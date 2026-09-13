@@ -915,6 +915,7 @@ function detectEngine(host) {
 const cases = [
   ['www.bing.com', 'bing'],
   ['cn.bing.com', 'bing'],
+  ['global.bing.com', 'bing'],
   ['m.bing.com', 'bing'],
   ['bing.com.hk', 'bing'],
   ['www.bing.com.hk', 'bing'],
@@ -942,6 +943,7 @@ const cases = [
   ['images.google.com', 'google'],
   ['encrypted.google.com', 'google'],
   ['search.yahoo.co.jp', 'yahoo'],
+  ['japan.search.yahoo.co.jp', 'yahoo'],
   ['jp.search.yahoo.com', 'yahoo'],
   ['images.search.yahoo.com', 'yahoo'],
   ['html.duckduckgo.com', 'duckduckgo'],
