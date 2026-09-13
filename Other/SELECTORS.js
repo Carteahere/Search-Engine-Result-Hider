@@ -1,6 +1,6 @@
   const SELECTORS = {
     bing: {
-      match: /^(?:(?:www|cn|www2|m)\.)?bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
+      match: /^(?:(?:www|cn|www2|global|m)\.)?bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
       containers: 'li.b_algo, div.b_algo',
       titles: ['h2 a', 'a h2', '.b_title'],
       snippets: ['.b_caption p', '.b_snippet', '.b_paractl p', '.b_lineclamp2'],
@@ -42,7 +42,7 @@
       links: ['a[href]'],
     },
     yahoo: {
-      match: /^(?:[a-z]{2,3}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
+      match: /^(?:[a-z]{2,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
       containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo',
       titles: ['h3', '.s-title', 'h2 a', 'a h2', '.b_title', '.title'],
       snippets: ['.sw-Card__description', '.sw-Card__snippet', '.sw-Text__body', 'p', '.b_caption p', '.b_snippet', '.b_paractl p'],
