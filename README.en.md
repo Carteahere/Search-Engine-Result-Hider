@@ -190,7 +190,7 @@ Open the editing panel via the script manager menu `🖋️ Custom Selectors` (J
 
 ```javascript
 example: {
-  match: /(?:^|\.)searx\.example\.com$/,
+  match: /(?:^|\.)search\.example\.com$/,
   containers: '.result',
   titles: ['h3'],
   snippets: ['.content'],

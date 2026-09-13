@@ -190,7 +190,7 @@ URL通配规则按匹配模式语义从URL开头匹配，`*://`仅匹配`http/ht
 
 ```javascript
 example: {
-  match: /(?:^|\.)searx\.example\.com$/,
+  match: /(?:^|\.)search\.example\.com$/,
   containers: '.result',
   titles: ['h3'],
   snippets: ['.content'],
