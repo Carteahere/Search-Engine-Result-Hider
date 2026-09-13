@@ -6,8 +6,7 @@
 
 Implements complex-rule search result blocking on browsers that only support user script installation.  
 Supports URL matching including uBlacklist basic rules, regex matching, title matching, whitelist matching, target result highlighting, and result snippet matching.  
-Currently supported search engines: Bing, Google, Google Scholar, DuckDuckGo, Yandex, Brave, Yahoo  
-Automatic redirect removal: Unpacks result links by target URL (Bing `/ck/a`, Google `/url`, Google Scholar `scholar_url`, DuckDuckGo `/l`, Yahoo `RU=`)
+Currently supported search engines: Bing, Google, Google Scholar, DuckDuckGo, Yandex, Brave, Yahoo
 
 Install sources [Github](https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [Greasy Fork](https://update.greasyfork.org/scripts/552394/%E6%90%9C%E7%B4%A2%E5%BC%95%E6%93%8E%E7%BB%93%E6%9E%9C%E5%B1%8F%E8%94%BD%E5%99%A8.user.js)
 
@@ -36,13 +35,13 @@ Open with a browser that supports script installation to install directly.
 
 ### 1.3 About WebDAV:
 
-1. Auto-sync performs an overwrite upload/download once per hour based on configuration timestamp.
+1. Auto-sync performs an overwrite upload/download once per 12 hours based on configuration timestamp.
 2. Address only supports HTTPS and full paths, e.g., Nutstore `https://dav.jianguoyun.com/dav/your_folder/`.
 3. Auto-sync runs in the background. When multiple tabs are open, a cross-tab lock ensures only one tab initiates requests.
 
 ### 1.4 About Subscriptions:
 
-1. Auto-update frequency is once per day. Supports plain text remote links, e.g., `https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Other/rules.txt`; compatible with `.yaml` uBlacklist list format (`name`/`rules`/`blacklist`/`whitelist` entries; whitelist entries are automatically prepended with `@` upon import).
+1. Auto-update frequency is once per 12 hours. Supports plain text remote links, e.g., `https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Other/rules.txt`; compatible with `.yaml` uBlacklist list format (`name`/`rules`/`blacklist`/`whitelist` entries; whitelist entries are automatically prepended with `@` upon import).
 2. Subscription rules are appended after local rules. Due to limited allocatable script performance, it is recommended that the total number of rules does not exceed 50k to avoid mobile device performance issues 🤳💥
 3. Script extension capabilities are limited and do not support `##` DOM element rules; they are automatically filtered out when imported via subscriptions.
 4. Subscription updates also run in the background. When multiple tabs are open, each subscription is fetched by only one tab.
@@ -56,6 +55,7 @@ For unblocking, when secondary confirmation is enabled, a panel pops up offering
 3. Rule priority: Local whitelist > Local blacklist > Subscription whitelist > Subscription blacklist
 4. The script is injected globally via `@match *://*/*`. The floating bubble and blocking filters only take effect when matching search engine hostnames.
 5. Comment line format: `# + space + content`. The ⬆️/⬇️ buttons navigate to the previous/next comment line. Pressing ⬆️ on the first line or first comment line jumps to the last line.
+6. Automatic redirect removal: Unpacks result links by target URL Bing`/ck/a`, Google`/url`, Google Scholar`scholar_url`, DuckDuckGo`/l`, Yahoo`RU=`
 
 ## Rule Description
 
@@ -69,7 +69,7 @@ For unblocking, when secondary confirmation is enabled, a panel pops up offering
 | `*://*.example.*` | Matches all top-level domains of `example.com` |
 | `example.com` | Equivalent to `*://*.example.com/*`, shorthand for script only. Rules intended for simultaneous uBlacklist use must include the `*://*.` prefix. |
 
-URL wildcard rules match from the start of the URL according to match pattern semantics. `*://` only matches `http/https`, host wildcard `*` does not cross paths, and `*.` prefix matches the bare domain simultaneously.
+URL wildcard rules match from the start of the URL according to match pattern semantics. `*://` only matches `http/https`, host wildcard `*` does not cross paths, and `*.` prefix matches the bare domain simultaneously. IDN hostnames (e.g. `例子.com`) are treated as equivalent to their punycode form (`xn--fsqu00a.com`).
 
 ### 2.2 Regex Matching:
 
@@ -252,7 +252,7 @@ console.log('Result count:', document.querySelectorAll('div.g').length);
 
 // Monitor rule matching performance
 console.time('Rule matching');
-d.checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels);
+d.checkRuleMatchOptimized(url, domain, title, snippet);
 console.timeEnd('Rule matching');
 
 // Monitor DOM query performance

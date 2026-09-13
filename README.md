@@ -6,8 +6,7 @@
 
 在仅支持安装脚本的浏览器上实现复杂规则屏蔽搜索结果功能  
 支持包括ublacklist基础规则在内的URL匹配、正则匹配、标题匹配、白名单匹配、高亮目标结果以及结果摘要(snippet)匹配  
-当前支持搜索引擎：Bing、Google、Google Scholar、DuckDuckGo、Yandex、Brave、Yahoo  
-自动去除重定向：按结果链接 URL 解包（Bing `/ck/a`、Google `/url`、Google Scholar `scholar_url`、DuckDuckGo `/l`、Yahoo `RU=`）
+当前支持搜索引擎：Bing、Google、Google Scholar、DuckDuckGo、Yandex、Brave、Yahoo
 
 安装源 [Github](https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [Greasy Fork](https://update.greasyfork.org/scripts/552394/%E6%90%9C%E7%B4%A2%E5%BC%95%E6%93%8E%E7%BB%93%E6%9E%9C%E5%B1%8F%E8%94%BD%E5%99%A8.user.js)
 
@@ -36,13 +35,13 @@
 
 ### 1.3 关于Webdav：
 
-1. 自动同步根据配置时间戳每小时覆盖上传/下载一次
+1. 自动同步根据配置时间戳每12h覆盖上传/下载一次
 2. 地址只支持https和完整路径，如坚果云`https://dav.jianguoyun.com/dav/your_folder/`
 3. 自动同步后台运行，多标签页时由跨页锁确保仅一个标签页发起请求
 
 ### 1.4 关于订阅：
 
-1. 自动更新频率为每天一次，支持纯文本远程链接，例如`https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Other/rules.txt`；兼容`.yaml`uBlacklist列表格式（`name`/`rules`/`blacklist`/`whitelist`项，白名单项导入时自动加`@`前缀）
+1. 自动更新每12h拉取一次，支持纯文本远程链接，例如`https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Other/rules.txt`；兼容`.yaml`uBlacklist列表格式（`name`/`rules`/`blacklist`/`whitelist`项，白名单项导入时自动加`@`前缀）
 2. 订阅规则在本地规则后追加应用，由于脚本可分配性能有限，规则总数建议不超过5w条避免手机爆炸🤳💥
 3. 脚本扩展有限不支持`##`DOM元素等规则，通过订阅导入会自动过滤
 4. 订阅更新同样后台运行，多标签页时每个订阅仅由一个标签页拉取
@@ -56,6 +55,7 @@
 3. 规则优先级：本地白名单 > 本地黑名单 > 订阅白名单 > 订阅黑名单
 4. 脚本通过`@match *://*/*`全站注入，悬浮球与屏蔽过滤仅在匹配搜索引擎hostname时生效
 5. 注释行格式`#+空格+内容`，⬆️/⬇️功能为移动到上一个/下一个注释行，在第一行或第一个注释行时⬆️会跳到最后一行
+6. 自动去除重定向：按结果链接 URL 解包Bing`/ck/a`、Google`/url`、Google Scholar`scholar_url`、DuckDuckGo`/l`、Yahoo`RU=`
 
 ## 规则说明
 
@@ -69,7 +69,7 @@
 | `*://*.example.*` | 匹配`example.com`所有顶级域名 |
 | `example.com` | 等效`*://*.example.com/*`，仅用于脚本的简单写法，对于需要同时在ublacklist使用的规则必须加`*://*.`前缀 |
 
-URL通配规则按匹配模式语义从URL开头匹配，`*://`仅匹配`http/https`，主机通配`*`不跨越路径，`*.`前缀同时匹配裸域
+URL通配规则按匹配模式语义从URL开头匹配，`*://`仅匹配`http/https`，主机通配`*`不跨越路径，`*.`前缀同时匹配裸域；中文等 IDN 域名与 punycode（如`例子.com`与`xn--fsqu00a.com`）视为同一主机
 
 ### 2.2 正则匹配：
 
@@ -252,7 +252,7 @@ console.log('结果数量:', document.querySelectorAll('div.g').length);
 
 // 监控规则匹配性能
 console.time('规则匹配');
-d.checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels);
+d.checkRuleMatchOptimized(url, domain, title, snippet);
 console.timeEnd('规则匹配');
 
 // 监控DOM查询性能
