@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/SadYuyuko
-// @version      8.2.0
+// @version      8.2.1
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -59,6 +59,7 @@
   const SELECTORS_KEY = 'searchfilter_selectors';
   const HL_STATS_REGEX = /^@\d+/;
   const MAX_SUBSCRIPTIONS = 100;
+  const AUTO_UPDATE_INTERVAL = 12 * 60 * 60 * 1000;
 
   // 默认配置
   let currentConfig = GM_getValue(CONFIG_KEY, {
@@ -101,49 +102,49 @@
   // 选择器
   const SELECTORS = {
     bing: {
-      match: /(?:^|\.)bing\.(?:com|[a-z]{2}(?:\.[a-z]{2})?)$/,
+      match: /^(?:(?:www|cn|www2|global|m)\.)?bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
       containers: 'li.b_algo, div.b_algo',
       titles: ['h2 a', 'a h2', '.b_title'],
       snippets: ['.b_caption p', '.b_snippet', '.b_paractl p', '.b_lineclamp2'],
       links: 'a[href]',
     },
     google_scholar: {
-      match: /(?:^|\.)scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/,
+      match: /^(?:www\.)?scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/,
       containers: 'div.gs_r.gs_or.gs_scl',
       titles: ['h3.gs_rt a', 'h3.gs_rt', '.gs_rt'],
       snippets: ['.gs_rs'],
       links: ['h3.gs_rt a[href]', 'a[href]'],
     },
     google: {
-      match: /(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/,
+      match: /^(?:(?:www|images|video|videos|search|encrypted|m)\.)?google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/,
       containers: 'div.g, div.MjjYud',
       titles: ['h3', 'div[role="heading"]', '.LC20lb', '.DKV0Md', '.sXLaOe', '.c9DxTc', 'a h3'],
       snippets: ['.st', '.VwiC3b', '.s3v9rd', '.IsZvec', '.lyLwlc', '.yXK7lf'],
       links: 'a[href]',
     },
     duckduckgo: {
-      match: /(?:^|\.)(?:duckduckgo\.com|ddg\.gg)$/,
+      match: /^(?:(?:www|html|start|lite|m|safe)\.)?(?:duckduckgo\.com|ddg\.gg)$/,
       containers: '[data-testid="result"], .result, .web-result, .tile, .tile--ad',
       titles: ['a[data-testid="result-title-a"]', '.result__title', '.tile__title', '.tile--title__title', 'h2 a', 'a h2'],
       snippets: ['[data-testid="result-snippet"]', '[data-result="snippet"]', '.result__snippet'],
       links: ['a[data-testid="result-extras-url-link"]', 'a[data-testid="result-title-a"]', '.result__url', '.tile--title__domain', 'a[href]'],
     },
     yandex: {
-      match: /(?:^|\.)(?:ya\.ru|yandex\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,}))$/,
+      match: /^(?:www\.)?(?:ya\.ru|yandex\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,}))$/,
       containers: 'div.Organic',
       titles: ['.OrganicTitle'],
       snippets: ['.OrganicText'],
       links: ['.OrganicTitle a', '.Path-Item a', 'a.Link', 'a[href]'],
     },
     brave: {
-      match: /(?:^|\.)brave\.com$/,
+      match: /^search\.brave\.com$/,
       containers: '.snippet[data-type="web"], .snippet[data-type="news"], .snippet[data-type="videos"], .image-wrapper',
       titles: ['.title', '.snippet-title', '.img-title'],
       snippets: ['.generic-snippet .content', '.generic-snippet', '.line-clamp-dynamic', '.snippet-description', '.description'],
       links: ['a[href]'],
     },
     yahoo: {
-      match: /(?:^|\.)yahoo\.(?:com|[a-z]{2}(?:\.[a-z]{2})?)$/,
+      match: /^(?:[a-z]{2,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
       containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo',
       titles: ['h3', '.s-title', 'h2 a', 'a h2', '.b_title', '.title'],
       snippets: ['.sw-Card__description', '.sw-Card__snippet', '.sw-Text__body', 'p', '.b_caption p', '.b_snippet', '.b_paractl p'],
@@ -558,6 +559,37 @@
     return text;
   }
 
+  function hostLabelToASCII(label) {
+    const s = String(label || '');
+    if (!s || s === '*' || /^[a-z0-9_-]*$/i.test(s)) return s;
+    try {
+      const ascii = new URL('http://' + s + '.invalid').hostname;
+      if (ascii.toLowerCase().endsWith('.invalid')) return ascii.slice(0, -8);
+    } catch (e) {}
+    return s;
+  }
+
+  function toASCIIHostname(host) {
+    const raw = String(host || '').replace(/\.$/, '').trim().toLowerCase();
+    if (!raw) return '';
+    if (/^[\x00-\x7F]*$/.test(raw)) return raw;
+    return raw.split('.').map(label => label ? hostLabelToASCII(label) : label).join('.');
+  }
+
+  function toASCIIUrl(url) {
+    const raw = String(url || '');
+    if (!raw || /^[\x00-\x7F]*$/.test(raw)) return raw;
+    try {
+      const abs = raw.startsWith('//') ? 'http:' + raw : raw;
+      const u = new URL(abs);
+      const asciiHost = toASCIIHostname(u.hostname);
+      if (asciiHost && asciiHost !== u.hostname) u.hostname = asciiHost;
+      return raw.startsWith('//') ? u.href.replace(/^https?:/i, '') : u.href;
+    } catch (e) {
+      return raw;
+    }
+  }
+
   function safeRegexTest(regex, value) {
     if (!regex) return false;
     regex.lastIndex = 0;
@@ -911,21 +943,27 @@
       } catch (e) {
         return false;
       }
-      const raw = cond.type === 'host' ? u.hostname
+      const raw = cond.type === 'host' ? toASCIIHostname(u.hostname)
         : cond.type === 'path' ? (u.pathname + u.search)
         : u.protocol.slice(0, -1);
       const value = raw.toLowerCase();
-      if (cond.op === '=') return value === cond.val;
-      if (cond.op === '^=') return value.startsWith(cond.val);
+      const cmpVal = cond.type === 'host' ? toASCIIHostname(cond.val) : cond.val;
+      if (cond.op === '=') return value === cmpVal;
+      if (cond.op === '^=') return value.startsWith(cmpVal);
       if (cond.op === '$=') {
         if (cond.type === 'host') {
-          const target = cond.val.replace(/^\.+|\.+$/g, '');
+          const target = cmpVal.replace(/^\.+|\.+$/g, '');
           return value === target || value.endsWith(`.${target}`);
         }
         return value.endsWith(cond.val);
       }
-      if (cond.op === '*=') return value.includes(cond.val);
-      if (cond.op === '=~') return safeRegexTest(cond.regex, raw);
+      if (cond.op === '*=') return value.includes(cmpVal);
+      if (cond.op === '=~') {
+        if (cond.type === 'host') {
+          return safeRegexTest(cond.regex, raw) || safeRegexTest(cond.regex, u.hostname);
+        }
+        return safeRegexTest(cond.regex, raw);
+      }
       return false;
     }
     return false;
@@ -988,8 +1026,10 @@
     if (strMatch) {
       const op = strMatch[2] === ':' ? '=' : strMatch[2];
       const rawVal = (strMatch[3] !== undefined ? strMatch[3] : (strMatch[4] !== undefined ? strMatch[4] : strMatch[5]));
-      const val = rawVal.replace(/\\(["'])/g, '$1').toLowerCase();
-      return { matched: true, dynamic: { type: strMatch[1].toLowerCase(), op, val } };
+      let val = rawVal.replace(/\\(["'])/g, '$1').toLowerCase();
+      const condType = strMatch[1].toLowerCase();
+      if (condType === 'host') val = toASCIIHostname(val);
+      return { matched: true, dynamic: { type: condType, op, val } };
     }
 
     const reMatch = trimmed.match(/^(title|url|host|path|scheme)\s*(?:=\~\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
@@ -1458,6 +1498,12 @@
   // 通配符片段转正则
   function escapeWildcardPart(part, isHost) {
     const starPattern = isHost ? '[^/]*' : '.*';
+    if (isHost && part && !/^[\x00-\x7F]*$/.test(part)) {
+      part = part.split('.').map(label => {
+        if (!label || label === '*' || label.includes('*') || label.includes('\\') || /^[\x00-\x7F]*$/.test(label)) return label;
+        return hostLabelToASCII(label);
+      }).join('.');
+    }
     let out = '';
     let i = 0;
     if (isHost && part.startsWith('*.')) {
@@ -1544,18 +1590,18 @@
     if (pattern.includes(':') && !pattern.startsWith('*://')) return null;
     const bareWildcard = pattern.match(/^\*\.([^\/\*\s:]+)$/);
     if (bareWildcard && bareWildcard[1].includes('.')) {
-      return { domain: bareWildcard[1].toLowerCase(), domainType: 'wildcard' };
+      return { domain: toASCIIHostname(bareWildcard[1]), domainType: 'wildcard' };
     }
     if (!pattern.startsWith('/') && !pattern.startsWith('title/') && !pattern.startsWith('text/') &&
       !pattern.includes('*') && !pattern.includes('://') && !pattern.startsWith('.')) {
       if (pattern.includes('.') && !/\s/.test(pattern) && !pattern.includes('/') && !pattern.includes(':')) {
-        return { domain: pattern.toLowerCase(), domainType: 'wildcard' };
+        return { domain: toASCIIHostname(pattern), domainType: 'wildcard' };
       }
     }
     const wildcardMatch = pattern.match(/^\*:\/\/\*\.([^\/\*:]+)\/\*$/);
-    if (wildcardMatch && wildcardMatch[1].includes('.')) return { domain: wildcardMatch[1].toLowerCase(), domainType: 'wildcard' };
+    if (wildcardMatch && wildcardMatch[1].includes('.')) return { domain: toASCIIHostname(wildcardMatch[1]), domainType: 'wildcard' };
     const exactMatch = pattern.match(/^\*:\/\/([^\/\*:]+)\/\*$/);
-    if (exactMatch) return { domain: exactMatch[1].toLowerCase(), domainType: 'exact' };
+    if (exactMatch) return { domain: toASCIIHostname(exactMatch[1]), domainType: 'exact' };
     return null;
   }
 
@@ -1836,7 +1882,7 @@
   }
 
   function getSubdomainLevels(domain) {
-    const lower = domain.toLowerCase();
+    const lower = toASCIIHostname(domain);
     if (subdomainCache.has(lower)) return subdomainCache.get(lower);
     const levels = [];
     let d = lower;
@@ -1856,6 +1902,7 @@
 
   // 规则优先级
   function checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels) {
+    if (!subdomainLevels) subdomainLevels = getSubdomainLevels(domain);
     const isLocalEntry = (entry) => {
       if (!entry) return false;
       if (entry.isLocal !== undefined) return entry.isLocal;
@@ -2200,7 +2247,7 @@
       const urlObj = new URL(url);
       const host = urlObj.hostname;
       const path = urlObj.pathname;
-      if (/(?:^|\.)bing\.(?:com|[a-z]{2}(?:\.[a-z]{2})?)$/i.test(host) && path.startsWith('/ck/a')) {
+      if (/(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) && path.startsWith('/ck/a')) {
         const realUrl = decodeBingCkTarget(urlObj.searchParams.get('u'));
         if (realUrl) return realUrl;
       }
@@ -2216,7 +2263,7 @@
         const realUrl = decodeRedirectTarget(urlObj.searchParams.get('uddg'));
         if (realUrl) return realUrl;
       }
-      if (/(?:^|\.)(?:[a-z]{2}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2}(?:\.[a-z]{2})?)$/i.test(host)) {
+      if (/(?:^|\.)(?:[a-z]{2,3}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host)) {
         for (const part of path.split('/')) {
           if (part.startsWith('RU=')) {
             const realUrl = decodeRedirectTarget(part.substring(3));
@@ -2238,10 +2285,11 @@
 
   // 提取链接
   function resolveUrlDomain(link) {
-    const url = getCleanUrlAndFixDOM(link);
+    const rawUrl = getCleanUrlAndFixDOM(link);
+    const url = toASCIIUrl(rawUrl) || rawUrl;
     let domain = '';
     try {
-      domain = new URL(url).hostname;
+      domain = toASCIIHostname(new URL(url).hostname);
     } catch (e) {}
     return { url, domain };
   }
@@ -2778,6 +2826,7 @@
           getSearchEngine,
           getSearchCategory,
           getContainerSelector,
+          getSubdomainLevels,
           checkRuleMatchOptimized,
           forceReprocessAll
         };
@@ -6522,10 +6571,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     if (!GM_getValue(WEBDAV_AUTO_SYNC_KEY, false)) return;
     const config = GM_getValue(WEBDAV_KEY);
     if (!config || !config.url) return;
-    if (Date.now() - GM_getValue(WEBDAV_LAST_SYNC_KEY, 0) < 60 * 60 * 1000) return;
+    if (Date.now() - GM_getValue(WEBDAV_LAST_SYNC_KEY, 0) < AUTO_UPDATE_INTERVAL) return;
     if (document.getElementById('searchfilter-panel')) return;
     runWithSyncLock('webdav', async () => {
-      if (Date.now() - GM_getValue(WEBDAV_LAST_SYNC_KEY, 0) < 60 * 60 * 1000) return;
+      if (Date.now() - GM_getValue(WEBDAV_LAST_SYNC_KEY, 0) < AUTO_UPDATE_INTERVAL) return;
       await performAutoWebDAVSync(config);
     }).catch(err => console.error('[自动 WebDAV] 同步失败:', err.message));
   }
@@ -6701,9 +6750,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     const subs = getSubscriptions();
     if (!subs || subs.length === 0) return;
     const now = Date.now();
-    if (!subs.some(s => s.enabled && now - s.lastUpdate >= 24 * 60 * 60 * 1000)) return;
+    if (!subs.some(s => s.enabled && now - s.lastUpdate >= AUTO_UPDATE_INTERVAL)) return;
     runWithSyncLock('subscription', async () => {
-      const pending = getSubscriptions().filter(s => s.enabled && Date.now() - s.lastUpdate >= 24 * 60 * 60 * 1000);
+      const pending = getSubscriptions().filter(s => s.enabled && Date.now() - s.lastUpdate >= AUTO_UPDATE_INTERVAL);
       if (!pending.length) return;
       for (const sub of pending) {
         console.log(`[订阅] 开始更新: ${sub.url}`);
