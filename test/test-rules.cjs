@@ -35,7 +35,7 @@ function assert(name, cond, extra) { check(name, cond, extra); }
 
 // ==== 来源: test-regex.cjs ====
 await (async () => {
-const fns = ['escapeWildcardPart', 'wildcardToRegex', 'parsePrefixedRegexRule', 'ruleToRegex', 'compileRuleRegex', 'safeRegexTest']
+const fns = ['hostLabelToASCII', 'toASCIIHostname', 'escapeWildcardPart', 'wildcardToRegex', 'parsePrefixedRegexRule', 'ruleToRegex', 'compileRuleRegex', 'safeRegexTest']
   .map((n) => extractFn(src, n));
 
 const api = new Function(`
@@ -70,6 +70,9 @@ assert('W15: 问号不是单字符通配', !match('*://example.com/a?b', 'https:
 assert('W16: 保留用户转义点', match('*://example\\.com/*', 'https://example.com/'));
 assert('W17: 显式 scheme 可用', match('https://example.com/*', 'https://example.com/x'));
 assert('W18: 无斜杠模式点号转义', !api.safeRegexTest(new RegExp(api.wildcardToRegex('example.com')), 'exampleXcom'));
+assert('W18a: 中文域名通配匹配 punycode', match('*://*.例子.com/*', 'https://xn--fsqu00a.com/x'));
+assert('W18b: 中文域名简写匹配 punycode', match('例子.com', 'https://xn--fsqu00a.com/'));
+assert('W18c: 中文域名路径规则匹配 punycode', match('*://*.例子.com/path/*', 'https://xn--fsqu00a.com/path/x'));
 
 // 锚定与通配范围
 assert('W19: 路径模式匹配自身', match('*://example.com/path/*', 'https://example.com/path/x'));
@@ -158,7 +161,7 @@ assert('S18: /pattern/I 编译不抛错', (() => {
 // ==== 来源: test-rule-filter.cjs ====
 await (async () => {
 const fns = [
-  'safeRegexTest', 'stripRuleComment', 'parseRulesetContent', 'extractYamlRuleItems', 'getInvalidRegexFlags', 'parseConditionPart',
+  'hostLabelToASCII', 'toASCIIHostname', 'safeRegexTest', 'stripRuleComment', 'parseRulesetContent', 'extractYamlRuleItems', 'getInvalidRegexFlags', 'parseConditionPart',
   'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr',
   'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences',
   'stripIfConditions', 'isCondExprCore', 'looksLikeCondExpr', 'isScriptRuleLine', 'isElementRuleLine',
@@ -290,7 +293,7 @@ assert('Y3: 无引号中文@if可订阅', api.collectSubscriptionRules(['*://*.e
 // ==== 来源: test-rule-source.cjs ====
 await (async () => {
 const fns = [
-  'safeRegexTest', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
+  'hostLabelToASCII', 'toASCIIHostname', 'safeRegexTest', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
   'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr',
   'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
   'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr',
@@ -792,7 +795,7 @@ await (async () => {
 // ==== 校验空正则与 DDG 重定向解包测试 ====
 await (async () => {
   const fnsToExtract = [
-    'safeRegexTest', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
+    'hostLabelToASCII', 'toASCIIHostname', 'safeRegexTest', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
     'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr',
     'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
     'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr',
@@ -840,7 +843,8 @@ await (async () => {
   const gUrl = { href: 'https://www.google.com/url?q=https%3A%2F%2Fexample.com%2Fa' };
   assert('G1: google /url 解包', getCleanUrlAndFixDOM(gUrl) === 'https://example.com/a');
   const yahooTw = { href: 'https://tw.search.yahoo.com/r/RU=https%3A%2F%2Fexample.com%2Fy/RK=2' };
-  assert('Y1: yahoo 地区站 RU= 解包', getCleanUrlAndFixDOM(yahooTw) === 'https://example.com/y');
+  const yahooHk = { href: 'https://search.yahoo.com.hk/r/RU=https%3A%2F%2Fexample.com%2Fhk/RK=2' };
+  assert('Y1: yahoo 地区站 RU= 解包', getCleanUrlAndFixDOM(yahooTw) === 'https://example.com/y' && getCleanUrlAndFixDOM(yahooHk) === 'https://example.com/hk');
   const customEngineLink = { href: 'https://scholar.google.com/scholar_url?url=https%3A%2F%2Fpapers.example.com%2Fx' };
   assert('C1: 不依赖引擎ID仍解包', getCleanUrlAndFixDOM(customEngineLink) === 'https://papers.example.com/x');
 })();

@@ -36,6 +36,8 @@ function assert(name, cond, extra) { check(name, cond, extra); }
 // ==== 来源: test-cond-expr.cjs ====
 await (async () => {
 const fns = [
+  'hostLabelToASCII',
+  'toASCIIHostname',
   'safeRegexTest',
   'stripRuleComment',
   'parseRulesetContent',
@@ -365,6 +367,11 @@ assert('H9: host简写(正则含|不切分)', !r.errors && ev(r, 't', 'https://w
 r = condExpr('host $= ".example.com"', 'google');
 assert('H10: 忽略大小写', ev(r, 't', 'https://WWW.EXAMPLE.COM/') === true);
 
+r = condExpr('host $= ".例子.com"', 'google');
+assert('H11: 中文域名后缀匹配 punycode URL', !r.errors && ev(r, 't', 'https://xn--fsqu00a.com/') === true);
+assert('H12: 中文域名后缀匹配 Unicode URL', ev(r, 't', 'https://例子.com/') === true);
+assert('H13: 中文域名不误伤其他站', ev(r, 't', 'https://example.com/') === false);
+
 r = condExpr('path *= "/download/"', 'google');
 assert('P1: path包含', !r.errors && ev(r, 't', 'https://x.com/download/setup.exe') === true && ev(r, 't', 'https://x.com/dl/x') === false);
 
@@ -565,7 +572,7 @@ for (const rule of condFalseCases) {
 // ==== 来源: test-if-cond.cjs ====
 await (async () => {
 const fns = [
-  'safeRegexTest', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
+  'hostLabelToASCII', 'toASCIIHostname', 'safeRegexTest', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
   'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr',
   'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences',
   'stripIfConditions', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr',
@@ -731,6 +738,8 @@ function extractNamed(text, marker) {
 }
 
 const fns = [
+  'hostLabelToASCII',
+  'toASCIIHostname',
   'safeRegexTest',
   'stripRuleComment',
   'getInvalidRegexFlags',
