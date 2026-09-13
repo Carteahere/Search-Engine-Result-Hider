@@ -102,6 +102,11 @@ assert('W38: 无路径规则匹配自身', match('*://example.com', 'https://exa
 assert('W39: 无路径规则匹配子路径', match('*://example.com', 'https://example.com/path/x'));
 assert('W40: 无路径规则不匹配后缀域名', !match('*://example.com', 'https://example.com.evil.com/'));
 assert('W41: 无路径规则匹配子域与端口', match('*://*.example.com', 'https://a.example.com:8080/'));
+assert('W41b: 带路径URL通配匹配带端口URL', match('*://*.example.com/path/*', 'https://sub.example.com:8080/path/test'));
+assert('W41c: 路径URL通配规则匹配同端口URL', match('*://example.com/abc/*', 'https://example.com:8080/abc/xyz'));
+assert('W41d: 显式指定端口的路径规则匹配同端口', match('*://example.com:8080/path/*', 'https://example.com:8080/path/test'));
+assert('W41e: 显式指定端口的路径规则不匹配不同端口', !match('*://example.com:8080/path/*', 'https://example.com:9000/path/test'));
+assert('W41f: 显式指定端口的路径规则不匹配无端口', !match('*://example.com:8080/path/*', 'https://example.com/path/test'));
 assert('W42: 无scheme 路径规则按主机匹配首段', match('*.example.com/path/*', 'https://sub.example.com/path/x'));
 assert('W43: 无scheme 路径规则不匹配其他站路径', !match('*.example.com/path/*', 'https://evil.com/x/example.com/path/y'));
 assert('W44: 精确路径模式不误匹配同名前缀路径', !match('*://example.com/test', 'https://example.com/testing-other'));

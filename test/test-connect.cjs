@@ -60,9 +60,9 @@ const syncFns = [
   'checkExternalConfigChange', 'performAutoWebDAVSync',
 ].map((n) => extractFn(src, n));
 
-function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], localTime = 0, localSubs = [], storedConfig = undefined }) {
+function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], localTime = 0, localSubs = [], storedConfig = undefined, syncConfig = true, responseHeaders = '' }) {
   const store = new Map();
-  store.set(KEYS.WEBDAV_SYNC_CONFIG_KEY, true);
+  store.set(KEYS.WEBDAV_SYNC_CONFIG_KEY, syncConfig);
   store.set(KEYS.WEBDAV_SYNC_SELECTORS_KEY, false);
   store.set(KEYS.LOCAL_LAST_MODIFIED_KEY, localTime);
   store.set(KEYS.WEBDAV_LAST_SYNC_KEY, 0);
@@ -108,7 +108,7 @@ function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], local
       state,
     };
   `);
-  return factory(store, calls, state, { status: cloudStatus, responseText: cloudText, responseHeaders: '' });
+  return factory(store, calls, state, { status: cloudStatus, responseText: cloudText, responseHeaders });
 }
 
 const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '', filename: 'rules.txt' };
@@ -210,6 +210,73 @@ function makeAdoptEnv({ storedConfig, memoryConfig, panelOpen }) {
   const same = { rules: ['a'], enabled: true };
   const env = makeAdoptEnv({ storedConfig: same, memoryConfig: { rules: ['a'], enabled: true }, panelOpen: false });
   assert('T6c: 配置一致时不重复处理', env.check() === false && env.state.reprocess === 0);
+}
+
+// T7: persistConfig 默认不更新时间戳，仅在显式传入 true 时更新
+{
+  const store = new Map();
+  store.set(KEYS.LOCAL_LAST_MODIFIED_KEY, 12345);
+  let currentConfig = { rules: ['a'], bubbleSize: 30 };
+  const persistConfigFn = new Function('store', 'CONFIG_KEY', 'LOCAL_LAST_MODIFIED_KEY', 'currentConfig', `
+    const GM_setValue = (k, v) => { store.set(k, v); };
+    ${extractFn(src, 'persistConfig')}
+    return persistConfig;
+  `)(store, KEYS.CONFIG_KEY, KEYS.LOCAL_LAST_MODIFIED_KEY, currentConfig);
+
+  persistConfigFn(); // 默认未传参（非规则变更）
+  assert('T7: persistConfig 默认不修改本地时间戳', store.get(KEYS.LOCAL_LAST_MODIFIED_KEY) === 12345);
+
+  persistConfigFn(false); // 显式传 false
+  assert('T7b: persistConfig(false) 不修改本地时间戳', store.get(KEYS.LOCAL_LAST_MODIFIED_KEY) === 12345);
+
+  persistConfigFn(true); // 规则变更显式传 true
+  assert('T7c: persistConfig(true) 刷新本地时间戳', store.get(KEYS.LOCAL_LAST_MODIFIED_KEY) > 12345);
+
+  // T7d: saveConfig 逻辑模拟：仅当 rules 实质改变时传入 true
+  const saveMock = (prevRules, newRules) => {
+    const rulesChanged = JSON.stringify(prevRules) !== JSON.stringify(newRules);
+    persistConfigFn(rulesChanged);
+  };
+  store.set(KEYS.LOCAL_LAST_MODIFIED_KEY, 12345);
+  saveMock(['a', 'b'], ['a', 'b']); // 规则未变
+  assert('T7d: saveConfig 在规则未变时不更新时间戳', store.get(KEYS.LOCAL_LAST_MODIFIED_KEY) === 12345);
+  saveMock(['a', 'b'], ['a', 'b', 'c']); // 规则改变
+  assert('T7e: saveConfig 在规则改变时更新时间戳', store.get(KEYS.LOCAL_LAST_MODIFIED_KEY) > 12345);
+}
+
+// T8: 未开启配置同步 + Last-Modified秒级时间戳 + 内容一致 -> 不重复上传(死循环回归)
+{
+  const rules = ['*://same.example.com/*'];
+  const lastMod = 'Mon, 14 Sep 2026 08:00:00 GMT';
+  const cloudTimeMs = Date.parse(lastMod);
+  const env = makeSyncEnv({
+    cloudText: rules.join('\n'),
+    localRules: [...rules],
+    localTime: cloudTimeMs + 456, // 毫秒级本地时间戳
+    syncConfig: false,
+    responseHeaders: `last-modified: ${lastMod}`,
+  });
+  env.setCurrent({ rules: [...rules], enabled: true });
+  await env.run(syncCfg);
+  assert('T8: 内容一致且仅时间戳精度差异时不重复上传', env.calls.filter((c) => c.method === 'PUT').length === 0);
+  assert('T8b: 本地时间戳对齐为云端Last-Modified', env.store.get(KEYS.LOCAL_LAST_MODIFIED_KEY) === cloudTimeMs);
+  assert('T8c: 本地规则未被改动', JSON.stringify(env.getCurrent().rules) === JSON.stringify(rules));
+}
+
+// T9: 未开启配置同步 + 内容确实不同 -> 仍正常上传
+{
+  const lastMod = 'Mon, 14 Sep 2026 08:00:00 GMT';
+  const env = makeSyncEnv({
+    cloudText: '*://cloud.example.com/*',
+    localRules: ['*://local.example.com/*'],
+    localTime: Date.parse(lastMod) + 456,
+    syncConfig: false,
+    responseHeaders: `last-modified: ${lastMod}`,
+  });
+  env.setCurrent({ rules: ['*://local.example.com/*'], enabled: true });
+  await env.run(syncCfg);
+  const put = env.calls.find((c) => c.method === 'PUT');
+  assert('T9: 内容不同时仍触发上传', !!put && put.data === '*://local.example.com/*');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -39,6 +39,7 @@ const fns = [
   'hostLabelToASCII',
   'toASCIIHostname',
   'safeRegexTest',
+  'safeDecodeURIComponent',
   'stripRuleComment',
   'parseRulesetContent',
   'extractYamlRuleItems',
@@ -93,6 +94,12 @@ r = condExpr('title*=关键词', 'google');
 assert('旧2e: 无空格无引号中文', !r.errors && ev(r, '关键词', 'https://x.com/') === true);
 r = condExpr('path *= /a%20b/', 'google');
 assert('旧2f: 无引号含百分号路径', !r.errors && ev(r, 't', 'https://x.com/a%20b/c') === true);
+r = condExpr('path *= "/下载/"', 'google');
+assert('旧2g: 中文path解码比对', !r.errors && ev(r, 't', 'https://x.com/下载/list') === true && ev(r, 't', 'https://x.com/other') === false);
+r = condExpr('path ^= "/分类/"', 'google');
+assert('旧2h: 中文path前缀', !r.errors && ev(r, 't', 'https://x.com/分类/1') === true);
+r = condExpr('path *= "/%E4%B8%8B%E8%BD%BD/"', 'google');
+assert('旧2i: 编码形式path仍命中', !r.errors && ev(r, 't', 'https://x.com/下载/') === true);
 
 r = condExpr('title *= "kw1" | title *= "kw2"', 'google');
 assert('旧3: 纯或->动态AST', !r.errors && !r.const && r.ast.type === 'or');
@@ -467,6 +474,10 @@ const pc13 = m.parseRulesetContent('name: WL\nblacklist:\n  - ads.example.com\nw
 assert('R13: whitelist段导入并自动加@', pc13.meta.name === 'WL' && pc13.lines.length === 3 && pc13.lines[0] === 'ads.example.com' && pc13.lines[1] === '@good.example.com' && pc13.lines[2] === '@*://keep.example.com/*');
 const pc14 = m.parseRulesetContent('blacklist:\n  - a.com\nrules:\n  - b.com\n');
 assert('R14: 连续两个list键均提取', pc14.lines.length === 2 && pc14.lines[0] === 'a.com' && pc14.lines[1] === 'b.com');
+const pc15 = m.parseRulesetContent('---\nname: Block Sample\nhomepage: https://x\n---\ntitle: A\nurl: https://www.a.com/\nmatches:\n  - *://*.a.com/*\n\ntitle: B\nmatches:\n  - /re\\.com/\n');
+assert('R15: uBlacklist matches段提取', pc15.meta.name === 'Block Sample' && pc15.lines.length === 2 && pc15.lines[0] === '*://*.a.com/*' && pc15.lines[1] === '/re\\.com/');
+const pc16 = m.parseRulesetContent('title: A\nmatches:\n  - *://*.b.com/*\n');
+assert('R16: matches段不残留垃圾行', pc16.lines.length === 1 && pc16.lines[0] === '*://*.b.com/*');
 
 // ---- uBlacklist 独立 i 修饰符兼容(默认仍忽略大小写)----
 r = condExpr('title *= "KW" i', 'google');
@@ -572,7 +583,7 @@ for (const rule of condFalseCases) {
 // ==== 来源: test-if-cond.cjs ====
 await (async () => {
 const fns = [
-  'hostLabelToASCII', 'toASCIIHostname', 'safeRegexTest', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
+  'hostLabelToASCII', 'toASCIIHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
   'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr',
   'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences',
   'stripIfConditions', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr',
@@ -741,6 +752,7 @@ const fns = [
   'hostLabelToASCII',
   'toASCIIHostname',
   'safeRegexTest',
+  'safeDecodeURIComponent',
   'stripRuleComment',
   'getInvalidRegexFlags',
   'parseConditionPart',
