@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/SadYuyuko
-// @version      8.2.1
+// @version      8.2.2
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -345,6 +345,7 @@
       bcExact: '精确',
       bcWhitelist: '白名单',
       bcDelete: '删除',
+      bcDeleteSub: '订阅规则无法删除',
       bcConfirm: '确认',
       cannotBlockCurrentSite: '无法屏蔽当前搜索引擎自身域名: {domain}',
       statsErrors: '发现 {count} 个规则错误: ',
@@ -460,6 +461,7 @@
       bcExact: 'Exact',
       bcWhitelist: 'Whitelist',
       bcDelete: 'Delete',
+      bcDeleteSub: 'Subscription rules cannot be deleted',
       bcConfirm: 'Confirm',
       cannotBlockCurrentSite: 'Cannot block search engine own domain: {domain}',
       statsErrors: 'Found {count} rule errors:',
@@ -596,6 +598,14 @@
     const matched = regex.test(String(value ?? ''));
     regex.lastIndex = 0;
     return matched;
+  }
+
+  function safeDecodeURIComponent(str) {
+    try {
+      return decodeURIComponent(String(str ?? ''));
+    } catch (e) {
+      return String(str ?? '');
+    }
   }
 
   // 规则处理
@@ -948,21 +958,27 @@
         : u.protocol.slice(0, -1);
       const value = raw.toLowerCase();
       const cmpVal = cond.type === 'host' ? toASCIIHostname(cond.val) : cond.val;
-      if (cond.op === '=') return value === cmpVal;
-      if (cond.op === '^=') return value.startsWith(cmpVal);
+      let altValue = value;
+      let altCmpVal = cmpVal;
+      if (cond.type === 'path') {
+        altValue = safeDecodeURIComponent(raw).toLowerCase();
+        altCmpVal = safeDecodeURIComponent(cmpVal);
+      }
+      if (cond.op === '=') return value === cmpVal || altValue === altCmpVal;
+      if (cond.op === '^=') return value.startsWith(cmpVal) || altValue.startsWith(altCmpVal);
       if (cond.op === '$=') {
         if (cond.type === 'host') {
           const target = cmpVal.replace(/^\.+|\.+$/g, '');
           return value === target || value.endsWith(`.${target}`);
         }
-        return value.endsWith(cond.val);
+        return value.endsWith(cmpVal) || altValue.endsWith(altCmpVal);
       }
-      if (cond.op === '*=') return value.includes(cmpVal);
+      if (cond.op === '*=') return value.includes(cmpVal) || altValue.includes(altCmpVal);
       if (cond.op === '=~') {
         if (cond.type === 'host') {
           return safeRegexTest(cond.regex, raw) || safeRegexTest(cond.regex, u.hostname);
         }
-        return safeRegexTest(cond.regex, raw);
+        return safeRegexTest(cond.regex, raw) || safeRegexTest(cond.regex, altValue);
       }
       return false;
     }
@@ -1526,6 +1542,30 @@
   }
 
   function wildcardToRegex(pattern) {
+    function splitHostAndPort(part) {
+      if (part.startsWith('[')) {
+        const bracketEnd = part.indexOf(']');
+        if (bracketEnd !== -1 && part.charCodeAt(bracketEnd + 1) === 58) {
+          return { host: part.slice(0, bracketEnd + 1), port: part.slice(bracketEnd + 1), hasPort: true };
+        }
+        return { host: part, port: '', hasPort: false };
+      }
+      const lastColon = part.lastIndexOf(':');
+      if (lastColon !== -1) {
+        return { host: part.slice(0, lastColon), port: part.slice(lastColon), hasPort: true };
+      }
+      return { host: part, port: '', hasPort: false };
+    }
+
+    function escapeHostPart(part) {
+      const { host, port, hasPort } = splitHostAndPort(part);
+      const escapedHost = escapeWildcardPart(host, true);
+      if (hasPort) {
+        return escapedHost + escapeWildcardPart(port, false);
+      }
+      return escapedHost + '(?::\\d+)?';
+    }
+
     let prefix = '^';
     let hostIsFirst = false;
     if (pattern.startsWith('*://')) {
@@ -1545,11 +1585,16 @@
     }
     if (pattern.includes('/')) {
       const regexStr = prefix + pattern.split('/')
-        .map((part, index) => escapeWildcardPart(part, hostIsFirst && index === 0))
+        .map((part, index) => {
+          if (hostIsFirst && index === 0) {
+            return escapeHostPart(part);
+          }
+          return escapeWildcardPart(part, false);
+        })
         .join('\\/');
       return pattern.endsWith('*') ? regexStr : regexStr + '(?:[\\/?#:]|$)';
     }
-    return prefix + escapeWildcardPart(pattern, hostIsFirst) + '(?:[\\/?#:]|$)';
+    return prefix + (hostIsFirst ? escapeHostPart(pattern) : escapeWildcardPart(pattern, false)) + '(?:[\\/?#:]|$)';
   }
 
   function ruleToRegex(rule) {
@@ -2354,7 +2399,7 @@
     const cleanRule = stripRuleComment(newRule.trim());
     if (!currentConfig.rules.some(rule => stripRuleComment(rule.trim()) === cleanRule)) {
       currentConfig.rules.push(newRule);
-      persistConfig();
+      persistConfig(true);
       syncRulesTextarea();
       forceReprocessAll();
     } else {
@@ -2382,21 +2427,22 @@
           { label: t('bcExact'), rule: opts.exactRule },
           { label: t('bcWhitelist'), rule: opts.whitelistRule }
         ]
-      : [
-          { label: t('bcDomain'), rule: opts.domainRule },
-          { label: t('bcExact'), rule: opts.exactRule },
-          { label: t('bcWhitelist'), rule: opts.whitelistRule }
-        ]);
+          : [
+              { label: t('bcDomain'), rule: opts.domainRule },
+              { label: t('bcExact'), rule: opts.exactRule },
+              { label: t('bcWhitelist'), rule: opts.whitelistRule }
+            ]);
+    const firstEnabledIdx = options.findIndex(o => !o.disabled);
 
     const panel = document.createElement('div');
     panel.id = 'searchfilter-block-confirm-dialog';
     panel.innerHTML = `
       <div class="sfb-confirm-domain">${escHtml(domain)}</div>
       ${options.map((o, i) => `
-        <label class="sfb-confirm-option">
-          <input type="radio" name="sfb-confirm-rule" value="${i}" ${i === 0 ? 'checked' : ''}>
+        <label class="sfb-confirm-option${o.disabled ? ' sfb-confirm-option-disabled' : ''}">
+          <input type="radio" name="sfb-confirm-rule" value="${i}" ${o.disabled ? 'disabled' : ''} ${i === firstEnabledIdx ? 'checked' : ''}>
           <span class="sfb-confirm-label">${escHtml(o.label)}</span>
-          <input type="text" class="sfb-confirm-rule" data-idx="${i}" value="${escHtml(o.rule)}" spellcheck="false">
+          <input type="text" class="sfb-confirm-rule" data-idx="${i}" value="${escHtml(o.rule)}" spellcheck="false" ${o.disabled ? 'disabled' : ''}>
         </label>`).join('')}
       <div class="sfb-confirm-btns">
         <button id="sfb-confirm-ok" class="searchfilter-button searchfilter-button-primary">${t('bcConfirm')}</button>
@@ -2455,6 +2501,7 @@
         return;
       }
       const selectedOption = options[idx];
+      if (selectedOption && selectedOption.disabled) { close(); return; }
       close();
       onConfirm(rule, selectedOption);
     };
@@ -2523,7 +2570,9 @@
         if (currentConfig.blockConfirm) {
           const unblockOptions = [];
           if (matchedRule) {
-            unblockOptions.push({ label: t('bcDelete'), rule: matchedRule, action: 'delete' });
+            const matchedSource = (result.dataset.matchedSource || '').trim();
+            const isSubRule = !isLocalEntry({ source: matchedSource });
+            unblockOptions.push({ label: isSubRule ? t('bcDeleteSub') : t('bcDelete'), rule: matchedRule, action: 'delete', disabled: isSubRule });
           }
           unblockOptions.push({ label: t('bcWhitelist'), rule: whitelistRule, action: 'whitelist' });
 
@@ -2537,7 +2586,7 @@
                 currentConfig.rules.push(chosenRule);
               }
             }
-            persistConfig();
+            persistConfig(true);
             syncRulesTextarea();
             forceReprocessAll();
           }, unblockOptions);
@@ -2547,7 +2596,7 @@
         if (!currentConfig.rules.some(rule => stripRuleComment(rule.trim()) === whitelistRule)) {
           currentConfig.rules.push(whitelistRule);
         }
-        persistConfig();
+        persistConfig(true);
         syncRulesTextarea();
         forceReprocessAll();
         return;
@@ -3211,6 +3260,17 @@
             -webkit-appearance: auto !important;
             display: inline-block !important;
         }
+        #searchfilter-block-confirm-dialog .sfb-confirm-option-disabled {
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+        #searchfilter-block-confirm-dialog .sfb-confirm-option-disabled input[type="radio"] {
+            cursor: not-allowed !important;
+        }
+        #searchfilter-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule {
+            background: #edf2f7;
+            color: #a0aec0;
+        }
 
         .searchfilter-switch input[type="checkbox"] {
             opacity: 0 !important;
@@ -3277,6 +3337,10 @@
             #searchfilter-block-confirm-dialog .sfb-confirm-rule:focus {
                 border-color: #60a5fa;
                 background: #374151;
+            }
+            #searchfilter-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule {
+                background: #1f2937;
+                color: #6b7280;
             }
         }
 
@@ -4350,7 +4414,7 @@
   }
 
   // 配置持久化
-  function persistConfig(updateModifiedTime = true) {
+  function persistConfig(updateModifiedTime = false) {
     GM_setValue(CONFIG_KEY, currentConfig);
     if (updateModifiedTime) GM_setValue(LOCAL_LAST_MODIFIED_KEY, Date.now());
   }
@@ -5027,6 +5091,9 @@
     const rawLines = rulesText.split('\n');
     const userRules = filterValidRuleLines(rawLines);
 
+    const prevRules = Array.isArray(currentConfig.rules) ? currentConfig.rules : [];
+    const rulesChanged = JSON.stringify(prevRules) !== JSON.stringify(userRules);
+
     currentConfig.rules = userRules;
 
     currentConfig.enabled = enabled;
@@ -5036,7 +5103,7 @@
     currentConfig.blockDomain = blockDomain;
     currentConfig.blockConfirm = blockConfirm;
 
-    persistConfig();
+    persistConfig(rulesChanged);
 
     showHiddenResults = false;
     forceReprocessAll();
@@ -5949,7 +6016,7 @@
       return s;
     };
     const listKeyOf = (line) => {
-      const m = line.match(/^\s*(rules|blacklist|whitelist)\s*:\s*(?:#.*)?$/i);
+      const m = line.match(/^\s*(rules|blacklist|whitelist|matches)\s*:\s*(?:#.*)?$/i);
       return m ? m[1].toLowerCase() : '';
     };
     for (const line of lines) {
@@ -6546,20 +6613,28 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         GM_setValue(LOCAL_LAST_MODIFIED_KEY, cloudTime);
       }
     } else if (localTime > cloudTime || resp.status === 404) {
-      console.log('[自动 WebDAV] 本地配置较新，上传中...');
-      const uploadedTime = Math.max(Date.now(), cloudTime + 1);
-      const uploadData = buildUploadContent(localRules.join('\n'), uploadedTime);
-      const putHeaders = { ...headers };
-      if (resp.status !== 404) {
-        if (cloudETag && !cloudETag.startsWith('W/')) putHeaders['If-Match'] = cloudETag;
-        else if (cloudLastMod) putHeaders['If-Unmodified-Since'] = cloudLastMod;
-      }
-      try {
-        await gmRequest('PUT', fullUrl, { headers: putHeaders, data: uploadData });
-        GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime);
-      } catch (err) {
-        console.warn('[自动 WebDAV] 上传冲突或失败:', err.message);
-        return;
+      const localContent = localRules.join('\n');
+      const cloudContent = cloudRules.join('\n');
+      if (resp.status !== 404 && localContent === cloudContent) {
+        if (cloudTime > 0) {
+          GM_setValue(LOCAL_LAST_MODIFIED_KEY, cloudTime);
+        }
+      } else {
+        console.log('[自动 WebDAV] 本地配置较新，上传中...');
+        const uploadedTime = Math.max(Date.now(), cloudTime + 1);
+        const uploadData = buildUploadContent(localContent, uploadedTime);
+        const putHeaders = { ...headers };
+        if (resp.status !== 404) {
+          if (cloudETag && !cloudETag.startsWith('W/')) putHeaders['If-Match'] = cloudETag;
+          else if (cloudLastMod) putHeaders['If-Unmodified-Since'] = cloudLastMod;
+        }
+        try {
+          await gmRequest('PUT', fullUrl, { headers: putHeaders, data: uploadData });
+          GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime);
+        } catch (err) {
+          console.warn('[自动 WebDAV] 上传冲突或失败:', err.message);
+          return;
+        }
       }
     }
 
