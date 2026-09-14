@@ -36,16 +36,16 @@ Open with a browser that supports script installation to install directly.
 
 ### 1.3 About WebDAV:
 
-1. Auto-sync runs in the background, merging line by line once every 1h based on the configured timestamp
-2. Script settings sync and custom selector sync toggles are independent of each other
-3. Address only supports HTTPS and full paths, e.g., Nutstore `https://dav.jianguoyun.com/dav/your_folder/`; the folder is created automatically if it does not exist
+1. Auto-sync runs in the background, merging line by line once every 1h based on the configured timestamp.
+2. Script settings sync and custom selector sync toggles are independent of each other.
+3. Address only supports HTTPS and full paths, e.g., Nutstore `https://dav.jianguoyun.com/dav/your_folder/`; the folder is created automatically if it does not exist.
 
 ### 1.4 About Subscriptions:
 
-1. Subscription updates also run in the background, fetching once every 12h. Supports plain-text remote links such as `https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Other/rules.txt`; compatible with `.yaml` uBlacklist list format (`name`/`rules`/`blacklist`/`whitelist`/`matches` fields)
-2. Subscription rules are appended after local rules. Due to limited script-allocatable performance, keep the total number of rules under 50k to avoid blowing up your phone 🤳💥
-3. Script extensions are limited and do not support `##` DOM element or uBO filter rules; they are filtered out automatically on subscription import
-4. Both subscriptions and WebDAV rely on cross-origin request permissions; if a permission prompt appears, select `Always allow`
+1. Subscription updates also run in the background, fetching once every 12h. Supports plain-text remote links such as `https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Other/rules.txt`; compatible with `.yaml` uBlacklist list format (`name`/`rules`/`blacklist`/`whitelist`/`matches` fields).
+2. Subscription rules are appended after local rules. Due to limited script-allocatable performance, keep the total number of rules under 50k to avoid mobile device performance issues.
+3. Script extensions are limited and do not support `##` DOM element or uBO filter rules; they are filtered out automatically on subscription import.
+4. Both subscriptions and WebDAV rely on cross-origin request permissions; if a permission prompt appears, select `Always allow`.
 
 ### 1.5 Other:
 
@@ -53,8 +53,8 @@ Open with a browser that supports script installation to install directly.
 When secondary confirmation is enabled, a panel pops up offering options to block or add to whitelist; when disabled, adds `*://example.com/*` or `*://*.example.com/*` depending on the block-domain switch.  
 Unblocking: when secondary confirmation is enabled, a panel pops up offering options to delete local source rules or add to whitelist; when disabled, adds a whitelist entry by default.
 2. Rule priority: Local whitelist > Local blacklist > Subscription whitelist > Subscription blacklist
-3. The script is injected site-wide via `@match *://*/*`; the floating bubble and blocking filters only take effect on search engines
-4. Comment line format: `# + space + content`. ⬆️/⬇️ jump to the previous/next comment line; when on the first line or first comment line, ⬆️ jumps to the last line
+3. The script is injected site-wide via `@match *://*/*`; the floating bubble and blocking filters only take effect on search engines.
+4. Comment line format: `# + space + content`. ⬆️/⬇️ jump to the previous/next comment line; when on the first line or first comment line, ⬆️ jumps to the last line.
 
 ## Docs
 
