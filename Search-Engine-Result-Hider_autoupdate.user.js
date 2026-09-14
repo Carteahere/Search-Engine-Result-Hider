@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/SadYuyuko
-// @version      8.2.2
+// @version      8.2.3
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -56,10 +56,15 @@
   const WEBDAV_AUTO_SYNC_KEY = 'searchfilter_webdav_auto_sync';
   const WEBDAV_SYNC_CONFIG_KEY = 'searchfilter_webdav_sync_config';
   const WEBDAV_SYNC_SELECTORS_KEY = 'searchfilter_webdav_sync_selectors';
+  const TOMBSTONES_KEY = 'searchfilter_rule_tombstones';
+  const SUBSCRIPTION_TOMBSTONES_KEY = 'searchfilter_subscription_tombstones';
+  const LOCAL_RULE_ADDED_KEY = 'searchfilter_rule_added_times';
+  const WEBDAV_LAST_SYNC_SELECTORS_KEY = 'searchfilter_webdav_last_sync_selectors';
   const SELECTORS_KEY = 'searchfilter_selectors';
   const HL_STATS_REGEX = /^@\d+/;
   const MAX_SUBSCRIPTIONS = 100;
   const AUTO_UPDATE_INTERVAL = 12 * 60 * 60 * 1000;
+  const WEBDAV_AUTO_SYNC_INTERVAL = 1 * 60 * 60 * 1000;
 
   // 默认配置
   let currentConfig = GM_getValue(CONFIG_KEY, {
@@ -365,6 +370,7 @@
       webdavDownloading: '正在下载...',
       webdavUploadFailed: '上传失败: ',
       webdavDownloadFailed: '下载失败: ',
+      webdavSyncLocked: '同步正在进行中，请稍后重试',
       webdavHttpsRequired: '安全起见，WebDAV地址必须使用https',
       networkError: '网络错误',
       requestTimeout: '请求超时',
@@ -372,6 +378,7 @@
       importing: '导入中',
       autoSync: '自动同步',
       syncScriptConfig: '同步配置',
+      syncCustomSelectors: '云同步',
       webdavUrlEmpty: 'WebDAV地址为空',
       highlightRules: '高亮规则',
       menuHighlightColor: '🎨 高亮颜色设置',
@@ -481,6 +488,7 @@
       webdavDownloading: 'Downloading...',
       webdavUploadFailed: 'Upload failed: ',
       webdavDownloadFailed: 'Download failed: ',
+      webdavSyncLocked: 'Sync is currently in progress, please try again later',
       webdavHttpsRequired: 'For security, WebDAV server must use HTTPS',
       networkError: 'Network error',
       requestTimeout: 'Request timeout',
@@ -488,6 +496,7 @@
       importing: 'Importing',
       autoSync: 'Auto Sync',
       syncScriptConfig: 'Sync Config',
+      syncCustomSelectors: 'Cloud Sync',
       webdavUrlEmpty: 'WebDAV URL is empty',
       highlightRules: 'Highlight Rules',
       menuHighlightColor: '🎨 Highlight Colors',
@@ -615,12 +624,20 @@
       .filter(line => line.length > 0);
   }
 
+  function getRuleKey(r) {
+    if (!r || typeof r !== 'string') return '';
+    const trimmed = r.trim();
+    if (trimmed.startsWith('#')) return trimmed;
+    const stripped = stripRuleComment(trimmed);
+    return (stripped.startsWith('#') ? stripped : stripped.replace(/\s+#.*$/, '')).trim();
+  }
+
   // 剥离行尾注释
   function stripRuleComment(line) {
     const n = line.length;
     let i = 0;
     while (i < n && /\s/.test(line[i])) i++;
-    if (line[i] === '@') {
+    if (line[i] === '@' && line.substr(i + 1, 2).toLowerCase() !== 'if') {
       i++;
       while (i < n && /\d/.test(line[i])) i++;
       while (i < n && /\s/.test(line[i])) i++;
@@ -1256,6 +1273,7 @@
 
   function looksLikeCondExpr(str) {
     if (!isCondExprCore(str)) return false;
+    if (/^\s*!\s+(?:title|url|site|description|version|expires|homepage)\s*:\s*\S/i.test(str)) return false;
     return /(?:^|[\s(&|!])(?:\$site|\$category|site|title|url|host|path|scheme)\s*(?:(?:=~|\^=|\$=|\*=|=|:)\s*\S|\/)/i.test(str)
       || /^\s*!\s*(?:(?:\$site|\$category|site|title|url|host|path|scheme)\b|\()/i.test(str);
   }
@@ -2399,6 +2417,7 @@
     const cleanRule = stripRuleComment(newRule.trim());
     if (!currentConfig.rules.some(rule => stripRuleComment(rule.trim()) === cleanRule)) {
       currentConfig.rules.push(newRule);
+      recordRuleAddedTimes([newRule]);
       persistConfig(true);
       syncRulesTextarea();
       forceReprocessAll();
@@ -2580,10 +2599,13 @@
             const action = (selectedOption && selectedOption.action) || 'whitelist';
             if (action === 'delete') {
               const cleanTarget = stripRuleComment(chosenRule.trim());
+              const deleted = currentConfig.rules.filter(rule => stripRuleComment(rule.trim()) === cleanTarget);
+              recordRuleDeletions(deleted);
               currentConfig.rules = currentConfig.rules.filter(rule => stripRuleComment(rule.trim()) !== cleanTarget);
             } else {
               if (!currentConfig.rules.some(rule => stripRuleComment(rule.trim()) === chosenRule)) {
                 currentConfig.rules.push(chosenRule);
+                recordRuleAddedTimes([chosenRule]);
               }
             }
             persistConfig(true);
@@ -2595,6 +2617,7 @@
 
         if (!currentConfig.rules.some(rule => stripRuleComment(rule.trim()) === whitelistRule)) {
           currentConfig.rules.push(whitelistRule);
+          recordRuleAddedTimes([whitelistRule]);
         }
         persistConfig(true);
         syncRulesTextarea();
@@ -3707,7 +3730,13 @@
             align-items: center;
             gap: 6px;
         }
-        .subscription-input-row input {
+        .subscription-toggle-switch {
+            width: 28px !important;
+            height: 16px !important;
+            margin: 0 !important;
+            flex-shrink: 0 !important;
+        }
+        .subscription-input-row input.subscription-url {
             flex: 1;
             margin: 0;
         }
@@ -4253,7 +4282,7 @@
             right: status.style.right,
             isLeftHalf
           };
-          persistConfig();
+          persistConfig(false);
           updateBubbleContent(status, parseInt(status.dataset.blockedCount || 0));
         } else {
           applyBubbleStatePosition(status);
@@ -4312,6 +4341,14 @@
         removeMatchedRuleLabel(el);
       }
     });
+    if (!showHiddenResults) {
+      document.querySelectorAll('[data-blocker-yandex-parent]').forEach(parent => {
+        const hasVisibleSiblings = Array.from(parent.children).some(sibling =>
+          sibling.style.display !== 'none' && sibling.getAttribute('data-is-blocked') !== 'true'
+        );
+        if (!hasVisibleSiblings) parent.style.display = 'none';
+      });
+    }
     const status = document.getElementById('searchfilter-status');
     if (status) {
       updateBubbleContent(status, parseInt(status.dataset.blockedCount || 0));
@@ -4416,7 +4453,18 @@
   // 配置持久化
   function persistConfig(updateModifiedTime = false) {
     GM_setValue(CONFIG_KEY, currentConfig);
-    if (updateModifiedTime) GM_setValue(LOCAL_LAST_MODIFIED_KEY, Date.now());
+    if (updateModifiedTime) {
+      GM_setValue(LOCAL_LAST_MODIFIED_KEY, Date.now());
+      if (typeof triggerWebDAVSyncDelayed === 'function') {
+        triggerWebDAVSyncDelayed(5000);
+      }
+    }
+  }
+
+  // 修改配置项并更新修改时间戳
+  function persistConfigItem(key, value, updateModifiedTime = true) {
+    currentConfig[key] = value;
+    persistConfig(updateModifiedTime);
   }
 
   function syncRulesTextarea() {
@@ -4757,7 +4805,11 @@
       if (!panel.contains(e.target)) closePanel();
     };
     const closePanel = () => {
-      if (typeof onBeforeClose === 'function') onBeforeClose();
+      try {
+        if (typeof onBeforeClose === 'function') onBeforeClose();
+      } catch (err) {
+        console.error('[面板] 关闭前回调失败:', err);
+      }
       document.removeEventListener('click', closeHandler);
       panel._cleanupClick = null;
       fadeOutAndRemovePanel(panel);
@@ -4776,6 +4828,10 @@
     injectWidgetStyles();
     const existingPanel = document.getElementById('searchfilter-panel');
     if (existingPanel) {
+      if (window._panelCloseTimer) {
+        clearTimeout(window._panelCloseTimer);
+        window._panelCloseTimer = null;
+      }
       if (window._panelCloseHandler) {
         document.removeEventListener('click', window._panelCloseHandler);
         window._panelCloseHandler = null;
@@ -4784,12 +4840,17 @@
       return;
     }
 
+    if (window._panelCloseTimer) {
+      clearTimeout(window._panelCloseTimer);
+      window._panelCloseTimer = null;
+    }
     if (window._panelCloseHandler) {
       document.removeEventListener('click', window._panelCloseHandler);
       window._panelCloseHandler = null;
     }
 
     const panel = createPanel('searchfilter-panel');
+    panel._initialRules = Array.isArray(currentConfig.rules) ? [...currentConfig.rules] : [];
 
     // 兼容旧悬浮球设置
     const initialSize = getBubbleSize();
@@ -4904,12 +4965,20 @@
     });
 
     const closePanel = () => {
+      if (window._panelCloseTimer) {
+        clearTimeout(window._panelCloseTimer);
+        window._panelCloseTimer = null;
+      }
       fadeOutAndRemovePanel(panel, () => {
-        document.removeEventListener('click', window._panelCloseHandler);
+        if (window._panelCloseHandler !== closeHandler) return;
+        document.removeEventListener('click', closeHandler);
         window._panelCloseHandler = null;
 
         const savedConfig = GM_getValue(CONFIG_KEY, currentConfig);
         currentConfig = savedConfig;
+        if (typeof triggerWebDAVSyncDelayed === 'function') {
+          triggerWebDAVSyncDelayed(1000);
+        }
       });
       const toastContainer = document.getElementById('searchfilter-toast-container');
       if (toastContainer) toastContainer.remove();
@@ -5044,7 +5113,7 @@
         }
         const statusBtn = document.getElementById('searchfilter-status');
         if (statusBtn) applyBubbleSize(statusBtn);
-        persistConfig();
+        persistConfig(true);
       });
     }
 
@@ -5062,7 +5131,7 @@
       if (el) {
         el.addEventListener('change', function() {
           currentConfig[sw.key] = this.checked;
-          persistConfig();
+          persistConfig(true);
           if (sw.apply) sw.apply();
         });
       }
@@ -5075,7 +5144,33 @@
       }
     };
     window._panelCloseHandler = closeHandler;
-    setTimeout(() => document.addEventListener('click', closeHandler), 200);
+    if (window._panelCloseTimer) clearTimeout(window._panelCloseTimer);
+    window._panelCloseTimer = setTimeout(() => {
+      window._panelCloseTimer = null;
+      if (panel.isConnected && window._panelCloseHandler === closeHandler) {
+        document.addEventListener('click', closeHandler);
+      }
+    }, 200);
+  }
+
+  // 记录墓碑时间
+  function applyRuleDiff(prevRules, newRules) {
+    const prevList = Array.isArray(prevRules) ? prevRules : [];
+    const nextList = Array.isArray(newRules) ? newRules : [];
+    if (JSON.stringify(prevList) === JSON.stringify(nextList)) return false;
+    const prevKeySet = new Set(prevList.map(getRuleKey));
+    const nextKeySet = new Set(nextList.map(getRuleKey));
+    const deletedRules = prevList.filter(r => {
+      const k = getRuleKey(r);
+      return k && !k.startsWith('#') && !nextKeySet.has(k);
+    });
+    const addedRules = nextList.filter(r => {
+      const k = getRuleKey(r);
+      return k && !k.startsWith('#') && !prevKeySet.has(k);
+    });
+    if (deletedRules.length > 0) recordRuleDeletions(deletedRules);
+    if (addedRules.length > 0) recordRuleAddedTimes(addedRules);
+    return true;
   }
 
   // 保存配置
@@ -5091,10 +5186,26 @@
     const rawLines = rulesText.split('\n');
     const userRules = filterValidRuleLines(rawLines);
 
-    const prevRules = Array.isArray(currentConfig.rules) ? currentConfig.rules : [];
-    const rulesChanged = JSON.stringify(prevRules) !== JSON.stringify(userRules);
+    const panel = document.getElementById('searchfilter-panel');
+    const baseRules = (panel && Array.isArray(panel._initialRules)) ? panel._initialRules : (Array.isArray(currentConfig.rules) ? currentConfig.rules : []);
+    const rulesChanged = applyRuleDiff(baseRules, userRules);
 
-    currentConfig.rules = userRules;
+    const initialKeySet = new Set(baseRules.map(getRuleKey));
+    const userKeySet = new Set(userRules.map(getRuleKey));
+    const backgroundNewRules = (Array.isArray(currentConfig.rules) ? currentConfig.rules : []).filter(r => {
+      const k = getRuleKey(r);
+      return k && !k.startsWith('#') && !initialKeySet.has(k) && !userKeySet.has(k);
+    });
+    const finalRules = backgroundNewRules.length > 0 ? [...userRules, ...backgroundNewRules] : userRules;
+
+    const settingsChanged = currentConfig.enabled !== enabled ||
+      currentConfig.showCount !== showCount ||
+      currentConfig.debug !== debug ||
+      currentConfig.showBlockBtn !== showBlockBtn ||
+      currentConfig.blockDomain !== blockDomain ||
+      currentConfig.blockConfirm !== blockConfirm;
+
+    currentConfig.rules = finalRules;
 
     currentConfig.enabled = enabled;
     currentConfig.showCount = showCount;
@@ -5103,7 +5214,7 @@
     currentConfig.blockDomain = blockDomain;
     currentConfig.blockConfirm = blockConfirm;
 
-    persistConfig(rulesChanged);
+    persistConfig(rulesChanged || settingsChanged);
 
     showHiddenResults = false;
     forceReprocessAll();
@@ -5371,8 +5482,8 @@
         newColors[i] = val;
       }
       if (hasError) return;
-      currentConfig.highlightColors = newColors;
-      persistConfig();
+        currentConfig.highlightColors = newColors;
+        persistConfig(true);
       forceReprocessAll();
       showToast(t('saved'), 'success');
     };
@@ -5383,6 +5494,9 @@
         document.getElementById(`hlcolor-input-${i}`).value = defaults[i];
         document.getElementById(`hlcolor-preview-${i}`).style.background = defaults[i];
       }
+      currentConfig.highlightColors = {...defaults};
+      persistConfig(true);
+      forceReprocessAll();
       const [r, g, b] = hexToRgb('#CE2029');
       [currentHue, currentSat, currentVal] = rgbToHsv(r, g, b);
       drawSVCanvas(currentHue);
@@ -5748,7 +5862,7 @@
                             <input type="checkbox" id="searchfilter-selector-sync" ${syncSelectorsEnabled ? 'checked' : ''}>
                             <span class="searchfilter-slider"></span>
                         </span>
-                        <span style="line-height:1;">${t('syncScriptConfig')}</span>
+                        <span style="line-height:1;">${t('syncCustomSelectors')}</span>
                     </label>
                     <button id="searchfilter-selector-import" class="searchfilter-button searchfilter-button-secondary" style="padding: 3px 8px; border: 1px solid transparent;">${t('import')}</button>
                     <button id="searchfilter-selector-export" class="searchfilter-button searchfilter-button-success" style="padding: 3px 8px; border: 1px solid transparent;">${t('export')}</button>
@@ -5792,6 +5906,7 @@
       _selectorStoreSignature = getSelectorStoreSignature();
       resetSelectorCache();
       refreshEngineSite();
+      GM_setValue(LOCAL_LAST_MODIFIED_KEY, Date.now());
     };
 
     const showError = (messages) => {
@@ -5900,24 +6015,91 @@
     return rules;
   }
 
+  function getSubscriptionTombstones() {
+    const raw = GM_getValue(SUBSCRIPTION_TOMBSTONES_KEY, {});
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  }
+
+  function recordSubscriptionDeletions(urls, deletedAt = Date.now()) {
+    if (!Array.isArray(urls) || !urls.length) return;
+    const tombstones = getSubscriptionTombstones();
+    let changed = false;
+    urls.forEach(u => {
+      const url = String(u || '').trim();
+      if (url) {
+        tombstones[url] = deletedAt;
+        changed = true;
+      }
+    });
+    if (changed) {
+      pruneTombstones(tombstones);
+      GM_setValue(SUBSCRIPTION_TOMBSTONES_KEY, tombstones);
+    }
+  }
+
   // 应用云端订阅
-  function applyCloudSubscriptions(subscriptions) {
+  function applyCloudSubscriptions(subscriptions, cloudSubTombstones) {
+    if (!cloudSubTombstones || typeof cloudSubTombstones !== 'object') cloudSubTombstones = {};
     if (!Array.isArray(subscriptions)) return;
     const existing = getSubscriptions();
-    const merged = subscriptions.map(s => {
-      if (!s || typeof s !== 'object') return s;
-      const local = existing.find(e => e && e.url === s.url);
-      return {
-        ...s,
-        rules: Array.isArray(local && local.rules) ? local.rules : (Array.isArray(s.rules) ? s.rules : []),
-        name: s.name !== undefined ? s.name : (local && local.name)
-      };
-    });
-    saveSubscriptions(merged.slice(0, MAX_SUBSCRIPTIONS));
+    let hasNewSub = false;
+
+    const localSubTombstones = getSubscriptionTombstones();
+    const mergedSubTombstones = { ...(cloudSubTombstones || {}), ...localSubTombstones };
+    for (const k in cloudSubTombstones) {
+      if (typeof cloudSubTombstones[k] === 'number') {
+        mergedSubTombstones[k] = Math.max(mergedSubTombstones[k] || 0, cloudSubTombstones[k]);
+      }
+    }
+    pruneTombstones(mergedSubTombstones);
+    GM_setValue(SUBSCRIPTION_TOMBSTONES_KEY, mergedSubTombstones);
+
+    const merged = subscriptions
+      .filter(s => s && s.url && (!mergedSubTombstones[s.url] || (s.lastUpdate && s.lastUpdate > mergedSubTombstones[s.url])))
+      .map(s => {
+        const local = existing.find(e => e && e.url === s.url);
+        const isNew = !local || !Array.isArray(local.rules) || local.rules.length === 0;
+        if (isNew && s.url && s.enabled !== false) hasNewSub = true;
+        const rules = Array.isArray(local && local.rules) && local.rules.length > 0
+          ? local.rules
+          : (Array.isArray(s.rules) ? s.rules : []);
+        const lastUpdate = (local && local.rules && local.rules.length > 0)
+          ? (s.lastUpdate || (local && local.lastUpdate) || 0)
+          : 0;
+        return {
+          ...s,
+          enabled: s.enabled !== undefined ? s.enabled !== false : (local ? local.enabled !== false : true),
+          rules,
+          lastUpdate,
+          name: s.name !== undefined ? s.name : (local && local.name)
+        };
+      });
+
+    // 订阅同步: 已被打上删除墓碑的本地订阅不再复活
+    const localOnly = existing.filter(localSub =>
+      localSub && localSub.url &&
+      !mergedSubTombstones[localSub.url] &&
+      !merged.some(s => s && s.url === localSub.url)
+    );
+    if (merged.length + localOnly.length > MAX_SUBSCRIPTIONS) {
+      const room = Math.max(0, MAX_SUBSCRIPTIONS - localOnly.length);
+      const keptCloud = merged.slice(0, room);
+      if (currentConfig.debug && keptCloud.length < merged.length) {
+        console.warn(`[订阅] 云端订阅超出上限，已截断 ${merged.length - keptCloud.length} 条`);
+      }
+      saveSubscriptions([...keptCloud, ...localOnly].slice(0, MAX_SUBSCRIPTIONS));
+    } else {
+      saveSubscriptions([...merged, ...localOnly]);
+    }
+    if (hasNewSub) {
+      setTimeout(() => {
+        checkAutoSubscription(true);
+      }, 1000);
+    }
   }
 
   // 订阅管理
-  function gmRequest(method, url, { headers, data, allow404 = false, timeout = 30000 } = {}) {
+  function gmRequest(method, url, { headers, data, allow404 = false, timeout = 30000, anonymous = true } = {}) {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
         method,
@@ -5925,6 +6107,8 @@
         headers,
         data,
         timeout,
+        anonymous,
+        nocache: true,
         onload: (resp) => {
           if (resp.status >= 200 && resp.status < 300) resolve(resp);
           else if (allow404 && resp.status === 404) resolve(resp);
@@ -5936,19 +6120,152 @@
     });
   }
 
+  function getLocalRuleAddedTimes() {
+    const raw = GM_getValue(LOCAL_RULE_ADDED_KEY, {});
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  }
+
+  function recordRuleAddedTimes(addedRules, addedAt = Date.now(), overwriteExisting = true) {
+    if (!Array.isArray(addedRules) || !addedRules.length) return;
+    const times = getLocalRuleAddedTimes();
+    const tombstones = getLocalTombstones();
+    let changed = false;
+    let tsChanged = false;
+    addedRules.forEach(r => {
+      const key = getRuleKey(r);
+      if (key && !key.startsWith('#')) {
+        if (overwriteExisting || times[key] === undefined) {
+          times[key] = addedAt;
+          changed = true;
+          if (overwriteExisting && tombstones[key]) {
+            delete tombstones[key];
+            tsChanged = true;
+          }
+        }
+      }
+    });
+    if (changed) GM_setValue(LOCAL_RULE_ADDED_KEY, times);
+    if (tsChanged) GM_setValue(TOMBSTONES_KEY, tombstones);
+  }
+
+  function getLocalTombstones() {
+    const raw = GM_getValue(TOMBSTONES_KEY, {});
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  }
+
+  function recordRuleDeletions(deletedRules, deletedAt = Date.now()) {
+    if (!Array.isArray(deletedRules) || !deletedRules.length) return;
+    const tombstones = getLocalTombstones();
+    const addedTimes = getLocalRuleAddedTimes();
+    let changed = false;
+    let addedChanged = false;
+    deletedRules.forEach(r => {
+      const key = getRuleKey(r);
+      if (key && !key.startsWith('#')) {
+        tombstones[key] = deletedAt;
+        changed = true;
+        if (addedTimes[key]) {
+          delete addedTimes[key];
+          addedChanged = true;
+        }
+      }
+    });
+    if (addedChanged) GM_setValue(LOCAL_RULE_ADDED_KEY, addedTimes);
+    if (changed) {
+      pruneTombstones(tombstones);
+      GM_setValue(TOMBSTONES_KEY, tombstones);
+    }
+  }
+
+  function pruneTombstones(tombstones) {
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    for (const k in tombstones) {
+      if (typeof tombstones[k] !== 'number' || tombstones[k] < cutoff) {
+        delete tombstones[k];
+      }
+    }
+  }
+
+  function mergeRulesWithTombstones(localRules, cloudRules, localTime, cloudTime, cloudTombstones, cloudAddedTimes) {
+    cloudTombstones = cloudTombstones || {};
+    cloudAddedTimes = cloudAddedTimes || {};
+    const localTombstones = getLocalTombstones();
+    const localAddedTimes = getLocalRuleAddedTimes();
+    const mergedTombstones = { ...cloudTombstones, ...localTombstones };
+    for (const k in cloudTombstones) {
+      if (typeof cloudTombstones[k] === 'number') {
+        mergedTombstones[k] = Math.max(mergedTombstones[k] || 0, cloudTombstones[k]);
+      }
+    }
+
+    const isRuleActive = (rule) => {
+      const trimmed = rule.trim();
+      if (!trimmed) return false;
+      const key = getRuleKey(trimmed);
+      if (!key || key.startsWith('#')) return true;
+      const delTime = mergedTombstones[key];
+      if (!delTime) return true;
+
+      // 时间基准
+      const localAdded = localAddedTimes[key] || 0;
+      if (localAdded > delTime) {
+        delete mergedTombstones[key];
+        return true;
+      }
+
+      const cloudAdded = cloudAddedTimes[key] || 0;
+      if (cloudAdded > delTime) {
+        delete mergedTombstones[key];
+        return true;
+      }
+
+      return false;
+    };
+
+    const merged = [];
+    const seen = new Set();
+    const addRule = (r) => {
+      const trimmed = r.trim();
+      if (!trimmed) return;
+      if (!isRuleActive(trimmed)) return;
+      const key = getRuleKey(trimmed);
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push(trimmed);
+      }
+    };
+
+    if (localTime >= cloudTime) {
+      localRules.forEach(addRule);
+      cloudRules.forEach(addRule);
+    } else {
+      cloudRules.forEach(addRule);
+      localRules.forEach(addRule);
+    }
+
+    pruneTombstones(mergedTombstones);
+    GM_setValue(TOMBSTONES_KEY, mergedTombstones);
+    return { mergedRules: merged, mergedTombstones };
+  }
+
   // 同步配置处理
   function buildSyncPayload(syncedAt = Date.now()) {
     const stored = GM_getValue(CONFIG_KEY);
     const base = (stored && typeof stored === 'object' && !Array.isArray(stored)) ? stored : currentConfig;
-    const { rules, bubbleState, bubbleSize, ...settings } = base;
+    const { rules, bubbleState, bubbleSize, selectors, ...settings } = base;
     const payload = {
       ...settings,
-      subscriptions: getSubscriptions().map(s => ({ url: s.url, enabled: s.enabled, lastUpdate: s.lastUpdate })),
+      subscriptions: getSubscriptions().map(s => ({
+        url: s.url,
+        name: s.name,
+        enabled: s.enabled,
+        lastUpdate: s.lastUpdate
+      })),
+      subscriptionTombstones: getSubscriptionTombstones(),
+      tombstones: getLocalTombstones(),
+      ruleAddedTimes: getLocalRuleAddedTimes(),
       syncedAt
     };
-    if (GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false)) {
-      payload.selectors = getUserSelectors();
-    }
     return payload;
   }
 
@@ -5957,17 +6274,44 @@
   }
 
   function parseSyncHeader(content) {
-    const lines = content.split('\n');
-    if (lines.length > 0 && lines[0].startsWith('# ScriptConfig:')) {
-      let config = null;
-      try {
-        config = JSON.parse(lines[0].substring('# ScriptConfig:'.length));
-      } catch (e) {
-        if (currentConfig.debug) console.warn('[WebDAV] 配置头解析失败:', e);
+    const lines = String(content || '').replace(/^\uFEFF/, '').split('\n');
+    let config = null;
+    let selectors = null;
+    let rawScriptConfig = null;
+    let rawSelectors = null;
+    let startIndex = 0;
+
+    for (let i = 0; i < Math.min(lines.length, 50); i++) {
+      const line = lines[i];
+      if (line.startsWith('# ScriptConfig:')) {
+        rawScriptConfig = line;
+        try {
+          config = JSON.parse(line.substring('# ScriptConfig:'.length));
+        } catch (e) {
+          if (currentConfig.debug) console.warn('[WebDAV] 配置头解析失败:', e);
+        }
+        startIndex = Math.max(startIndex, i + 1);
+      } else if (line.startsWith('# Selectors:')) {
+        rawSelectors = line;
+        try {
+          selectors = JSON.parse(line.substring('# Selectors:'.length));
+        } catch (e) {
+          if (currentConfig.debug) console.warn('[WebDAV] 选择器头解析失败:', e);
+        }
+        startIndex = Math.max(startIndex, i + 1);
+      } else if (line.startsWith('#')) {
+      } else {
+        break;
       }
-      return { config, restLines: lines.slice(1) };
     }
-    return { config: null, restLines: lines };
+
+    if (config && selectors && !config.selectors) {
+      config.selectors = selectors;
+    } else if (!config && selectors) {
+      config = { selectors };
+    }
+
+    return { config, rawScriptConfig, rawSelectors, restLines: lines.slice(startIndex) };
   }
 
   function safeBase64Encode(str) {
@@ -5984,20 +6328,108 @@
   }
 
   // WebDAV请求
+  function isHttpsUrl(url) {
+    return /^https:\/\//i.test(String(url || '').trim());
+  }
+
   function getWebDAVRequest(config) {
-    const headers = {};
-    if (config.username) headers['Authorization'] = 'Basic ' + safeBase64Encode(`${config.username}:${config.password}`);
+    if (!isHttpsUrl(config.url)) throw new Error(t('webdavHttpsRequired'));
+    const headers = {
+      'Cache-Control': 'no-cache, no-store'
+    };
+    if (config.username) {
+      const authStr = `${config.username}:${config.password || ''}`;
+      headers['Authorization'] = 'Basic ' + safeBase64Encode(authStr);
+    }
+    const cleanFilename = String(config.filename || 'rules.txt').trim().replace(/^\/+/, '');
+    const encodedFilename = cleanFilename.split('/').map(encodeURIComponent).join('/');
+    const cleanFolderUrl = String(config.url).trim().replace(/\/+$/, '') + '/';
     return {
-      fullUrl: config.url.replace(/\/$/, '') + '/' + config.filename,
+      folderUrl: cleanFolderUrl,
+      fullUrl: cleanFolderUrl + encodedFilename,
+      filename: cleanFilename,
       headers
     };
   }
 
+  async function ensureWebDAVFolder(folderUrl, headers) {
+    let url = String(folderUrl).trim().replace(/\/+$/, '') + '/';
+    const parsed = new URL(url);
+    const rootPath = parsed.origin + '/';
+    if (url === rootPath) return;
+
+    // 检查目录是否存在
+    try {
+      const resp = await gmRequest('PROPFIND', url, {
+        headers: { ...headers, Depth: '0' },
+        allow404: true
+      });
+      if (resp.status === 207 || resp.status === 200) return;
+    } catch (_) {}
+
+    // 递归创建目录
+    const trimmedPath = url.slice(0, url.lastIndexOf('/', url.length - 2) + 1);
+    if (trimmedPath && trimmedPath !== rootPath && trimmedPath.length > parsed.origin.length) {
+      await ensureWebDAVFolder(trimmedPath, headers);
+    }
+
+    try {
+      await gmRequest('MKCOL', url, { headers, allow404: true });
+    } catch (_) {}
+  }
+
+  function parseRemoteConfig(raw) {
+    if (!raw || typeof raw !== 'string' || !raw.startsWith('# ScriptConfig:')) return null;
+    try {
+      const parsed = JSON.parse(raw.substring('# ScriptConfig:'.length));
+      return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function mergeTimeMaps(base, extra) {
+    const out = { ...(base && typeof base === 'object' && !Array.isArray(base) ? base : {}) };
+    if (!extra || typeof extra !== 'object') return out;
+    for (const k in extra) {
+      const v = extra[k];
+      if (typeof v === 'number') out[k] = Math.max(typeof out[k] === 'number' ? out[k] : 0, v);
+      else out[k] = v;
+    }
+    return out;
+  }
+
+  function buildMetadataConfigPayload(remoteRaw, syncedAt) {
+    const remote = parseRemoteConfig(remoteRaw) || {};
+    const tombstones = mergeTimeMaps(remote.tombstones, getLocalTombstones());
+    const ruleAddedTimes = mergeTimeMaps(remote.ruleAddedTimes, getLocalRuleAddedTimes());
+    pruneTombstones(tombstones);
+    return JSON.stringify({ ...remote, tombstones, ruleAddedTimes, syncedAt });
+  }
+
   // 配置头上传
-  function buildUploadContent(content, syncedAt = Date.now()) {
-    return GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)
-      ? '# ScriptConfig:' + JSON.stringify(buildSyncPayload(syncedAt)) + '\n' + content
-      : content;
+  function buildUploadContent(content, syncedAt, remotePreserved) {
+    syncedAt = syncedAt || Date.now();
+    remotePreserved = remotePreserved || {};
+    let prefix = '';
+    const syncConfig = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false);
+    const syncSelectors = GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false);
+
+    if (syncConfig) {
+      const payload = buildSyncPayload(syncedAt);
+      pruneTombstones(payload.tombstones);
+      prefix += '# ScriptConfig:' + JSON.stringify(payload) + '\n';
+    } else {
+      prefix += '# ScriptConfig:' + buildMetadataConfigPayload(remotePreserved.rawScriptConfig, syncedAt) + '\n';
+    }
+
+    if (syncSelectors) {
+      prefix += '# Selectors:' + JSON.stringify(getUserSelectors()) + '\n';
+    } else if (remotePreserved.rawSelectors) {
+      prefix += remotePreserved.rawSelectors + '\n';
+    }
+
+    return prefix + content;
   }
 
   // 提取YAML
@@ -6005,6 +6437,7 @@
     let hasSection = false;
     let inSection = false;
     let sectionKind = '';
+    let sectionIndent = -1;
     let name;
     const items = [];
     const stripQ = (raw) => {
@@ -6016,15 +6449,17 @@
       return s;
     };
     const listKeyOf = (line) => {
-      const m = line.match(/^\s*(rules|blacklist|whitelist|matches)\s*:\s*(?:#.*)?$/i);
-      return m ? m[1].toLowerCase() : '';
+      const m = line.match(/^(\s*)(rules|blacklist|whitelist|matches)\s*:\s*(?:#.*)?$/i);
+      return m ? { key: m[2].toLowerCase(), indent: m[1].length } : null;
     };
-    for (const line of lines) {
-      const listKey = listKeyOf(line);
-      if (listKey) {
+    for (let idx = 0; idx < lines.length; idx++) {
+      const line = lines[idx];
+      const match = listKeyOf(line);
+      if (match) {
         hasSection = true;
         inSection = true;
-        sectionKind = listKey;
+        sectionKind = match.key;
+        sectionIndent = match.indent;
         continue;
       }
       if (!inSection) {
@@ -6036,8 +6471,22 @@
       }
       const s = line.trim();
       if (!s || s.startsWith('#')) continue;
+
+      const currentIndent = line.search(/\S/);
+      const isListItem = s.startsWith('-');
+      if (!isListItem && (currentIndent <= sectionIndent || (sectionIndent === 0 && currentIndent === 0))) {
+        inSection = false;
+        sectionKind = '';
+        sectionIndent = -1;
+        idx--;
+        continue;
+      }
+
       if (/^-\s+/.test(s)) {
         let rawItem = s.replace(/^-\s+/, '').trim();
+        if (/^[a-zA-Z0-9_]+\s*:(?!\/\/)/.test(rawItem)) {
+          continue;
+        }
         const qMatch = rawItem.match(/^((?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'))(?:\s*#.*)?$/);
         if (qMatch) {
           rawItem = qMatch[1].slice(1, -1);
@@ -6050,10 +6499,6 @@
         continue;
       }
       if (s === '-') continue;
-      if (!/^\s/.test(line)) {
-        inSection = false;
-        sectionKind = '';
-      }
     }
     if (!hasSection || !items.length) return null;
     return { items, name };
@@ -6061,7 +6506,7 @@
 
   // 解析订阅
   function parseRulesetContent(content) {
-    let lines = content.split('\n');
+    let lines = String(content || '').replace(/^\uFEFF/, '').split('\n');
     let meta = {};
     if (lines.length > 0 && lines[0].trim() === '---') {
       const endIndex = lines.findIndex((l, i) => i > 0 && l.trim() === '---');
@@ -6122,7 +6567,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   const existingIndex = subs.findIndex(s => s.url === url);
   const subData = {
     url,
-    enabled: true,
+    enabled: existing ? existing.enabled !== false : true,
     lastUpdate: Date.now(),
     rules: validRules
   };
@@ -6155,11 +6600,21 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
     let subscriptions = getSubscriptions();
 
-    function createSubscriptionRow(url = '') {
+    function createSubscriptionRow(sub = {}) {
+      const url = typeof sub === 'string' ? sub : (sub.url || '');
+      const enabled = typeof sub === 'object' && sub.enabled !== undefined ? sub.enabled : true;
       const row = document.createElement('div');
       row.className = 'subscription-row';
-      row.innerHTML = `<div class="subscription-meta-row"><span class="subscription-index"></span><div class="subscription-status-message"></div><span class="subscription-info"></span></div><div class="subscription-input-row"><input type="text" class="subscription-url" placeholder="https://example.com/rules.txt"><button class="delete-subscription-btn">❌</button></div>`;
+      row.innerHTML = `<div class="subscription-meta-row"><span class="subscription-index"></span><div class="subscription-status-message"></div><span class="subscription-info"></span></div><div class="subscription-input-row"><label class="searchfilter-switch subscription-toggle-switch" style="margin:0 2px 0 0;"><input type="checkbox" class="subscription-enable-toggle" ${enabled ? 'checked' : ''}><span class="searchfilter-slider"></span></label><input type="text" class="subscription-url" placeholder="https://example.com/rules.txt"><button class="delete-subscription-btn">❌</button></div>`;
       row.querySelector('.subscription-url').value = url;
+      row.dataset.originalUrl = url;
+      const toggle = row.querySelector('.subscription-enable-toggle');
+      toggle.addEventListener('change', () => {
+        if (persistCurrentSubscriptions()) {
+          forceReprocessAll();
+          showToast(t('saved'), 'success');
+        }
+      });
       return row;
     }
 
@@ -6184,7 +6639,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
     const container = document.getElementById('subscription-rows-container');
     subscriptions.forEach(sub => {
-      container.appendChild(createSubscriptionRow(sub.url || ''));
+      container.appendChild(createSubscriptionRow(sub));
     });
 
     const addBtn = document.getElementById('subscription-add');
@@ -6192,7 +6647,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     if (autoUpdateSwitch) {
       autoUpdateSwitch.addEventListener('change', function() {
         currentConfig.subscriptionAutoUpdate = this.checked;
-        persistConfig();
+        persistConfig(false);
       });
     }
 
@@ -6220,9 +6675,13 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     function collectSubscriptionsFromRows() {
       const newSubs = [];
       let hasError = false;
+      const seenUrls = new Set();
       container.querySelectorAll('.subscription-row').forEach(row => {
         const input = row.querySelector('.subscription-url');
         const url = input.value.trim();
+        const origUrl = row.dataset.originalUrl || url;
+        const toggle = row.querySelector('.subscription-enable-toggle');
+        const enabled = toggle ? toggle.checked : true;
         const msgDiv = row.querySelector('.subscription-status-message');
         if (!url) {
           msgDiv.textContent = '';
@@ -6235,12 +6694,17 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           hasError = true;
           return;
         }
-        const existingSub = subscriptions.find(s => s.url === url);
+        if (seenUrls.has(url)) {
+          return;
+        }
+        seenUrls.add(url);
+        const existingSub = subscriptions.find(s => s && s.url === origUrl) ||
+          subscriptions.find(s => s && s.url === url);
         newSubs.push({
           url,
-          enabled: true,
+          enabled,
           lastUpdate: existingSub ? existingSub.lastUpdate : 0,
-          rules: existingSub ? existingSub.rules : [],
+          rules: existingSub && Array.isArray(existingSub.rules) ? existingSub.rules : [],
           name: existingSub ? existingSub.name : undefined
         });
       });
@@ -6252,6 +6716,11 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       if (hasError) return false;
       saveSubscriptions(newSubs.filter(s => s.url).slice(0, MAX_SUBSCRIPTIONS));
       subscriptions = getSubscriptions();
+      container.querySelectorAll('.subscription-row').forEach(row => {
+        const input = row.querySelector('.subscription-url');
+        if (input) row.dataset.originalUrl = input.value.trim();
+      });
+      GM_setValue(LOCAL_LAST_MODIFIED_KEY, Date.now());
       return true;
     }
 
@@ -6259,7 +6728,11 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       container.querySelectorAll('.delete-subscription-btn').forEach(btn => {
         btn.onclick = (e) => {
           e.stopPropagation();
-          btn.closest('.subscription-row').remove();
+          const row = btn.closest('.subscription-row');
+          const input = row.querySelector('.subscription-url');
+          const deletedUrl = input ? input.value.trim() : (row.dataset.originalUrl || '');
+          if (deletedUrl) recordSubscriptionDeletions([deletedUrl]);
+          row.remove();
           reindexRows();
           updateAddButtonState();
           if (persistCurrentSubscriptions()) {
@@ -6286,7 +6759,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     updateAddButtonState();
     bindDeleteEvents();
 
-    const closePanel = bindOutsideClickClose(panel);
+    const closePanel = bindOutsideClickClose(panel, () => {
+      persistCurrentSubscriptions();
+    });
 
     document.getElementById('subscription-import').onclick = async () => {
       const rows = Array.from(container.querySelectorAll('.subscription-row'));
@@ -6308,11 +6783,11 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         }
         try {
           const result = await performSubscriptionForUrl(url, false);
+          row.dataset.originalUrl = url;
           msgDiv.textContent = t('subImportSuccess');
           msgDiv.className = 'subscription-status-message success';
-          const rowIndex = rows.indexOf(row);
           const updatedSubs = getSubscriptions();
-          const sub = updatedSubs[rowIndex];
+          const sub = updatedSubs.find(s => s && s.url === url);
           const infoEl = row.querySelector('.subscription-info');
           if (sub && sub.lastUpdate) {
             const d = new Date(sub.lastUpdate);
@@ -6425,8 +6900,15 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
 
     function saveWebDAVConfig() {
+      const rawUrl = urlInput.value.trim();
+      const prevConfig = GM_getValue(WEBDAV_KEY, {}) || {};
+      let url = rawUrl;
+      if (rawUrl && !isHttpsUrl(rawUrl)) {
+        showToast(t('webdavHttpsRequired'), 'error');
+        url = isHttpsUrl(prevConfig.url) ? String(prevConfig.url).trim() : '';
+      }
       const config = {
-        url: urlInput.value.trim(),
+        url,
         username: usernameInput.value.trim(),
         password: passwordInput.value,
         filename: filenameInput.value.trim() || 'rules.txt'
@@ -6449,31 +6931,82 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       return saveWebDAVConfig();
     }
 
-    const closePanel = bindOutsideClickClose(panel);
+    urlInput.addEventListener('change', saveWebDAVConfig);
+    usernameInput.addEventListener('change', saveWebDAVConfig);
+    passwordInput.addEventListener('change', saveWebDAVConfig);
+    filenameInput.addEventListener('change', saveWebDAVConfig);
+
+    let isExplicitCancel = false;
+    const closePanel = bindOutsideClickClose(panel, () => {
+      if (!isExplicitCancel) {
+        saveWebDAVConfig();
+      }
+    });
 
     // webdav上传
     document.getElementById('webdav-upload').onclick = async () => {
       const config = getValidatedWebDAVConfig();
       if (!config) return;
+      const uploadBtn = document.getElementById('webdav-upload');
+      if (uploadBtn.disabled) return;
+      uploadBtn.disabled = true;
       const textarea = document.getElementById('searchfilter-rules');
       if (textarea) {
-        currentConfig.rules = filterValidRuleLines(textarea.value.split('\n'));
+        const newRules = filterValidRuleLines(textarea.value.split('\n'));
+        applyRuleDiff(currentConfig.rules, newRules);
+        currentConfig.rules = newRules;
         persistConfig(false);
       }
-      let content = textarea ? textarea.value : currentConfig.rules.join('\n');
-      content = buildUploadContent(content);
+      let content = currentConfig.rules.join('\n');
       const loadingToast = showToast(t('webdavUploading'), 'info', 10000);
       try {
-        const { fullUrl, headers } = getWebDAVRequest(config);
-        const uploadedTime = Date.now();
-        await gmRequest('PUT', fullUrl, { headers, data: content });
-        GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime);
-        GM_setValue(WEBDAV_LAST_SYNC_KEY, uploadedTime);
+        const lockAcquired = await runWithSyncLock('webdav', async () => {
+          const { folderUrl, fullUrl, headers } = getWebDAVRequest(config);
+          await ensureWebDAVFolder(folderUrl, headers);
+          let remotePreserved = {};
+          let remoteSyncedAt = 0;
+          try {
+            const resp = await gmRequest('GET', fullUrl, { headers, allow404: true });
+            if (resp.status !== 404 && !isHtmlResponse(resp.responseText)) {
+              const parsed = parseSyncHeader(resp.responseText);
+              remotePreserved = {
+                rawScriptConfig: parsed.rawScriptConfig,
+                rawSelectors: parsed.rawSelectors
+              };
+              if (parsed.config && typeof parsed.config.syncedAt === 'number') {
+                remoteSyncedAt = parsed.config.syncedAt;
+              }
+            }
+          } catch (_) {}
+          const uploadedTime = Math.max(Date.now(), remoteSyncedAt + 1000);
+          const uploadData = buildUploadContent(content, uploadedTime, remotePreserved);
+          await gmRequest('PUT', fullUrl, {
+            headers: {
+              ...headers,
+              'Content-Type': 'text/plain; charset=utf-8',
+              'X-OC-Mtime': Math.floor(uploadedTime / 1000).toString()
+            },
+            data: uploadData
+          });
+          GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime);
+          GM_setValue(WEBDAV_LAST_SYNC_KEY, uploadedTime);
+        });
         loadingToast.dismiss();
-        showToast(t('uploadSuccess'), 'success');
+        if (lockAcquired === false) {
+          showToast(t('webdavSyncLocked'), 'error', 4000);
+        } else {
+          showToast(t('uploadSuccess'), 'success');
+          const mainPanel = document.getElementById('searchfilter-panel');
+          if (mainPanel && Array.isArray(currentConfig.rules)) {
+            mainPanel._initialRules = [...currentConfig.rules];
+          }
+          forceReprocessAll();
+        }
       } catch (err) {
         loadingToast.dismiss();
         showToast(t('webdavUploadFailed') + err.message, 'error', 5000);
+      } finally {
+        uploadBtn.disabled = false;
       }
     };
 
@@ -6488,19 +7021,31 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     document.getElementById('webdav-download').onclick = async () => {
       const config = getValidatedWebDAVConfig();
       if (!config) return;
+      const downloadBtn = document.getElementById('webdav-download');
+      if (downloadBtn.disabled) return;
+      downloadBtn.disabled = true;
       const loadingToast = showToast(t('webdavDownloading'), 'info', 10000);
       try {
-        await performWebDAVDownload(config, true);
+        const lockAcquired = await runWithSyncLock('webdav', async () => {
+          await performWebDAVDownload(config, true);
+        });
         loadingToast.dismiss();
-        showToast(t('downloadSuccess'), 'success');
+        if (lockAcquired === false) {
+          showToast(t('webdavSyncLocked'), 'error', 4000);
+        } else {
+          showToast(t('downloadSuccess'), 'success');
+        }
       } catch (err) {
         loadingToast.dismiss();
         showToast(t('webdavDownloadFailed') + err.message, 'error', 5000);
+      } finally {
+        downloadBtn.disabled = false;
       }
     };
 
     document.getElementById('webdav-cancel').onclick = (e) => {
       e.stopPropagation();
+      isExplicitCancel = true;
       closePanel();
     };
 
@@ -6512,11 +7057,32 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     const content = resp.responseText;
     if (isHtmlResponse(content)) throw new Error(t('subImportFailed'));
     const parsedHeader = parseSyncHeader(content);
-    if (parsedHeader.config && GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
-      const { syncedAt, subscriptions, bubbleState, bubbleSize, selectors, ...settings } = parsedHeader.config;
-      Object.assign(currentConfig, settings);
-      GM_setValue(CONFIG_KEY, currentConfig);
-      if (subscriptions) applyCloudSubscriptions(subscriptions);
+    if (parsedHeader.config) {
+      const { syncedAt, subscriptions, subscriptionTombstones, bubbleState, bubbleSize, selectors, tombstones, ruleAddedTimes, ...settings } = parsedHeader.config;
+      
+      if (tombstones && typeof tombstones === 'object') {
+        const localTombstones = getLocalTombstones();
+        const merged = { ...tombstones, ...localTombstones };
+        for (const k in tombstones) {
+          if (typeof tombstones[k] === 'number') merged[k] = Math.max(merged[k] || 0, tombstones[k]);
+        }
+        pruneTombstones(merged);
+        GM_setValue(TOMBSTONES_KEY, merged);
+      }
+      if (ruleAddedTimes && typeof ruleAddedTimes === 'object') {
+        const localTimes = getLocalRuleAddedTimes();
+        const mergedTimes = { ...ruleAddedTimes, ...localTimes };
+        for (const k in ruleAddedTimes) {
+          if (typeof ruleAddedTimes[k] === 'number') mergedTimes[k] = Math.max(mergedTimes[k] || 0, ruleAddedTimes[k]);
+        }
+        GM_setValue(LOCAL_RULE_ADDED_KEY, mergedTimes);
+      }
+
+      if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
+        Object.assign(currentConfig, settings);
+        GM_setValue(CONFIG_KEY, currentConfig);
+        if (subscriptions) applyCloudSubscriptions(subscriptions, subscriptionTombstones);
+      }
       if (selectors && typeof selectors === 'object' && !Array.isArray(selectors) && GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false)) {
         GM_setValue(SELECTORS_KEY, selectors);
         _selectorStoreSignature = getSelectorStoreSignature();
@@ -6524,7 +7090,20 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         refreshEngineSite();
       }
     }
-    const newRules = parsedHeader.restLines.map(r => r.trim()).filter(r => r);
+    const downloadedRawRules = parsedHeader.restLines.map(r => r.trim()).filter(r => r);
+    const activeTombstones = getLocalTombstones();
+    const activeAddedTimes = getLocalRuleAddedTimes();
+
+    const newRules = downloadedRawRules.filter(r => {
+      const k = getRuleKey(r);
+      if (!k || k.startsWith('#')) return true;
+      const delTime = activeTombstones[k];
+      if (!delTime) return true;
+      const addedTime = activeAddedTimes[k] || 0;
+      return addedTime > delTime;
+    });
+
+    recordRuleAddedTimes(newRules, Date.now(), false);
     currentConfig.rules = newRules;
     persistConfig(false);
     let cloudTime = 0;
@@ -6552,7 +7131,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   // 同步逻辑
   async function performAutoWebDAVSync(config) {
     adoptStoredConfigIfNewer();
-    const { fullUrl, headers } = getWebDAVRequest(config);
+    const { folderUrl, fullUrl, headers } = getWebDAVRequest(config);
 
     const resp = await gmRequest('GET', fullUrl, { headers, allow404: true });
 
@@ -6561,16 +7140,15 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     let cloudTime = 0;
     let cloudETag = '';
     let cloudLastMod = '';
+    let parsedHeader = null;
     if (resp.status !== 404) {
       const content = resp.responseText;
       if (isHtmlResponse(content)) {
         console.warn('[自动 WebDAV] 云端返回 HTML，已跳过');
         return;
       }
-      const parsedHeader = parseSyncHeader(content);
-      if (parsedHeader.config && GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
-        cloudConfig = parsedHeader.config;
-      }
+      parsedHeader = parseSyncHeader(content);
+      cloudConfig = parsedHeader.config;
       cloudRules = parsedHeader.restLines.map(r => r.trim()).filter(r => r);
       let headerTime = 0;
       if (parsedHeader.config && typeof parsedHeader.config.syncedAt === 'number') {
@@ -6588,18 +7166,74 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           cloudETag = etagMatch[1].trim();
         }
       }
-      cloudTime = headerTime || lastModTime || 0;
+      cloudTime = Math.max(headerTime || 0, lastModTime || 0);
       if (isNaN(cloudTime)) cloudTime = 0;
     }
 
     const localTime = GM_getValue(LOCAL_LAST_MODIFIED_KEY, 0);
     const localRules = currentConfig.rules || [];
 
-    if (cloudTime > localTime) {
+    if (resp.status === 404) {
+      console.log('[自动 WebDAV] 云端文件不存在，初始上传中...');
+      await ensureWebDAVFolder(folderUrl, headers);
+      const localContent = localRules.join('\n');
+      const uploadedTime = Math.max(Date.now(), 1);
+      const uploadData = buildUploadContent(localContent, uploadedTime);
+      try {
+        await gmRequest('PUT', fullUrl, {
+          headers: {
+            ...headers,
+            'Content-Type': 'text/plain; charset=utf-8',
+            'X-OC-Mtime': Math.floor(uploadedTime / 1000).toString()
+          },
+          data: uploadData
+        });
+        GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime);
+      } catch (err) {
+        console.warn('[自动 WebDAV] 初始上传失败:', err.message);
+        return;
+      }
+    } else {
+      const cloudTombstones = (cloudConfig && cloudConfig.tombstones && typeof cloudConfig.tombstones === 'object')
+        ? cloudConfig.tombstones
+        : {};
+      const cloudAddedTimes = (cloudConfig && cloudConfig.ruleAddedTimes && typeof cloudConfig.ruleAddedTimes === 'object')
+        ? cloudConfig.ruleAddedTimes
+        : {};
+
+      // 合并
+      const { mergedRules } = mergeRulesWithTombstones(localRules, cloudRules, localTime, cloudTime, cloudTombstones, cloudAddedTimes);
+      const mergedContent = mergedRules.join('\n');
+      const localContent = localRules.join('\n');
+      const cloudContent = cloudRules.join('\n');
+
       if (cloudConfig) {
-        const { syncedAt, subscriptions, bubbleState, bubbleSize, selectors, ...settings } = cloudConfig;
-        Object.assign(currentConfig, settings);
-        if (subscriptions) applyCloudSubscriptions(subscriptions);
+        if (cloudConfig.tombstones && typeof cloudConfig.tombstones === 'object') {
+          const localTombstones = getLocalTombstones();
+          const merged = { ...cloudConfig.tombstones, ...localTombstones };
+          for (const k in cloudConfig.tombstones) {
+            if (typeof cloudConfig.tombstones[k] === 'number') merged[k] = Math.max(merged[k] || 0, cloudConfig.tombstones[k]);
+          }
+          pruneTombstones(merged);
+          GM_setValue(TOMBSTONES_KEY, merged);
+        }
+        if (cloudConfig.ruleAddedTimes && typeof cloudConfig.ruleAddedTimes === 'object') {
+          const localTimes = getLocalRuleAddedTimes();
+          const mergedTimes = { ...cloudConfig.ruleAddedTimes, ...localTimes };
+          for (const k in cloudConfig.ruleAddedTimes) {
+            if (typeof cloudConfig.ruleAddedTimes[k] === 'number') mergedTimes[k] = Math.max(mergedTimes[k] || 0, cloudConfig.ruleAddedTimes[k]);
+          }
+          GM_setValue(LOCAL_RULE_ADDED_KEY, mergedTimes);
+        }
+      }
+
+      // 应用云端设置
+      if (cloudTime > localTime && cloudConfig) {
+        const { syncedAt, subscriptions, subscriptionTombstones, bubbleState, bubbleSize, selectors, tombstones, ruleAddedTimes, ...settings } = cloudConfig;
+        if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
+          Object.assign(currentConfig, settings);
+          if (subscriptions) applyCloudSubscriptions(subscriptions, subscriptionTombstones);
+        }
         if (selectors && typeof selectors === 'object' && !Array.isArray(selectors) && GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false)) {
           GM_setValue(SELECTORS_KEY, selectors);
           _selectorStoreSignature = getSelectorStoreSignature();
@@ -6607,33 +7241,39 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           refreshEngineSite();
         }
       }
-      currentConfig.rules = cloudRules;
+
+      // 更新本地规则
+      currentConfig.rules = mergedRules;
       persistConfig(false);
-      if (cloudTime > 0) {
-        GM_setValue(LOCAL_LAST_MODIFIED_KEY, cloudTime);
-      }
-    } else if (localTime > cloudTime || resp.status === 404) {
-      const localContent = localRules.join('\n');
-      const cloudContent = cloudRules.join('\n');
-      if (resp.status !== 404 && localContent === cloudContent) {
-        if (cloudTime > 0) {
-          GM_setValue(LOCAL_LAST_MODIFIED_KEY, cloudTime);
-        }
-      } else {
-        console.log('[自动 WebDAV] 本地配置较新，上传中...');
-        const uploadedTime = Math.max(Date.now(), cloudTime + 1);
-        const uploadData = buildUploadContent(localContent, uploadedTime);
-        const putHeaders = { ...headers };
-        if (resp.status !== 404) {
-          if (cloudETag && !cloudETag.startsWith('W/')) putHeaders['If-Match'] = cloudETag;
-          else if (cloudLastMod) putHeaders['If-Unmodified-Since'] = cloudLastMod;
-        }
+
+      const syncConfig = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false);
+      const syncSelectors = GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false);
+      const contentChanged = mergedContent !== cloudContent;
+      const localNewer = localTime > cloudTime;
+      const shouldUpload = contentChanged || (localNewer && (syncConfig || syncSelectors));
+
+      if (shouldUpload) {
+        console.log('[自动 WebDAV] 规则合并或配置更新完成，上传至云端...');
+        const uploadedTime = Math.max(Date.now(), cloudTime + 1000, localTime + 1);
+        const uploadData = buildUploadContent(mergedContent, uploadedTime, {
+          rawScriptConfig: parsedHeader ? parsedHeader.rawScriptConfig : null,
+          rawSelectors: parsedHeader ? parsedHeader.rawSelectors : null
+        });
+        const putHeaders = {
+          ...headers,
+          'Content-Type': 'text/plain; charset=utf-8',
+          'X-OC-Mtime': Math.floor(uploadedTime / 1000).toString()
+        };
         try {
           await gmRequest('PUT', fullUrl, { headers: putHeaders, data: uploadData });
           GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime);
         } catch (err) {
-          console.warn('[自动 WebDAV] 上传冲突或失败:', err.message);
+          console.warn('[自动 WebDAV] 上传失败:', err.message);
           return;
+        }
+      } else {
+        if (cloudTime > 0) {
+          GM_setValue(LOCAL_LAST_MODIFIED_KEY, cloudTime);
         }
       }
     }
@@ -6642,14 +7282,34 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     GM_setValue(WEBDAV_LAST_SYNC_KEY, Date.now());
   }
 
+  let _webdavSyncDelayedTimer = null;
+  function triggerWebDAVSyncDelayed(delayMs = 5000) {
+    if (!GM_getValue(WEBDAV_AUTO_SYNC_KEY, false)) return;
+    const config = GM_getValue(WEBDAV_KEY);
+    if (!config || !config.url || !isHttpsUrl(config.url)) return;
+
+    if (_webdavSyncDelayedTimer) clearTimeout(_webdavSyncDelayedTimer);
+    _webdavSyncDelayedTimer = setTimeout(() => {
+      _webdavSyncDelayedTimer = null;
+      if (document.getElementById('searchfilter-panel')) {
+        triggerWebDAVSyncDelayed(3000);
+        return;
+      }
+      runWithSyncLock('webdav', async () => {
+        await performAutoWebDAVSync(config);
+      }).catch(err => console.error('[防抖 WebDAV] 同步失败:', err.message));
+    }, delayMs);
+  }
+
   function checkAutoWebDAV() {
     if (!GM_getValue(WEBDAV_AUTO_SYNC_KEY, false)) return;
     const config = GM_getValue(WEBDAV_KEY);
     if (!config || !config.url) return;
-    if (Date.now() - GM_getValue(WEBDAV_LAST_SYNC_KEY, 0) < AUTO_UPDATE_INTERVAL) return;
+    if (!isHttpsUrl(config.url)) return;
+    if (Date.now() - GM_getValue(WEBDAV_LAST_SYNC_KEY, 0) < WEBDAV_AUTO_SYNC_INTERVAL) return;
     if (document.getElementById('searchfilter-panel')) return;
     runWithSyncLock('webdav', async () => {
-      if (Date.now() - GM_getValue(WEBDAV_LAST_SYNC_KEY, 0) < AUTO_UPDATE_INTERVAL) return;
+      if (Date.now() - GM_getValue(WEBDAV_LAST_SYNC_KEY, 0) < WEBDAV_AUTO_SYNC_INTERVAL) return;
       await performAutoWebDAVSync(config);
     }).catch(err => console.error('[自动 WebDAV] 同步失败:', err.message));
   }
@@ -6734,7 +7394,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     const on = isOn();
     GM_registerMenuCommand((on ? markerOn : markerOff) + t(labelKey) + (on ? `: ${t(onText)}` : `: ${t(offText)}`), () => {
       apply();
-      persistConfig();
+      persistConfig(true);
       location.reload();
     });
   }
@@ -6756,7 +7416,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     const langDisplay = currentConfig.language === 'zh-CN' ? t('menuLang') : t('menuLangEn');
     GM_registerMenuCommand((currentConfig.language === 'zh-CN' ? '🟢 ' : '🔵 ') + langDisplay, () => {
       currentConfig.language = currentConfig.language === 'zh-CN' ? 'en' : 'zh-CN';
-      persistConfig();
+      persistConfig(true);
       location.reload();
     });
     GM_registerMenuCommand(t('menuHighlightColor'), () => showHighlightColorPanel());
@@ -6809,10 +7469,11 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   }
 
   async function runWithSyncLock(task, fn) {
-    if (!(await acquireSyncLock(task))) return;
+    if (!(await acquireSyncLock(task))) return false;
     const renewTimer = setInterval(() => renewSyncLock(task), Math.max(5000, Math.floor(SYNC_LOCK_TTL / 3)));
     try {
-      await fn();
+      const res = await fn();
+      return res === undefined ? true : res;
     } finally {
       clearInterval(renewTimer);
       releaseSyncLock(task);
@@ -6820,14 +7481,15 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   }
 
   // 订阅
-  function checkAutoSubscription() {
-    if (!currentConfig.subscriptionAutoUpdate) return;
+  function checkAutoSubscription(force = false) {
+    if (!force && !currentConfig.subscriptionAutoUpdate) return;
     const subs = getSubscriptions();
     if (!subs || subs.length === 0) return;
     const now = Date.now();
-    if (!subs.some(s => s.enabled && now - s.lastUpdate >= AUTO_UPDATE_INTERVAL)) return;
+    const isDue = (s) => s.enabled && (!s.rules || s.rules.length === 0 || now - s.lastUpdate >= AUTO_UPDATE_INTERVAL);
+    if (!subs.some(isDue)) return;
     runWithSyncLock('subscription', async () => {
-      const pending = getSubscriptions().filter(s => s.enabled && Date.now() - s.lastUpdate >= AUTO_UPDATE_INTERVAL);
+      const pending = getSubscriptions().filter(isDue);
       if (!pending.length) return;
       for (const sub of pending) {
         console.log(`[订阅] 开始更新: ${sub.url}`);
