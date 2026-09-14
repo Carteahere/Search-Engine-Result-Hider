@@ -346,6 +346,9 @@ assert('C17: 嵌套@if括号', m.stripRuleComment('*://x.com/* @if((title *= "a"
 assert('C18: 引号内转义引号', m.stripRuleComment('*://x.com/* @if(title *= "a\\"b # c") # x') === '*://x.com/* @if(title *= "a\\"b # c")');
 assert('C19: @if内部正则含空格和#不被截断', m.stripRuleComment('*://x.com/* @if(url =~ /foo # bar/) # note') === '*://x.com/* @if(url =~ /foo # bar/)');
 assert('C20: 高亮域名注释', m.stripRuleComment('@1 *://x.com/* # c') === '@1 *://x.com/*');
+assert('C21: 行首@if内部#不截断', m.stripRuleComment('@if(title *= "a # b")') === '@if(title *= "a # b")');
+assert('C22: 行首@if行尾注释', m.stripRuleComment('@if(title *= "a") # note') === '@if(title *= "a")');
+assert('C23: 行首@if正则含#不截断', m.stripRuleComment('@if(url =~ /foo # bar/) *://x/*') === '@if(url =~ /foo # bar/) *://x/*');
 
 // ---- host / path / scheme 变量 ----
 r = condExpr('host $= ".example.com"', 'google');
@@ -846,6 +849,8 @@ assert('L7: title/正则不像表达式', m.looksLikeCondExpr('title/foo/i') ===
 assert('L8: text/不像表达式', m.looksLikeCondExpr('text/ad/') === false);
 assert('L9: 裸正则不像表达式', m.looksLikeCondExpr('/example\\.com/') === false);
 assert('L10: host简写正则像表达式', m.looksLikeCondExpr('host/\\.example\\.com$/i') === true);
+assert('L11: 取反冒号条件', m.looksLikeCondExpr('!title:foo') === true && m.looksLikeCondExpr('!url:https://x') === true);
+assert('L12: Adblock元数据仍被排除', m.looksLikeCondExpr('! Title: Some List') === false && m.looksLikeCondExpr('! URL: https://x') === false);
 
 // ---- 解析 ----
 let p = m.parseRuleWithConditions('host $= ".example.com"');

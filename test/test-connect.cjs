@@ -52,12 +52,16 @@ const KEYS = {
   SELECTORS_KEY: 'searchfilter_selectors',
   LOCAL_LAST_MODIFIED_KEY: 'searchfilter_local_last_modified',
   WEBDAV_LAST_SYNC_KEY: 'searchfilter_webdav_last_sync',
+  TOMBSTONES_KEY: 'searchfilter_rule_tombstones',
 };
 
 const syncFns = [
-  'stripRuleComment', 'getWebDAVRequest', 'isHtmlResponse', 'parseSyncHeader', 'buildUploadContent',
+  'getRuleKey', 'getLocalRuleAddedTimes', 'recordRuleAddedTimes', 'getLocalTombstones', 'recordRuleDeletions', 'pruneTombstones', 'mergeRulesWithTombstones',
+  'getSubscriptionTombstones', 'recordSubscriptionDeletions',
+  'stripRuleComment', 'isHttpsUrl', 'getWebDAVRequest', 'ensureWebDAVFolder', 'isHtmlResponse', 'parseSyncHeader', 'parseRemoteConfig', 'mergeTimeMaps',
+  'buildMetadataConfigPayload', 'buildUploadContent',
   'buildSyncPayload', 'applyCloudSubscriptions', 'adoptStoredConfigIfNewer',
-  'checkExternalConfigChange', 'performAutoWebDAVSync',
+  'checkExternalConfigChange', 'triggerWebDAVSyncDelayed', 'performAutoWebDAVSync', 'performWebDAVDownload',
 ].map((n) => extractFn(src, n));
 
 function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], localTime = 0, localSubs = [], storedConfig = undefined, syncConfig = true, responseHeaders = '' }) {
@@ -72,12 +76,16 @@ function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], local
   const state = { reprocess: 0 };
   const factory = new Function('store', 'calls', 'state', 'mockResponse', `
     const console = { log: () => {}, warn: () => {} };
+    const t = (k) => k;
     const CONFIG_KEY = ${JSON.stringify(KEYS.CONFIG_KEY)};
     const WEBDAV_SYNC_CONFIG_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_CONFIG_KEY)};
     const WEBDAV_SYNC_SELECTORS_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_SELECTORS_KEY)};
     const SELECTORS_KEY = ${JSON.stringify(KEYS.SELECTORS_KEY)};
     const LOCAL_LAST_MODIFIED_KEY = ${JSON.stringify(KEYS.LOCAL_LAST_MODIFIED_KEY)};
     const WEBDAV_LAST_SYNC_KEY = ${JSON.stringify(KEYS.WEBDAV_LAST_SYNC_KEY)};
+    const TOMBSTONES_KEY = ${JSON.stringify(KEYS.TOMBSTONES_KEY)};
+    const SUBSCRIPTION_TOMBSTONES_KEY = 'searchfilter_subscription_tombstones';
+    const LOCAL_RULE_ADDED_KEY = 'searchfilter_rule_added_times';
     const MAX_SUBSCRIPTIONS = 100;
     const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
     const GM_setValue = (k, v) => { store.set(k, v); };
@@ -103,6 +111,7 @@ function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], local
       setCurrent: (c) => { currentConfig = c; },
       getCurrent: () => currentConfig,
       run: (cfg) => performAutoWebDAVSync(cfg),
+      getRequest: (cfg) => getWebDAVRequest(cfg),
       store,
       calls,
       state,
@@ -113,7 +122,7 @@ function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], local
 
 const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '', filename: 'rules.txt' };
 
-// T1: 云端较新 -> 应用云端设置与规则 + 保留本地订阅规则数组 + 不上传
+// T1: 云端较新 -> 应用云端设置 + 规则集合智能合并(保留两端独有规则) + 本地订阅与云端订阅双向合并
 {
   const cloud = { enabled: false, language: 'en', syncedAt: 2000, subscriptions: [{ url: 'https://sub/x.txt', enabled: true, lastUpdate: 9 }] };
   const cloudText = '# ScriptConfig:' + JSON.stringify(cloud) + '\n*://cloud.example.com/*';
@@ -123,13 +132,13 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   await env.run(syncCfg);
   const cur = env.getCurrent();
   assert('T1: 云端较新时应用云端设置', cur.enabled === false && cur.language === 'en');
-  assert('T1b: 采纳云端规则', cur.rules.includes('*://cloud.example.com/*') && !cur.rules.includes('*://local-old.example.com/*') && cur.rules.length === 1);
+  assert('T1b: 智能合并云端与本地规则', cur.rules.includes('*://cloud.example.com/*') && cur.rules.includes('*://local-old.example.com/*') && cur.rules.length === 2);
   assert('T1c: 本地订阅规则数组保留', env.store.get('subs')[0].rules[0] === 'title/foo/' && env.store.get('subs')[0].lastUpdate === 9);
-  assert('T1d: 云新时不上传', env.calls.length === 1 && env.calls[0].method === 'GET');
-  assert('T1e: 对齐本地修改时间戳为云端时间戳', env.store.get(KEYS.LOCAL_LAST_MODIFIED_KEY) === 2000);
+  assert('T1d: 合并产生新内容时上传合并结果', env.calls.some((c) => c.method === 'PUT'));
+  assert('T1e: 对齐本地修改时间戳', env.store.get(KEYS.LOCAL_LAST_MODIFIED_KEY) >= 2000);
 }
 
-// T2: 本地较新 -> 保留本地设置 + 上传本地规则(头含本地配置)
+// T2: 本地较新 -> 保留本地设置 + 合并上传两端规则(头含本地配置与删除标记)
 {
   const cloud = { enabled: false, syncedAt: 500 };
   const cloudText = '# ScriptConfig:' + JSON.stringify(cloud) + '\n*://cloud.example.com/*';
@@ -140,7 +149,7 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   const cur = env.getCurrent();
   assert('T2: 本地较新时保留本地设置', cur.enabled === true && cur.language === 'zh-CN');
   const put = env.calls.find((c) => c.method === 'PUT');
-  assert('T2b: 本地较新时上传本地规则', !!put && put.data.includes('*://local.example.com/*') && !put.data.includes('*://cloud.example.com/*'));
+  assert('T2b: 本地较新时合并上传两端规则', !!put && put.data.includes('*://local.example.com/*') && put.data.includes('*://cloud.example.com/*'));
   const header = JSON.parse(put.data.split('\n')[0].substring('# ScriptConfig:'.length));
   assert('T2c: 上传头含本地配置', header.enabled === true && header.language === 'zh-CN');
   assert('T2d: 更新本地修改时间戳与上传时间戳对齐', env.store.get(KEYS.LOCAL_LAST_MODIFIED_KEY) >= 1000);
@@ -263,7 +272,7 @@ function makeAdoptEnv({ storedConfig, memoryConfig, panelOpen }) {
   assert('T8c: 本地规则未被改动', JSON.stringify(env.getCurrent().rules) === JSON.stringify(rules));
 }
 
-// T9: 未开启配置同步 + 内容确实不同 -> 仍正常上传
+// T9: 未开启配置同步 + 内容确实不同 -> 仍正常合并并上传
 {
   const lastMod = 'Mon, 14 Sep 2026 08:00:00 GMT';
   const env = makeSyncEnv({
@@ -276,7 +285,260 @@ function makeAdoptEnv({ storedConfig, memoryConfig, panelOpen }) {
   env.setCurrent({ rules: ['*://local.example.com/*'], enabled: true });
   await env.run(syncCfg);
   const put = env.calls.find((c) => c.method === 'PUT');
-  assert('T9: 内容不同时仍触发上传', !!put && put.data === '*://local.example.com/*');
+  assert('T9: 内容不同时仍触发上传', !!put && put.data.includes('*://local.example.com/*') && put.data.includes('*://cloud.example.com/*'));
+}
+
+// T10: BOM + 前5行以外的配置头仍可解析 (#6 回归)
+{
+  const cloud = { enabled: false, syncedAt: 3000 };
+  const cloudText = '\uFEFF# c1\n# c2\n# c3\n# c4\n# c5\n# ScriptConfig:' + JSON.stringify(cloud) + '\n*://bom.example.com/*';
+  const env = makeSyncEnv({ cloudText, localRules: [], localTime: 0 });
+  env.setCurrent({ rules: [], enabled: true });
+  await env.run(syncCfg);
+  assert('T10: BOM+多行注释后仍解析配置头', env.getCurrent().enabled === false);
+  assert('T10b: 规则正确提取且不含注释行', env.getCurrent().rules.includes('*://bom.example.com/*') && !env.getCurrent().rules.some((r) => r.includes('c1')));
+}
+
+// T11: 未开启配置同步时仍写入/合并墓碑 (#5 回归)
+{
+  const now = Date.now();
+  const remote = { enabled: false, language: 'en', syncedAt: now - 2000, tombstones: { '*://old.example.com/*': now - 5000 } };
+  const cloudText = '# ScriptConfig:' + JSON.stringify(remote) + '\n*://cloud.example.com/*';
+  const env = makeSyncEnv({ cloudText, localRules: ['*://local.example.com/*'], localTime: now - 1000, syncConfig: false });
+  env.store.set(KEYS.TOMBSTONES_KEY, { '*://deleted.example.com/*': now - 4000 });
+  env.setCurrent({ rules: ['*://local.example.com/*'], enabled: true });
+  await env.run(syncCfg);
+  const put = env.calls.find((c) => c.method === 'PUT');
+  assert('T11: 内容变化时上传', !!put);
+  const header = JSON.parse(put.data.split('\n')[0].substring('# ScriptConfig:'.length));
+  assert('T11b: 本地墓碑写入云端头', header.tombstones['*://deleted.example.com/*'] === now - 4000);
+  assert('T11c: 云端墓碑被保留', header.tombstones['*://old.example.com/*'] === now - 5000);
+  assert('T11d: 云端设置被保留', header.enabled === false && header.language === 'en');
+  assert('T11e: 未开启配置同步时本地设置不被云端覆盖', env.getCurrent().enabled === true);
+}
+
+// T12: 云端订阅缺 enabled 时保留本地启用状态; 本地独有订阅不被丢弃 (#7 回归)
+{
+  const cloud = { syncedAt: 5000, subscriptions: [{ url: 'https://a/x.txt' }] };
+  const cloudText = '# ScriptConfig:' + JSON.stringify(cloud) + '\n*://r.example.com/*';
+  const localSubs = [
+    { url: 'https://a/x.txt', enabled: true, lastUpdate: 1, rules: ['title/foo/'] },
+    { url: 'https://b/y.txt', enabled: true, lastUpdate: 2, rules: ['title/bar/'] }
+  ];
+  const env = makeSyncEnv({ cloudText, localRules: [], localTime: 1000, localSubs });
+  env.setCurrent({ rules: [], enabled: true });
+  await env.run(syncCfg);
+  const subs = env.store.get('subs');
+  const a = subs.find((s) => s.url === 'https://a/x.txt');
+  const b = subs.find((s) => s.url === 'https://b/y.txt');
+  assert('T12: 缺省 enabled 的云端订阅保持启用', !!a && a.enabled === true && a.rules[0] === 'title/foo/');
+  assert('T12b: 本地独有订阅保留', !!b && b.rules[0] === 'title/bar/');
+}
+
+// T13: 非 https 地址被拒绝 (#3 回归)
+{
+  const env = makeSyncEnv({});
+  let threw = false;
+  try {
+    env.getRequest({ url: 'http://dav.example.com/dav/', username: '', password: '', filename: 'rules.txt' });
+  } catch (e) { threw = true; }
+  assert('T13: http 地址被拒绝', threw);
+  const ok = env.getRequest({ url: 'https://dav.example.com/dav/', username: '', password: '', filename: 'rules.txt' });
+  assert('T13b: https 地址正常拼接', ok.fullUrl === 'https://dav.example.com/dav/rules.txt');
+}
+
+// T14: 订阅面板保存不再抛错且按原URL保留规则 (#1 回归)
+{
+  const csrFactory = new Function('container', 'subscriptions', 't', 'MAX_SUBSCRIPTIONS', `
+    ${extractFn(src, 'collectSubscriptionsFromRows')}
+    return collectSubscriptionsFromRows;
+  `);
+  const makeRow = (url, origUrl, enabled) => ({
+    querySelector: (sel) => {
+      if (sel === '.subscription-url') return { value: url };
+      if (sel === '.subscription-enable-toggle') return { checked: enabled };
+      if (sel === '.subscription-status-message') return { textContent: '', className: '' };
+      return null;
+    },
+    dataset: { originalUrl: origUrl }
+  });
+  const container = { querySelectorAll: () => [makeRow('https://a/x.txt', 'https://a/x.txt', true), makeRow('https://new/x.txt', 'https://old/x.txt', true)] };
+  const subs = [
+    { url: 'https://a/x.txt', enabled: true, lastUpdate: 7, rules: ['title/a/'], name: 'A' },
+    { url: 'https://old/x.txt', enabled: true, lastUpdate: 8, rules: ['title/old/'], name: 'Old' }
+  ];
+  const result = csrFactory(container, subs, (k) => k, 100)();
+  assert('T14: 收集订阅不抛错', Array.isArray(result.newSubs) && result.newSubs.length === 2);
+  assert('T14b: 未修改行保留规则与时间', result.newSubs[0].rules[0] === 'title/a/' && result.newSubs[0].lastUpdate === 7);
+  assert('T14c: URL 编辑后按原 URL 保留规则', result.newSubs[1].url === 'https://new/x.txt' && result.newSubs[1].rules[0] === 'title/old/');
+}
+
+// T15: 上传/保存路径共用规则差异记录 (#2 回归)
+{
+  const deleted = [];
+  const added = [];
+  const diffFactory = new Function('recordRuleDeletions', 'recordRuleAddedTimes', 'getRuleKey', `
+    ${extractFn(src, 'applyRuleDiff')}
+    return applyRuleDiff;
+  `);
+  const getRuleKeyFn = new Function(`
+    ${extractFn(src, 'stripRuleComment')}
+    ${extractFn(src, 'getRuleKey')}
+    return getRuleKey;
+  `)();
+  const diff = diffFactory((rules) => deleted.push(...rules), (rules) => added.push(...rules), getRuleKeyFn);
+  const changed = diff(['*://a/*', '*://b/*'], ['*://b/*', '*://c/*']);
+  assert('T15: 检测到规则变化', changed === true);
+  assert('T15b: 记录删除', deleted.length === 1 && deleted[0] === '*://a/*');
+  assert('T15c: 记录新增', added.length === 1 && added[0] === '*://c/*');
+  assert('T15d: 规则未变不记录', diff(['*://a/*'], ['*://a/*']) === false);
+}
+
+// T16: 订阅墓碑能够防止已删除的本地订阅死而复生 (Bug 3 回归)
+{
+  const now = Date.now();
+  const cloud = {
+    syncedAt: now,
+    subscriptions: [{ url: 'https://remain/x.txt', enabled: true, lastUpdate: now - 5000 }],
+    subscriptionTombstones: { 'https://deleted/x.txt': now - 2000 }
+  };
+  const cloudText = '# ScriptConfig:' + JSON.stringify(cloud) + '\n*://r.example.com/*';
+  const localSubs = [
+    { url: 'https://remain/x.txt', enabled: true, lastUpdate: now - 5000, rules: ['r1'] },
+    { url: 'https://deleted/x.txt', enabled: true, lastUpdate: now - 3000, rules: ['r2'] }, // 早于墓碑时间，应被清理
+    { url: 'https://truly-local/x.txt', enabled: true, lastUpdate: now - 1000, rules: ['r3'] } // 无墓碑，应保留
+  ];
+  const env = makeSyncEnv({ cloudText, localRules: [], localTime: now - 10000, localSubs });
+  env.setCurrent({ rules: [], enabled: true });
+  await env.run(syncCfg);
+  const subs = env.store.get('subs');
+  assert('T16: 云端墓碑清理已删除本地订阅', !subs.some(s => s.url === 'https://deleted/x.txt'));
+  assert('T16b: 未被删除的本地独有订阅仍安全保留', subs.some(s => s.url === 'https://truly-local/x.txt'));
+}
+
+// T17: 0缩进YAML与带字典项YAML规则解析 (Bug 7 & Bug 9 回归)
+{
+  const yamlWithZeroIndentAndDict = `name: Advanced List
+rules:
+- example.com
+- description: some note
+- site: google
+- '*://*.test.com/*'
+- regular.com
+`;
+  const parsed = new Function(`
+    ${extractFn(src, 'extractYamlRuleItems')}
+    ${extractFn(src, 'parseRulesetContent')}
+    return parseRulesetContent;
+  `)()(yamlWithZeroIndentAndDict);
+  assert('T17: 0缩进YAML列表正常提取', Array.isArray(parsed.lines) && parsed.lines.length >= 2);
+  assert('T17b: 字典项跳过且后续规则未被截断', parsed.lines.includes('example.com') && parsed.lines.includes('*://*.test.com/*') && parsed.lines.includes('regular.com'));
+}
+
+// T18: WebDAV 上传失败时绝不更新 WEBDAV_LAST_SYNC_KEY 避免死锁1小时
+{
+  const localConfig = { rules: ['*://fail.example.com/*'], enabled: true };
+  const env = makeSyncEnv({ cloudStatus: 200, cloudText: '*://remote.example.com/*', localRules: ['*://fail.example.com/*'], localTime: 1000, storedConfig: localConfig });
+  env.setCurrent({ ...localConfig });
+  // Mock gmRequest PUT 抛出网络错误
+  const oldRun = env.run;
+  let customCalls = [];
+  const failingEnvFactory = new Function('store', 'calls', 'state', `
+    const console = { log: () => {}, warn: () => {} };
+    const t = (k) => k;
+    const CONFIG_KEY = ${JSON.stringify(KEYS.CONFIG_KEY)};
+    const WEBDAV_SYNC_CONFIG_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_CONFIG_KEY)};
+    const WEBDAV_SYNC_SELECTORS_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_SELECTORS_KEY)};
+    const SELECTORS_KEY = ${JSON.stringify(KEYS.SELECTORS_KEY)};
+    const LOCAL_LAST_MODIFIED_KEY = ${JSON.stringify(KEYS.LOCAL_LAST_MODIFIED_KEY)};
+    const WEBDAV_LAST_SYNC_KEY = ${JSON.stringify(KEYS.WEBDAV_LAST_SYNC_KEY)};
+    const TOMBSTONES_KEY = ${JSON.stringify(KEYS.TOMBSTONES_KEY)};
+    const SUBSCRIPTION_TOMBSTONES_KEY = 'searchfilter_subscription_tombstones';
+    const LOCAL_RULE_ADDED_KEY = 'searchfilter_rule_added_times';
+    const MAX_SUBSCRIPTIONS = 100;
+    const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
+    const GM_setValue = (k, v) => { store.set(k, v); };
+    async function gmRequest(method, url, opts = {}) {
+      if (method === 'GET') return { status: 200, responseText: '*://remote.example.com/*' };
+      if (method === 'PUT') throw new Error('Network Timeout');
+      return { status: 200 };
+    }
+    function forceReprocessAll() {}
+    function persistConfig(updateModifiedTime = true) {
+      GM_setValue(CONFIG_KEY, currentConfig);
+      if (updateModifiedTime) GM_setValue(LOCAL_LAST_MODIFIED_KEY, Date.now());
+    }
+    function getSubscriptions() { return []; }
+    function saveSubscriptions(subs) {}
+    function getUserSelectors() { return {}; }
+    function getSelectorStoreSignature() { return null; }
+    function resetSelectorCache() {}
+    function refreshEngineSite() {}
+    let currentConfig = ${JSON.stringify(localConfig)};
+    ${syncFns.join('\n')}
+    return {
+      run: (cfg) => performAutoWebDAVSync(cfg),
+      store
+    };
+  `);
+  const failingEnv = failingEnvFactory(env.store, customCalls, {});
+  await failingEnv.run(syncCfg);
+  assert('T18: 上传失败不更新最后同步时间戳', env.store.get(KEYS.WEBDAV_LAST_SYNC_KEY) === 0);
+}
+
+// T19: 手动下载时能够正确用本地合并后的墓碑过滤云端残留规则 (Bug 1 回归)
+{
+  const now = Date.now();
+  const cloud = {
+    syncedAt: now - 5000,
+    tombstones: { '*://deleted-by-cloud.com/*': now - 6000 }
+  };
+  const cloudText = '# ScriptConfig:' + JSON.stringify(cloud) + '\n*://valid.com/*\n*://deleted-by-cloud.com/*\n*://deleted-by-local.com/*';
+  
+  const dlFactory = new Function('currentConfig', 'store', `
+    const console = { log: () => {}, warn: () => {} };
+    const t = (k) => k;
+    const CONFIG_KEY = ${JSON.stringify(KEYS.CONFIG_KEY)};
+    const WEBDAV_SYNC_CONFIG_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_CONFIG_KEY)};
+    const WEBDAV_SYNC_SELECTORS_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_SELECTORS_KEY)};
+    const SELECTORS_KEY = ${JSON.stringify(KEYS.SELECTORS_KEY)};
+    const LOCAL_LAST_MODIFIED_KEY = ${JSON.stringify(KEYS.LOCAL_LAST_MODIFIED_KEY)};
+    const WEBDAV_LAST_SYNC_KEY = ${JSON.stringify(KEYS.WEBDAV_LAST_SYNC_KEY)};
+    const TOMBSTONES_KEY = ${JSON.stringify(KEYS.TOMBSTONES_KEY)};
+    const SUBSCRIPTION_TOMBSTONES_KEY = 'searchfilter_subscription_tombstones';
+    const LOCAL_RULE_ADDED_KEY = 'searchfilter_rule_added_times';
+    const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
+    const GM_setValue = (k, v) => { store.set(k, v); };
+    async function gmRequest(method, url, opts = {}) {
+      return { status: 200, responseText: ${JSON.stringify(cloudText)}, responseHeaders: '' };
+    }
+    function forceReprocessAll() {}
+    function persistConfig() {}
+    function applyCloudSubscriptions() {}
+    function getSelectorStoreSignature() { return null; }
+    function resetSelectorCache() {}
+    function refreshEngineSite() {}
+    function updateLineNumbers() {}
+    const document = { getElementById: () => null };
+
+    ${syncFns.join('\n')}
+    return {
+      download: (cfg) => performWebDAVDownload(cfg, false),
+      current: () => currentConfig,
+      store
+    };
+  `);
+  const store = new Map();
+  store.set(KEYS.WEBDAV_SYNC_CONFIG_KEY, false);
+  store.set(KEYS.TOMBSTONES_KEY, { '*://deleted-by-local.com/*': now - 4000 });
+  store.set(KEYS.LOCAL_RULE_ADDED_KEY, { '*://deleted-by-local.com/*': now - 10000 });
+  
+  const env = dlFactory({ rules: [] }, store);
+  await env.download(syncCfg);
+  const finalRules = env.current().rules;
+  assert('T19: 手动下载正确保留有效规则', finalRules.includes('*://valid.com/*'));
+  assert('T19b: 手动下载过滤掉云端旧墓碑规则', !finalRules.includes('*://deleted-by-cloud.com/*'));
+  assert('T19c: 手动下载过滤掉本地已有墓碑规则', !finalRules.includes('*://deleted-by-local.com/*'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
