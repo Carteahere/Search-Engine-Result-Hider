@@ -508,7 +508,7 @@ function createEnv() {
         return false;
       },
       querySelector(sel) {
-        return sel === '.searchfilter-quick-block' ? this.quickBtn : null;
+        return sel === '.serh-quick-block' ? this.quickBtn : null;
       },
     };
     elements.push(el);
@@ -709,7 +709,7 @@ function createTeardownEnv() {
       if (sel === '[data-observed]') return observed;
       return [];
     },
-    getElementById(id) { return id === 'searchfilter-status' ? statusEl : null; },
+    getElementById(id) { return id === 'serh-status' ? statusEl : null; },
   };
   const resultObserver = { unobserve(el) { el.unobserved++; } };
   const api = new Function('document', 'resultObserver', 'statusEl', 'observer', 'counters', `
@@ -1077,6 +1077,41 @@ function createLockEnv(tabId, ttl = 2000) {
     await tab.runWithSyncLock('fail', async () => { throw new Error('boom'); });
   } catch (e) { threw = true; }
   check('L11 任务异常仍释放锁', threw === true && tab.readSyncLock('fail') === null);
+}
+
+// ---- 菜单注册测试 (非引擎站仅注册4项) ----
+{
+  const regMenuFn = extractFn(src, 'registerMenu');
+  const regToggleFn = extractFn(src, 'registerToggleMenu');
+  function runMenuTest(isEngine) {
+    const registered = [];
+    const GM_registerMenuCommand = (label, cb) => { registered.push(label); };
+    const t = (k) => k;
+    const currentConfig = { language: 'zh-CN', errorDetection: true, panelCentered: false, showBubble: true, bubbleAction: 'openPanel' };
+    const isEngineSite = () => isEngine;
+    const showConfigPanel = () => {};
+    const showSelectorPanel = () => {};
+    const showHighlightColorPanel = () => {};
+    const persistConfig = () => {};
+    const menuEnv = new Function(
+      'registered', 'GM_registerMenuCommand', 't', 'currentConfig', 'isEngineSite', 'showConfigPanel', 'showSelectorPanel', 'showHighlightColorPanel', 'persistConfig',
+      `${regToggleFn}
+       ${regMenuFn}
+       registerMenu();
+       return registered;`
+    );
+    return menuEnv(registered, GM_registerMenuCommand, t, currentConfig, isEngineSite, showConfigPanel, showSelectorPanel, showHighlightColorPanel, persistConfig);
+  }
+
+  const nonEngineMenus = runMenuTest(false);
+  check('M1 非引擎站点仅显示4个菜单项', nonEngineMenus.length === 4);
+  check('M2 非引擎站点包含打开面板', nonEngineMenus[0] === 'menuOpenPanel');
+  check('M3 非引擎站点包含自定义选择器', nonEngineMenus[1] === 'menuCustomSelectors');
+  check('M4 非引擎站点包含自定义颜色', nonEngineMenus[2] === 'menuHighlightColor');
+  check('M5 非引擎站点包含语言切换', nonEngineMenus[3].includes('menuLang'));
+
+  const engineMenus = runMenuTest(true);
+  check('M6 引擎站点显示全部8个菜单项', engineMenus.length === 8);
 }
 })();
 

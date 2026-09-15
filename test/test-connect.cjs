@@ -58,7 +58,7 @@ const KEYS = {
 const syncFns = [
   'getRuleKey', 'getLocalRuleAddedTimes', 'recordRuleAddedTimes', 'getLocalTombstones', 'recordRuleDeletions', 'pruneTombstones', 'mergeRulesWithTombstones',
   'getSubscriptionTombstones', 'recordSubscriptionDeletions',
-  'stripRuleComment', 'isHttpsUrl', 'getWebDAVRequest', 'ensureWebDAVFolder', 'isHtmlResponse', 'parseSyncHeader', 'parseRemoteConfig', 'mergeTimeMaps',
+  'stripRuleComment', 'isHttpsUrl', 'getWebDAVRequest', 'ensureWebDAVFolder', 'isHtmlResponse', 'isInvalidSyncResponse', 'parseSyncHeader', 'parseRemoteConfig', 'mergeTimeMaps',
   'buildMetadataConfigPayload', 'buildUploadContent',
   'buildSyncPayload', 'applyCloudSubscriptions', 'adoptStoredConfigIfNewer',
   'checkExternalConfigChange', 'triggerWebDAVSyncDelayed', 'performAutoWebDAVSync', 'performWebDAVDownload',
@@ -296,7 +296,7 @@ function makeAdoptEnv({ storedConfig, memoryConfig, panelOpen }) {
   env.setCurrent({ rules: [], enabled: true });
   await env.run(syncCfg);
   assert('T10: BOM+多行注释后仍解析配置头', env.getCurrent().enabled === false);
-  assert('T10b: 规则正确提取且不含注释行', env.getCurrent().rules.includes('*://bom.example.com/*') && !env.getCurrent().rules.some((r) => r.includes('c1')));
+  assert('T10b: 规则正确提取且头前注释行保留(不吞注释)', env.getCurrent().rules.includes('*://bom.example.com/*') && env.getCurrent().rules.some((r) => r.includes('# c1')));
 }
 
 // T11: 未开启配置同步时仍写入/合并墓碑 (#5 回归)
@@ -486,14 +486,14 @@ rules:
   assert('T18: 上传失败不更新最后同步时间戳', env.store.get(KEYS.WEBDAV_LAST_SYNC_KEY) === 0);
 }
 
-// T19: 手动下载时能够正确用本地合并后的墓碑过滤云端残留规则 (Bug 1 回归)
+// T19: 手动下载忽略墓碑强制覆盖云端规则并清理对应墓碑
 {
   const now = Date.now();
   const cloud = {
     syncedAt: now - 5000,
     tombstones: { '*://deleted-by-cloud.com/*': now - 6000 }
   };
-  const cloudText = '# ScriptConfig:' + JSON.stringify(cloud) + '\n*://valid.com/*\n*://deleted-by-cloud.com/*\n*://deleted-by-local.com/*';
+  const cloudText = '# ScriptConfig:' + JSON.stringify(cloud) + '\n*://valid.com/*\n*://deleted-by-local.com/*';
   
   const dlFactory = new Function('currentConfig', 'store', `
     const console = { log: () => {}, warn: () => {} };
@@ -537,8 +537,93 @@ rules:
   await env.download(syncCfg);
   const finalRules = env.current().rules;
   assert('T19: 手动下载正确保留有效规则', finalRules.includes('*://valid.com/*'));
-  assert('T19b: 手动下载过滤掉云端旧墓碑规则', !finalRules.includes('*://deleted-by-cloud.com/*'));
-  assert('T19c: 手动下载过滤掉本地已有墓碑规则', !finalRules.includes('*://deleted-by-local.com/*'));
+  assert('T19b: 手动下载强制覆盖保留云端存在的规则(即使本地曾有墓碑)', finalRules.includes('*://deleted-by-local.com/*'));
+  assert('T19c: 手动下载清理了覆盖规则的本地墓碑', !env.store.get(KEYS.TOMBSTONES_KEY)['*://deleted-by-local.com/*']);
+}
+
+// G: 垃圾响应识别单元测试(网关 200 + JSON/纯文本错误页)
+{
+  const isInvalid = new Function(
+    extractFn(src, 'isHtmlResponse') + '\n' + extractFn(src, 'isInvalidSyncResponse') + '\nreturn isInvalidSyncResponse;'
+  )();
+  assert('G1: JSON错误体拒绝', isInvalid('{"error":"Not Found","status":404}', '') === true);
+  assert('G2: 纯文本状态行拒绝', isInvalid('404 Not Found', '') === true);
+  assert('G3: 纯文本短语拒绝', isInvalid('Not Found', '') === true);
+  assert('G4: XML错误拒绝', isInvalid('<?xml version="1.0"?><Error/>', '') === true);
+  assert('G5: JSON content-type 拒绝', isInvalid('[1,2', 'content-type: application/json\r\n') === true);
+  assert('G6: HTML标记拒绝', isInvalid('<html><body>x</body></html>', '') === true);
+  assert('G7: 正常规则放行', isInvalid('*://a.com/*\n*://b.com/*', 'content-type: text/plain; charset=utf-8') === false);
+  assert('G8: 带同步头文件放行', isInvalid('# ScriptConfig: {"syncedAt":1}\n*://a.com/*', 'content-type: text/plain') === false);
+  assert('G9: 空文件放行', isInvalid('', '') === false);
+  assert('G10: YAML段落文件放行', isInvalid('[Section]\nname: x', 'text/plain') === false);
+}
+
+// T20: 网关 200 + JSON/纯文本错误页不被当作规则写入本地, 也不回传云端
+{
+  const garbageBodies = [
+    '{"error":"Not Found","status":404}',
+    '{"message":"Unauthorized"}',
+    '404 Not Found',
+    'Not Found',
+    '<?xml version="1.0" encoding="UTF-8"?><Error><Code>NoSuchKey</Code></Error>'
+  ];
+  for (let gi = 0; gi < garbageBodies.length; gi++) {
+    const body = garbageBodies[gi];
+    const factory = new Function('currentConfig', 'store', `
+      const console = { log: () => {}, warn: () => {} };
+      const t = (k) => k;
+      const CONFIG_KEY = ${JSON.stringify(KEYS.CONFIG_KEY)};
+      const WEBDAV_SYNC_CONFIG_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_CONFIG_KEY)};
+      const WEBDAV_SYNC_SELECTORS_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_SELECTORS_KEY)};
+      const SELECTORS_KEY = ${JSON.stringify(KEYS.SELECTORS_KEY)};
+      const LOCAL_LAST_MODIFIED_KEY = ${JSON.stringify(KEYS.LOCAL_LAST_MODIFIED_KEY)};
+      const WEBDAV_LAST_SYNC_KEY = ${JSON.stringify(KEYS.WEBDAV_LAST_SYNC_KEY)};
+      const TOMBSTONES_KEY = ${JSON.stringify(KEYS.TOMBSTONES_KEY)};
+      const SUBSCRIPTION_TOMBSTONES_KEY = 'searchfilter_subscription_tombstones';
+      const LOCAL_RULE_ADDED_KEY = 'searchfilter_rule_added_times';
+      const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
+      const GM_setValue = (k, v) => { store.set(k, v); };
+      const calls = [];
+      async function gmRequest(method, url, opts = {}) {
+        calls.push(method);
+        if (method === 'GET') return { status: 200, responseText: ${JSON.stringify(body)}, responseHeaders: 'content-type: text/plain' };
+        return { status: 200 };
+      }
+      function forceReprocessAll() {}
+      function persistConfig() {}
+      function applyCloudSubscriptions() {}
+      function getSelectorStoreSignature() { return null; }
+      function resetSelectorCache() {}
+      function refreshEngineSite() {}
+      function updateLineNumbers() {}
+      const document = { getElementById: () => null };
+      ${syncFns.join('\n')}
+      return {
+        download: (cfg) => performWebDAVDownload(cfg, false),
+        calls,
+        current: () => currentConfig,
+        store
+      };
+    `);
+    const store = new Map();
+    store.set(KEYS.WEBDAV_SYNC_CONFIG_KEY, false);
+    const env = factory({ rules: ['*://local.example.com/*'] }, store);
+    let threw = false;
+    try { await env.download(syncCfg); } catch (_) { threw = true; }
+    assert(`T20.${gi + 1}: 错误响应被拒绝(${body.slice(0, 24)}...)`, threw);
+    assert(`T20.${gi + 1}b: 本地规则未被污染`, env.current().rules.join('|') === '*://local.example.com/*');
+    assert(`T20.${gi + 1}c: 拒绝后不回写云端`, !env.calls.includes('PUT'));
+  }
+}
+
+// T21: 自动同步遇到网关错误响应时跳过, 不合并也不上传覆盖云端
+{
+  const localConfig = { rules: ['*://local.example.com/*'], enabled: true };
+  const env = makeSyncEnv({ cloudStatus: 200, cloudText: '{"error":"Not Found"}', localRules: ['*://local.example.com/*'], localTime: 1000, storedConfig: localConfig });
+  env.setCurrent({ ...localConfig });
+  await env.run(syncCfg);
+  assert('T21: 自动同步遇到错误响应不合并', env.getCurrent().rules.join('|') === '*://local.example.com/*');
+  assert('T21b: 自动同步遇到错误响应不上传覆盖云端', !env.calls.some((c) => c.method === 'PUT'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -670,7 +670,7 @@ function createEnv() {
       },
     },
     createElement(tag) { return tag === 'input' ? fakeInput : {}; },
-    getElementById(id) { return id === 'searchfilter-rules' ? env.textarea : null; },
+    getElementById(id) { return id === 'serh-rules' ? env.textarea : null; },
   };
 
   const windowStub = {
@@ -758,6 +758,35 @@ await (async () => {
     assert('C13: 同步配置头被剥离', env.textarea.value === 'rule1\nrule2');
   }
 
+})();
+
+// ==== 同步头解析: 仅剥离两种同步头行, 其余 # 注释保留 ====
+await (async () => {
+  const parseSyncHeaderFn = extractFn(src, 'parseSyncHeader');
+  const run = (content) => new Function('currentConfig', 'console', `
+    ${parseSyncHeaderFn}
+    return parseSyncHeader;
+  `)({ debug: false }, { warn: () => {} })(content);
+
+  let r = run('# uBlacklist backup rules\n# exported 2026-01-01\n# ScriptConfig: {"a":1}\nrule1');
+  assert('D1: 头前用户注释保留', r.restLines.join('\n') === '# uBlacklist backup rules\n# exported 2026-01-01\nrule1');
+  assert('D2: ScriptConfig 头仍被解析', !!r.config && r.config.a === 1);
+
+  r = run('# ScriptConfig: {"a":1}\n# 我的分组注释\n# Selectors: []\nrule1');
+  assert('D3: 两头之间的注释保留', r.restLines.join('\n') === '# 我的分组注释\nrule1');
+  assert('D4: Selectors 头解析并合入 config', Array.isArray(r.config.selectors));
+
+  r = run('# 注释\nrule1\n# ScriptConfig: {"a":1}');
+  assert('D5: 规则行后的头行不吞(按规则保留)', r.restLines.join('\n') === '# 注释\nrule1\n# ScriptConfig: {"a":1}');
+
+  r = run('# ScriptConfig: {"a":1}\n# ScriptConfig: {"b":2}\nrule1');
+  assert('D6: 重复头取后者且均被剥离', r.config.b === 2 && r.restLines.join('\n') === 'rule1');
+
+  r = run('\uFEFF# title: my rules\n# author: me\n*://bad.example.com/*');
+  assert('D7: 无头纯注释文件原样保留(BOM)', r.restLines.join('\n') === '# title: my rules\n# author: me\n*://bad.example.com/*' && !r.config);
+
+  r = run('# ScriptConfig: {"a":1}\nrule1\n# 尾注释');
+  assert('D8: 头后内容完整保留', r.restLines.join('\n') === 'rule1\n# 尾注释');
 })();
 
 // ==== 一键屏蔽规则选项构建(域名/精确/白名单) ====
