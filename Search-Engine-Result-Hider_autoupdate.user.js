@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/SadYuyuko
-// @version      8.2.4
+// @version      8.2.5
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -188,7 +188,15 @@
       const def = user[key];
       if (!def || typeof def !== 'object' || Array.isArray(def)) continue;
       if (def.disabled || def.disable) {
-        merged[key] = { disabled: true };
+        merged[key] = {
+          match: def.match,
+          containers: typeof def.containers === 'string' ? def.containers : '',
+          titles: normalizeSelectorList(def.titles),
+          snippets: normalizeSelectorList(def.snippets),
+          links: Array.isArray(def.links) ? normalizeSelectorList(def.links)
+            : (typeof def.links === 'string' && def.links ? def.links : 'a[href]'),
+          disabled: true
+        };
         continue;
       }
       const defContentKeys = Object.keys(def).filter(k => k !== 'disabled' && k !== 'disable' && def[k] !== undefined && def[k] !== null && def[k] !== '');
@@ -1240,8 +1248,9 @@
 
       const cond = parenResult.content.trim();
 
+      const rangeStart = occ.index === 0 ? 1 : occ.index;
       ranges.push({
-        start: occ.index,
+        start: rangeStart,
         end: parenResult.endIndex
       });
 
@@ -1274,6 +1283,7 @@
   function looksLikeCondExpr(str) {
     if (!isCondExprCore(str)) return false;
     if (/^\s*!\s+(?:title|url|site|description|version|expires|homepage)\s*:\s*\S/i.test(str)) return false;
+    if (!/^\s*(?:!|\(|\$site\b|\$category\b|(?:site|title|url|host|path|scheme)\s*(?:=~|\^=|\$=|\*=|=|:|\/))/i.test(str)) return false;
     return /(?:^|[\s(&|!])(?:\$site|\$category|site|title|url|host|path|scheme)\s*(?:(?:=~|\^=|\$=|\*=|=|:)\s*\S|\/)/i.test(str)
       || /^\s*!\s*(?:(?:\$site|\$category|site|title|url|host|path|scheme)\b|\()/i.test(str);
   }
@@ -1290,7 +1300,7 @@
 
   // uBO元素判定
   function isElementRuleLine(line) {
-    if (!/(?:##|#@#|#(?:@)?[$?%]#)/.test(line)) return false;
+    if (!/(?:##|#@#|#(?:@)?[$?%]{1,2}#)/.test(line)) return false;
     return !isScriptRuleLine(line);
   }
 
@@ -1384,7 +1394,8 @@
     }
 
     // @if条件语法检查
-    if (/@if\s*\(/i.test(ruleToCheck)) {
+    const hasIfCond = /@if\s*\(/i.test(ruleToCheck);
+    if (hasIfCond) {
         let unbalanced = false;
         for (const occ of findIfOccurrences(ruleToCheck)) {
           if (!extractBalancedParens(ruleToCheck, occ.condStart)) { unbalanced = true; break; }
@@ -1411,7 +1422,10 @@
         return { valid: false, errors, warnings };
       }
       ruleToCheck = ruleToCheck.substring(1).trim();
-      if (!ruleToCheck) return { valid: false, errors: [t('emptyPrefixRule')], warnings };
+      if (!ruleToCheck) {
+        if (hasIfCond) return { valid: errors.length === 0, errors, warnings };
+        return { valid: false, errors: [t('emptyPrefixRule')], warnings };
+      }
     }
 
     if (!ruleToCheck) {
@@ -2410,10 +2424,7 @@
 
   // 添加屏蔽规则
   function applyBlockRule(result, newRule) {
-    const stored = GM_getValue(CONFIG_KEY);
-    if (stored && Array.isArray(stored.rules)) {
-      currentConfig.rules = stored.rules;
-    }
+    adoptStoredConfigBeforeWrite();
     const cleanRule = stripRuleComment(newRule.trim());
     if (!currentConfig.rules.some(rule => stripRuleComment(rule.trim()) === cleanRule)) {
       currentConfig.rules.push(newRule);
@@ -2437,7 +2448,7 @@
       document.removeEventListener('click', _blockConfirmOutsideHandler, true);
       _blockConfirmOutsideHandler = null;
     }
-    const existing = document.getElementById('searchfilter-block-confirm-dialog');
+    const existing = document.getElementById('serh-block-confirm-dialog');
     if (existing) existing.remove();
 
     const opts = buildBlockRuleOptions(domain);
@@ -2454,7 +2465,7 @@
     const firstEnabledIdx = options.findIndex(o => !o.disabled);
 
     const panel = document.createElement('div');
-    panel.id = 'searchfilter-block-confirm-dialog';
+    panel.id = 'serh-block-confirm-dialog';
     panel.innerHTML = `
       <div class="sfb-confirm-domain">${escHtml(domain)}</div>
       ${options.map((o, i) => `
@@ -2464,8 +2475,8 @@
           <input type="text" class="sfb-confirm-rule" data-idx="${i}" value="${escHtml(o.rule)}" spellcheck="false" ${o.disabled ? 'disabled' : ''}>
         </label>`).join('')}
       <div class="sfb-confirm-btns">
-        <button id="sfb-confirm-ok" class="searchfilter-button searchfilter-button-primary">${t('bcConfirm')}</button>
-        <button id="sfb-confirm-cancel" class="searchfilter-button searchfilter-button-secondary">${t('cancel')}</button>
+        <button id="sfb-confirm-ok" class="serh-button serh-button-primary">${t('bcConfirm')}</button>
+        <button id="sfb-confirm-cancel" class="serh-button serh-button-secondary">${t('cancel')}</button>
       </div>`;
     document.body.appendChild(panel);
 
@@ -2541,11 +2552,11 @@
     }
     const title = getResultTitle(result, engine);
     if (!title) return;
-    if (result.querySelector('.searchfilter-quick-block')) return;
+    if (result.querySelector('.serh-quick-block')) return;
 
     const isBlocked = result.getAttribute('data-is-blocked') === 'true';
     const btn = document.createElement('div');
-    btn.className = 'searchfilter-quick-block';
+    btn.className = 'serh-quick-block';
 
     // 屏蔽按钮
     const iconColor = isBlocked ? '#3182ce' : 'currentColor';
@@ -2596,6 +2607,7 @@
           unblockOptions.push({ label: t('bcWhitelist'), rule: whitelistRule, action: 'whitelist' });
 
           showBlockConfirmPanel(btn, domain, (chosenRule, selectedOption) => {
+            adoptStoredConfigBeforeWrite();
             const action = (selectedOption && selectedOption.action) || 'whitelist';
             if (action === 'delete') {
               const cleanTarget = stripRuleComment(chosenRule.trim());
@@ -2615,6 +2627,7 @@
           return;
         }
 
+        adoptStoredConfigBeforeWrite();
         if (!currentConfig.rules.some(rule => stripRuleComment(rule.trim()) === whitelistRule)) {
           currentConfig.rules.push(whitelistRule);
           recordRuleAddedTimes([whitelistRule]);
@@ -2638,7 +2651,7 @@
 
   // 移除标签
   function removeMatchedRuleLabel(result) {
-    const label = result.querySelector('.searchfilter-matched-rule');
+    const label = result.querySelector('.serh-matched-rule');
     if (label) label.remove();
   }
 
@@ -2653,7 +2666,7 @@
     result.removeAttribute('data-is-highlighted');
     result.removeAttribute('data-highlight-n');
     clearMatchedData(result);
-    result.classList.remove('searchfilter-blocked-visible');
+    result.classList.remove('serh-blocked-visible');
     result.style.outline = '';
     result.style.outlineOffset = '';
     result.style.display = '';
@@ -2665,7 +2678,7 @@
     if (!result.dataset.matchedRule) return;
     removeMatchedRuleLabel(result);
     const label = document.createElement('div');
-    label.className = 'searchfilter-matched-rule';
+    label.className = 'serh-matched-rule';
     const sourceText = result.dataset.matchedSource || t('matchedRule');
     const ruleText = result.dataset.matchedRule;
     label.textContent = `${sourceText}: ${ruleText}`;
@@ -2731,7 +2744,7 @@
       result.dataset.matchedRule = matchResult.rule || '';
       result.dataset.matchedSource = matchResult.source || '';
       if (showHiddenResults) {
-        result.classList.add('searchfilter-blocked-visible');
+        result.classList.add('serh-blocked-visible');
         if (currentConfig.showBlockBtn) injectBlockButton(result, engine, url, domain);
         addMatchedRuleLabel(result);
       }
@@ -2744,7 +2757,7 @@
       result.style.display = '';
       result.style.outline = `2px solid ${color}`;
       result.style.outlineOffset = '-2px';
-      result.classList.remove('searchfilter-blocked-visible');
+      result.classList.remove('serh-blocked-visible');
       result.setAttribute('data-blocker-processed', 'true');
       result.setAttribute('data-is-highlighted', 'true');
       result.setAttribute('data-highlight-n', matchHL);
@@ -2803,7 +2816,7 @@
       try { stillMatches = result.matches(selector); } catch (e) { stillMatches = false; }
       if (stillMatches) return;
       resultObserver.unobserve(result);
-      const quickBtn = result.querySelector('.searchfilter-quick-block');
+      const quickBtn = result.querySelector('.serh-quick-block');
       if (quickBtn) quickBtn.remove();
       resetResultStyles(result);
       result.removeAttribute('data-observed');
@@ -2926,7 +2939,7 @@
       console.log(`[屏蔽] 规则数量: domains=${compiledRules.domains.size}, urls=${compiledRules.urls.length}, titles=${compiledRules.titles.length}, texts=${compiledRules.texts.length}`);
     }
 
-    document.querySelectorAll('.searchfilter-quick-block').forEach(btn => btn.remove());
+    document.querySelectorAll('.serh-quick-block').forEach(btn => btn.remove());
     document.querySelectorAll('[data-blocker-yandex-parent]').forEach(el => {
       el.style.display = '';
       el.removeAttribute('data-blocker-yandex-parent');
@@ -2988,7 +3001,7 @@
     widgetStylesInjected = true;
     GM_addStyle(`
         /* 强隔离样式 */
-        [id^="searchfilter-"]:not(button) {
+        [id^="serh-"]:not(button) {
             text-align: left !important;
             letter-spacing: normal !important;
             word-spacing: normal !important;
@@ -3001,7 +3014,7 @@
             font-variant: normal !important;
         }
 
-        #searchfilter-panel, #searchfilter-webdav-panel, #searchfilter-subscription-panel, #searchfilter-selector-panel {
+        #serh-panel, #serh-webdav-panel, #serh-subscription-panel, #serh-selector-panel {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
             font-size: 13px !important;
             box-sizing: border-box !important;
@@ -3013,8 +3026,8 @@
         }
 
         /* 强隔离按钮 */
-        [id^="searchfilter-"] button,
-        .searchfilter-button {
+        [id^="serh-"] button,
+        .serh-button {
             border: none !important;
             border-radius: 4px !important;
             cursor: pointer !important;
@@ -3036,8 +3049,8 @@
         }
 
         /* 次级小按钮 */
-        [id^="searchfilter-"] button:not(.action-button),
-        .searchfilter-button:not(.action-button) {
+        [id^="serh-"] button:not(.action-button),
+        .serh-button:not(.action-button) {
             font-size: 11px !important;
             padding: 4px 8px !important;
             height: auto !important;
@@ -3046,21 +3059,21 @@
             min-width: 0 !important;
             max-width: none !important;
         }
-        .searchfilter-button-primary { background: #2c5282 !important; color: #ffffff !important; }
-        .searchfilter-button-primary:hover { background: #1a365d !important; color: #ffffff !important; }
-        .searchfilter-button-primary:active, .searchfilter-button-primary:focus, .searchfilter-button-primary:focus-visible { background: #15294a !important; color: #ffffff !important; }
+        .serh-button-primary { background: #2c5282 !important; color: #ffffff !important; }
+        .serh-button-primary:hover { background: #1a365d !important; color: #ffffff !important; }
+        .serh-button-primary:active, .serh-button-primary:focus, .serh-button-primary:focus-visible { background: #15294a !important; color: #ffffff !important; }
 
-        .searchfilter-button-secondary { background: #4a5568 !important; color: #ffffff !important; }
-        .searchfilter-button-secondary:hover { background: #2d3748 !important; color: #ffffff !important; }
-        .searchfilter-button-secondary:active, .searchfilter-button-secondary:focus, .searchfilter-button-secondary:focus-visible { background: #1a202c !important; color: #ffffff !important; }
+        .serh-button-secondary { background: #4a5568 !important; color: #ffffff !important; }
+        .serh-button-secondary:hover { background: #2d3748 !important; color: #ffffff !important; }
+        .serh-button-secondary:active, .serh-button-secondary:focus, .serh-button-secondary:focus-visible { background: #1a202c !important; color: #ffffff !important; }
 
-        .searchfilter-button-success { background: #276749 !important; color: #ffffff !important; }
-        .searchfilter-button-success:hover { background: #22543d !important; color: #ffffff !important; }
-        .searchfilter-button-success:active, .searchfilter-button-success:focus, .searchfilter-button-success:focus-visible { background: #1c4532 !important; color: #ffffff !important; }
+        .serh-button-success { background: #276749 !important; color: #ffffff !important; }
+        .serh-button-success:hover { background: #22543d !important; color: #ffffff !important; }
+        .serh-button-success:active, .serh-button-success:focus, .serh-button-success:focus-visible { background: #1c4532 !important; color: #ffffff !important; }
 
-        .searchfilter-button-danger { background: #c53030 !important; color: #ffffff !important; }
-        .searchfilter-button-danger:hover { background: #9b2c2c !important; color: #ffffff !important; }
-        .searchfilter-button-danger:active, .searchfilter-button-danger:focus, .searchfilter-button-danger:focus-visible { background: #742a2a !important; color: #ffffff !important; }
+        .serh-button-danger { background: #c53030 !important; color: #ffffff !important; }
+        .serh-button-danger:hover { background: #9b2c2c !important; color: #ffffff !important; }
+        .serh-button-danger:active, .serh-button-danger:focus, .serh-button-danger:focus-visible { background: #742a2a !important; color: #ffffff !important; }
 
         .option-row {
             display: flex;
@@ -3128,8 +3141,8 @@
         }
 
         /* 行号排版锁定 */
-        #searchfilter-line-numbers,
-        #searchfilter-sel-line-numbers {
+        #serh-line-numbers,
+        #serh-sel-line-numbers {
             min-width: 20px;
             padding: 8px 4px 8px 2px !important;
             background: #edf2f7;
@@ -3146,8 +3159,8 @@
             box-sizing: border-box !important;
         }
 
-        #searchfilter-rules,
-        #searchfilter-sel-rules {
+        #serh-rules,
+        #serh-sel-rules {
             flex: 1;
             height: 100% !important;
             min-height: 0 !important;
@@ -3168,13 +3181,13 @@
             box-shadow: none !important;
         }
 
-        #searchfilter-rules::-webkit-scrollbar, #searchfilter-sel-rules::-webkit-scrollbar { width: 6px; height: 0px; }
-        #searchfilter-rules::-webkit-scrollbar-track, #searchfilter-sel-rules::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
-        #searchfilter-rules::-webkit-scrollbar-thumb, #searchfilter-sel-rules::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
-        #searchfilter-rules::-webkit-scrollbar-thumb:hover, #searchfilter-sel-rules::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+        #serh-rules::-webkit-scrollbar, #serh-sel-rules::-webkit-scrollbar { width: 6px; height: 0px; }
+        #serh-rules::-webkit-scrollbar-track, #serh-sel-rules::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
+        #serh-rules::-webkit-scrollbar-thumb, #serh-sel-rules::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
+        #serh-rules::-webkit-scrollbar-thumb:hover, #serh-sel-rules::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
 
         /* 统计面板 */
-        #searchfilter-stats-panel {
+        #serh-stats-panel {
             position: absolute;
             top: 10px;
             left: 15px;
@@ -3191,20 +3204,20 @@
             box-sizing: border-box;
         }
 
-        #searchfilter-stats-content {
+        #serh-stats-content {
             padding: 12px;
             overflow-y: auto;
             flex: 1;
             scrollbar-width: thin;
         }
 
-        #searchfilter-stats-content::-webkit-scrollbar { width: 6px; }
-        #searchfilter-stats-content::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
-        #searchfilter-stats-content::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
-        #searchfilter-stats-content::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+        #serh-stats-content::-webkit-scrollbar { width: 6px; }
+        #serh-stats-content::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
+        #serh-stats-content::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
+        #serh-stats-content::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
 
         /* 屏蔽按钮 */
-        .searchfilter-quick-block {
+        .serh-quick-block {
             position: absolute;
             cursor: pointer;
             z-index: 99;
@@ -3220,18 +3233,18 @@
             transition: transform 0.2s;
         }
 
-        .searchfilter-quick-block:hover {
+        .serh-quick-block:hover {
             transform: scale(1.1);
         }
 
         @media (prefers-color-scheme: dark) {
-            .searchfilter-quick-block {
+            .serh-quick-block {
                 color: #ffffff;
             }
         }
 
         /* 屏蔽确认面板 */
-        #searchfilter-block-confirm-dialog {
+        #serh-block-confirm-dialog {
             position: fixed;
             z-index: 10002;
             display: flex;
@@ -3251,13 +3264,13 @@
             line-height: 1.4;
             box-sizing: border-box;
         }
-        #searchfilter-block-confirm-dialog .sfb-confirm-domain {
+        #serh-block-confirm-dialog .sfb-confirm-domain {
             font-size: 11px;
             color: #718096;
             word-break: break-all;
             margin-bottom: 2px;
         }
-        #searchfilter-block-confirm-dialog .sfb-confirm-option {
+        #serh-block-confirm-dialog .sfb-confirm-option {
             display: flex;
             align-items: center;
             gap: 6px;
@@ -3270,7 +3283,7 @@
             white-space: nowrap;
         }
         /* 开关控件防污染 */
-        #searchfilter-block-confirm-dialog .sfb-confirm-option input[type="radio"] {
+        #serh-block-confirm-dialog .sfb-confirm-option input[type="radio"] {
             margin: 0 !important;
             padding: 0 !important;
             flex-shrink: 0 !important;
@@ -3283,19 +3296,19 @@
             -webkit-appearance: auto !important;
             display: inline-block !important;
         }
-        #searchfilter-block-confirm-dialog .sfb-confirm-option-disabled {
+        #serh-block-confirm-dialog .sfb-confirm-option-disabled {
             cursor: not-allowed;
             opacity: 0.6;
         }
-        #searchfilter-block-confirm-dialog .sfb-confirm-option-disabled input[type="radio"] {
+        #serh-block-confirm-dialog .sfb-confirm-option-disabled input[type="radio"] {
             cursor: not-allowed !important;
         }
-        #searchfilter-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule {
+        #serh-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule {
             background: #edf2f7;
             color: #a0aec0;
         }
 
-        .searchfilter-switch input[type="checkbox"] {
+        .serh-switch input[type="checkbox"] {
             opacity: 0 !important;
             width: 0 !important;
             height: 0 !important;
@@ -3309,13 +3322,13 @@
             -webkit-appearance: none !important;
             border: none !important;
         }
-        #searchfilter-block-confirm-dialog .sfb-confirm-label {
+        #serh-block-confirm-dialog .sfb-confirm-label {
             flex-shrink: 0;
             min-width: 36px;
             white-space: nowrap;
             font-size: 12px;
         }
-        #searchfilter-block-confirm-dialog .sfb-confirm-rule {
+        #serh-block-confirm-dialog .sfb-confirm-rule {
             flex: 1;
             min-width: 0;
             padding: 3px 6px;
@@ -3330,45 +3343,45 @@
             height: auto;
             box-sizing: border-box;
         }
-        #searchfilter-block-confirm-dialog .sfb-confirm-rule:focus {
+        #serh-block-confirm-dialog .sfb-confirm-rule:focus {
             border-color: #3182ce;
             background: #ffffff;
         }
-        #searchfilter-block-confirm-dialog .sfb-confirm-btns {
+        #serh-block-confirm-dialog .sfb-confirm-btns {
             display: flex;
             gap: 6px;
             justify-content: flex-end;
             margin-top: 4px;
         }
-        #searchfilter-block-confirm-dialog .sfb-confirm-btns .searchfilter-button {
+        #serh-block-confirm-dialog .sfb-confirm-btns .serh-button {
             height: 24px;
             padding: 0 10px;
             font-size: 11px;
         }
         @media (prefers-color-scheme: dark) {
-            #searchfilter-block-confirm-dialog {
+            #serh-block-confirm-dialog {
                 background: #171717;
                 color: #f3f4f6;
                 border-color: #374151;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.5);
             }
-            #searchfilter-block-confirm-dialog .sfb-confirm-rule {
+            #serh-block-confirm-dialog .sfb-confirm-rule {
                 background: #374151;
                 border-color: #4b5563;
                 color: #f3f4f6;
             }
-            #searchfilter-block-confirm-dialog .sfb-confirm-rule:focus {
+            #serh-block-confirm-dialog .sfb-confirm-rule:focus {
                 border-color: #60a5fa;
                 background: #374151;
             }
-            #searchfilter-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule {
+            #serh-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule {
                 background: #1f2937;
                 color: #6b7280;
             }
         }
 
         /* 快速滑动按钮 */
-        .searchfilter-scroll-btn {
+        .serh-scroll-btn {
             position: absolute;
             right: 7px;
             cursor: pointer;
@@ -3384,45 +3397,45 @@
             z-index: 10;
         }
 
-        .searchfilter-scroll-btn:hover { opacity: 1; transform: scale(1.2); }
-        .searchfilter-quick-block:hover { transform: scale(1.1); opacity: 1; }
+        .serh-scroll-btn:hover { opacity: 1; transform: scale(1.2); }
+        .serh-quick-block:hover { transform: scale(1.1); opacity: 1; }
 
         /* 非正文区域隐藏按钮 */
-        .isv-r .searchfilter-quick-block, 
-        .image-section .searchfilter-quick-block,
-        g-img .searchfilter-quick-block,
-        .is-extra-container .searchfilter-quick-block { display: none !important; }
-        header .searchfilter-quick-block,
-        [role="navigation"] .searchfilter-quick-block,
-        [role="tablist"] .searchfilter-quick-block,
-        [role="search"] .searchfilter-quick-block,
-        g-scrolling-carousel .searchfilter-quick-block,
-        #hdtb .searchfilter-quick-block,
-        #appbar .searchfilter-quick-block,
-        #searchform .searchfilter-quick-block,
-        #top_nav .searchfilter-quick-block,
-        #extabar .searchfilter-quick-block { display: none !important; }
+        .isv-r .serh-quick-block, 
+        .image-section .serh-quick-block,
+        g-img .serh-quick-block,
+        .is-extra-container .serh-quick-block { display: none !important; }
+        header .serh-quick-block,
+        [role="navigation"] .serh-quick-block,
+        [role="tablist"] .serh-quick-block,
+        [role="search"] .serh-quick-block,
+        g-scrolling-carousel .serh-quick-block,
+        #hdtb .serh-quick-block,
+        #appbar .serh-quick-block,
+        #searchform .serh-quick-block,
+        #top_nav .serh-quick-block,
+        #extabar .serh-quick-block { display: none !important; }
 
         /* 面板隔离 */
-        #searchfilter-webdav-panel,
-        #searchfilter-subscription-panel {
+        #serh-webdav-panel,
+        #serh-subscription-panel {
             height: 332px;
             overflow: visible;
         }
 
-        #searchfilter-webdav-panel #searchfilter-toast-container,
-        #searchfilter-subscription-panel #searchfilter-toast-container,
-        #searchfilter-selector-panel #searchfilter-toast-container {
+        #serh-webdav-panel #serh-toast-container,
+        #serh-subscription-panel #serh-toast-container,
+        #serh-selector-panel #serh-toast-container {
             max-width: none;
             width: auto;
             left: 0;
             right: 0;
         }
 
-        #searchfilter-panel,
-        #searchfilter-webdav-panel,
-        #searchfilter-subscription-panel,
-        #searchfilter-hlcolor-panel {
+        #serh-panel,
+        #serh-webdav-panel,
+        #serh-subscription-panel,
+        #serh-hlcolor-panel {
         box-sizing: border-box !important;
         background: #ffffff !important;
         color: #2d3748 !important;
@@ -3434,61 +3447,61 @@
         line-height: 1.5 !important;
         }
 
-        #searchfilter-panel *,
-        #searchfilter-webdav-panel *,
-        #searchfilter-subscription-panel *,
-        #searchfilter-selector-panel *,
-        #searchfilter-hlcolor-panel * {
+        #serh-panel *,
+        #serh-webdav-panel *,
+        #serh-subscription-panel *,
+        #serh-selector-panel *,
+        #serh-hlcolor-panel * {
         box-sizing: border-box !important;
         }
 
         /* 主面板深色 */
         @media (prefers-color-scheme: dark) {
-        #searchfilter-panel {
+        #serh-panel {
         background: #171717 !important; 
         color: #f3f4f6 !important; 
         border-color: #374151 !important;
         box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
         }
 
-        #searchfilter-panel .option-label,
-        #searchfilter-panel .compact-row span {
+        #serh-panel .option-label,
+        #serh-panel .compact-row span {
             color: #9ca3af !important;
         }
 
-        #searchfilter-panel .rules-container,
-        #searchfilter-selector-panel .rules-container {
+        #serh-panel .rules-container,
+        #serh-selector-panel .rules-container {
             border-color: #4b5563 !important;
             background: #1E1F21 !important;
         }
 
-        #searchfilter-line-numbers,
-        #searchfilter-sel-line-numbers {
+        #serh-line-numbers,
+        #serh-sel-line-numbers {
             background: #222629 !important;
             border-right-color: #4b5563 !important;
             color: #9ca3af !important;
         }
 
-        #searchfilter-rules,
-        #searchfilter-sel-rules {
+        #serh-rules,
+        #serh-sel-rules {
             background: #1E1F21 !important;
             color: #f3f4f6 !important;
         }
 
-        #searchfilter-rules::placeholder {
+        #serh-rules::placeholder {
             color: #6b7280 !important;
         }
 
         /* 统计面板深色 */
-        #searchfilter-stats-panel {
+        #serh-stats-panel {
             background: #171717 !important;
             border-color: #374151 !important;
         }
-        #searchfilter-stats-content {
+        #serh-stats-content {
             color: #f3f4f6 !important;
         }
 
-        #searchfilter-panel .compact-row button.searchfilter-button {
+        #serh-panel .compact-row button.serh-button {
             height: auto !important;
             min-height: 0 !important;
             width: auto !important;
@@ -3501,14 +3514,14 @@
         }
         }
 
-        #searchfilter-webdav-panel *,
-        #searchfilter-subscription-panel * {
+        #serh-webdav-panel *,
+        #serh-subscription-panel * {
             box-sizing: border-box !important;
         }
 
-        #searchfilter-webdav-panel h3,
-        #searchfilter-subscription-panel h3,
-        #searchfilter-hlcolor-panel h3 {
+        #serh-webdav-panel h3,
+        #serh-subscription-panel h3,
+        #serh-hlcolor-panel h3 {
             margin: 0 0 8px 0 !important;
             font-size: 14px !important;
             color: inherit !important;
@@ -3519,7 +3532,7 @@
             letter-spacing: normal !important;
         }
 
-        #searchfilter-selector-panel h3 {
+        #serh-selector-panel h3 {
             margin: 0 !important;
             font-size: 14px !important;
             color: inherit !important;
@@ -3531,7 +3544,7 @@
             line-height: 1.2 !important;
         }
 
-        #searchfilter-webdav-panel .webdav-row {
+        #serh-webdav-panel .webdav-row {
             margin-bottom: 8px !important;
             padding: 0 !important;
             border: none !important;
@@ -3539,8 +3552,8 @@
             display: block !important;
         }
 
-        #searchfilter-webdav-panel label,
-        #searchfilter-subscription-panel label {
+        #serh-webdav-panel label,
+        #serh-subscription-panel label {
             display: block !important;
             margin: 0 0 4px 0 !important;
             color: #4a5568 !important;
@@ -3549,9 +3562,9 @@
             line-height: 1.2 !important;
         }
 
-        #searchfilter-webdav-panel input[type="text"],
-        #searchfilter-webdav-panel input[type="password"],
-        #searchfilter-subscription-panel input[type="text"] {
+        #serh-webdav-panel input[type="text"],
+        #serh-webdav-panel input[type="password"],
+        #serh-subscription-panel input[type="text"] {
             width: 100% !important;
             padding: 6px 8px !important;
             margin: 0 !important;
@@ -3567,23 +3580,23 @@
             display: block !important;
         }
 
-        #searchfilter-webdav-panel input:focus,
-        #searchfilter-subscription-panel input:focus {
+        #serh-webdav-panel input:focus,
+        #serh-subscription-panel input:focus {
             border-color: #3182ce !important;
         }
 
-        #searchfilter-webdav-panel .webdav-btn-group {
+        #serh-webdav-panel .webdav-btn-group {
             display: flex !important;
             gap: 8px !important;
             justify-content: flex-end !important;
             margin-top: 12px !important;
         }
 
-        #searchfilter-webdav-panel .searchfilter-button,
-        #searchfilter-subscription-panel .searchfilter-button,
-        #searchfilter-hlcolor-panel .searchfilter-button,
-        #searchfilter-panel .action-button,
-        #searchfilter-selector-panel .action-button {
+        #serh-webdav-panel .serh-button,
+        #serh-subscription-panel .serh-button,
+        #serh-hlcolor-panel .serh-button,
+        #serh-panel .action-button,
+        #serh-selector-panel .action-button {
             height: 30px !important;
             min-height: 30px !important;
             max-height: 30px !important;
@@ -3605,52 +3618,52 @@
             background-image: none !important;
         }
         
-        #searchfilter-webdav-panel .searchfilter-button {
+        #serh-webdav-panel .serh-button {
             flex: 1 !important;
         }
 
         /* Webdav订阅面板深色 */
         @media (prefers-color-scheme: dark) {
-            #searchfilter-webdav-panel,
-            #searchfilter-subscription-panel,
-            #searchfilter-selector-panel,
-            #searchfilter-hlcolor-panel {
+            #serh-webdav-panel,
+            #serh-subscription-panel,
+            #serh-selector-panel,
+            #serh-hlcolor-panel {
                 background: #171717 !important;
                 color: #f3f4f6 !important;
                 border-color: #374151 !important;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
             }
 
-            #searchfilter-webdav-panel label,
-            #searchfilter-subscription-panel label,
-            #searchfilter-hlcolor-panel .hlcolor-row label {
+            #serh-webdav-panel label,
+            #serh-subscription-panel label,
+            #serh-hlcolor-panel .hlcolor-row label {
                 color: #9ca3af !important; 
             }
 
-            #searchfilter-webdav-panel input[type="text"],
-            #searchfilter-webdav-panel input[type="password"],
-            #searchfilter-subscription-panel input[type="text"],
-            #searchfilter-hlcolor-panel .hlcolor-row input {
+            #serh-webdav-panel input[type="text"],
+            #serh-webdav-panel input[type="password"],
+            #serh-subscription-panel input[type="text"],
+            #serh-hlcolor-panel .hlcolor-row input {
                 background: #374151 !important;
                 border-color: #4b5563 !important;
                 color: #f3f4f6 !important;
             }
 
-            #searchfilter-webdav-panel input:focus,
-            #searchfilter-subscription-panel input:focus,
-            #searchfilter-hlcolor-panel .hlcolor-row input:focus {
+            #serh-webdav-panel input:focus,
+            #serh-subscription-panel input:focus,
+            #serh-hlcolor-panel .hlcolor-row input:focus {
                 border-color: #60a5fa !important;
             }
-            #searchfilter-hlcolor-panel .hlcolor-row .hlcolor-preview {
+            #serh-hlcolor-panel .hlcolor-row .hlcolor-preview {
                 border-color: #4b5563 !important;
             }
-            #hlcolor-current-preview {
+            #serh-hlcolor-current-preview {
                 border-color: #4b5563 !important;
             }
-            #hlcolor-sv-canvas, #hlcolor-hue-canvas {
+            #serh-hlcolor-sv-canvas, #serh-hlcolor-hue-canvas {
                 border-color: #4b5563 !important;
             }
-            #searchfilter-hlcolor-panel .hlcolor-current-code {
+            #serh-hlcolor-panel .hlcolor-current-code {
                 background: #374151 !important;
                 border-color: #4b5563 !important;
                 color: #f3f4f6 !important;
@@ -3658,26 +3671,26 @@
         }
 
         /* 面板渐入渐出动画 */
-        .searchfilter-panel-fade {
+        .serh-panel-fade {
             opacity: 0;
             transform: translate(-50%, -48%);
             transition: opacity 0.1s ease, transform 0.1s ease;
         }
-        .searchfilter-panel-fade.show {
+        .serh-panel-fade.show {
             opacity: 1;
             transform: translate(-50%, -50%);
         }
 
-        #searchfilter-panel:not(.searchfilter-panel-fade) {
+        #serh-panel:not(.serh-panel-fade) {
             transition: opacity 0.1s ease;
         }
-        #searchfilter-webdav-panel:not(.searchfilter-panel-fade) {
+        #serh-webdav-panel:not(.serh-panel-fade) {
             transition: opacity 0.1s ease;
         }
-        #searchfilter-subscription-panel:not(.searchfilter-panel-fade) {
+        #serh-subscription-panel:not(.serh-panel-fade) {
             transition: opacity 0.1s ease;
         }
-        #searchfilter-hlcolor-panel:not(.searchfilter-panel-fade) {
+        #serh-hlcolor-panel:not(.serh-panel-fade) {
             transition: opacity 0.1s ease;
         }
 
@@ -3688,7 +3701,7 @@
         .subscription-panel-header h3 {
             margin: 0 !important;
         }
-        #subscription-rows-container {
+        #serh-subscription-rows-container {
             flex: 1;
             min-height: 0;
             overflow-y: auto;
@@ -3696,10 +3709,10 @@
             scrollbar-width: thin;
             padding-right: 2px;
         }
-        #subscription-rows-container::-webkit-scrollbar { width: 6px; }
-        #subscription-rows-container::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
-        #subscription-rows-container::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
-        #subscription-rows-container::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+        #serh-subscription-rows-container::-webkit-scrollbar { width: 6px; }
+        #serh-subscription-rows-container::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
+        #serh-subscription-rows-container::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
+        #serh-subscription-rows-container::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
         .subscription-row {
             display: flex;
             flex-direction: column;
@@ -3775,7 +3788,7 @@
             margin-top: 12px;
             flex-shrink: 0;
         }
-        .subscription-btn-group .searchfilter-button {
+        .subscription-btn-group .serh-button {
             flex: 1 !important;
         }
         @media (prefers-color-scheme: dark) {
@@ -3788,9 +3801,9 @@
         }
 
         /* 屏蔽结果灰底 */
-        .searchfilter-blocked-visible,
-        .g.searchfilter-blocked-visible,
-        .MjjYud.searchfilter-blocked-visible {
+        .serh-blocked-visible,
+        .g.serh-blocked-visible,
+        .MjjYud.serh-blocked-visible {
             background-color: #d1d5db !important;
             border-radius: 8px !important;
             padding: 8px !important;
@@ -3798,17 +3811,17 @@
         }
 
         @media (prefers-color-scheme: dark) {
-            .searchfilter-blocked-visible,
-            .g.searchfilter-blocked-visible,
-            .MjjYud.searchfilter-blocked-visible {
+            .serh-blocked-visible,
+            .g.serh-blocked-visible,
+            .MjjYud.serh-blocked-visible {
                 background-color: #374151 !important; 
             }
         }
 
-        .searchfilter-blocked-visible div,
-        .searchfilter-blocked-visible .yuRUbf,
-        .searchfilter-blocked-visible div[data-sokoban-container],
-        .searchfilter-blocked-visible div[data-snc] {
+        .serh-blocked-visible div,
+        .serh-blocked-visible .yuRUbf,
+        .serh-blocked-visible div[data-sokoban-container],
+        .serh-blocked-visible div[data-snc] {
             background-color: transparent !important;
             background: transparent !important;
             background-image: none !important;
@@ -3819,7 +3832,7 @@
         }
 
         /* 匹配规则标签 */
-        .searchfilter-matched-rule {
+        .serh-matched-rule {
             position: absolute;
             top: 2px;
             left: 50%;
@@ -3840,14 +3853,14 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.2);
         }
         @media (prefers-color-scheme: dark) {
-            .searchfilter-matched-rule {
+            .serh-matched-rule {
                 background: rgba(0, 160, 0, 0.9);
                 color: #fff;
             }
         }
 
         /* 高亮边框 */
-        #searchfilter-hlcolor-panel .hlcolor-row {
+        #serh-hlcolor-panel .hlcolor-row {
             margin-bottom: 2px !important;
             padding: 0 !important;
             border: none !important;
@@ -3856,7 +3869,7 @@
             align-items: center !important;
             gap: 4px !important;
         }
-        #searchfilter-hlcolor-panel .hlcolor-row label {
+        #serh-hlcolor-panel .hlcolor-row label {
             min-width: 20px !important;
             font-size: 12px !important;
             color: #4a5568 !important;
@@ -3864,14 +3877,14 @@
             margin: 0 !important;
             line-height: 1.2 !important;
         }
-        #searchfilter-hlcolor-panel .hlcolor-row .hlcolor-preview {
+        #serh-hlcolor-panel .hlcolor-row .hlcolor-preview {
             width: 12px !important;
             height: 12px !important;
             border-radius: 2px !important;
             border: 1px solid #e2e8f0 !important;
             flex-shrink: 0 !important;
         }
-        #searchfilter-hlcolor-panel .hlcolor-row input {
+        #serh-hlcolor-panel .hlcolor-row input {
             width: 70px !important;
             flex: none !important;
             padding: 2px 4px !important;
@@ -3887,20 +3900,20 @@
             box-shadow: none !important;
             outline: none !important;
         }
-        #searchfilter-hlcolor-panel .hlcolor-row input:focus {
+        #serh-hlcolor-panel .hlcolor-row input:focus {
             border-color: #3182ce !important;
         }
-        #searchfilter-hlcolor-panel .hlcolor-picker-wrapper {
+        #serh-hlcolor-panel .hlcolor-picker-wrapper {
             display: flex !important;
             align-items: stretch !important;
             margin: 0 !important;
         }
-        #hlcolor-sv-canvas, #hlcolor-hue-canvas {
+        #serh-hlcolor-sv-canvas, #serh-hlcolor-hue-canvas {
             cursor: crosshair !important;
             border-radius: 3px !important;
             border: 1px solid #e2e8f0 !important;
         }
-        #searchfilter-hlcolor-panel .hlcolor-current-code {
+        #serh-hlcolor-panel .hlcolor-current-code {
             font-size: 12px !important;
             font-family: 'Consolas', monospace !important;
             padding: 2px 4px !important;
@@ -3911,12 +3924,12 @@
             border: 1px solid #e2e8f0 !important;
             margin-bottom: 2px !important;
         }
-        #hlcolor-current-preview {
+        #serh-hlcolor-current-preview {
             flex-shrink: 0 !important;
         }
 
         /* 开关样式 */
-        .searchfilter-switch {
+        .serh-switch {
             position: relative;
             display: inline-block;
             width: 28px;
@@ -3925,14 +3938,14 @@
             flex-shrink: 0;
         }
 
-        .searchfilter-switch input {
+        .serh-switch input {
             opacity: 0;
             width: 0;
             height: 0;
             position: absolute;
         }
 
-        .searchfilter-slider {
+        .serh-slider {
             position: absolute;
             cursor: pointer;
             top: 0;
@@ -3944,7 +3957,7 @@
             border-radius: 16px;
         }
 
-        .searchfilter-slider:before {
+        .serh-slider:before {
             position: absolute;
             content: "";
             height: 12px;
@@ -3956,26 +3969,26 @@
             border-radius: 50%;
         }
 
-        .searchfilter-switch input:checked + .searchfilter-slider {
+        .serh-switch input:checked + .serh-slider {
             background-color: #2c5282;
         }
 
-        .searchfilter-switch input:checked + .searchfilter-slider:before {
+        .serh-switch input:checked + .serh-slider:before {
             transform: translateX(12px);
         }
 
         /* 暗色模式适配 */
         @media (prefers-color-scheme: dark) {
-            .searchfilter-slider {
+            .serh-slider {
                 background-color: #4b5563;
             }
-            .searchfilter-switch input:checked + .searchfilter-slider {
+            .serh-switch input:checked + .serh-slider {
                 background-color: #2c5282;
             }
         }
 
         /* 悬浮球大小滑条 */
-        #searchfilter-bubble-size-slider::-webkit-slider-thumb {
+        #serh-bubble-size-slider::-webkit-slider-thumb {
             -webkit-appearance: none;
             width: 14px;
             height: 14px;
@@ -3983,7 +3996,7 @@
             background: #2c5282;
             cursor: pointer;
         }
-        #searchfilter-bubble-size-slider::-moz-range-thumb {
+        #serh-bubble-size-slider::-moz-range-thumb {
             width: 14px;
             height: 14px;
             border-radius: 50%;
@@ -3993,7 +4006,7 @@
         }
 
         /* 悬浮通知 */
-        #searchfilter-toast-container {
+        #serh-toast-container {
             position: fixed;
             top: 15px;
             right: 15px;
@@ -4006,7 +4019,7 @@
             max-width: min(320px, calc(100vw - 16px));
         }
 
-        .searchfilter-toast {
+        .serh-toast {
             pointer-events: auto;
             box-sizing: border-box;
             background: #ffffff;
@@ -4026,22 +4039,22 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
 
-        .searchfilter-toast.show {
+        .serh-toast.show {
             opacity: 1;
             transform: translateY(0);
         }
 
         @media (prefers-color-scheme: dark) {
-            .searchfilter-toast {
+            .serh-toast {
                 background: #171717 !important;
                 color: #f3f4f6 !important;
                 border-color: #374151;
             }
         }
 
-        .searchfilter-toast-success { border-left-color: #276749; }
-        .searchfilter-toast-error { border-left-color: #c53030; }
-        .searchfilter-toast-info { border-left-color: #2c5282; }
+        .serh-toast-success { border-left-color: #276749; }
+        .serh-toast-error { border-left-color: #c53030; }
+        .serh-toast-info { border-left-color: #2c5282; }
     `);
   }
 
@@ -4153,15 +4166,15 @@
       el.style.bottom = 'auto';
     }
     if (!currentConfig.showBubble) {
-      const status = document.getElementById('searchfilter-status');
+      const status = document.getElementById('serh-status');
       if (status) status.remove();
       return;
     }
 
-    let status = document.getElementById('searchfilter-status');
+    let status = document.getElementById('serh-status');
     if (!status) {
       status = document.createElement('div');
-      status.id = 'searchfilter-status';
+      status.id = 'serh-status';
       applyBubbleStyle(status);
 
       let isDragging = false;
@@ -4276,6 +4289,7 @@
           if (newTop < 5) newTop = 5;
           if (newTop + rect.height > window.innerHeight - 5) newTop = window.innerHeight - rect.height - 5;
           status.style.top = newTop + 'px';
+          adoptStoredConfigBeforeWrite();
           currentConfig.bubbleState = {
             top: status.style.top,
             left: status.style.left,
@@ -4326,18 +4340,18 @@
         if (el.parentElement && el.parentElement.style.display === 'none') {
           el.parentElement.style.display = '';
         }
-        el.classList.add('searchfilter-blocked-visible');
+        el.classList.add('serh-blocked-visible');
         const engine = getSearchEngine();
         const link = getResultLink(el, engine);
         if (link && link.href && currentConfig.showBlockBtn) {
           const { url, domain } = resolveUrlDomain(link);
-          if (!el.querySelector('.searchfilter-quick-block')) {
+          if (!el.querySelector('.serh-quick-block')) {
             injectBlockButton(el, engine, url, domain);
           }
         }
         addMatchedRuleLabel(el);
       } else {
-        el.classList.remove('searchfilter-blocked-visible');
+        el.classList.remove('serh-blocked-visible');
         removeMatchedRuleLabel(el);
       }
     });
@@ -4349,7 +4363,7 @@
         if (!hasVisibleSiblings) parent.style.display = 'none';
       });
     }
-    const status = document.getElementById('searchfilter-status');
+    const status = document.getElementById('serh-status');
     if (status) {
       updateBubbleContent(status, parseInt(status.dataset.blockedCount || 0));
     }
@@ -4362,8 +4376,8 @@
   const LINE_NUM_CHUNK = 200;
 
   function updateLineNumbersIncremental() {
-    const textarea = document.getElementById('searchfilter-rules');
-    const lineNums = document.getElementById('searchfilter-line-numbers');
+    const textarea = document.getElementById('serh-rules');
+    const lineNums = document.getElementById('serh-line-numbers');
     if (!textarea || !lineNums) {
       _lineUpdatePending = false;
       return;
@@ -4403,7 +4417,7 @@
         const analysis = currentConfig.errorDetection !== false ? cachedAnalyzeRule(lines[i]) : { valid: true, errors: [], warnings: [] };
         const valid = analysis.valid;
         const errMsg = valid ? '' : analysis.errors.join(' | ');
-        const html = `${i + 1}${valid ? '' : `<span class="searchfilter-line-error" title="${escHtml(errMsg)}" data-error="${escHtml(errMsg)}" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 10px; background: #edf2f7; z-index: 1; cursor: pointer;">⚠️</span>`}`;
+        const html = `${i + 1}${valid ? '' : `<span class="serh-line-error" title="${escHtml(errMsg)}" data-error="${escHtml(errMsg)}" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 10px; background: #edf2f7; z-index: 1; cursor: pointer;">⚠️</span>`}`;
         if (node.dataset.v !== html) {
           node.innerHTML = html;
           node.dataset.v = html;
@@ -4451,6 +4465,11 @@
   }
 
   // 配置持久化
+  function adoptStoredConfigBeforeWrite() {
+    adoptStoredConfigIfNewer();
+    if (!Array.isArray(currentConfig.rules)) currentConfig.rules = [];
+  }
+
   function persistConfig(updateModifiedTime = false) {
     GM_setValue(CONFIG_KEY, currentConfig);
     if (updateModifiedTime) {
@@ -4461,14 +4480,15 @@
     }
   }
 
-  // 修改配置项并更新修改时间戳
+  // 配置项更新时间戳
   function persistConfigItem(key, value, updateModifiedTime = true) {
+    adoptStoredConfigBeforeWrite();
     currentConfig[key] = value;
     persistConfig(updateModifiedTime);
   }
 
   function syncRulesTextarea() {
-    const textarea = document.getElementById('searchfilter-rules');
+    const textarea = document.getElementById('serh-rules');
     if (textarea) {
       textarea.value = currentConfig.rules.join('\n');
       updateLineNumbers();
@@ -4477,18 +4497,18 @@
 
   // 悬浮通知
   function showToast(message, type = 'info', duration = 3000) {
-    let container = document.getElementById('searchfilter-toast-container');
+    let container = document.getElementById('serh-toast-container');
     if (!container) {
       container = document.createElement('div');
-      container.id = 'searchfilter-toast-container';
+      container.id = 'serh-toast-container';
       document.body.appendChild(container);
     }
 
-    const panel = document.getElementById('searchfilter-webdav-panel') ||
-      document.getElementById('searchfilter-subscription-panel') ||
-      document.getElementById('searchfilter-hlcolor-panel') ||
-      document.getElementById('searchfilter-selector-panel') ||
-      document.getElementById('searchfilter-panel');
+    const panel = document.getElementById('serh-webdav-panel') ||
+      document.getElementById('serh-subscription-panel') ||
+      document.getElementById('serh-hlcolor-panel') ||
+      document.getElementById('serh-selector-panel') ||
+      document.getElementById('serh-panel');
     if (panel) {
       if (container.parentElement !== panel) {
         panel.appendChild(container);
@@ -4513,7 +4533,7 @@
     }
 
     const toast = document.createElement('div');
-    toast.className = `searchfilter-toast searchfilter-toast-${type}`;
+    toast.className = `serh-toast serh-toast-${type}`;
     toast.textContent = message;
     container.appendChild(toast);
     requestAnimationFrame(() => toast.classList.add('show'));
@@ -4533,12 +4553,12 @@
 
   // 统计面板
   function hideStatsPanel() {
-    const statsPanel = document.getElementById('searchfilter-stats-panel');
+    const statsPanel = document.getElementById('serh-stats-panel');
     if (statsPanel) statsPanel.style.display = 'none';
   }
 
   function toggleStatsPanel() {
-    const statsPanel = document.getElementById('searchfilter-stats-panel');
+    const statsPanel = document.getElementById('serh-stats-panel');
     if (!statsPanel) return;
 
     if (statsPanel.style.display === 'flex') {
@@ -4552,10 +4572,10 @@
 
   // 统计分类
   function updateStatsContent() {
-    const statsContent = document.getElementById('searchfilter-stats-content');
+    const statsContent = document.getElementById('serh-stats-content');
     if (!statsContent) return;
 
-    const textarea = document.getElementById('searchfilter-rules');
+    const textarea = document.getElementById('serh-rules');
     const rulesText = textarea ? textarea.value : currentConfig.rules.join('\n');
     const rawLines = rulesText.split('\n');
     const localRules = filterValidRuleLines(rawLines);
@@ -4736,7 +4756,7 @@
 
   // 面板定位
   function getPanelPositionStyles() {
-    const statusBtn = document.getElementById('searchfilter-status');
+    const statusBtn = document.getElementById('serh-status');
     if (currentConfig.panelCentered) {
       return `top: 60%; left: 50%; transform: translate(-50%, -50%);`;
     }
@@ -4769,7 +4789,7 @@
   function createPanel(id, width = '320px', padding = '15px') {
     const panel = document.createElement('div');
     panel.id = id;
-    panel.classList.add('searchfilter-panel-fade');
+    panel.classList.add('serh-panel-fade');
     panel.style.cssText = `
         position: fixed;
         ${getPanelPositionStyles()}
@@ -4826,7 +4846,7 @@
   // 主面板样式
   function showConfigPanel() {
     injectWidgetStyles();
-    const existingPanel = document.getElementById('searchfilter-panel');
+    const existingPanel = document.getElementById('serh-panel');
     if (existingPanel) {
       if (window._panelCloseTimer) {
         clearTimeout(window._panelCloseTimer);
@@ -4849,7 +4869,7 @@
       window._panelCloseHandler = null;
     }
 
-    const panel = createPanel('searchfilter-panel');
+    const panel = createPanel('serh-panel');
     panel._initialRules = Array.isArray(currentConfig.rules) ? [...currentConfig.rules] : [];
 
     // 兼容旧悬浮球设置
@@ -4859,27 +4879,27 @@
             <div style="display: flex; gap: 8px; margin-top: 0px; margin-bottom: 8px;">
                 <label style="display: flex; align-items: center; flex: 1; justify-content: space-between; white-space: nowrap; cursor: pointer; font-size: 12px; color: #4a5568;">
                     <span style="display: flex; align-items: center;">
-                        <span class="searchfilter-switch">
-                            <input type="checkbox" id="searchfilter-enabled" ${currentConfig.enabled ? 'checked' : ''}>
-                            <span class="searchfilter-slider"></span>
+                        <span class="serh-switch">
+                            <input type="checkbox" id="serh-enabled" ${currentConfig.enabled ? 'checked' : ''}>
+                            <span class="serh-slider"></span>
                         </span>
                         <span>${t('enableBlock')}</span>
                     </span>
                 </label>
                 <label style="display: flex; align-items: center; flex: 1; justify-content: space-between; white-space: nowrap; cursor: pointer; font-size: 12px; color: #4a5568;">
                     <span style="display: flex; align-items: center;">
-                        <span class="searchfilter-switch">
-                            <input type="checkbox" id="searchfilter-show-count" ${currentConfig.showCount ? 'checked' : ''}>
-                            <span class="searchfilter-slider"></span>
+                        <span class="serh-switch">
+                            <input type="checkbox" id="serh-show-count" ${currentConfig.showCount ? 'checked' : ''}>
+                            <span class="serh-slider"></span>
                         </span>
                         <span>${t('showCount')}</span>
                     </span>
                 </label>
                 <label style="display: flex; align-items: center; flex: 1; justify-content: space-between; white-space: nowrap; cursor: pointer; font-size: 12px; color: #4a5568;">
                     <span style="display: flex; align-items: center;">
-                        <span class="searchfilter-switch">
-                            <input type="checkbox" id="searchfilter-debug" ${currentConfig.debug ? 'checked' : ''}>
-                            <span class="searchfilter-slider"></span>
+                        <span class="serh-switch">
+                            <input type="checkbox" id="serh-debug" ${currentConfig.debug ? 'checked' : ''}>
+                            <span class="serh-slider"></span>
                         </span>
                         <span>${t('debugMode')}</span>
                     </span>
@@ -4889,27 +4909,27 @@
             <div style="display: flex; gap: 8px; margin-bottom: 12px;">
                 <label style="display: flex; align-items: center; flex: 1; justify-content: space-between; white-space: nowrap; cursor: pointer; font-size: 12px; color: #4a5568;">
                     <span style="display: flex; align-items: center;">
-                        <span class="searchfilter-switch">
-                            <input type="checkbox" id="searchfilter-show-block-btn" ${currentConfig.showBlockBtn ? 'checked' : ''}>
-                            <span class="searchfilter-slider"></span>
+                        <span class="serh-switch">
+                            <input type="checkbox" id="serh-show-block-btn" ${currentConfig.showBlockBtn ? 'checked' : ''}>
+                            <span class="serh-slider"></span>
                         </span>
                         <span>${t('oneClickBlock')}</span>
                     </span>
                 </label>
                 <label style="display: flex; align-items: center; flex: 1; justify-content: space-between; white-space: nowrap; cursor: pointer; font-size: 12px; color: #4a5568;">
                     <span style="display: flex; align-items: center;">
-                        <span class="searchfilter-switch">
-                            <input type="checkbox" id="searchfilter-block-domain" ${currentConfig.blockDomain ? 'checked' : ''}>
-                            <span class="searchfilter-slider"></span>
+                        <span class="serh-switch">
+                            <input type="checkbox" id="serh-block-domain" ${currentConfig.blockDomain ? 'checked' : ''}>
+                            <span class="serh-slider"></span>
                         </span>
                         <span>${t('blockDomain')}</span>
                     </span>
                 </label>
                 <label style="display: flex; align-items: center; flex: 1; justify-content: space-between; white-space: nowrap; cursor: pointer; font-size: 12px; color: #4a5568;">
                     <span style="display: flex; align-items: center;">
-                        <span class="searchfilter-switch">
-                            <input type="checkbox" id="searchfilter-block-confirm" ${currentConfig.blockConfirm ? 'checked' : ''}>
-                            <span class="searchfilter-slider"></span>
+                        <span class="serh-switch">
+                            <input type="checkbox" id="serh-block-confirm" ${currentConfig.blockConfirm ? 'checked' : ''}>
+                            <span class="serh-slider"></span>
                         </span>
                         <span>${t('doubleConfirm')}</span>
                     </span>
@@ -4917,50 +4937,50 @@
             </div>
             
             <div class="option-row" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px;">
-                <span class="option-label" style="margin-bottom: 0;">${t('bubbleSize')} <span id="searchfilter-bubble-size-val">${initialSize}px</span></span>
-                <input type="range" id="searchfilter-bubble-size-slider" min="15" max="40" value="${initialSize}" style="flex: 1; margin-left: 5px; height: 4px; background: #cbd5e0; border-radius: 2px; outline: none; -webkit-appearance: none; cursor: pointer;">
+                <span class="option-label" style="margin-bottom: 0;">${t('bubbleSize')} <span id="serh-bubble-size-val">${initialSize}px</span></span>
+                <input type="range" id="serh-bubble-size-slider" min="15" max="40" value="${initialSize}" style="flex: 1; margin-left: 5px; height: 4px; background: #cbd5e0; border-radius: 2px; outline: none; -webkit-appearance: none; cursor: pointer;">
             </div>
             
             <div style="margin-bottom: 0px;">
                 <div class="compact-row">
                     <span style="font-size: 12px; color: #4a5568;">${t('blockRules')}</span>
                     <div style="display: flex; gap: 4px; flex: 0 0 auto;">
-                        <button id="searchfilter-subscribe" class="searchfilter-button searchfilter-button-secondary" style="padding: 3px 8px; border: 1px solid transparent; min-width: 0 !important; width: auto !important; flex: 0 0 auto !important;">${t('subscription')}</button>
-                        <button id="searchfilter-sync" class="searchfilter-button searchfilter-button-success" style="padding: 3px 8px; border: 1px solid transparent; min-width: 0 !important; width: auto !important; flex: 0 0 auto !important;">${t('sync')}</button>
-                        <button id="searchfilter-import-file" class="searchfilter-button searchfilter-button-secondary" style="padding: 3px 8px; border: 1px solid transparent; min-width: 0 !important; width: auto !important; flex: 0 0 auto !important;">${t('import')}</button>
-                        <button id="searchfilter-export-file" class="searchfilter-button searchfilter-button-success" style="padding: 3px 8px; border: 1px solid transparent; min-width: 0 !important; width: auto !important; flex: 0 0 auto !important;">${t('export')}</button>
+                        <button id="serh-subscribe" class="serh-button serh-button-secondary" style="padding: 3px 8px; border: 1px solid transparent; min-width: 0 !important; width: auto !important; flex: 0 0 auto !important;">${t('subscription')}</button>
+                        <button id="serh-sync" class="serh-button serh-button-success" style="padding: 3px 8px; border: 1px solid transparent; min-width: 0 !important; width: auto !important; flex: 0 0 auto !important;">${t('sync')}</button>
+                        <button id="serh-import-file" class="serh-button serh-button-secondary" style="padding: 3px 8px; border: 1px solid transparent; min-width: 0 !important; width: auto !important; flex: 0 0 auto !important;">${t('import')}</button>
+                        <button id="serh-export-file" class="serh-button serh-button-success" style="padding: 3px 8px; border: 1px solid transparent; min-width: 0 !important; width: auto !important; flex: 0 0 auto !important;">${t('export')}</button>
                     </div>
                 </div>
                 <div class="rules-container">
-                    <div id="searchfilter-line-numbers"></div>
-                    <textarea id="searchfilter-rules" placeholder="${t('placeholder')}" wrap="off">${escHtml(currentConfig.rules.join('\n'))}</textarea>
-                    <div id="searchfilter-scroll-top" class="searchfilter-scroll-btn" style="top: 2px;">⬆️</div>
-                    <div id="searchfilter-scroll-bottom" class="searchfilter-scroll-btn" style="bottom: 1px;">⬇️</div>
+                    <div id="serh-line-numbers"></div>
+                    <textarea id="serh-rules" placeholder="${t('placeholder')}" wrap="off">${escHtml(currentConfig.rules.join('\n'))}</textarea>
+                    <div id="serh-scroll-top" class="serh-scroll-btn" style="top: 2px;">⬆️</div>
+                    <div id="serh-scroll-bottom" class="serh-scroll-btn" style="bottom: 1px;">⬇️</div>
                 </div>
             </div>
             
-            <div style="display: flex; gap: 6px; margin-top: 8px;" id="searchfilter-panel-footer">
-                <button id="searchfilter-save" class="searchfilter-button searchfilter-button-primary action-button" style="flex: 2;">${t('save')}</button>
-                <button id="searchfilter-test" class="searchfilter-button searchfilter-button-secondary action-button" style="flex: 1;">${t('stats')}</button>
-                <button id="searchfilter-close" class="searchfilter-button searchfilter-button-danger action-button" style="flex: 1;">${t('close')}</button>
+            <div style="display: flex; gap: 6px; margin-top: 8px;" id="serh-panel-footer">
+                <button id="serh-save" class="serh-button serh-button-primary action-button" style="flex: 2;">${t('save')}</button>
+                <button id="serh-test" class="serh-button serh-button-secondary action-button" style="flex: 1;">${t('stats')}</button>
+                <button id="serh-close" class="serh-button serh-button-danger action-button" style="flex: 1;">${t('close')}</button>
             </div>
             
-            <div id="searchfilter-stats-panel">
-                <div id="searchfilter-stats-content"></div>
+            <div id="serh-stats-panel">
+                <div id="serh-stats-content"></div>
             </div>
         `;
 
     updateLineNumbers();
 
-    const textarea = document.getElementById('searchfilter-rules');
-    const lineNums = document.getElementById('searchfilter-line-numbers');
+    const textarea = document.getElementById('serh-rules');
+    const lineNums = document.getElementById('serh-line-numbers');
 
     textarea.addEventListener('input', scheduleLineNumbersUpdate);
     textarea.addEventListener('scroll', () => {
       lineNums.scrollTop = textarea.scrollTop;
     });
     lineNums.addEventListener('click', (e) => {
-      const errorEl = e.target.closest('.searchfilter-line-error');
+      const errorEl = e.target.closest('.serh-line-error');
       if (errorEl) showToast(errorEl.getAttribute('data-error') || t('invalidRule'), 'error');
     });
 
@@ -4980,24 +5000,24 @@
           triggerWebDAVSyncDelayed(1000);
         }
       });
-      const toastContainer = document.getElementById('searchfilter-toast-container');
+      const toastContainer = document.getElementById('serh-toast-container');
       if (toastContainer) toastContainer.remove();
     };
 
-    document.getElementById('searchfilter-save').onclick = () => {
+    document.getElementById('serh-save').onclick = () => {
       hideStatsPanel();
       saveConfig();
       showToast(t('saved'), 'success');
     };
-    document.getElementById('searchfilter-test').onclick = toggleStatsPanel;
-    document.getElementById('searchfilter-close').onclick = (e) => {
+    document.getElementById('serh-test').onclick = toggleStatsPanel;
+    document.getElementById('serh-close').onclick = (e) => {
       e.stopPropagation();
       closePanel();
     };
-    document.getElementById('searchfilter-subscribe').onclick = showSubscriptionPanel;
-    document.getElementById('searchfilter-sync').onclick = showWebDAVPanel;
-    document.getElementById('searchfilter-import-file').onclick = importRulesFromFile;
-    document.getElementById('searchfilter-export-file').onclick = exportRulesToFile;
+    document.getElementById('serh-subscribe').onclick = showSubscriptionPanel;
+    document.getElementById('serh-sync').onclick = showWebDAVPanel;
+    document.getElementById('serh-import-file').onclick = importRulesFromFile;
+    document.getElementById('serh-export-file').onclick = exportRulesToFile;
 
     const COMMENT_HEADING_REGEX = /^\s*#\s+\S+/;
 
@@ -5098,20 +5118,21 @@
         handleJump(e);
       };
     };
-    bindScrollBtn('searchfilter-scroll-top', 'prev');
-    bindScrollBtn('searchfilter-scroll-bottom', 'next');
+    bindScrollBtn('serh-scroll-top', 'prev');
+    bindScrollBtn('serh-scroll-bottom', 'next');
 
     // 悬浮球大小滑条
-    const sizeSlider = panel.querySelector('#searchfilter-bubble-size-slider');
-    const sizeValueDisplay = panel.querySelector('#searchfilter-bubble-size-val');
+    const sizeSlider = panel.querySelector('#serh-bubble-size-slider');
+    const sizeValueDisplay = panel.querySelector('#serh-bubble-size-val');
     if (sizeSlider) {
       sizeSlider.addEventListener('input', function() {
         const value = parseInt(this.value);
+        adoptStoredConfigBeforeWrite();
         currentConfig.bubbleSize = value;
         if (sizeValueDisplay) {
           sizeValueDisplay.textContent = `${value}px`;
         }
-        const statusBtn = document.getElementById('searchfilter-status');
+        const statusBtn = document.getElementById('serh-status');
         if (statusBtn) applyBubbleSize(statusBtn);
         persistConfig(true);
       });
@@ -5119,17 +5140,18 @@
 
     // 滑块开关
     const switchDefs = [
-      { id: 'searchfilter-enabled', key: 'enabled', apply: () => { forceReprocessAll(); } },
-      { id: 'searchfilter-show-count', key: 'showCount', apply: () => { const s = document.getElementById('searchfilter-status'); if (s) updateBubbleContent(s, parseInt(s.dataset.blockedCount || 0)); } },
-      { id: 'searchfilter-debug', key: 'debug', apply: () => { exposeDebugApi(); } },
-      { id: 'searchfilter-show-block-btn', key: 'showBlockBtn', apply: () => { forceReprocessAll(); } },
-      { id: 'searchfilter-block-domain', key: 'blockDomain', apply: null },
-      { id: 'searchfilter-block-confirm', key: 'blockConfirm', apply: null },
+      { id: 'serh-enabled', key: 'enabled', apply: () => { forceReprocessAll(); } },
+      { id: 'serh-show-count', key: 'showCount', apply: () => { const s = document.getElementById('serh-status'); if (s) updateBubbleContent(s, parseInt(s.dataset.blockedCount || 0)); } },
+      { id: 'serh-debug', key: 'debug', apply: () => { exposeDebugApi(); } },
+      { id: 'serh-show-block-btn', key: 'showBlockBtn', apply: () => { forceReprocessAll(); } },
+      { id: 'serh-block-domain', key: 'blockDomain', apply: null },
+      { id: 'serh-block-confirm', key: 'blockConfirm', apply: null },
     ];
     switchDefs.forEach(sw => {
       const el = document.getElementById(sw.id);
       if (el) {
         el.addEventListener('change', function() {
+          adoptStoredConfigBeforeWrite();
           currentConfig[sw.key] = this.checked;
           persistConfig(true);
           if (sw.apply) sw.apply();
@@ -5139,7 +5161,7 @@
 
     const closeHandler = (e) => {
       if (preventPanelClose) return;
-      if (!panel.contains(e.target) && !e.target.closest('#searchfilter-status') && !e.target.closest('#searchfilter-webdav-panel') && !e.target.closest('#searchfilter-subscription-panel') && !e.target.closest('#searchfilter-hlcolor-panel') && !e.target.closest('#searchfilter-hlcolor-popup') && !e.target.closest('#searchfilter-selector-panel')) {
+      if (!panel.contains(e.target) && !e.target.closest('#serh-status') && !e.target.closest('#serh-webdav-panel') && !e.target.closest('#serh-subscription-panel') && !e.target.closest('#serh-hlcolor-panel') && !e.target.closest('#serh-hlcolor-popup') && !e.target.closest('#serh-selector-panel')) {
         closePanel();
       }
     };
@@ -5175,20 +5197,22 @@
 
   // 保存配置
   function saveConfig() {
-    const rulesText = document.getElementById('searchfilter-rules').value;
-    const enabled = document.getElementById('searchfilter-enabled').checked;
-    const showCount = document.getElementById('searchfilter-show-count').checked;
-    const debug = document.getElementById('searchfilter-debug').checked;
-    const showBlockBtn = document.getElementById('searchfilter-show-block-btn').checked;
-    const blockDomain = document.getElementById('searchfilter-block-domain').checked;
-    const blockConfirm = document.getElementById('searchfilter-block-confirm').checked;
+    const rulesText = document.getElementById('serh-rules').value;
+    const enabled = document.getElementById('serh-enabled').checked;
+    const showCount = document.getElementById('serh-show-count').checked;
+    const debug = document.getElementById('serh-debug').checked;
+    const showBlockBtn = document.getElementById('serh-show-block-btn').checked;
+    const blockDomain = document.getElementById('serh-block-domain').checked;
+    const blockConfirm = document.getElementById('serh-block-confirm').checked;
 
     const rawLines = rulesText.split('\n');
     const userRules = filterValidRuleLines(rawLines);
 
-    const panel = document.getElementById('searchfilter-panel');
+    const panel = document.getElementById('serh-panel');
     const baseRules = (panel && Array.isArray(panel._initialRules)) ? panel._initialRules : (Array.isArray(currentConfig.rules) ? currentConfig.rules : []);
     const rulesChanged = applyRuleDiff(baseRules, userRules);
+
+    adoptStoredConfigBeforeWrite();
 
     const initialKeySet = new Set(baseRules.map(getRuleKey));
     const userKeySet = new Set(userRules.map(getRuleKey));
@@ -5216,6 +5240,9 @@
 
     persistConfig(rulesChanged || settingsChanged);
 
+    if (panel) panel._initialRules = [...finalRules];
+    if (backgroundNewRules.length > 0) syncRulesTextarea();
+
     showHiddenResults = false;
     forceReprocessAll();
 
@@ -5223,7 +5250,7 @@
 
   // 高亮面板
   function showHighlightColorPanel() {
-    const existing = document.getElementById('searchfilter-hlcolor-panel');
+    const existing = document.getElementById('serh-hlcolor-panel');
     if (existing) {
       if (typeof existing._cleanupClick === 'function') existing._cleanupClick();
       existing.remove();
@@ -5270,7 +5297,7 @@
       return '#' + [r,g,b].map(x => x.toString(16).padStart(2,'0').toUpperCase()).join('');
     }
 
-    const panel = createPanel('searchfilter-hlcolor-panel', 'auto; max-width: 350px');
+    const panel = createPanel('serh-hlcolor-panel', 'auto; max-width: 350px');
 
     const colors = currentConfig.highlightColors || {};
     const sanitizeHex = (val, fallback) => (/^#[0-9A-Fa-f]{6}$/.test(String(val || '')) ? String(val).toUpperCase() : fallback);
@@ -5279,8 +5306,8 @@
       const hex = sanitizeHex(colors[i], '#CE2029');
       rowsHtml += `<div class="hlcolor-row">
         <label>@${i}</label>
-        <span class="hlcolor-preview" id="hlcolor-preview-${i}" style="background:${escHtml(hex)}"></span>
-        <input type="text" id="hlcolor-input-${i}" value="${escHtml(hex)}" placeholder="#RRGGBB" maxlength="7">
+        <span class="hlcolor-preview" id="serh-hlcolor-preview-${i}" style="background:${escHtml(hex)}"></span>
+        <input type="text" id="serh-hlcolor-input-${i}" value="${escHtml(hex)}" placeholder="#RRGGBB" maxlength="7">
       </div>`;
     }
 
@@ -5291,30 +5318,30 @@
     panel.innerHTML = `
       <h3 style="margin:0 0 3px;font-size:13px;color:#2d3748;font-weight:600;">${escHtml(t('hlColorTitle'))}</h3>
       <div style="display:flex;gap:2px;align-items:stretch;">
-        <div id="hlcolor-left" style="flex:0 0 auto;display:flex;flex-direction:column;height:132px;">
+        <div id="serh-hlcolor-left" style="flex:0 0 auto;display:flex;flex-direction:column;height:132px;">
           ${rowsHtml}
           <div style="display:flex;align-items:center;gap:4px;margin-top:1px;">
             <span style="min-width:20px;font-size:12px;color:#4a5568;font-weight:600;">🎨</span>
-            <span id="hlcolor-current-preview" style="width:12px;height:12px;border-radius:2px;border:1px solid #e2e8f0;background:${escHtml(defaultHex)};flex-shrink:0;"></span>
-            <span id="hlcolor-code-text" style="font-size:11px;font-family:'Consolas',monospace;padding:2px 4px;background:#f7fafc;border-radius:3px;border:1px solid #e2e8f0;width:70px;flex:none;text-align:center;">${escHtml(defaultHex)}</span>
+            <span id="serh-hlcolor-current-preview" style="width:12px;height:12px;border-radius:2px;border:1px solid #e2e8f0;background:${escHtml(defaultHex)};flex-shrink:0;"></span>
+            <span id="serh-hlcolor-code-text" style="font-size:11px;font-family:'Consolas',monospace;padding:2px 4px;background:#f7fafc;border-radius:3px;border:1px solid #e2e8f0;width:70px;flex:none;text-align:center;">${escHtml(defaultHex)}</span>
           </div>
         </div>
         <div class="hlcolor-picker-wrapper" style="display:flex;gap:2px;align-items:stretch;flex-shrink:0;">
-          <canvas id="hlcolor-sv-canvas"></canvas>
-          <canvas id="hlcolor-hue-canvas" width="22"></canvas>
+          <canvas id="serh-hlcolor-sv-canvas"></canvas>
+          <canvas id="serh-hlcolor-hue-canvas" width="22"></canvas>
         </div>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:5px;">
-        <button id="hlcolor-save" class="searchfilter-button searchfilter-button-primary" style="flex:1;">${escHtml(t('save'))}</button>
-        <button id="hlcolor-reset" class="searchfilter-button searchfilter-button-secondary" style="flex:1;">${escHtml(t('hlColorReset'))}</button>
-        <button id="hlcolor-cancel" class="searchfilter-button searchfilter-button-secondary" style="flex:1;">${escHtml(t('cancel'))}</button>
+        <button id="serh-hlcolor-save" class="serh-button serh-button-primary" style="flex:1;">${escHtml(t('save'))}</button>
+        <button id="serh-hlcolor-reset" class="serh-button serh-button-secondary" style="flex:1;">${escHtml(t('hlColorReset'))}</button>
+        <button id="serh-hlcolor-cancel" class="serh-button serh-button-secondary" style="flex:1;">${escHtml(t('cancel'))}</button>
       </div>
     `;
 
     function resizeCanvasToMatch() {
-      const left = document.getElementById('hlcolor-left');
-      const svCanvas = document.getElementById('hlcolor-sv-canvas');
-      const hueCanvas = document.getElementById('hlcolor-hue-canvas');
+      const left = document.getElementById('serh-hlcolor-left');
+      const svCanvas = document.getElementById('serh-hlcolor-sv-canvas');
+      const hueCanvas = document.getElementById('serh-hlcolor-hue-canvas');
       if (!left || !svCanvas || !hueCanvas) return;
       svCanvas.width = svCanvas.height = left.clientHeight;
       hueCanvas.height = left.clientHeight;
@@ -5327,7 +5354,7 @@
     });
 
     function drawSVCanvas(hue) {
-      const canvas = document.getElementById('hlcolor-sv-canvas');
+      const canvas = document.getElementById('serh-hlcolor-sv-canvas');
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
       const w = canvas.width, h = canvas.height;
@@ -5347,7 +5374,7 @@
     }
 
     function drawHueCanvas() {
-      const canvas = document.getElementById('hlcolor-hue-canvas');
+      const canvas = document.getElementById('serh-hlcolor-hue-canvas');
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
       const w = canvas.width, h = canvas.height;
@@ -5361,13 +5388,13 @@
     function updatePickedColor() {
       const [r, g, b] = hsvToRgb(currentHue, currentSat, currentVal);
       const hex = rgbToHex(r, g, b);
-      const el = document.getElementById('hlcolor-code-text');
+      const el = document.getElementById('serh-hlcolor-code-text');
       if (el) el.textContent = hex;
-      const preview = document.getElementById('hlcolor-current-preview');
+      const preview = document.getElementById('serh-hlcolor-current-preview');
       if (preview) preview.style.background = hex;
     }
 
-    const svCanvas = document.getElementById('hlcolor-sv-canvas');
+    const svCanvas = document.getElementById('serh-hlcolor-sv-canvas');
 
     function onSVMove(clientX, clientY) {
       const rect = svCanvas.getBoundingClientRect();
@@ -5408,7 +5435,7 @@
       document.addEventListener('touchcancel', onSVTouchEnd);
     }, { passive: false });
 
-    const hueCanvas = document.getElementById('hlcolor-hue-canvas');
+    const hueCanvas = document.getElementById('serh-hlcolor-hue-canvas');
 
     function onHueMove(clientY) {
       const rect = hueCanvas.getBoundingClientRect();
@@ -5449,26 +5476,26 @@
     }, { passive: false });
 
     function updatePreview(i) {
-      const input = document.getElementById(`hlcolor-input-${i}`);
-      const preview = document.getElementById(`hlcolor-preview-${i}`);
+      const input = document.getElementById(`serh-hlcolor-input-${i}`);
+      const preview = document.getElementById(`serh-hlcolor-preview-${i}`);
       if (input && preview && /^#[0-9a-fA-F]{6}$/.test(input.value)) {
         preview.style.background = input.value;
       }
     }
 
     for (let i = 1; i <= 5; i++) {
-      document.getElementById(`hlcolor-input-${i}`).addEventListener('input', () => updatePreview(i));
+      document.getElementById(`serh-hlcolor-input-${i}`).addEventListener('input', () => updatePreview(i));
     }
 
-    document.getElementById('hlcolor-save').onclick = () => {
+    document.getElementById('serh-hlcolor-save').onclick = () => {
       const newColors = {...currentConfig.highlightColors};
       let hasError = false;
       for (let i = 1; i <= 5; i++) {
-        const input = document.getElementById(`hlcolor-input-${i}`);
+        const input = document.getElementById(`serh-hlcolor-input-${i}`);
         const val = input.value.trim();
         if (val === '') continue;
         if (!/^#[0-9a-fA-F]{6}$/.test(val)) {
-          const saveBtn = document.getElementById('hlcolor-save');
+          const saveBtn = document.getElementById('serh-hlcolor-save');
           const originalText = saveBtn.textContent;
           saveBtn.textContent = t('errorWord');
           saveBtn.style.backgroundColor = '#c53030';
@@ -5482,18 +5509,20 @@
         newColors[i] = val;
       }
       if (hasError) return;
+        adoptStoredConfigBeforeWrite();
         currentConfig.highlightColors = newColors;
         persistConfig(true);
       forceReprocessAll();
       showToast(t('saved'), 'success');
     };
 
-    document.getElementById('hlcolor-reset').onclick = () => {
+    document.getElementById('serh-hlcolor-reset').onclick = () => {
       const defaults = {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'};
       for (let i = 1; i <= 5; i++) {
-        document.getElementById(`hlcolor-input-${i}`).value = defaults[i];
-        document.getElementById(`hlcolor-preview-${i}`).style.background = defaults[i];
+        document.getElementById(`serh-hlcolor-input-${i}`).value = defaults[i];
+        document.getElementById(`serh-hlcolor-preview-${i}`).style.background = defaults[i];
       }
+      adoptStoredConfigBeforeWrite();
       currentConfig.highlightColors = {...defaults};
       persistConfig(true);
       forceReprocessAll();
@@ -5505,7 +5534,7 @@
 
     const closePanel = bindOutsideClickClose(panel);
 
-    document.getElementById('hlcolor-cancel').onclick = (e) => {
+    document.getElementById('serh-hlcolor-cancel').onclick = (e) => {
       e.stopPropagation();
       closePanel();
     };
@@ -5541,13 +5570,15 @@
   function serializeSelectors() {
     const merged = getSelectors();
     const parts = [];
+    const keyToText = (key) => /^[A-Za-z_$][\w$-]*$/.test(key) ? key : `'${escapeJsString(key)}'`;
     const defToText = (def, disabled) => {
       const links = Array.isArray(def.links)
         ? `[${(def.links || []).map(s => `'${escapeJsString(s)}'`).join(', ')}]`
         : `'${escapeJsString(def.links || 'a[href]')}'`;
       const m = matchDefToParts(def.match);
+      const matchText = (m.source || m.flags) ? `/${regexSourceToLiteralText(m.source)}/${m.flags}` : `''`;
       return `{\n` +
-        `  match: /${regexSourceToLiteralText(m.source)}/${m.flags},\n` +
+        `  match: ${matchText},\n` +
         `  containers: '${escapeJsString(def.containers || '')}',\n` +
         `  titles: [${(def.titles || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
         `  snippets: [${(def.snippets || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
@@ -5559,11 +5590,16 @@
       if (key === 'other') continue;
       const def = merged[key];
       if (def && def.disabled) {
+        const hasCustom = !!(def.match || def.containers || (def.titles && def.titles.length) || (def.snippets && def.snippets.length));
+        if (hasCustom) {
+          parts.push(`${keyToText(key)}: ${defToText(def, true)}`);
+          continue;
+        }
         const builtin = SELECTORS[key];
-        parts.push(`${key}: ${builtin ? defToText(builtin, true) : `{\n  disabled: true,\n}`}`);
+        parts.push(`${keyToText(key)}: ${builtin ? defToText(builtin, true) : `{\n  disabled: true,\n}`}`);
         continue;
       }
-      parts.push(`${key}: ${defToText(def, false)}`);
+      parts.push(`${keyToText(key)}: ${defToText(def, false)}`);
     }
     return parts.join(',\n');
   }
@@ -5658,7 +5694,14 @@
       if (key === 'other') continue;
       const def = config[key];
       if (!def || typeof def !== 'object' || Array.isArray(def)) continue;
-      if (def.disabled === true || def.disable === true) { out[key] = { disabled: true }; continue; }
+      if (def.disabled === true || def.disable === true) {
+        const rest = { ...def };
+        delete rest.disable;
+        rest.disabled = true;
+        const builtin = SELECTORS[key];
+        out[key] = (builtin && sameSelectorDef(rest, builtin)) ? { disabled: true } : rest;
+        continue;
+      }
       const rest = { ...def };
       if (rest.disable !== undefined) {
         if (rest.disabled === undefined) rest.disabled = rest.disable;
@@ -5705,7 +5748,11 @@
         const ch = s[j];
         if (ch === '\\') {
           const nx = s[j + 1];
-          if (nx === '\\' || nx === quote) { val += nx; j += 2; continue; }
+          if (nx === '\\') { val += '\\'; j += 2; continue; }
+          if (nx === quote) { val += quote; j += 2; continue; }
+          if (nx === 'n') { val += '\n'; j += 2; continue; }
+          if (nx === 'r') { val += '\r'; j += 2; continue; }
+          if (nx === 't') { val += '\t'; j += 2; continue; }
           val += ch + (nx || ''); j += 2; continue;
         }
         if (ch === quote) { i = j + 1; return val; }
@@ -5843,14 +5890,14 @@
   function showSelectorPanel() {
     injectWidgetStyles();
     hideStatsPanel();
-    const existing = document.getElementById('searchfilter-selector-panel');
+    const existing = document.getElementById('serh-selector-panel');
     if (existing) {
       if (typeof existing._cleanupClick === 'function') existing._cleanupClick();
       existing.remove();
       return;
     }
 
-    const panel = createPanel('searchfilter-selector-panel', '320px', '15px');
+    const panel = createPanel('serh-selector-panel', '320px', '15px');
     const syncSelectorsEnabled = GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false);
 
     panel.innerHTML = `
@@ -5858,31 +5905,31 @@
                 <h3 style="margin:0;font-size:14px;line-height:1.2;">${t('selectorPanelTitle')}</h3>
                 <div style="display:flex;align-items:center;gap:6px;">
                     <label style="display:flex !important;align-items:center;font-size:12px;color:#4a5568;cursor:pointer;margin:0;white-space:nowrap;line-height:1;">
-                        <span class="searchfilter-switch">
-                            <input type="checkbox" id="searchfilter-selector-sync" ${syncSelectorsEnabled ? 'checked' : ''}>
-                            <span class="searchfilter-slider"></span>
+                        <span class="serh-switch">
+                            <input type="checkbox" id="serh-selector-sync" ${syncSelectorsEnabled ? 'checked' : ''}>
+                            <span class="serh-slider"></span>
                         </span>
                         <span style="line-height:1;">${t('syncCustomSelectors')}</span>
                     </label>
-                    <button id="searchfilter-selector-import" class="searchfilter-button searchfilter-button-secondary" style="padding: 3px 8px; border: 1px solid transparent;">${t('import')}</button>
-                    <button id="searchfilter-selector-export" class="searchfilter-button searchfilter-button-success" style="padding: 3px 8px; border: 1px solid transparent;">${t('export')}</button>
+                    <button id="serh-selector-import" class="serh-button serh-button-secondary" style="padding: 3px 8px; border: 1px solid transparent;">${t('import')}</button>
+                    <button id="serh-selector-export" class="serh-button serh-button-success" style="padding: 3px 8px; border: 1px solid transparent;">${t('export')}</button>
                 </div>
             </div>
             <div style="font-size:11px;color:#718096;margin-bottom:6px;">${t('selectorHint')}</div>
             <div class="rules-container" style="height:255px;">
-                <div id="searchfilter-sel-line-numbers"></div>
-                <textarea id="searchfilter-sel-rules" spellcheck="false" wrap="off">${escHtml(serializeSelectors())}</textarea>
+                <div id="serh-sel-line-numbers"></div>
+                <textarea id="serh-sel-rules" spellcheck="false" wrap="off">${escHtml(serializeSelectors())}</textarea>
             </div>
             <div style="display:flex;gap:6px;margin-top:8px;">
-                <button id="searchfilter-selector-save" class="searchfilter-button searchfilter-button-primary action-button" style="flex:2;">${t('save')}</button>
-                <button id="searchfilter-selector-reset" class="searchfilter-button searchfilter-button-danger action-button" style="flex:1;">${t('hlColorReset')}</button>
-                <button id="searchfilter-selector-cancel" class="searchfilter-button searchfilter-button-secondary action-button" style="flex:1;">${t('cancel')}</button>
+                <button id="serh-selector-save" class="serh-button serh-button-primary action-button" style="flex:2;">${t('save')}</button>
+                <button id="serh-selector-reset" class="serh-button serh-button-danger action-button" style="flex:1;">${t('hlColorReset')}</button>
+                <button id="serh-selector-cancel" class="serh-button serh-button-secondary action-button" style="flex:1;">${t('cancel')}</button>
             </div>
         `;
 
     const closePanel = bindOutsideClickClose(panel);
-    const textarea = document.getElementById('searchfilter-sel-rules');
-    const lineNums = document.getElementById('searchfilter-sel-line-numbers');
+    const textarea = document.getElementById('serh-sel-rules');
+    const lineNums = document.getElementById('serh-sel-line-numbers');
 
     const updateSelLineNumbers = () => {
       if (!textarea || !lineNums || !lineNums.isConnected) return;
@@ -5917,18 +5964,18 @@
       showToast(messages.join('\n'), 'error', 5000);
     };
 
-    document.getElementById('searchfilter-selector-sync').onchange = (e) => {
+    document.getElementById('serh-selector-sync').onchange = (e) => {
       GM_setValue(WEBDAV_SYNC_SELECTORS_KEY, e.target.checked);
     };
 
-    document.getElementById('searchfilter-selector-import').onclick = () => {
+    document.getElementById('serh-selector-import').onclick = () => {
       importSelectorsFromFile(textarea, () => {
         showError([]);
         updateSelLineNumbers();
       });
     };
 
-    document.getElementById('searchfilter-selector-export').onclick = () => {
+    document.getElementById('serh-selector-export').onclick = () => {
       preventPanelClose = true;
       const content = textarea.value;
       if (!content.trim()) {
@@ -5953,7 +6000,7 @@
       preventPanelClose = false;
     };
 
-    document.getElementById('searchfilter-selector-save').onclick = () => {
+    document.getElementById('serh-selector-save').onclick = () => {
       const parsed = parseSelectorText(textarea.value);
       if (!parsed.config || parsed.errors.length) {
         showError(parsed.errors.length ? parsed.errors : [t('selectorJsonError')]);
@@ -5968,14 +6015,14 @@
       showToast(t('saved'), 'success');
     };
 
-    document.getElementById('searchfilter-selector-reset').onclick = () => {
+    document.getElementById('serh-selector-reset').onclick = () => {
       applyUserSelectors({});
       textarea.value = serializeSelectors();
       showError([]);
       updateSelLineNumbers();
     };
 
-    document.getElementById('searchfilter-selector-cancel').onclick = (e) => {
+    document.getElementById('serh-selector-cancel').onclick = (e) => {
       e.stopPropagation();
       closePanel();
     };
@@ -6276,13 +6323,34 @@
     return /^\s*<!DOCTYPE\s+html|^\s*<html[\s>]/i.test(String(content || ''));
   }
 
+  // 识别非规则响应
+  function isInvalidSyncResponse(content, responseHeaders) {
+    const text = String(content || '');
+    if (isHtmlResponse(text)) return true;
+    const trimmed = text.replace(/^\uFEFF/, '').trim();
+    if (/^<\?xml/i.test(trimmed)) return true;
+    const c0 = trimmed.charAt(0);
+    if (c0 === '\u007B' || c0 === '\u005B') {
+      try {
+        JSON.parse(trimmed);
+        return true;
+      } catch (_) {}
+    }
+    const ctMatch = responseHeaders && String(responseHeaders).match(/content-type:\s*([^\r\n;]+)/i);
+    const ct = ctMatch ? ctMatch[1].trim().toLowerCase() : '';
+    if (/\b(?:application\/(?:json|xml)|text\/html)\b/.test(ct)) return true;
+    const firstLine = trimmed.split('\n')[0].trim();
+    if (/^(?:4\d\d|5\d\d)(?:\s|$)/.test(firstLine)) return true;
+    return /^(?:not found|forbidden|unauthorized|unauthenticated|bad request|proxy authentication required|request timeout|internal server error|bad gateway|service unavailable|gateway time-?out|error\d*|exception)\s*$/i.test(firstLine);
+  }
+
   function parseSyncHeader(content) {
     const lines = String(content || '').replace(/^\uFEFF/, '').split('\n');
     let config = null;
     let selectors = null;
     let rawScriptConfig = null;
     let rawSelectors = null;
-    let startIndex = 0;
+    const headerLineIndexes = new Set();
 
     for (let i = 0; i < Math.min(lines.length, 50); i++) {
       const line = lines[i];
@@ -6293,7 +6361,7 @@
         } catch (e) {
           if (currentConfig.debug) console.warn('[WebDAV] 配置头解析失败:', e);
         }
-        startIndex = Math.max(startIndex, i + 1);
+        headerLineIndexes.add(i);
       } else if (line.startsWith('# Selectors:')) {
         rawSelectors = line;
         try {
@@ -6301,9 +6369,8 @@
         } catch (e) {
           if (currentConfig.debug) console.warn('[WebDAV] 选择器头解析失败:', e);
         }
-        startIndex = Math.max(startIndex, i + 1);
-      } else if (line.startsWith('#')) {
-      } else {
+        headerLineIndexes.add(i);
+      } else if (!line.startsWith('#')) {
         break;
       }
     }
@@ -6314,7 +6381,8 @@
       config = { selectors };
     }
 
-    return { config, rawScriptConfig, rawSelectors, restLines: lines.slice(startIndex) };
+    const restLines = lines.filter((_, idx) => !headerLineIndexes.has(idx));
+    return { config, rawScriptConfig, rawSelectors, restLines };
   }
 
   function safeBase64Encode(str) {
@@ -6594,14 +6662,14 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   function showSubscriptionPanel() {
     hideStatsPanel();
-    const existing = document.getElementById('searchfilter-subscription-panel');
+    const existing = document.getElementById('serh-subscription-panel');
     if (existing) {
       if (typeof existing._cleanupClick === 'function') existing._cleanupClick();
       existing.remove();
       return;
     }
 
-    const panel = createPanel('searchfilter-subscription-panel', '320px', '20px');
+    const panel = createPanel('serh-subscription-panel', '320px', '20px');
 
     let subscriptions = getSubscriptions();
 
@@ -6610,7 +6678,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       const enabled = typeof sub === 'object' && sub.enabled !== undefined ? sub.enabled : true;
       const row = document.createElement('div');
       row.className = 'subscription-row';
-      row.innerHTML = `<div class="subscription-meta-row"><span class="subscription-index"></span><div class="subscription-status-message"></div><span class="subscription-info"></span></div><div class="subscription-input-row"><label class="searchfilter-switch subscription-toggle-switch" style="margin:0 2px 0 0;"><input type="checkbox" class="subscription-enable-toggle" ${enabled ? 'checked' : ''}><span class="searchfilter-slider"></span></label><input type="text" class="subscription-url" placeholder="https://example.com/rules.txt"><button class="delete-subscription-btn">❌</button></div>`;
+      row.innerHTML = `<div class="subscription-meta-row"><span class="subscription-index"></span><div class="subscription-status-message"></div><span class="subscription-info"></span></div><div class="subscription-input-row"><label class="serh-switch subscription-toggle-switch" style="margin:0 2px 0 0;"><input type="checkbox" class="subscription-enable-toggle" ${enabled ? 'checked' : ''}><span class="serh-slider"></span></label><input type="text" class="subscription-url" placeholder="https://example.com/rules.txt"><button class="delete-subscription-btn">❌</button></div>`;
       row.querySelector('.subscription-url').value = url;
       row.dataset.originalUrl = url;
       const toggle = row.querySelector('.subscription-enable-toggle');
@@ -6627,30 +6695,31 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
             <div class="subscription-panel-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0;">
                 <h3 style="margin:0;font-size:16px;color:#2d3748;line-height:1;">${t('panelTitle')}</h3>
                 <label style="display:flex !important;align-items:center;font-size:12px;color:#4a5568;cursor:pointer;margin:0;white-space:nowrap;line-height:1;">
-                    <span class="searchfilter-switch">
-                        <input type="checkbox" id="subscription-auto-update" ${currentConfig.subscriptionAutoUpdate ? 'checked' : ''}>
-                        <span class="searchfilter-slider"></span>
+                    <span class="serh-switch">
+                        <input type="checkbox" id="serh-subscription-auto-update" ${currentConfig.subscriptionAutoUpdate ? 'checked' : ''}>
+                        <span class="serh-slider"></span>
                     </span>
                     <span style="line-height:1;">${t('autoUpdate')}</span>
                 </label>
             </div>
-            <div id="subscription-rows-container"></div>
+            <div id="serh-subscription-rows-container"></div>
             <div class="subscription-btn-group">
-                <button id="subscription-import" class="searchfilter-button searchfilter-button-primary">${t('import')}</button>
-                <button id="subscription-add" class="searchfilter-button searchfilter-button-success">+</button>
-                <button id="subscription-cancel" class="searchfilter-button searchfilter-button-secondary">${t('cancel')}</button>
+                <button id="serh-subscription-import" class="serh-button serh-button-primary">${t('import')}</button>
+                <button id="serh-subscription-add" class="serh-button serh-button-success">+</button>
+                <button id="serh-subscription-cancel" class="serh-button serh-button-secondary">${t('cancel')}</button>
             </div>
         `;
 
-    const container = document.getElementById('subscription-rows-container');
+    const container = document.getElementById('serh-subscription-rows-container');
     subscriptions.forEach(sub => {
       container.appendChild(createSubscriptionRow(sub));
     });
 
-    const addBtn = document.getElementById('subscription-add');
-    const autoUpdateSwitch = document.getElementById('subscription-auto-update');
+    const addBtn = document.getElementById('serh-subscription-add');
+    const autoUpdateSwitch = document.getElementById('serh-subscription-auto-update');
     if (autoUpdateSwitch) {
       autoUpdateSwitch.addEventListener('change', function() {
+        adoptStoredConfigBeforeWrite();
         currentConfig.subscriptionAutoUpdate = this.checked;
         persistConfig(false);
       });
@@ -6738,7 +6807,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           e.stopPropagation();
           const row = btn.closest('.subscription-row');
           const input = row.querySelector('.subscription-url');
-          const deletedUrl = input ? input.value.trim() : (row.dataset.originalUrl || '');
+          const origUrl = (row.dataset.originalUrl || '').trim();
+          const inputVal = input ? input.value.trim() : '';
+          const deletedUrl = origUrl || inputVal;
           if (deletedUrl) recordSubscriptionDeletions([deletedUrl]);
           row.remove();
           reindexRows();
@@ -6771,7 +6842,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       persistCurrentSubscriptions();
     });
 
-    document.getElementById('subscription-import').onclick = async () => {
+    document.getElementById('serh-subscription-import').onclick = async () => {
       const rows = Array.from(container.querySelectorAll('.subscription-row'));
       if (!persistCurrentSubscriptions()) return;
       showToast(t('importing'), 'info');
@@ -6819,7 +6890,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       }
     };
 
-    document.getElementById('subscription-cancel').onclick = (e) => {
+    document.getElementById('serh-subscription-cancel').onclick = (e) => {
       e.stopPropagation();
       closePanel();
     };
@@ -6828,7 +6899,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   function showWebDAVPanel() {
     hideStatsPanel();
-    const existing = document.getElementById('searchfilter-webdav-panel');
+    const existing = document.getElementById('serh-webdav-panel');
     if (existing) {
       if (typeof existing._cleanupClick === 'function') existing._cleanupClick();
       existing.remove();
@@ -6842,7 +6913,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       filename: 'rules.txt'
     });
 
-    const panel = createPanel('searchfilter-webdav-panel', '320px', '20px');
+    const panel = createPanel('serh-webdav-panel', '320px', '20px');
 
     const autoSyncEnabled = GM_getValue(WEBDAV_AUTO_SYNC_KEY, false);
     const syncConfigEnabled = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false);
@@ -6853,50 +6924,50 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         <h3 style="margin:0;font-size:16px;color:#2d3748;line-height:1;">${t('webdavTitle')}</h3>
         <div style="display:flex;align-items:center;gap:8px;">
             <label style="display:flex !important;align-items:center;font-size:12px;color:#4a5568;cursor:pointer;margin:0;white-space:nowrap;line-height:1;">
-                <span class="searchfilter-switch">
-                    <input type="checkbox" id="webdav-sync-config" ${syncConfigEnabled ? 'checked' : ''}>
-                    <span class="searchfilter-slider"></span>
+                <span class="serh-switch">
+                    <input type="checkbox" id="serh-webdav-sync-config" ${syncConfigEnabled ? 'checked' : ''}>
+                    <span class="serh-slider"></span>
                 </span>
                 <span style="line-height:1;">${t('syncScriptConfig')}</span>
             </label>
             <label style="display:flex !important;align-items:center;font-size:12px;color:#4a5568;cursor:pointer;margin:0;white-space:nowrap;line-height:1;">
-                <span class="searchfilter-switch">
-                    <input type="checkbox" id="webdav-auto-sync" ${autoSyncEnabled ? 'checked' : ''}>
-                    <span class="searchfilter-slider"></span>
+                <span class="serh-switch">
+                    <input type="checkbox" id="serh-webdav-auto-sync" ${autoSyncEnabled ? 'checked' : ''}>
+                    <span class="serh-slider"></span>
                 </span>
                 <span style="line-height:1;">${t('autoSync')}</span>
             </label>
         </div>
     </div>
-    <div class="webdav-row"><label>${t('webdavUrl')}</label><input id="webdav-url" type="text" placeholder="https://example.com/dav/files/"></div>
-    <div class="webdav-row"><label>${t('webdavUser')}</label><input id="webdav-username" type="text"></div>
+    <div class="webdav-row"><label>${t('webdavUrl')}</label><input id="serh-webdav-url" type="text" placeholder="https://example.com/dav/files/"></div>
+    <div class="webdav-row"><label>${t('webdavUser')}</label><input id="serh-webdav-username" type="text"></div>
     <div class="webdav-row">
         <label>${t('webdavPass')}</label>
         <div style="position: relative; display: flex; align-items: center;">
-            <input id="webdav-password" type="password" style="padding-right: 35px !important;">
-            <button id="webdav-toggle-password" type="button" style="position: absolute; right: 4px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; padding: 4px; font-size: 16px; line-height: 1; color: #718096; display: flex; align-items: center; justify-content: center; z-index: 1;">🐵</button>
+            <input id="serh-webdav-password" type="password" style="padding-right: 35px !important;">
+            <button id="serh-webdav-toggle-password" type="button" style="position: absolute; right: 4px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; padding: 4px; font-size: 16px; line-height: 1; color: #718096; display: flex; align-items: center; justify-content: center; z-index: 1;">🐵</button>
         </div>
     </div>
-    <div class="webdav-row"><label>${t('filename')}</label><input id="webdav-filename" type="text" placeholder="rules.txt"></div>
+    <div class="webdav-row"><label>${t('filename')}</label><input id="serh-webdav-filename" type="text" placeholder="rules.txt"></div>
     <div class="webdav-btn-group">
-        <button id="webdav-upload" class="searchfilter-button searchfilter-button-success">${t('upload')}</button>
-        <button id="webdav-download" class="searchfilter-button searchfilter-button-primary">${t('download')}</button>
-        <button id="webdav-cancel" class="searchfilter-button searchfilter-button-secondary">${t('cancel')}</button>
+        <button id="serh-webdav-upload" class="serh-button serh-button-success">${t('upload')}</button>
+        <button id="serh-webdav-download" class="serh-button serh-button-primary">${t('download')}</button>
+        <button id="serh-webdav-cancel" class="serh-button serh-button-secondary">${t('cancel')}</button>
     </div>
 `;
 
     // 获取输入
-    const urlInput = document.getElementById('webdav-url');
-    const usernameInput = document.getElementById('webdav-username');
-    const passwordInput = document.getElementById('webdav-password');
-    const filenameInput = document.getElementById('webdav-filename');
+    const urlInput = document.getElementById('serh-webdav-url');
+    const usernameInput = document.getElementById('serh-webdav-username');
+    const passwordInput = document.getElementById('serh-webdav-password');
+    const filenameInput = document.getElementById('serh-webdav-filename');
     urlInput.value = webdavConfig.url || '';
     usernameInput.value = webdavConfig.username || '';
     passwordInput.value = webdavConfig.password || '';
     filenameInput.value = webdavConfig.filename || 'rules.txt';
 
     // 密码显隐
-    const togglePasswordBtn = document.getElementById('webdav-toggle-password');
+    const togglePasswordBtn = document.getElementById('serh-webdav-toggle-password');
     if (togglePasswordBtn && passwordInput) {
       togglePasswordBtn.addEventListener('click', (e) => {
         e.preventDefault();
@@ -6952,16 +7023,17 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     });
 
     // webdav上传
-    document.getElementById('webdav-upload').onclick = async () => {
+    document.getElementById('serh-webdav-upload').onclick = async () => {
       const config = getValidatedWebDAVConfig();
       if (!config) return;
-      const uploadBtn = document.getElementById('webdav-upload');
+      const uploadBtn = document.getElementById('serh-webdav-upload');
       if (uploadBtn.disabled) return;
       uploadBtn.disabled = true;
-      const textarea = document.getElementById('searchfilter-rules');
+      const textarea = document.getElementById('serh-rules');
       if (textarea) {
         const newRules = filterValidRuleLines(textarea.value.split('\n'));
         applyRuleDiff(currentConfig.rules, newRules);
+        adoptStoredConfigBeforeWrite();
         currentConfig.rules = newRules;
         persistConfig(false);
       }
@@ -6975,7 +7047,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           let remoteSyncedAt = 0;
           try {
             const resp = await gmRequest('GET', fullUrl, { headers, allow404: true });
-            if (resp.status !== 404 && !isHtmlResponse(resp.responseText)) {
+            if (resp.status !== 404 && !isInvalidSyncResponse(resp.responseText, resp.responseHeaders)) {
               const parsed = parseSyncHeader(resp.responseText);
               remotePreserved = {
                 rawScriptConfig: parsed.rawScriptConfig,
@@ -7004,7 +7076,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           showToast(t('webdavSyncLocked'), 'error', 4000);
         } else {
           showToast(t('uploadSuccess'), 'success');
-          const mainPanel = document.getElementById('searchfilter-panel');
+          const mainPanel = document.getElementById('serh-panel');
           if (mainPanel && Array.isArray(currentConfig.rules)) {
             mainPanel._initialRules = [...currentConfig.rules];
           }
@@ -7018,18 +7090,18 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       }
     };
 
-    document.getElementById('webdav-auto-sync').onchange = (e) => {
+    document.getElementById('serh-webdav-auto-sync').onchange = (e) => {
       GM_setValue(WEBDAV_AUTO_SYNC_KEY, e.target.checked);
     };
-    document.getElementById('webdav-sync-config').onchange = (e) => {
+    document.getElementById('serh-webdav-sync-config').onchange = (e) => {
       GM_setValue(WEBDAV_SYNC_CONFIG_KEY, e.target.checked);
     };
 
     // webdav下载
-    document.getElementById('webdav-download').onclick = async () => {
+    document.getElementById('serh-webdav-download').onclick = async () => {
       const config = getValidatedWebDAVConfig();
       if (!config) return;
-      const downloadBtn = document.getElementById('webdav-download');
+      const downloadBtn = document.getElementById('serh-webdav-download');
       if (downloadBtn.disabled) return;
       downloadBtn.disabled = true;
       const loadingToast = showToast(t('webdavDownloading'), 'info', 10000);
@@ -7051,7 +7123,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       }
     };
 
-    document.getElementById('webdav-cancel').onclick = (e) => {
+    document.getElementById('serh-webdav-cancel').onclick = (e) => {
       e.stopPropagation();
       isExplicitCancel = true;
       closePanel();
@@ -7063,7 +7135,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     const { fullUrl, headers } = getWebDAVRequest(config);
     const resp = await gmRequest('GET', fullUrl, { headers });
     const content = resp.responseText;
-    if (isHtmlResponse(content)) throw new Error(t('subImportFailed'));
+    if (isInvalidSyncResponse(content, resp.responseHeaders)) throw new Error(t('subImportFailed'));
     const parsedHeader = parseSyncHeader(content);
     if (parsedHeader.config) {
       const { syncedAt, subscriptions, subscriptionTombstones, bubbleState, bubbleSize, selectors, tombstones, ruleAddedTimes, ...settings } = parsedHeader.config;
@@ -7128,11 +7200,11 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     if (cloudTime > 0) {
       GM_setValue(LOCAL_LAST_MODIFIED_KEY, cloudTime);
     }
-    const mainPanel = document.getElementById('searchfilter-panel');
+    const mainPanel = document.getElementById('serh-panel');
     if (mainPanel && Array.isArray(currentConfig.rules)) {
       mainPanel._initialRules = [...currentConfig.rules];
     }
-    const textarea = document.getElementById('searchfilter-rules');
+    const textarea = document.getElementById('serh-rules');
     if (textarea) {
       textarea.value = newRules.join('\n');
       updateLineNumbers();
@@ -7156,8 +7228,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     let parsedHeader = null;
     if (resp.status !== 404) {
       const content = resp.responseText;
-      if (isHtmlResponse(content)) {
-        console.warn('[自动 WebDAV] 云端返回 HTML，已跳过');
+      if (isInvalidSyncResponse(content, resp.responseHeaders)) {
+        console.warn('[自动 WebDAV] 云端返回异常内容，已跳过');
         return;
       }
       parsedHeader = parseSyncHeader(content);
@@ -7304,7 +7376,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     if (_webdavSyncDelayedTimer) clearTimeout(_webdavSyncDelayedTimer);
     _webdavSyncDelayedTimer = setTimeout(() => {
       _webdavSyncDelayedTimer = null;
-      if (document.getElementById('searchfilter-panel')) {
+      if (document.getElementById('serh-panel')) {
         triggerWebDAVSyncDelayed(3000);
         return;
       }
@@ -7322,7 +7394,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     const lastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0);
     const now = Date.now();
     if (lastSync > 0 && now >= lastSync && now - lastSync < WEBDAV_AUTO_SYNC_INTERVAL) return;
-    if (document.getElementById('searchfilter-panel')) return;
+    if (document.getElementById('serh-panel')) return;
     runWithSyncLock('webdav', async () => {
       const currentLastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0);
       const currentTime = Date.now();
@@ -7364,7 +7436,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       reader.onload = (event) => {
         let content = event.target.result;
         content = parseSyncHeader(content).restLines.join('\n');
-        const textarea = document.getElementById('searchfilter-rules');
+        const textarea = document.getElementById('serh-rules');
         if (textarea) {
           textarea.value = content;
           updateLineNumbers();
@@ -7382,7 +7454,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   // TXT导出
   function exportRulesToFile() {
     preventPanelClose = true;
-    const textarea = document.getElementById('searchfilter-rules');
+    const textarea = document.getElementById('serh-rules');
     const content = textarea.value;
     if (!content.trim()) {
       alert(t('noRulesExport'));
@@ -7410,6 +7482,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   function registerToggleMenu(labelKey, isOn, onText, offText, markerOn, markerOff, apply) {
     const on = isOn();
     GM_registerMenuCommand((on ? markerOn : markerOff) + t(labelKey) + (on ? `: ${t(onText)}` : `: ${t(offText)}`), () => {
+      adoptStoredConfigBeforeWrite();
       apply();
       persistConfig(true);
       location.reload();
@@ -7422,6 +7495,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     GM_registerMenuCommand(t('menuHighlightColor'), () => showHighlightColorPanel());
     const langDisplay = currentConfig.language === 'zh-CN' ? t('menuLang') : t('menuLangEn');
     GM_registerMenuCommand((currentConfig.language === 'zh-CN' ? '🟢 ' : '🔵 ') + langDisplay, () => {
+      adoptStoredConfigBeforeWrite();
       currentConfig.language = currentConfig.language === 'zh-CN' ? 'en' : 'zh-CN';
       persistConfig(true);
       location.reload();
@@ -7593,7 +7667,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           history[method] = function(...args) {
             const ret = orig.apply(this, args);
             try {
-              window.dispatchEvent(new Event('searchfilter:locationchange'));
+              window.dispatchEvent(new Event('serh:locationchange'));
             } catch (e) {}
             return ret;
           };
@@ -7601,7 +7675,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       };
       wrapHistoryMethod('pushState');
       wrapHistoryMethod('replaceState');
-      window.addEventListener('searchfilter:locationchange', _urlChangeHandler);
+      window.addEventListener('serh:locationchange', _urlChangeHandler);
     }
   }
 
@@ -7620,8 +7694,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
     _searchForm = null;
     _searchFormHandler = null;
-    document.querySelectorAll('.searchfilter-quick-block').forEach(btn => btn.remove());
-    const confirmPanel = document.getElementById('searchfilter-block-confirm-dialog');
+    document.querySelectorAll('.serh-quick-block').forEach(btn => btn.remove());
+    const confirmPanel = document.getElementById('serh-block-confirm-dialog');
     if (confirmPanel) confirmPanel.remove();
     document.querySelectorAll('[data-blocker-yandex-parent]').forEach(el => {
       el.style.display = '';
@@ -7634,7 +7708,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     });
     showHiddenResults = false;
     _observedSelector = '';
-    const status = document.getElementById('searchfilter-status');
+    const status = document.getElementById('serh-status');
     if (status) status.remove();
     removeGlobalStyles();
   }
@@ -7684,7 +7758,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   // 多标签页感知
   function checkExternalConfigChange() {
-    if (document.getElementById('searchfilter-panel')) return false;
+    if (document.getElementById('serh-panel')) return false;
     if (!adoptStoredConfigIfNewer()) return false;
     forceReprocessAll();
     return true;
