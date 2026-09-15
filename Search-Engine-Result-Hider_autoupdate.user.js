@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/SadYuyuko
-// @version      8.2.3
+// @version      8.2.4
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -5907,6 +5907,9 @@
       resetSelectorCache();
       refreshEngineSite();
       GM_setValue(LOCAL_LAST_MODIFIED_KEY, Date.now());
+      if (typeof triggerWebDAVSyncDelayed === 'function') {
+        triggerWebDAVSyncDelayed(5000);
+      }
     };
 
     const showError = (messages) => {
@@ -6075,7 +6078,7 @@
         };
       });
 
-    // 订阅同步: 已被打上删除墓碑的本地订阅不再复活
+    // 订阅同步
     const localOnly = existing.filter(localSub =>
       localSub && localSub.url &&
       !mergedSubTombstones[localSub.url] &&
@@ -6342,8 +6345,11 @@
       headers['Authorization'] = 'Basic ' + safeBase64Encode(authStr);
     }
     const cleanFilename = String(config.filename || 'rules.txt').trim().replace(/^\/+/, '');
-    const encodedFilename = cleanFilename.split('/').map(encodeURIComponent).join('/');
-    const cleanFolderUrl = String(config.url).trim().replace(/\/+$/, '') + '/';
+    const segments = cleanFilename.split('/').filter(Boolean);
+    const fileBaseName = segments.pop() || 'rules.txt';
+    const subPath = segments.length > 0 ? segments.map(encodeURIComponent).join('/') + '/' : '';
+    const cleanFolderUrl = String(config.url).trim().replace(/\/+$/, '') + '/' + subPath;
+    const encodedFilename = encodeURIComponent(fileBaseName);
     return {
       folderUrl: cleanFolderUrl,
       fullUrl: cleanFolderUrl + encodedFilename,
@@ -6352,13 +6358,13 @@
     };
   }
 
+    // 递归创建目录
   async function ensureWebDAVFolder(folderUrl, headers) {
     let url = String(folderUrl).trim().replace(/\/+$/, '') + '/';
     const parsed = new URL(url);
     const rootPath = parsed.origin + '/';
     if (url === rootPath) return;
 
-    // 检查目录是否存在
     try {
       const resp = await gmRequest('PROPFIND', url, {
         headers: { ...headers, Depth: '0' },
@@ -6367,7 +6373,6 @@
       if (resp.status === 207 || resp.status === 200) return;
     } catch (_) {}
 
-    // 递归创建目录
     const trimmedPath = url.slice(0, url.lastIndexOf('/', url.length - 2) + 1);
     if (trimmedPath && trimmedPath !== rootPath && trimmedPath.length > parsed.origin.length) {
       await ensureWebDAVFolder(trimmedPath, headers);
@@ -6721,6 +6726,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         if (input) row.dataset.originalUrl = input.value.trim();
       });
       GM_setValue(LOCAL_LAST_MODIFIED_KEY, Date.now());
+      if (typeof triggerWebDAVSyncDelayed === 'function') {
+        triggerWebDAVSyncDelayed(5000);
+      }
       return true;
     }
 
@@ -7090,20 +7098,21 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         refreshEngineSite();
       }
     }
-    const downloadedRawRules = parsedHeader.restLines.map(r => r.trim()).filter(r => r);
-    const activeTombstones = getLocalTombstones();
-    const activeAddedTimes = getLocalRuleAddedTimes();
-
-    const newRules = downloadedRawRules.filter(r => {
+    const newRules = parsedHeader.restLines.map(r => r.trim()).filter(r => r);
+    const localTombstones = getLocalTombstones();
+    let tombstonesCleaned = false;
+    for (const r of newRules) {
       const k = getRuleKey(r);
-      if (!k || k.startsWith('#')) return true;
-      const delTime = activeTombstones[k];
-      if (!delTime) return true;
-      const addedTime = activeAddedTimes[k] || 0;
-      return addedTime > delTime;
-    });
+      if (k && !k.startsWith('#') && localTombstones[k]) {
+        delete localTombstones[k];
+        tombstonesCleaned = true;
+      }
+    }
+    if (tombstonesCleaned) {
+      GM_setValue(TOMBSTONES_KEY, localTombstones);
+    }
 
-    recordRuleAddedTimes(newRules, Date.now(), false);
+    recordRuleAddedTimes(newRules, Date.now(), true);
     currentConfig.rules = newRules;
     persistConfig(false);
     let cloudTime = 0;
@@ -7118,6 +7127,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
     if (cloudTime > 0) {
       GM_setValue(LOCAL_LAST_MODIFIED_KEY, cloudTime);
+    }
+    const mainPanel = document.getElementById('searchfilter-panel');
+    if (mainPanel && Array.isArray(currentConfig.rules)) {
+      mainPanel._initialRules = [...currentConfig.rules];
     }
     const textarea = document.getElementById('searchfilter-rules');
     if (textarea) {
@@ -7166,7 +7179,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           cloudETag = etagMatch[1].trim();
         }
       }
-      cloudTime = Math.max(headerTime || 0, lastModTime || 0);
+      cloudTime = headerTime > 0 ? headerTime : lastModTime;
       if (isNaN(cloudTime)) cloudTime = 0;
     }
 
@@ -7306,10 +7319,14 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     const config = GM_getValue(WEBDAV_KEY);
     if (!config || !config.url) return;
     if (!isHttpsUrl(config.url)) return;
-    if (Date.now() - GM_getValue(WEBDAV_LAST_SYNC_KEY, 0) < WEBDAV_AUTO_SYNC_INTERVAL) return;
+    const lastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0);
+    const now = Date.now();
+    if (lastSync > 0 && now >= lastSync && now - lastSync < WEBDAV_AUTO_SYNC_INTERVAL) return;
     if (document.getElementById('searchfilter-panel')) return;
     runWithSyncLock('webdav', async () => {
-      if (Date.now() - GM_getValue(WEBDAV_LAST_SYNC_KEY, 0) < WEBDAV_AUTO_SYNC_INTERVAL) return;
+      const currentLastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0);
+      const currentTime = Date.now();
+      if (currentLastSync > 0 && currentTime >= currentLastSync && currentTime - currentLastSync < WEBDAV_AUTO_SYNC_INTERVAL) return;
       await performAutoWebDAVSync(config);
     }).catch(err => console.error('[自动 WebDAV] 同步失败:', err.message));
   }
@@ -7401,25 +7418,28 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   function registerMenu() {
     GM_registerMenuCommand(t('menuOpenPanel'), () => showConfigPanel());
-    registerToggleMenu('menuErrorDetection', () => currentConfig.errorDetection !== false, 'stateEnabled', 'stateDisabled', '🟢 ', '🔴 ', () => {
-      currentConfig.errorDetection = currentConfig.errorDetection === false ? true : false;
-    });
-    registerToggleMenu('menuCenter', () => currentConfig.panelCentered, 'stateEnabled', 'stateDisabled', '🟢 ', '🔴 ', () => {
-      currentConfig.panelCentered = !currentConfig.panelCentered;
-    });
-    registerToggleMenu('menuBubble', () => currentConfig.showBubble, 'menuBubbleStateShow', 'menuBubbleStateHide', '🟢 ', '🔴 ', () => {
-      currentConfig.showBubble = !currentConfig.showBubble;
-    });
-    registerToggleMenu('menuBubbleAction', () => currentConfig.bubbleAction === 'openPanel', 'menuBubbleActionOpen', 'menuBubbleActionToggle', '🟢 ', '🔵 ', () => {
-      currentConfig.bubbleAction = currentConfig.bubbleAction === 'openPanel' ? 'toggleHidden' : 'openPanel';
-    });
+    GM_registerMenuCommand(t('menuCustomSelectors'), showSelectorPanel);
+    GM_registerMenuCommand(t('menuHighlightColor'), () => showHighlightColorPanel());
     const langDisplay = currentConfig.language === 'zh-CN' ? t('menuLang') : t('menuLangEn');
     GM_registerMenuCommand((currentConfig.language === 'zh-CN' ? '🟢 ' : '🔵 ') + langDisplay, () => {
       currentConfig.language = currentConfig.language === 'zh-CN' ? 'en' : 'zh-CN';
       persistConfig(true);
       location.reload();
     });
-    GM_registerMenuCommand(t('menuHighlightColor'), () => showHighlightColorPanel());
+    if (isEngineSite()) {
+      registerToggleMenu('menuErrorDetection', () => currentConfig.errorDetection !== false, 'stateEnabled', 'stateDisabled', '🟢 ', '🔴 ', () => {
+        currentConfig.errorDetection = currentConfig.errorDetection === false ? true : false;
+      });
+      registerToggleMenu('menuCenter', () => currentConfig.panelCentered, 'stateEnabled', 'stateDisabled', '🟢 ', '🔴 ', () => {
+        currentConfig.panelCentered = !currentConfig.panelCentered;
+      });
+      registerToggleMenu('menuBubble', () => currentConfig.showBubble, 'menuBubbleStateShow', 'menuBubbleStateHide', '🟢 ', '🔴 ', () => {
+        currentConfig.showBubble = !currentConfig.showBubble;
+      });
+      registerToggleMenu('menuBubbleAction', () => currentConfig.bubbleAction === 'openPanel', 'menuBubbleActionOpen', 'menuBubbleActionToggle', '🟢 ', '🔵 ', () => {
+        currentConfig.bubbleAction = currentConfig.bubbleAction === 'openPanel' ? 'toggleHidden' : 'openPanel';
+      });
+    }
   }
 
   // 跨标签页同步锁
@@ -7689,7 +7709,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     exposeDebugApi();
 
     registerMenu();
-    GM_registerMenuCommand(t('menuCustomSelectors'), showSelectorPanel);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
