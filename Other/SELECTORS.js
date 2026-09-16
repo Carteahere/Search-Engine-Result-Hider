@@ -22,10 +22,10 @@
     },
     duckduckgo: {
       match: /^(?:(?:www|html|start|lite|m|safe)\.)?(?:duckduckgo\.com|ddg\.gg)$/,
-      containers: '[data-testid="result"], .result, .web-result, .tile, .tile--ad',
-      titles: ['a[data-testid="result-title-a"]', '.result__title', '.tile__title', '.tile--title__title', 'h2 a', 'a h2'],
+      containers: '[data-testid="result"], [data-testid="web-vertical"] li > article, .result, .web-result, .tile',
+      titles: ['a[data-testid="result-title-a"]', '.result__title', '.tile__title', '.tile--title__title', 'h2 a', 'a h2', 'h2'],
       snippets: ['[data-testid="result-snippet"]', '[data-result="snippet"]', '.result__snippet'],
-      links: ['a[data-testid="result-extras-url-link"]', 'a[data-testid="result-title-a"]', '.result__url', '.tile--title__domain', 'a[href]'],
+      links: ['a[data-testid="result-extras-url-link"]', 'a[data-testid="result-title-a"]', 'h2 > a', '.result__url', 'a[href]'],
     },
     yandex: {
       match: /^(?:www\.)?(?:ya\.ru|yandex\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,}))$/,
