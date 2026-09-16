@@ -393,7 +393,7 @@ assert('B2: 正常高亮域名规则不受影响', cr.highlightDomains.has('good
 
 // ==== 来源: test-priority.cjs ====
 await (async () => {
-const fns = ['safeRegexTest', 'matchDomainEntryType', 'checkDynamicConditions']
+const fns = ['safeRegexTest', 'matchDomainEntryType', 'checkDynamicConditions', 'toASCIIHostname', 'hostLabelToASCII']
   .map((n) => extractFn(src, n));
 
 const crmMarker = 'function checkRuleMatchOptimized(';

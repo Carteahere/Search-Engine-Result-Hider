@@ -193,6 +193,12 @@ r = condExpr('title *= "a" &', 'google');
 assert('错2: &缺右操作数', r.errors && r.errors.some((e) => e.startsWith('syntax')));
 r = condExpr('title *= "a" && title *= "b"', 'google');
 assert('错3: 连续&', r.errors && r.errors.some((e) => e.startsWith('syntax')));
+r = condExpr('title *= "a" || title *= "b"', 'google');
+assert('错3b: 连续|', r.errors && r.errors.some((e) => e.startsWith('syntax')));
+r = condExpr('title *= "a" &&& title *= "b"', 'google');
+assert('错3c: 三连&', r.errors && r.errors.some((e) => e.startsWith('syntax')));
+r = condExpr('title *= "a" & title *= "b" & title *= "c"', 'google');
+assert('错3d: 连续单&仍合法', !r.errors);
 r = condExpr('(title *= "a" | title *= "b"', 'google');
 assert('错4: 括号未闭合', r.errors && r.errors.some((e) => e.startsWith('syntax')));
 r = condExpr('title *= "a")', 'google');
@@ -282,7 +288,7 @@ assert('U17: 双url条件AND', ev(r, 't', 'https://ex.com/s/') === true && ev(r,
 r = condExpr('url = ~"x"', 'google');
 assert('U18: 乱写归unknown', r.errors && r.errors[0].startsWith('unknown'));
 
-// ---- $site 变量(uBlacklist 引擎属性)----
+// ---- $site 变量----
 r = condExpr('$site = "google"', 'google');
 assert('S1: $site命中', r.const === true);
 r = condExpr('$site = "google"', 'bing');
@@ -482,7 +488,6 @@ assert('R15: uBlacklist matches段提取', pc15.meta.name === 'Block Sample' && 
 const pc16 = m.parseRulesetContent('title: A\nmatches:\n  - *://*.b.com/*\n');
 assert('R16: matches段不残留垃圾行', pc16.lines.length === 1 && pc16.lines[0] === '*://*.b.com/*');
 
-// ---- uBlacklist 独立 i 修饰符兼容(默认仍忽略大小写)----
 r = condExpr('title *= "KW" i', 'google');
 assert('I1: title包含+i修饰', !r.errors && ev(r, 'contains kw', 'https://x/') === true && ev(r, 'nothing', 'https://x/') === false);
 r = condExpr('title $= "Domain" I', 'google');
@@ -684,6 +689,10 @@ assert('Q14: 表达式正则后的 @if 正常剥离', s.coreRule === 'host/\\.ex
 
 s = api.stripIfConditions('*://x.com/?q=~/foo @if(title *= "x")');
 assert('Q15: URL查询含=~/不误判正则', s.coreRule === '*://x.com/?q=~/foo' && s.staticPass === true);
+s = api.stripIfConditions('example.com/?q=~/foo @if(title *= "x")');
+assert('Q15b: 无协议URL含=~/仍识别@if', s.coreRule === 'example.com/?q=~/foo' && s.staticPass === true);
+s = api.stripIfConditions('*://x.com/* @if(url =~ /ad/) @if(title *= "x")');
+assert('Q15c: URL模式后合法=~正则条件不受影响', s.coreRule === '*://x.com/*' && s.staticPass === true);
 
 assert('Q16: 未闭合条件仍报错', api.validateRule('*://x.com/* @if((title *= "a")') === false);
 assert('Q17: 未闭合条件不剥离', api.stripIfConditions('*://x.com/* @if((title *= "a")').coreRule === '*://x.com/* @if((title *= "a")');

@@ -618,6 +618,41 @@ function createEnv() {
   api.clearStaleObserved('.a');
   check('STALE-C2 matches 异常按陈旧处理且不崩溃', bad.observed === false && bad.unobserveCount === 1);
 }
+
+// ---- filterNestedContainers: 嵌套容器外层自带链接时保留评估 ----
+{
+  const filterFn = new Function(`${extractFn(src, 'filterNestedContainers')}\nreturn filterNestedContainers;`)();
+  function makeNode(children, links) {
+    const node = { children: children || [], links: links || [] };
+    node.querySelectorAll = (sel) => (sel === 'a[href]' ? node.links : []);
+    node.querySelector = () => null;
+    node.contains = (other) => other !== node && (node.links.includes(other) || node.children.some((c) => c === other || c.contains(other)));
+    return node;
+  }
+  const innerLink = { id: 'inner-link' };
+  const ownLink = { id: 'own-link' };
+  const sub1 = makeNode([], [innerLink]);
+  const sub2 = makeNode([], []);
+  const outer = makeNode([sub1, sub2], [ownLink]);
+  const plain = makeNode([], []);
+  const kept = filterFn([outer, sub1, sub2, plain], 'div.g, div.MjjYud');
+  check('NEST-N1 聚合块外层自带独立链接时保留评估', kept.includes(outer) && kept.includes(sub1) && kept.includes(sub2) && kept.includes(plain));
+
+  const wrapLink = { id: 'wrap-link' };
+  const wsub = makeNode([], [wrapLink]);
+  const wrapper = makeNode([wsub], [wrapLink]);
+  const kept2 = filterFn([wrapper, wsub], 'div.g');
+  check('NEST-N2 纯包装外层(链接全属内层)仍被丢弃', !kept2.includes(wrapper) && kept2.includes(wsub));
+
+  const weird = { querySelector() { throw new Error('bad'); }, querySelectorAll() { throw new Error('bad'); }, contains() { return false; } };
+  check('NEST-N3 选择器异常时不崩溃', filterFn([weird], 'div.g').length === 1);
+
+  const obsLink = { id: 'obs-link' };
+  const obsInner = makeNode([], [obsLink]);
+  const outerOnly = makeNode([obsInner], [makeNode([], []), { id: 'o2' }]);
+  const kept3 = filterFn([outerOnly], 'div.g');
+  check('NEST-N4 内层不在批次时外层按自身链接判断', kept3.includes(outerOnly));
+}
 })();
 
 // ==== 来源: test-engine-lifecycle.cjs ====
@@ -921,6 +956,13 @@ const cases = [
   ['www.bing.com.hk', 'bing'],
   ['www.bing.com.tw', 'bing'],
   ['www.bing.com.au', 'bing'],
+  ['www2.bing.com', 'bing'],
+  ['www3.bing.com', 'bing'],
+  ['www4.bing.com', 'bing'],
+  ['www5.bing.com', 'other'],
+  ['noai.duckduckgo.com', 'duckduckgo'],
+  ['start.duckduckgo.com', 'duckduckgo'],
+  ['lite.duckduckgo.com', 'duckduckgo'],
   ['google.com', 'google'],
   ['m.google.com', 'google'],
   ['www.google.co.jp', 'google'],
