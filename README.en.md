@@ -4,7 +4,7 @@
 
 [中文](README.md) | [English](README.en.md) | Group [TG](https://t.me/+qBqMTqjc4Xk5M2Jh)
 
-Implements complex-rule search result blocking on browsers that only support user script installation.  
+Implements complex-rule search result blocking on browsers that **only support user script installation**.  
 Supports URL matching including uBlacklist basic rules, regex matching, title matching, whitelist matching, target result highlighting, and result snippet matching.  
 Currently supported search engines: Bing, Google, Google Scholar, DuckDuckGo, Yandex, Brave, Yahoo  
 Automatic redirect removal engines: Bing, Google, Google Scholar, DuckDuckGo, Yahoo
