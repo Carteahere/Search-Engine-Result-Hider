@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/SadYuyuko
-// @version      8.2.5
+// @version      8.2.6
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -34,7 +34,6 @@
   if (window.top !== window.self) return;
 
   let preventPanelClose = false;
-  let yandexParentTimeouts = new Set();
   let _engineSiteSetup = false;
   let _domObserver = null;
   let _observedSelector = '';
@@ -62,7 +61,6 @@
   const WEBDAV_LAST_SYNC_SELECTORS_KEY = 'searchfilter_webdav_last_sync_selectors';
   const SELECTORS_KEY = 'searchfilter_selectors';
   const HL_STATS_REGEX = /^@\d+/;
-  const MAX_SUBSCRIPTIONS = 100;
   const AUTO_UPDATE_INTERVAL = 12 * 60 * 60 * 1000;
   const WEBDAV_AUTO_SYNC_INTERVAL = 1 * 60 * 60 * 1000;
 
@@ -107,7 +105,7 @@
   // 选择器
   const SELECTORS = {
     bing: {
-      match: /^(?:(?:www|cn|www2|global|m)\.)?bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
+      match: /^(?:(?:www[2-4]?|cn|global|m)\.)?bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
       containers: 'li.b_algo, div.b_algo',
       titles: ['h2 a', 'a h2', '.b_title'],
       snippets: ['.b_caption p', '.b_snippet', '.b_paractl p', '.b_lineclamp2'],
@@ -128,14 +126,14 @@
       links: 'a[href]',
     },
     duckduckgo: {
-      match: /^(?:(?:www|html|start|lite|m|safe)\.)?(?:duckduckgo\.com|ddg\.gg)$/,
-      containers: '[data-testid="result"], .result, .web-result, .tile, .tile--ad',
-      titles: ['a[data-testid="result-title-a"]', '.result__title', '.tile__title', '.tile--title__title', 'h2 a', 'a h2'],
+      match: /^(?:(?:www|html|start|lite|m|safe|noai)\.)?(?:duckduckgo\.com|ddg\.gg)$/,
+      containers: '[data-testid="result"], [data-testid="web-vertical"] li > article, .result, .web-result, .tile',
+      titles: ['a[data-testid="result-title-a"]', '.result__title', '.tile__title', '.tile--title__title', 'h2 a', 'a h2', 'h2'],
       snippets: ['[data-testid="result-snippet"]', '[data-result="snippet"]', '.result__snippet'],
-      links: ['a[data-testid="result-extras-url-link"]', 'a[data-testid="result-title-a"]', '.result__url', '.tile--title__domain', 'a[href]'],
+      links: ['a[data-testid="result-extras-url-link"]', 'a[data-testid="result-title-a"]', 'h2 > a', '.result__url', 'a[href]'],
     },
     yandex: {
-      match: /^(?:www\.)?(?:ya\.ru|yandex\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,}))$/,
+      match: /^(?:(?:www|m)\.)?(?:ya\.ru|yandex\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,}))$/,
       containers: 'div.Organic',
       titles: ['.OrganicTitle'],
       snippets: ['.OrganicText'],
@@ -373,7 +371,6 @@
       subLinkEmpty: '链接为空',
       subImportSuccess: '导入成功',
       subImportFailed: '导入失败，请检查链接或网络状态',
-      maxSubscriptions: '最多只能添加100条订阅',
       webdavUploading: '正在上传...',
       webdavDownloading: '正在下载...',
       webdavUploadFailed: '上传失败: ',
@@ -491,7 +488,6 @@
       subLinkEmpty: 'URL is empty',
       subImportSuccess: 'Import success',
       subImportFailed: 'Import failed, check URL or network',
-      maxSubscriptions: 'Maximum 100 subscriptions allowed',
       webdavUploading: 'Uploading...',
       webdavDownloading: 'Downloading...',
       webdavUploadFailed: 'Upload failed: ',
@@ -697,7 +693,7 @@
       if (ch === '"') { inDQ = true; continue; }
       if (ch === '/' && !inRE) {
         const prev = line.slice(0, i).trimEnd();
-        if (/(?:=~|~)$/.test(prev) || (/(?:^|[\s(&|!])(?:title|url|host|path|scheme)$/i.test(prev) && !prev.includes('://'))) {
+        if (/(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*=~$/i.test(prev) || /(?:^|[\s(&|!])(?:title|url|host|path|scheme)$/i.test(prev)) {
           inRE = true;
           continue;
         }
@@ -786,6 +782,9 @@
 
       if (ch === '&' || ch === '|') {
         if (leafParens === 0) {
+          if (i + 1 < n && str[i + 1] === ch) {
+            return { error: true, tokens };
+          }
           flushLeaf();
           tokens.push(ch);
           i++;
@@ -1040,7 +1039,7 @@
       return s;
     };
 
-    const enginePropMatch = trimmed.match(/^\$site\s*[=:]\s*(?:['"](.*?)['"]|([^\s\)]+))\s*i?\s*$/i);
+    const enginePropMatch = trimmed.match(/^(?:\$site|engine)\s*[=:]\s*(?:['"](.*?)['"]|([^\s\)]+))\s*i?\s*$/i);
     if (enginePropMatch) {
       const raw = (enginePropMatch[1] !== undefined ? enginePropMatch[1] : enginePropMatch[2]).trim().toLowerCase();
       const target = raw.replace(/^ddg$/, 'duckduckgo').replace(/^yahoo-japan$/, 'yahoo');
@@ -1048,7 +1047,7 @@
       return { matched: true, static: engine === target || engine === raw };
     }
 
-    const categoryMatch = trimmed.match(/^\$category\s*[=:]\s*(?:['"](.*?)['"]|([^\s\)]+))\s*i?\s*$/i);
+    const categoryMatch = trimmed.match(/^(?:\$category|category)\s*[=:]\s*(?:['"](.*?)['"]|([^\s\)]+))\s*i?\s*$/i);
     if (categoryMatch) {
       const target = (categoryMatch[1] !== undefined ? categoryMatch[1] : categoryMatch[2]).trim().toLowerCase();
       return { matched: true, static: (currentCategory || 'web') === target };
@@ -1102,6 +1101,9 @@
   function validateUrlWildcard(rule) {
     if (!rule || /[<>"']/.test(rule) || /\s/.test(rule)) return false;
     if (rule.startsWith('|') || rule.startsWith('@@')) return false;
+    if (rule.includes('^')) return false;
+    const hostPart = rule.includes('://') ? (rule.split('/')[2] || '') : rule.split('/')[0];
+    if (/[$~]/.test(hostPart)) return false;
     if (/^\*:\/\/\*\*+/.test(rule) || /\*{3,}/.test(rule)) return false;
     if (rule.startsWith('*://') && !/^\*:\/\/[^/]+(?:\/.*)?$/.test(rule)) return false;
     return true;
@@ -1150,7 +1152,7 @@
       if (ch === '"') { inDQ = true; continue; }
       if (ch === '/') {
         const prev = str.slice(0, i).trimEnd();
-        if (/(?:=~|~)$/.test(prev) || (/(?:^|[\s(&|!])(?:title|url|host|path|scheme)$/i.test(prev) && !prev.includes('://'))) {
+        if (/(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*=~$/i.test(prev) || /(?:^|[\s(&|!])(?:title|url|host|path|scheme)$/i.test(prev)) {
           inRE = true;
           continue;
         }
@@ -1216,9 +1218,16 @@
       }
       if (ch === "'") { inSQ = true; continue; }
       if (ch === '"') { inDQ = true; continue; }
+      if (ch === '/' && !inRE) {
+        const prev = ruleStr.slice(0, i).trimEnd();
+        if (/(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*=~$/i.test(prev) || /(?:^|[\s(&|!])(?:title|url|host|path|scheme)$/i.test(prev)) {
+          inRE = true;
+          continue;
+        }
+      }
       if (ch === '@' && ruleStr.substr(i, 3).toLowerCase() === '@if') {
         const prevChar = i > 0 ? ruleStr[i - 1] : '';
-        const isBoundary = i === 0 || /\s/.test(prevChar) || prevChar === '@' || prevChar === '(';
+        const isBoundary = i === 0 || /\s/.test(prevChar) || prevChar === '@' || prevChar === '(' || prevChar === ')';
         if (!isBoundary) {
           continue;
         }
@@ -1248,7 +1257,7 @@
 
       const cond = parenResult.content.trim();
 
-      const rangeStart = occ.index === 0 ? 1 : occ.index;
+      const rangeStart = occ.index;
       ranges.push({
         start: rangeStart,
         end: parenResult.endIndex
@@ -1283,9 +1292,9 @@
   function looksLikeCondExpr(str) {
     if (!isCondExprCore(str)) return false;
     if (/^\s*!\s+(?:title|url|site|description|version|expires|homepage)\s*:\s*\S/i.test(str)) return false;
-    if (!/^\s*(?:!|\(|\$site\b|\$category\b|(?:site|title|url|host|path|scheme)\s*(?:=~|\^=|\$=|\*=|=|:|\/))/i.test(str)) return false;
-    return /(?:^|[\s(&|!])(?:\$site|\$category|site|title|url|host|path|scheme)\s*(?:(?:=~|\^=|\$=|\*=|=|:)\s*\S|\/)/i.test(str)
-      || /^\s*!\s*(?:(?:\$site|\$category|site|title|url|host|path|scheme)\b|\()/i.test(str);
+    if (!/^\s*(?:!|\(|\$site\b|\$category\b|engine\b|category\b|(?:site|title|url|host|path|scheme)\s*(?:=~|\^=|\$=|\*=|=|:|\/))/i.test(str)) return false;
+    return /(?:^|[\s(&|!])(?:\$site|\$category|engine|category|site|title|url|host|path|scheme)\s*(?:(?:=~|\^=|\$=|\*=|=|:)\s*\S|\/)/i.test(str)
+      || /^\s*!\s*(?:(?:\$site|\$category|engine|category|site|title|url|host|path|scheme)\b|\()/i.test(str);
   }
 
   // 判断规则行
@@ -1985,7 +1994,7 @@
       if (entry.isLocal !== undefined) return entry.isLocal;
       return entry.source === t('localRule') || entry.source === '本地规则' || entry.source === 'Local Rule';
     };
-    const lowerDomain = domain.toLowerCase();
+    const lowerDomain = toASCIIHostname(domain);
     let whitelisted = false;
     let highlightN = 0;
     let blockedInfo = null;
@@ -2292,14 +2301,24 @@
   function decodeRedirectTarget(raw) {
     if (!raw) return '';
     let value = String(raw);
-    try { value = decodeURIComponent(value); } catch (_) {}
+    for (let i = 0; i < 2; i++) {
+      if (/^https?:\/\//i.test(value)) break;
+      try {
+        const next = decodeURIComponent(value);
+        if (next === value) break;
+        value = next;
+      } catch (_) { break; }
+    }
     return /^https?:\/\//i.test(value) ? value : '';
   }
 
+  // bing重定向解码
   function decodeBingCkTarget(u) {
     if (!u || !u.startsWith('a1')) return '';
     let base64 = u.slice(2).replace(/-/g, '+').replace(/_/g, '/');
-    while (base64.length % 4) base64 += '=';
+    const rem = base64.length % 4;
+    if (rem === 1) return '';
+    if (rem > 0) base64 += '='.repeat(4 - rem);
     let realUrl = '';
     try {
       if (typeof atob === 'function') {
@@ -2314,6 +2333,14 @@
         realUrl = Buffer.from(base64, 'base64').toString('utf8');
       }
     } catch (_) { return ''; }
+
+    try {
+      if (!/^https?:\/\//i.test(realUrl) && realUrl.includes('%')) {
+        const decoded = decodeURIComponent(realUrl);
+        if (/^https?:\/\//i.test(decoded)) return decoded;
+      }
+    } catch (_) {}
+
     return /^https?:\/\//i.test(realUrl) ? realUrl : '';
   }
 
@@ -2356,7 +2383,9 @@
   function getCleanUrlAndFixDOM(link) {
     if (!link || !link.href) return '';
     const realUrl = unwrapRedirectUrl(link.href);
-    if (realUrl && realUrl !== link.href) link.href = realUrl;
+    if (realUrl && realUrl !== link.href) {
+      try { link.href = realUrl; } catch (_) {}
+    }
     return realUrl || link.href;
   }
 
@@ -2430,14 +2459,9 @@
       currentConfig.rules.push(newRule);
       recordRuleAddedTimes([newRule]);
       persistConfig(true);
-      syncRulesTextarea();
-      forceReprocessAll();
-    } else {
-      result.style.display = 'none';
-      result.setAttribute('data-is-blocked', 'true');
-      const totalBlocked = document.querySelectorAll('[data-is-blocked="true"]').length;
-      updateStatus(totalBlocked);
+      appendRuleToTextarea(newRule);
     }
+    forceReprocessAll();
   }
 
   // 二次确认面板
@@ -2621,7 +2645,11 @@
               }
             }
             persistConfig(true);
-            syncRulesTextarea();
+            if (action === 'delete') {
+              removeRulesFromTextarea([chosenRule]);
+            } else {
+              appendRuleToTextarea(chosenRule);
+            }
             forceReprocessAll();
           }, unblockOptions);
           return;
@@ -2633,7 +2661,7 @@
           recordRuleAddedTimes([whitelistRule]);
         }
         persistConfig(true);
-        syncRulesTextarea();
+        appendRuleToTextarea(whitelistRule);
         forceReprocessAll();
         return;
       }
@@ -2670,6 +2698,15 @@
     result.style.outline = '';
     result.style.outlineOffset = '';
     result.style.display = '';
+    if (result.parentElement && result.parentElement.dataset.blockerYandexParent) {
+      result.parentElement.style.display = '';
+      result.parentElement.removeAttribute('data-blocker-yandex-parent');
+    }
+    const googleParent = result.closest ? result.closest('[data-blocker-google-parent]') : null;
+    if (googleParent) {
+      googleParent.style.display = '';
+      googleParent.removeAttribute('data-blocker-google-parent');
+    }
     removeMatchedRuleLabel(result);
   }
 
@@ -2715,30 +2752,42 @@
 
     const matchResult = checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels);
 
-    // 黑名单＞高亮
+    // 容器处理
     if (matchResult && matchResult.blocked) {
       result.style.display = showHiddenResults ? '' : 'none';
       result.setAttribute('data-blocker-processed', 'true');
       result.setAttribute('data-is-blocked', 'true');
 
-      // 清除yandex空白条
+      // 清除yandex空白
       if (engine === 'yandex') {
-        const timeoutId = setTimeout(() => {
-          yandexParentTimeouts.delete(timeoutId);
-          const parent = result.parentElement;
-          if (parent) {
-            const hasVisibleSiblings = Array.from(parent.children).some(sibling => {
-              return sibling !== result &&
-                sibling.style.display !== 'none' &&
-                sibling.getAttribute('data-is-blocked') !== 'true';
-            });
-            if (!hasVisibleSiblings) {
-              parent.style.display = 'none';
-              parent.dataset.blockerYandexParent = 'true';
-            }
+        const parent = result.parentElement;
+        if (parent) {
+          const hasVisibleSiblings = Array.from(parent.children).some(sibling => {
+            return sibling !== result &&
+              sibling.style.display !== 'none' &&
+              sibling.getAttribute('data-is-blocked') !== 'true';
+          });
+          if (!hasVisibleSiblings) {
+            parent.style.display = showHiddenResults ? '' : 'none';
+            parent.dataset.blockerYandexParent = 'true';
           }
-        }, 50);
-        yandexParentTimeouts.add(timeoutId);
+        }
+      }
+
+      // 清除google空白
+      if (engine === 'google' && result.matches && result.matches('div.g')) {
+        const parent = result.closest('div.MjjYud');
+        if (parent && parent !== result) {
+          const hasVisibleSiblings = Array.from(parent.querySelectorAll('div.g')).some(otherG => {
+            return otherG !== result &&
+              otherG.style.display !== 'none' &&
+              otherG.getAttribute('data-is-blocked') !== 'true';
+          });
+          if (!hasVisibleSiblings) {
+            parent.style.display = showHiddenResults ? '' : 'none';
+            parent.dataset.blockerGoogleParent = 'true';
+          }
+        }
       }
 
       result.dataset.matchedRule = matchResult.rule || '';
@@ -2829,23 +2878,42 @@
     clearStaleObserved(selector);
   }
 
-  function filterNestedContainers(nodes) {
+  function filterNestedContainers(nodes, selector) {
     if (!nodes || nodes.length <= 1) return Array.from(nodes || []);
     const arr = Array.from(nodes);
-    return arr.filter(el => !arr.some(other => other !== el && other.contains(el)));
+    const hasOwnLink = (el) => {
+      try {
+        const links = el.querySelectorAll('a[href]');
+        for (const a of links) {
+          if (!arr.some(other => other !== el && other.contains(a))) return true;
+        }
+      } catch (_) {}
+      return false;
+    };
+    return arr.filter(el => {
+      if (selector) {
+        try {
+          if (el.querySelector(selector) && !hasOwnLink(el)) return false;
+        } catch (_) {}
+      }
+      if (arr.some(other => other !== el && el.contains(other))) {
+        return hasOwnLink(el);
+      }
+      return true;
+    });
   }
 
   function queryUnobserved(selector) {
     try {
       const nodes = document.querySelectorAll(`:is(${selector}):not([data-observed])`);
-      return filterNestedContainers(nodes);
+      return filterNestedContainers(nodes, selector);
     } catch (e) {
       try {
         const out = [];
         document.querySelectorAll(selector).forEach(el => {
           if (!el.hasAttribute('data-observed')) out.push(el);
         });
-        return filterNestedContainers(out);
+        return filterNestedContainers(out, selector);
       } catch (err) {
         return [];
       }
@@ -2923,8 +2991,6 @@
 
   function forceReprocessAll() {
     if (!isEngineSite()) return;
-    yandexParentTimeouts.forEach(id => clearTimeout(id));
-    yandexParentTimeouts.clear();
     buildRuleIndex();
     exposeDebugApi();
 
@@ -2943,6 +3009,10 @@
     document.querySelectorAll('[data-blocker-yandex-parent]').forEach(el => {
       el.style.display = '';
       el.removeAttribute('data-blocker-yandex-parent');
+    });
+    document.querySelectorAll('[data-blocker-google-parent]').forEach(el => {
+      el.style.display = '';
+      el.removeAttribute('data-blocker-google-parent');
     });
 
     const newResults = queryUnobserved(selector);
@@ -4131,7 +4201,7 @@
 
   // 悬浮球内容
   function updateBubbleContent(statusBtn, blocked) {
-    const isLeft = currentConfig.bubbleState ? currentConfig.bubbleState.isLeftHalf : false;
+    const isLeft = currentConfig.bubbleState ? currentConfig.bubbleState.isLeftHalf : true;
     const isToggleMode = currentConfig.bubbleAction === 'toggleHidden';
 
     const bubbleIcon = (inner) => `<span style="display: inline-block; width: 1em; height: 1em; vertical-align: -0.15em; flex-shrink: 0; line-height: 0;"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg></span>`;
@@ -4164,6 +4234,7 @@
       el.style.left = currentConfig.bubbleState.left || 'auto';
       el.style.right = currentConfig.bubbleState.right || 'auto';
       el.style.bottom = 'auto';
+      el.style.transform = 'none';
     }
     if (!currentConfig.showBubble) {
       const status = document.getElementById('serh-status');
@@ -4179,7 +4250,6 @@
 
       let isDragging = false;
       let startX, startY, initialLeft, initialTop;
-      let dragStartTime = 0;
 
       // 长按定时器
       let longPressTimer = null;
@@ -4199,7 +4269,6 @@
 
         isDragging = false;
         hasLongPressed = false;
-        dragStartTime = Date.now();
 
         if (longPressTimer) clearTimeout(longPressTimer);
 
@@ -4212,6 +4281,7 @@
         initialTop = rect.top;
         status.style.transition = 'none';
         status.style.cursor = 'grabbing';
+        status.style.transform = 'none';
         status.style.bottom = 'auto';
         status.style.right = 'auto';
         status.style.top = initialTop + 'px';
@@ -4301,8 +4371,8 @@
         } else {
           applyBubbleStatePosition(status);
 
-          // 判断短按点击
-          if (!hasLongPressed && Date.now() - dragStartTime < 300) {
+          // 判断点击
+          if (!hasLongPressed) {
             if (currentConfig.bubbleAction === 'openPanel') {
               setTimeout(() => {
                 showConfigPanel();
@@ -4319,9 +4389,10 @@
       if (currentConfig.bubbleState) {
         applyBubbleStatePosition(status);
       } else {
-        status.style.top = (window.innerHeight - 60) + 'px';
-        status.style.right = '5px';
-        status.style.left = 'auto';
+        status.style.top = '50%';
+        status.style.transform = 'translateY(-50%)';
+        status.style.left = '5px';
+        status.style.right = 'auto';
         status.style.bottom = 'auto';
       }
     }
@@ -4359,6 +4430,12 @@
       document.querySelectorAll('[data-blocker-yandex-parent]').forEach(parent => {
         const hasVisibleSiblings = Array.from(parent.children).some(sibling =>
           sibling.style.display !== 'none' && sibling.getAttribute('data-is-blocked') !== 'true'
+        );
+        if (!hasVisibleSiblings) parent.style.display = 'none';
+      });
+      document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
+        const hasVisibleSiblings = Array.from(parent.querySelectorAll('div.g')).some(otherG =>
+          otherG.style.display !== 'none' && otherG.getAttribute('data-is-blocked') !== 'true'
         );
         if (!hasVisibleSiblings) parent.style.display = 'none';
       });
@@ -4491,6 +4568,34 @@
     const textarea = document.getElementById('serh-rules');
     if (textarea) {
       textarea.value = currentConfig.rules.join('\n');
+      updateLineNumbers();
+    }
+  }
+
+  // 一键屏蔽增量
+  function appendRuleToTextarea(rule) {
+    const textarea = document.getElementById('serh-rules');
+    if (!textarea) return;
+    const clean = stripRuleComment(String(rule).trim());
+    const lines = textarea.value ? textarea.value.split('\n') : [];
+    if (lines.some(l => stripRuleComment(l.trim()) === clean)) return;
+    lines.push(rule);
+    textarea.value = lines.join('\n');
+    updateLineNumbers();
+  }
+
+  function removeRulesFromTextarea(rulesToRemove) {
+    const textarea = document.getElementById('serh-rules');
+    if (!textarea || !rulesToRemove || !rulesToRemove.length) return;
+    const cleanSet = new Set(rulesToRemove.map(r => stripRuleComment(String(r).trim())));
+    const lines = textarea.value ? textarea.value.split('\n') : [];
+    const filtered = lines.filter(l => {
+      const trimmed = l.trim();
+      if (!trimmed) return true;
+      return !cleanSet.has(stripRuleComment(trimmed));
+    });
+    if (filtered.length !== lines.length) {
+      textarea.value = filtered.join('\n');
       updateLineNumbers();
     }
   }
@@ -5127,13 +5232,17 @@
     if (sizeSlider) {
       sizeSlider.addEventListener('input', function() {
         const value = parseInt(this.value);
-        adoptStoredConfigBeforeWrite();
         currentConfig.bubbleSize = value;
         if (sizeValueDisplay) {
           sizeValueDisplay.textContent = `${value}px`;
         }
         const statusBtn = document.getElementById('serh-status');
         if (statusBtn) applyBubbleSize(statusBtn);
+      });
+      sizeSlider.addEventListener('change', function() {
+        const value = parseInt(this.value);
+        adoptStoredConfigBeforeWrite();
+        currentConfig.bubbleSize = value;
         persistConfig(true);
       });
     }
@@ -5161,7 +5270,7 @@
 
     const closeHandler = (e) => {
       if (preventPanelClose) return;
-      if (!panel.contains(e.target) && !e.target.closest('#serh-status') && !e.target.closest('#serh-webdav-panel') && !e.target.closest('#serh-subscription-panel') && !e.target.closest('#serh-hlcolor-panel') && !e.target.closest('#serh-hlcolor-popup') && !e.target.closest('#serh-selector-panel')) {
+      if (!panel.contains(e.target) && !e.target.closest('#serh-status') && !e.target.closest('#serh-webdav-panel') && !e.target.closest('#serh-subscription-panel') && !e.target.closest('#serh-hlcolor-panel') && !e.target.closest('#serh-hlcolor-popup') && !e.target.closest('#serh-selector-panel') && !e.target.closest('#serh-block-confirm-dialog')) {
         closePanel();
       }
     };
@@ -5216,11 +5325,28 @@
 
     const initialKeySet = new Set(baseRules.map(getRuleKey));
     const userKeySet = new Set(userRules.map(getRuleKey));
+    const tombstones = getLocalTombstones();
+    const addedTimes = getLocalRuleAddedTimes();
+
+    const activeUserRules = userRules.filter(r => {
+      const k = getRuleKey(r);
+      if (!k || k.startsWith('#')) return true;
+      const delTime = tombstones[k];
+      if (!delTime) return true;
+      if (!initialKeySet.has(k)) {
+        delete tombstones[k];
+        return true;
+      }
+      const addedTime = addedTimes[k] || 0;
+      if (addedTime > delTime) return true;
+      return false;
+    });
+
     const backgroundNewRules = (Array.isArray(currentConfig.rules) ? currentConfig.rules : []).filter(r => {
       const k = getRuleKey(r);
-      return k && !k.startsWith('#') && !initialKeySet.has(k) && !userKeySet.has(k);
+      return k && !k.startsWith('#') && !initialKeySet.has(k) && !userKeySet.has(k) && (!tombstones[k] || (addedTimes[k] && addedTimes[k] > tombstones[k]));
     });
-    const finalRules = backgroundNewRules.length > 0 ? [...userRules, ...backgroundNewRules] : userRules;
+    const finalRules = backgroundNewRules.length > 0 ? [...activeUserRules, ...backgroundNewRules] : activeUserRules;
 
     const settingsChanged = currentConfig.enabled !== enabled ||
       currentConfig.showCount !== showCount ||
@@ -6128,20 +6254,10 @@
     // 订阅同步
     const localOnly = existing.filter(localSub =>
       localSub && localSub.url &&
-      !mergedSubTombstones[localSub.url] &&
+      (!mergedSubTombstones[localSub.url] || (localSub.lastUpdate && localSub.lastUpdate > mergedSubTombstones[localSub.url])) &&
       !merged.some(s => s && s.url === localSub.url)
     );
-    if (merged.length + localOnly.length > MAX_SUBSCRIPTIONS) {
-      const room = Math.max(0, MAX_SUBSCRIPTIONS - localOnly.length);
-      const keptCloud = merged.slice(0, room);
-      if (currentConfig.debug && keptCloud.length < merged.length) {
-        console.warn(`[订阅] 云端订阅超出上限，已截断 ${merged.length - keptCloud.length} 条`);
-      }
-      saveSubscriptions([...keptCloud, ...localOnly].slice(0, MAX_SUBSCRIPTIONS));
-    } else {
-      saveSubscriptions([...merged, ...localOnly]);
-    }
-    if (hasNewSub) {
+    saveSubscriptions([...merged, ...localOnly]);    if (hasNewSub) {
       setTimeout(() => {
         checkAutoSubscription(true);
       }, 1000);
@@ -6431,24 +6547,32 @@
     let url = String(folderUrl).trim().replace(/\/+$/, '') + '/';
     const parsed = new URL(url);
     const rootPath = parsed.origin + '/';
-    if (url === rootPath) return;
+    if (url === rootPath || parsed.pathname === '/') return;
 
+    let propfindResp;
     try {
-      const resp = await gmRequest('PROPFIND', url, {
+      propfindResp = await gmRequest('PROPFIND', url, {
         headers: { ...headers, Depth: '0' },
         allow404: true
       });
-      if (resp.status === 207 || resp.status === 200) return;
-    } catch (_) {}
+    } catch (e) {
+      throw e;
+    }
+
+    if (propfindResp.status === 207 || propfindResp.status === 200) return;
+    if (propfindResp.status !== 404) {
+      throw new Error(`WebDAV PROPFIND failed: HTTP ${propfindResp.status}`);
+    }
 
     const trimmedPath = url.slice(0, url.lastIndexOf('/', url.length - 2) + 1);
     if (trimmedPath && trimmedPath !== rootPath && trimmedPath.length > parsed.origin.length) {
       await ensureWebDAVFolder(trimmedPath, headers);
     }
 
-    try {
-      await gmRequest('MKCOL', url, { headers, allow404: true });
-    } catch (_) {}
+    const mkcolResp = await gmRequest('MKCOL', url, { headers, allow404: false });
+    if (mkcolResp.status < 200 || mkcolResp.status >= 300) {
+      throw new Error(`WebDAV MKCOL failed: HTTP ${mkcolResp.status}`);
+    }
   }
 
   function parseRemoteConfig(raw) {
@@ -6648,8 +6772,13 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   else if (existing && existing.name) subData.name = existing.name;
 
   if (existingIndex >= 0) subs[existingIndex] = subData;
-  else if (subs.length < MAX_SUBSCRIPTIONS) subs.push(subData);
-  saveSubscriptions(subs.slice(0, MAX_SUBSCRIPTIONS));
+  else subs.push(subData);
+  const subTombstones = getSubscriptionTombstones();
+  if (subTombstones[url]) {
+    delete subTombstones[url];
+    GM_setValue(SUBSCRIPTION_TOMBSTONES_KEY, subTombstones);
+  }
+  saveSubscriptions(subs);
 
     if (showAlerts) alert(t('subscriptionSuccess', {
       count: validRules.length
@@ -6742,10 +6871,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       });
     }
 
-    function updateAddButtonState() {
-      addBtn.disabled = container.querySelectorAll('.subscription-row').length >= MAX_SUBSCRIPTIONS;
-    }
-
     function collectSubscriptionsFromRows() {
       const newSubs = [];
       let hasError = false;
@@ -6788,7 +6913,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     function persistCurrentSubscriptions() {
       const { newSubs, hasError } = collectSubscriptionsFromRows();
       if (hasError) return false;
-      saveSubscriptions(newSubs.filter(s => s.url).slice(0, MAX_SUBSCRIPTIONS));
+      saveSubscriptions(newSubs.filter(s => s.url));
       subscriptions = getSubscriptions();
       container.querySelectorAll('.subscription-row').forEach(row => {
         const input = row.querySelector('.subscription-url');
@@ -6813,7 +6938,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           if (deletedUrl) recordSubscriptionDeletions([deletedUrl]);
           row.remove();
           reindexRows();
-          updateAddButtonState();
           if (persistCurrentSubscriptions()) {
             showToast(t('saved'), 'success');
             forceReprocessAll();
@@ -6823,19 +6947,13 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
 
     addBtn.onclick = () => {
-      if (container.querySelectorAll('.subscription-row').length >= MAX_SUBSCRIPTIONS) {
-        showToast(t('maxSubscriptions'), 'error');
-        return;
-      }
       container.appendChild(createSubscriptionRow());
       reindexRows();
-      updateAddButtonState();
       bindDeleteEvents();
       container.scrollTop = container.scrollHeight;
     };
 
     reindexRows();
-    updateAddButtonState();
     bindDeleteEvents();
 
     const closePanel = bindOutsideClickClose(panel, () => {
@@ -7287,21 +7405,12 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         : {};
 
       // 合并
-      const { mergedRules } = mergeRulesWithTombstones(localRules, cloudRules, localTime, cloudTime, cloudTombstones, cloudAddedTimes);
+      const { mergedRules, mergedTombstones } = mergeRulesWithTombstones(localRules, cloudRules, localTime, cloudTime, cloudTombstones, cloudAddedTimes);
       const mergedContent = mergedRules.join('\n');
       const localContent = localRules.join('\n');
       const cloudContent = cloudRules.join('\n');
 
       if (cloudConfig) {
-        if (cloudConfig.tombstones && typeof cloudConfig.tombstones === 'object') {
-          const localTombstones = getLocalTombstones();
-          const merged = { ...cloudConfig.tombstones, ...localTombstones };
-          for (const k in cloudConfig.tombstones) {
-            if (typeof cloudConfig.tombstones[k] === 'number') merged[k] = Math.max(merged[k] || 0, cloudConfig.tombstones[k]);
-          }
-          pruneTombstones(merged);
-          GM_setValue(TOMBSTONES_KEY, merged);
-        }
         if (cloudConfig.ruleAddedTimes && typeof cloudConfig.ruleAddedTimes === 'object') {
           const localTimes = getLocalRuleAddedTimes();
           const mergedTimes = { ...cloudConfig.ruleAddedTimes, ...localTimes };
@@ -7349,6 +7458,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           'Content-Type': 'text/plain; charset=utf-8',
           'X-OC-Mtime': Math.floor(uploadedTime / 1000).toString()
         };
+        if (cloudETag) {
+          putHeaders['If-Match'] = cloudETag;
+        }
         try {
           await gmRequest('PUT', fullUrl, { headers: putHeaders, data: uploadData });
           GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime);
@@ -7687,8 +7799,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       _domObserver.disconnect();
       _domObserver = null;
     }
-    yandexParentTimeouts.forEach(clearTimeout);
-    yandexParentTimeouts.clear();
     if (_searchForm && _searchFormHandler) {
       _searchForm.removeEventListener('submit', _searchFormHandler);
     }
@@ -7700,6 +7810,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     document.querySelectorAll('[data-blocker-yandex-parent]').forEach(el => {
       el.style.display = '';
       el.removeAttribute('data-blocker-yandex-parent');
+    });
+    document.querySelectorAll('[data-blocker-google-parent]').forEach(el => {
+      el.style.display = '';
+      el.removeAttribute('data-blocker-google-parent');
     });
     document.querySelectorAll('[data-observed]').forEach(el => {
       resultObserver.unobserve(el);
