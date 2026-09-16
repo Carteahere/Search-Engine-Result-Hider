@@ -1,6 +1,6 @@
   const SELECTORS = {
     bing: {
-      match: /^(?:(?:www|cn|www2|global|m)\.)?bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
+      match: /^(?:(?:www[2-4]?|cn|global|m)\.)?bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
       containers: 'li.b_algo, div.b_algo',
       titles: ['h2 a', 'a h2', '.b_title'],
       snippets: ['.b_caption p', '.b_snippet', '.b_paractl p', '.b_lineclamp2'],
@@ -21,14 +21,14 @@
       links: 'a[href]',
     },
     duckduckgo: {
-      match: /^(?:(?:www|html|start|lite|m|safe)\.)?(?:duckduckgo\.com|ddg\.gg)$/,
+      match: /^(?:(?:www|html|start|lite|m|safe|noai)\.)?(?:duckduckgo\.com|ddg\.gg)$/,
       containers: '[data-testid="result"], [data-testid="web-vertical"] li > article, .result, .web-result, .tile',
       titles: ['a[data-testid="result-title-a"]', '.result__title', '.tile__title', '.tile--title__title', 'h2 a', 'a h2', 'h2'],
       snippets: ['[data-testid="result-snippet"]', '[data-result="snippet"]', '.result__snippet'],
       links: ['a[data-testid="result-extras-url-link"]', 'a[data-testid="result-title-a"]', 'h2 > a', '.result__url', 'a[href]'],
     },
     yandex: {
-      match: /^(?:www\.)?(?:ya\.ru|yandex\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,}))$/,
+      match: /^(?:(?:www|m)\.)?(?:ya\.ru|yandex\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,}))$/,
       containers: 'div.Organic',
       titles: ['.OrganicTitle'],
       snippets: ['.OrganicText'],
