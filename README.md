@@ -4,7 +4,7 @@
 
 [中文](README.md) | [English](README.en.md) | 交流群 [TG](https://t.me/+qBqMTqjc4Xk5M2Jh)
 
-在仅支持安装脚本的浏览器上实现复杂规则屏蔽搜索结果功能  
+在**仅支持安装脚本**的浏览器上实现复杂规则屏蔽搜索结果功能  
 支持包括ublacklist基础规则在内的URL匹配、正则匹配、标题匹配、白名单匹配、高亮目标结果以及结果摘要(snippet)匹配  
 当前支持的搜索引擎：Bing、Google、Google Scholar、DuckDuckGo、Yandex、Brave、Yahoo  
 自动去除重定向引擎：Bing、Google、Google Scholar、DuckDuckGo、Yahoo
