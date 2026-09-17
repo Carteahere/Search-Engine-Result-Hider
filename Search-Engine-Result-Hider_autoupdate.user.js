@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/SadYuyuko
-// @version      8.2.6
+// @version      8.3.0
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -32,7 +32,6 @@
 
   // 顶层页面运行
   if (window.top !== window.self) return;
-
   let preventPanelClose = false;
   let _engineSiteSetup = false;
   let _domObserver = null;
@@ -42,6 +41,8 @@
   let _urlChangeHandler = null;
   let _syncIntervalIds = [];
   let _syncInitialTimeout = null;
+  let _hrefUrlCache = new WeakMap();
+  const _hrefChangedContainers = new Set();
 
   // 配置存储键
   const CONFIG_KEY = 'searchfilter_blocker';
@@ -125,8 +126,16 @@
       snippets: ['.st', '.VwiC3b', '.s3v9rd', '.IsZvec', '.lyLwlc', '.yXK7lf'],
       links: 'a[href]',
     },
+    duckduckgo_lite: {
+      match: /^lite\.duckduckgo\.com$/,
+      containers: 'tr:has(.result-link)',
+      titles: ['.result-link'],
+      snippets: ['.result-snippet'],
+      links: ['a.result-link[href]'],
+      extraElements: ['+ tr:not(:has(.result-link))', '+ tr:not(:has(.result-link)) + tr:not(:has(.result-link))', '+ tr:not(:has(.result-link)) + tr:not(:has(.result-link)) + tr:not(:has(.result-link))'],
+    },
     duckduckgo: {
-      match: /^(?:(?:www|html|start|lite|m|safe|noai)\.)?(?:duckduckgo\.com|ddg\.gg)$/,
+      match: /^(?:(?:www|html|start|m|safe|noai)\.)?(?:duckduckgo\.com|ddg\.gg)$/,
       containers: '[data-testid="result"], [data-testid="web-vertical"] li > article, .result, .web-result, .tile',
       titles: ['a[data-testid="result-title-a"]', '.result__title', '.tile__title', '.tile--title__title', 'h2 a', 'a h2', 'h2'],
       snippets: ['[data-testid="result-snippet"]', '[data-result="snippet"]', '.result__snippet'],
@@ -191,6 +200,7 @@
           containers: typeof def.containers === 'string' ? def.containers : '',
           titles: normalizeSelectorList(def.titles),
           snippets: normalizeSelectorList(def.snippets),
+          extraElements: normalizeSelectorList(def.extraElements),
           links: Array.isArray(def.links) ? normalizeSelectorList(def.links)
             : (typeof def.links === 'string' && def.links ? def.links : 'a[href]'),
           disabled: true
@@ -215,6 +225,7 @@
         containers: typeof def.containers === 'string' ? def.containers : '',
         titles: normalizeSelectorList(def.titles),
         snippets: normalizeSelectorList(def.snippets),
+        extraElements: normalizeSelectorList(def.extraElements),
         links: Array.isArray(def.links) ? normalizeSelectorList(def.links)
           : (typeof def.links === 'string' && def.links ? def.links : 'a[href]'),
       };
@@ -324,6 +335,8 @@
       webdavUrl: '地址',
       webdavUser: '账号',
       webdavPass: '密码',
+      webdavPasswordSaved: '已保存密码，输入以更换',
+      webdavPasswordRequired: '地址或用户名已更改，请输入对应密码',
       filename: '文件名',
       upload: '上传',
       download: '下载',
@@ -441,6 +454,8 @@
       webdavUrl: 'URL',
       webdavUser: 'Username',
       webdavPass: 'Password',
+      webdavPasswordSaved: 'Password saved; enter to replace',
+      webdavPasswordRequired: 'Address or username changed; enter the corresponding password',
       filename: 'Filename',
       upload: 'Upload',
       download: 'Download',
@@ -591,6 +606,72 @@
     return raw.split('.').map(label => label ? hostLabelToASCII(label) : label).join('.');
   }
 
+  // 中文域名解码
+  function punycodeDecodeLabel(label) {
+    const s = String(label || '').toLowerCase();
+    if (!s.startsWith('xn--')) return label;
+    const body = s.slice(4);
+    const base = 36, tmin = 1, tmax = 26, skew = 38, damp = 700, initialBias = 72, initialN = 128;
+    let n = initialN, i = 0, bias = initialBias;
+    const output = [];
+    const delimPos = body.lastIndexOf('-');
+    let pos = 0;
+    if (delimPos > 0) {
+      for (; pos < delimPos; ++pos) {
+        output.push(body.charCodeAt(pos));
+      }
+      pos++;
+    } else if (delimPos === 0) {
+      pos++;
+    }
+    const adapt = (delta, numPoints, firstTime) => {
+      let k = 0;
+      delta = firstTime ? Math.floor(delta / damp) : delta >> 1;
+      delta += Math.floor(delta / numPoints);
+      while (delta > ((base - tmin) * tmax) >> 1) {
+        delta = Math.floor(delta / (base - tmin));
+        k += base;
+      }
+      return k + Math.floor(((base - tmin + 1) * delta) / (delta + skew));
+    };
+    while (pos < body.length) {
+      const oldi = i;
+      let w = 1;
+      for (let k = base; ; k += base) {
+        if (pos >= body.length) return label;
+        const ch = body.charCodeAt(pos++);
+        const digit = ch - 48 < 10 ? ch - 22 : ch - 65 < 26 ? ch - 65 : ch - 97 < 26 ? ch - 97 : base;
+        if (digit >= base) return label;
+        i += digit * w;
+        const t = k <= bias ? tmin : k >= bias + tmax ? tmax : k - bias;
+        if (digit < t) break;
+        w *= base - t;
+      }
+      const outLen = output.length + 1;
+      bias = adapt(i - oldi, outLen, oldi === 0);
+      n += Math.floor(i / outLen);
+      i %= outLen;
+      output.splice(i, 0, n);
+      i++;
+    }
+    return String.fromCodePoint(...output);
+  }
+
+  function toUnicodeHostname(host) {
+    const raw = String(host || '').replace(/\.$/, '').trim();
+    if (!raw || !raw.toLowerCase().includes('xn--')) return raw;
+    return raw.split('.').map(label => {
+      if (label && label.toLowerCase().startsWith('xn--')) {
+        try {
+          return punycodeDecodeLabel(label);
+        } catch (_) {
+          return label;
+        }
+      }
+      return label;
+    }).join('.');
+  }
+
   function toASCIIUrl(url) {
     const raw = String(url || '');
     if (!raw || /^[\x00-\x7F]*$/.test(raw)) return raw;
@@ -633,7 +714,7 @@
     const trimmed = r.trim();
     if (trimmed.startsWith('#')) return trimmed;
     const stripped = stripRuleComment(trimmed);
-    return (stripped.startsWith('#') ? stripped : stripped.replace(/\s+#.*$/, '')).trim();
+    return stripped.trim();
   }
 
   // 剥离行尾注释
@@ -1000,7 +1081,14 @@
       if (cond.op === '*=') return value.includes(cmpVal) || altValue.includes(altCmpVal);
       if (cond.op === '=~') {
         if (cond.type === 'host') {
-          return safeRegexTest(cond.regex, raw) || safeRegexTest(cond.regex, u.hostname);
+          const uHost = u.hostname;
+          let unicodeHost = uHost;
+          try {
+            if (typeof toUnicodeHostname === 'function') {
+              unicodeHost = toUnicodeHostname(uHost);
+            }
+          } catch (_) {}
+          return safeRegexTest(cond.regex, raw) || safeRegexTest(cond.regex, uHost) || safeRegexTest(cond.regex, unicodeHost);
         }
         return safeRegexTest(cond.regex, raw) || safeRegexTest(cond.regex, altValue);
       }
@@ -1044,7 +1132,7 @@
       const raw = (enginePropMatch[1] !== undefined ? enginePropMatch[1] : enginePropMatch[2]).trim().toLowerCase();
       const target = raw.replace(/^ddg$/, 'duckduckgo').replace(/^yahoo-japan$/, 'yahoo');
       const engine = String(currentEngine || '').toLowerCase();
-      return { matched: true, static: engine === target || engine === raw };
+      return { matched: true, static: engine === target || engine === raw || (target === 'duckduckgo' && engine === 'duckduckgo_lite') };
     }
 
     const categoryMatch = trimmed.match(/^(?:\$category|category)\s*[=:]\s*(?:['"](.*?)['"]|([^\s\)]+))\s*i?\s*$/i);
@@ -1639,10 +1727,16 @@
   }
 
   function ruleToRegex(rule) {
+    if (rule.startsWith('.')) rule = '*' + rule;
     if (!rule.startsWith('/') && !rule.startsWith('title/') && !rule.startsWith('text/') &&
       !rule.includes('*') && !rule.includes('://') && !rule.startsWith('.')) {
       if (rule.includes('.') && !rule.includes('/') && !/\s/.test(rule)) {
-        rule = '*://*.' + rule + '/*';
+        const queryMatch = rule.match(/^([^?#]+)([?#].*)$/);
+        if (queryMatch) {
+          rule = '*://*.' + queryMatch[1] + '/' + queryMatch[2];
+        } else {
+          rule = '*://*.' + rule + '/*';
+        }
       }
     }
 
@@ -1673,14 +1767,16 @@
 
   // 域名检查
   function matchWildcardDomainPattern(pattern) {
+    if (pattern.startsWith('.')) pattern = '*' + pattern;
     if (pattern.includes(':') && !pattern.startsWith('*://')) return null;
-    const bareWildcard = pattern.match(/^\*\.([^\/\*\s:]+)$/);
+    const bareWildcard = pattern.match(/^\*\.([^\/\*\s:?#]+)$/);
     if (bareWildcard && bareWildcard[1].includes('.')) {
       return { domain: toASCIIHostname(bareWildcard[1]), domainType: 'wildcard' };
     }
     if (!pattern.startsWith('/') && !pattern.startsWith('title/') && !pattern.startsWith('text/') &&
       !pattern.includes('*') && !pattern.includes('://') && !pattern.startsWith('.')) {
-      if (pattern.includes('.') && !/\s/.test(pattern) && !pattern.includes('/') && !pattern.includes(':')) {
+      if (pattern.includes('.') && !/\s/.test(pattern) && !pattern.includes('/') &&
+        !pattern.includes(':') && !pattern.includes('?') && !pattern.includes('#')) {
         return { domain: toASCIIHostname(pattern), domainType: 'wildcard' };
       }
     }
@@ -2012,7 +2108,7 @@
     }
     if (!highlightN) {
       for (let {regex, N} of compiledRules.highlightUrls) {
-        if (safeRegexTest(regex, url) || safeRegexTest(regex, domain)) { highlightN = N; break; }
+        if (safeRegexTest(regex, url)) { highlightN = N; break; }
       }
     }
     if (!highlightN && title) {
@@ -2043,7 +2139,7 @@
         if (!checkDynamicConditions(item.conditions, title, url)) continue;
         if (item.type === 'expr') { highlightN = item.N; break; }
         if (item.type === 'url' || item.type === 'regex') {
-          if (safeRegexTest(item.regex, url) || safeRegexTest(item.regex, domain)) { highlightN = item.N; break; }
+          if (safeRegexTest(item.regex, url)) { highlightN = item.N; break; }
         } else if (item.type === 'title' && title) {
           if (safeRegexTest(item.regex, title)) { highlightN = item.N; break; }
         } else if (item.type === 'text' && snippet) {
@@ -2065,7 +2161,7 @@
       for (let i = 0; i < compiledRules.whitelistUrlPatterns.length; i++) {
         const entry = compiledRules.whitelistUrlPatterns[i];
         if (!isLocalEntry(entry)) continue;
-        if (safeRegexTest(entry.regex, url) || safeRegexTest(entry.regex, domain)) { whitelisted = true; break; }
+        if (safeRegexTest(entry.regex, url)) { whitelisted = true; break; }
       }
     }
     if (!whitelisted && title) {
@@ -2100,7 +2196,7 @@
         if (!checkDynamicConditions(item.conditions, title, url)) continue;
         if (item.type === 'expr') { whitelisted = true; break; }
         if (item.type === 'url' || item.type === 'regex') {
-          if (safeRegexTest(item.regex, url) || safeRegexTest(item.regex, domain)) { whitelisted = true; break; }
+          if (safeRegexTest(item.regex, url)) { whitelisted = true; break; }
         } else if (item.type === 'title' && title) {
           if (safeRegexTest(item.regex, title)) { whitelisted = true; break; }
         } else if (item.type === 'text' && snippet) {
@@ -2124,7 +2220,7 @@
         for (let i = 0; i < compiledRules.urls.length; i++) {
           const item = compiledRules.urls[i];
           if (!isLocalEntry(item)) continue;
-          if (safeRegexTest(item.regex, url) || safeRegexTest(item.regex, domain)) { blockedInfo = {rule: item.originalRule, source: item.source}; break; }
+          if (safeRegexTest(item.regex, url)) { blockedInfo = {rule: item.originalRule, source: item.source}; break; }
         }
       }
       if (!blockedInfo && title) {
@@ -2160,7 +2256,7 @@
           if (!checkDynamicConditions(item.conditions, title, url)) continue;
           if (item.type === 'expr') { blockedInfo = {rule: item.originalRule, source: item.source}; break; }
           if (item.type === 'url' || item.type === 'regex') {
-            if (safeRegexTest(item.regex, url) || safeRegexTest(item.regex, domain)) { blockedInfo = {rule: item.originalRule, source: item.source}; break; }
+            if (safeRegexTest(item.regex, url)) { blockedInfo = {rule: item.originalRule, source: item.source}; break; }
           } else if (item.type === 'title' && title) {
             if (safeRegexTest(item.regex, title)) { blockedInfo = {rule: item.originalRule, source: item.source}; break; }
           } else if (item.type === 'text' && snippet) {
@@ -2185,7 +2281,7 @@
       for (let i = 0; i < compiledRules.whitelistUrlPatterns.length; i++) {
         const entry = compiledRules.whitelistUrlPatterns[i];
         if (isLocalEntry(entry)) continue;
-        if (safeRegexTest(entry.regex, url) || safeRegexTest(entry.regex, domain)) { whitelisted = true; break; }
+        if (safeRegexTest(entry.regex, url)) { whitelisted = true; break; }
       }
     }
     if (!whitelisted && !blockedInfo && title) {
@@ -2220,7 +2316,7 @@
         if (!checkDynamicConditions(item.conditions, title, url)) continue;
         if (item.type === 'expr') { whitelisted = true; break; }
         if (item.type === 'url' || item.type === 'regex') {
-          if (safeRegexTest(item.regex, url) || safeRegexTest(item.regex, domain)) { whitelisted = true; break; }
+          if (safeRegexTest(item.regex, url)) { whitelisted = true; break; }
         } else if (item.type === 'title' && title) {
           if (safeRegexTest(item.regex, title)) { whitelisted = true; break; }
         } else if (item.type === 'text' && snippet) {
@@ -2244,7 +2340,7 @@
         for (let i = 0; i < compiledRules.urls.length; i++) {
           const item = compiledRules.urls[i];
           if (isLocalEntry(item)) continue;
-          if (safeRegexTest(item.regex, url) || safeRegexTest(item.regex, domain)) { blockedInfo = {rule: item.originalRule, source: item.source}; break; }
+          if (safeRegexTest(item.regex, url)) { blockedInfo = {rule: item.originalRule, source: item.source}; break; }
         }
       }
       if (!blockedInfo && title) {
@@ -2282,7 +2378,7 @@
           if (!checkDynamicConditions(ruleObj.conditions, title, url)) continue;
           if (ruleObj.type === 'expr') { blockedInfo = {rule: ruleObj.originalRule, source: ruleObj.source}; break; }
           if (ruleObj.type === 'url' || ruleObj.type === 'regex') {
-            if (safeRegexTest(ruleObj.regex, url) || safeRegexTest(ruleObj.regex, domain)) { blockedInfo = {rule: ruleObj.originalRule, source: ruleObj.source}; break; }
+            if (safeRegexTest(ruleObj.regex, url)) { blockedInfo = {rule: ruleObj.originalRule, source: ruleObj.source}; break; }
           } else if (ruleObj.type === 'title' && title) {
             if (safeRegexTest(ruleObj.regex, title)) { blockedInfo = {rule: ruleObj.originalRule, source: ruleObj.source}; break; }
           } else if (ruleObj.type === 'text' && snippet) {
@@ -2314,8 +2410,14 @@
 
   // bing重定向解码
   function decodeBingCkTarget(u) {
-    if (!u || !u.startsWith('a1')) return '';
-    let base64 = u.slice(2).replace(/-/g, '+').replace(/_/g, '/');
+    if (!u) return '';
+    let rawEncoded = u;
+    if (rawEncoded.startsWith('a1')) {
+      rawEncoded = rawEncoded.slice(2);
+    } else if (rawEncoded.startsWith('a0')) {
+      rawEncoded = rawEncoded.slice(2);
+    }
+    let base64 = rawEncoded.replace(/-/g, '+').replace(/_/g, '/');
     const rem = base64.length % 4;
     if (rem === 1) return '';
     if (rem > 0) base64 += '='.repeat(4 - rem);
@@ -2352,7 +2454,11 @@
       const host = urlObj.hostname;
       const path = urlObj.pathname;
       if (/(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) && path.startsWith('/ck/a')) {
-        const realUrl = decodeBingCkTarget(urlObj.searchParams.get('u'));
+        const uParam = urlObj.searchParams.get('u');
+        let realUrl = decodeBingCkTarget(uParam);
+        if (!realUrl && uParam) {
+          realUrl = decodeRedirectTarget(uParam);
+        }
         if (realUrl) return realUrl;
       }
       if (/(?:^|\.)scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) && /\/scholar_url\/?$/i.test(path)) {
@@ -2380,24 +2486,31 @@
     return url;
   }
 
-  function getCleanUrlAndFixDOM(link) {
+  function getCleanUrl(link) {
     if (!link || !link.href) return '';
-    const realUrl = unwrapRedirectUrl(link.href);
-    if (realUrl && realUrl !== link.href) {
-      try { link.href = realUrl; } catch (_) {}
-    }
-    return realUrl || link.href;
+    return unwrapRedirectUrl(link.href) || link.href;
   }
 
   // 提取链接
   function resolveUrlDomain(link) {
-    const rawUrl = getCleanUrlAndFixDOM(link);
+    const rawUrl = getCleanUrl(link);
     const url = toASCIIUrl(rawUrl) || rawUrl;
     let domain = '';
     try {
       domain = toASCIIHostname(new URL(url).hostname);
     } catch (e) {}
     return { url, domain };
+  }
+
+  function peekResultUrl(result) {
+    try {
+      const engine = getSearchEngine();
+      const link = getResultLink(result, engine);
+      if (!link || !link.href) return '';
+      return resolveUrlDomain(link).url || '';
+    } catch (e) {
+      return '';
+    }
   }
 
   // 选择器适配
@@ -2411,21 +2524,108 @@
   }
 
   function getResultSnippet(result, engine) {
-    return getResultText(result, (getSelectors()[engine] || SELECTORS.other).snippets);
+    const selectors = (getSelectors()[engine] || SELECTORS.other).snippets;
+    const snippet = getResultText(result, selectors);
+    if (snippet) return snippet;
+    for (const element of getResultExtraElements(result, engine)) {
+      const text = selectors.some(selector => element.matches(selector))
+        ? element.textContent.trim() : getResultText(element, selectors);
+      if (text) return text;
+    }
+    return '';
+  }
+
+  function getResultExtraElements(result, engine = getSearchEngine()) {
+    const selectors = (getSelectors()[engine] || SELECTORS.other).extraElements;
+    const parent = result.parentElement;
+    if (!parent || !Array.isArray(selectors) || !selectors.length) return [];
+    const index = Array.prototype.indexOf.call(parent.children, result) + 1;
+    const elements = new Set();
+    for (const selector of selectors) {
+      if (typeof selector !== 'string' || !selector.trim() || selector.includes(',')) continue;
+      try {
+        for (const element of parent.querySelectorAll(':scope > :nth-child(' + index + ') ' + selector)) {
+          if (element !== result && !element.contains(result)) elements.add(element);
+        }
+      } catch (e) { /* Invalid custom CSS must not interrupt result processing. */ }
+    }
+    return [...elements];
+  }
+
+  const map_resultExtraElements = new Map();
+
+  function setResultExtraElementsVisible(result, visible) {
+    let rows = map_resultExtraElements.get(result);
+    if (!rows) {
+      rows = new Map(getResultExtraElements(result).map(row => [row, row.style.display]));
+      if (!rows.size) return;
+      map_resultExtraElements.set(result, rows);
+    }
+    rows.forEach((display, row) => { row.style.display = visible ? display : 'none'; });
+  }
+
+  function restoreResultExtraElements(result) {
+    const restore = (rows, owner) => {
+      rows.forEach((display, row) => { row.style.display = display; });
+      map_resultExtraElements.delete(owner);
+    };
+    if (result) {
+      const rows = map_resultExtraElements.get(result);
+      if (rows) restore(rows, result);
+    } else {
+      map_resultExtraElements.forEach(restore);
+    }
   }
 
   function getResultLink(result, engine) {
     const linkSelectors = (getSelectors()[engine] || SELECTORS.other).links;
+    let foundEl = null;
     if (Array.isArray(linkSelectors)) {
       for (let selector of linkSelectors) {
         const el = result.querySelector(selector);
-        if (el && el.href) return el;
+        if (el && el.href) {
+          foundEl = el;
+          break;
+        }
       }
     } else if (typeof linkSelectors === 'string') {
       const el = result.querySelector(linkSelectors);
-      if (el && el.href) return el;
+      if (el && el.href) foundEl = el;
     }
-    return result.querySelector('a[href]');
+    if (!foundEl) {
+      foundEl = result.querySelector('a[href]');
+    }
+    if (engine === 'bing' && foundEl && foundEl.href) {
+      try {
+        const u = new URL(foundEl.href);
+        if (/(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(u.hostname) && u.pathname.startsWith('/ck/a')) {
+          const unwrapTest = unwrapRedirectUrl(foundEl.href);
+          if (!unwrapTest || unwrapTest === foundEl.href) {
+            const attrEl = result.querySelector('.b_attribution, .b_algoheader cite, cite');
+            if (attrEl && attrEl.textContent) {
+              const citeText = attrEl.textContent.trim();
+              const domainMatch = citeText.match(/^https?:\/\/([^/\s]+)/i) ||
+                citeText.match(/^(?:[\p{L}\p{N}][\p{L}\p{N}_-]*\.)+\p{L}{2,}/u);
+              if (domainMatch) {
+                const candidateDomain = domainMatch[1] || domainMatch[0];
+                if (!/(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(candidateDomain) &&
+                    !candidateDomain.includes('..') && candidateDomain.includes('.')) {
+                  try {
+                    const fallbackUrl = new URL(`https://${toASCIIHostname(candidateDomain)}/`).href;
+                    return {
+                      href: fallbackUrl,
+                      getAttribute: (attr) => foundEl.getAttribute(attr),
+                      setAttribute: (attr, val) => foundEl.setAttribute(attr, val)
+                    };
+                  } catch (_) {}
+                }
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
+    return foundEl;
   }
 
   function getResultTitle(result, engine) {
@@ -2620,49 +2820,45 @@
         const opts = buildBlockRuleOptions(domain);
         const whitelistRule = '@' + (currentConfig.blockDomain ? opts.domainRule : opts.exactRule);
         const matchedRule = (result.dataset.matchedRule || '').trim();
+        const matchedSource = (result.dataset.matchedSource || '').trim();
+        const isSubRule = !isLocalEntry({ source: matchedSource });
+        const deleteLocalRule = (rule) => {
+          adoptStoredConfigBeforeWrite();
+          const cleanTarget = stripRuleComment(rule.trim());
+          const deleted = currentConfig.rules.filter(r => stripRuleComment(r.trim()) === cleanTarget);
+          recordRuleDeletions(deleted);
+          currentConfig.rules = currentConfig.rules.filter(r => stripRuleComment(r.trim()) !== cleanTarget);
+          persistConfig(true);
+          removeRulesFromTextarea([rule]);
+          forceReprocessAll();
+        };
 
-        if (currentConfig.blockConfirm) {
+        if (currentConfig.blockConfirm || !matchedRule || isSubRule) {
           const unblockOptions = [];
           if (matchedRule) {
-            const matchedSource = (result.dataset.matchedSource || '').trim();
-            const isSubRule = !isLocalEntry({ source: matchedSource });
             unblockOptions.push({ label: isSubRule ? t('bcDeleteSub') : t('bcDelete'), rule: matchedRule, action: 'delete', disabled: isSubRule });
           }
           unblockOptions.push({ label: t('bcWhitelist'), rule: whitelistRule, action: 'whitelist' });
 
           showBlockConfirmPanel(btn, domain, (chosenRule, selectedOption) => {
-            adoptStoredConfigBeforeWrite();
             const action = (selectedOption && selectedOption.action) || 'whitelist';
             if (action === 'delete') {
-              const cleanTarget = stripRuleComment(chosenRule.trim());
-              const deleted = currentConfig.rules.filter(rule => stripRuleComment(rule.trim()) === cleanTarget);
-              recordRuleDeletions(deleted);
-              currentConfig.rules = currentConfig.rules.filter(rule => stripRuleComment(rule.trim()) !== cleanTarget);
-            } else {
-              if (!currentConfig.rules.some(rule => stripRuleComment(rule.trim()) === chosenRule)) {
-                currentConfig.rules.push(chosenRule);
-                recordRuleAddedTimes([chosenRule]);
-              }
+              deleteLocalRule(chosenRule);
+              return;
+            }
+            adoptStoredConfigBeforeWrite();
+            if (!currentConfig.rules.some(rule => stripRuleComment(rule.trim()) === chosenRule)) {
+              currentConfig.rules.push(chosenRule);
+              recordRuleAddedTimes([chosenRule]);
             }
             persistConfig(true);
-            if (action === 'delete') {
-              removeRulesFromTextarea([chosenRule]);
-            } else {
-              appendRuleToTextarea(chosenRule);
-            }
+            appendRuleToTextarea(chosenRule);
             forceReprocessAll();
           }, unblockOptions);
           return;
         }
 
-        adoptStoredConfigBeforeWrite();
-        if (!currentConfig.rules.some(rule => stripRuleComment(rule.trim()) === whitelistRule)) {
-          currentConfig.rules.push(whitelistRule);
-          recordRuleAddedTimes([whitelistRule]);
-        }
-        persistConfig(true);
-        appendRuleToTextarea(whitelistRule);
-        forceReprocessAll();
+        deleteLocalRule(matchedRule);
         return;
       }
 
@@ -2689,6 +2885,8 @@
   }
 
   function resetResultStyles(result) {
+    restoreResultExtraElements(result);
+    _hrefUrlCache.delete(result);
     result.removeAttribute('data-blocker-processed');
     result.removeAttribute('data-is-blocked');
     result.removeAttribute('data-is-highlighted');
@@ -2708,6 +2906,34 @@
       googleParent.removeAttribute('data-blocker-google-parent');
     }
     removeMatchedRuleLabel(result);
+  }
+
+  // href变更处理
+  function reprocessContainerAfterHrefChange(container) {
+    try {
+      if (!container || !container.isConnected) return;
+      const staleBtn = container.querySelector('.serh-quick-block');
+      if (staleBtn) staleBtn.remove();
+      resetResultStyles(container);
+      container.removeAttribute('data-observed');
+      try {
+        processSingleResult(container);
+      } catch (e) {
+        if (currentConfig.debug) {
+          console.error('[屏蔽] 处理结果时出错:', container, e);
+        }
+        container.setAttribute('data-blocker-processed', 'true');
+      }
+      if (!container.hasAttribute('data-blocker-processed')) {
+        resultObserver.observe(container);
+      } else {
+        container.setAttribute('data-observed', 'true');
+      }
+    } catch (e) {
+      if (currentConfig.debug) {
+        console.error('[屏蔽] href变更重处理失败:', container, e);
+      }
+    }
   }
 
   // 添加标签
@@ -2743,6 +2969,7 @@
     }
 
     const { url, domain } = resolveUrlDomain(link);
+    _hrefUrlCache.set(result, url);
 
     const title = getResultTitle(result, engine);
     const snippet = getResultSnippet(result, engine);
@@ -2755,6 +2982,7 @@
     // 容器处理
     if (matchResult && matchResult.blocked) {
       result.style.display = showHiddenResults ? '' : 'none';
+      setResultExtraElementsVisible(result, showHiddenResults);
       result.setAttribute('data-blocker-processed', 'true');
       result.setAttribute('data-is-blocked', 'true');
 
@@ -2879,13 +3107,14 @@
   }
 
   function filterNestedContainers(nodes, selector) {
-    if (!nodes || nodes.length <= 1) return Array.from(nodes || []);
-    const arr = Array.from(nodes);
+    const arr = Array.from(nodes || []);
     const hasOwnLink = (el) => {
       try {
         const links = el.querySelectorAll('a[href]');
+        const nested = selector ? Array.from(el.querySelectorAll(selector)) : [];
         for (const a of links) {
-          if (!arr.some(other => other !== el && other.contains(a))) return true;
+          if (!nested.some(other => other.contains(a)) &&
+              !arr.some(other => other !== el && other.contains(a))) return true;
         }
       } catch (_) {}
       return false;
@@ -2923,6 +3152,7 @@
   // 增量扫描
   function scanNewResults() {
     if (!currentConfig.enabled) {
+      restoreResultExtraElements();
       document.querySelectorAll('[data-blocker-processed], [data-observed]').forEach(result => {
         resultObserver.unobserve(result);
         resetResultStyles(result);
@@ -2991,6 +3221,7 @@
 
   function forceReprocessAll() {
     if (!isEngineSite()) return;
+    restoreResultExtraElements();
     buildRuleIndex();
     exposeDebugApi();
 
@@ -3119,8 +3350,8 @@
         }
 
         /* 次级小按钮 */
-        [id^="serh-"] button:not(.action-button),
-        .serh-button:not(.action-button) {
+        [id^="serh-"] button:not(.serh-action-button),
+        .serh-button:not(.serh-action-button) {
             font-size: 11px !important;
             padding: 4px 8px !important;
             height: auto !important;
@@ -3145,25 +3376,25 @@
         .serh-button-danger:hover { background: #9b2c2c !important; color: #ffffff !important; }
         .serh-button-danger:active, .serh-button-danger:focus, .serh-button-danger:focus-visible { background: #742a2a !important; color: #ffffff !important; }
 
-        .option-row {
+        .serh-option-row {
             display: flex;
             align-items: center;
             justify-content: space-between;
             margin-bottom: 10px;
             flex-wrap: wrap;
         }
-        .option-label {
+        .serh-option-label {
             font-size: 12px;
             color: #4a5568;
             white-space: nowrap;
             margin-bottom: 4px;
         }
-        .option-buttons {
+        .serh-option-buttons {
             display: flex;
             gap: 4px;
             flex-wrap: wrap;
         }
-        .option-button {
+        .serh-option-button {
             padding: 3px 8px;
             font-size: 11px;
             background: #f7fafc;
@@ -3173,18 +3404,18 @@
             color: #4a5568;
             box-sizing: border-box;
         }
-        .option-button.active {
+        .serh-option-button.active {
             background: #2c5282;
             color: white;
             border-color: #2c5282;
         }
-        .compact-row {
+        .serh-compact-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 10px;
         }
-        .action-button {
+        .serh-action-button {
             padding: 7px 12px !important;
             font-size: 12px !important;
             font-weight: 500 !important;
@@ -3199,7 +3430,7 @@
         }
 
         /* 规则栏输入 */
-        .rules-container {
+        .serh-rules-container {
             display: flex;
             border: 1px solid #e2e8f0;
             border-radius: 4px;
@@ -3534,13 +3765,13 @@
         box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
         }
 
-        #serh-panel .option-label,
-        #serh-panel .compact-row span {
+        #serh-panel .serh-option-label,
+        #serh-panel .serh-compact-row span {
             color: #9ca3af !important;
         }
 
-        #serh-panel .rules-container,
-        #serh-selector-panel .rules-container {
+        #serh-panel .serh-rules-container,
+        #serh-selector-panel .serh-rules-container {
             border-color: #4b5563 !important;
             background: #1E1F21 !important;
         }
@@ -3571,7 +3802,7 @@
             color: #f3f4f6 !important;
         }
 
-        #serh-panel .compact-row button.serh-button {
+        #serh-panel .serh-compact-row button.serh-button {
             height: auto !important;
             min-height: 0 !important;
             width: auto !important;
@@ -3665,8 +3896,8 @@
         #serh-webdav-panel .serh-button,
         #serh-subscription-panel .serh-button,
         #serh-hlcolor-panel .serh-button,
-        #serh-panel .action-button,
-        #serh-selector-panel .action-button {
+        #serh-panel .serh-action-button,
+        #serh-selector-panel .serh-action-button {
             height: 30px !important;
             min-height: 30px !important;
             max-height: 30px !important;
@@ -3783,7 +4014,7 @@
         #serh-subscription-rows-container::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
         #serh-subscription-rows-container::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
         #serh-subscription-rows-container::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
-        .subscription-row {
+        .serh-subscription-row {
             display: flex;
             flex-direction: column;
             margin-bottom: 0;
@@ -4407,6 +4638,7 @@
     showHiddenResults = !showHiddenResults;
     document.querySelectorAll('[data-is-blocked="true"]').forEach(el => {
       el.style.display = showHiddenResults ? '' : 'none';
+      setResultExtraElementsVisible(el, showHiddenResults);
       if (showHiddenResults) {
         if (el.parentElement && el.parentElement.style.display === 'none') {
           el.parentElement.style.display = '';
@@ -4426,7 +4658,11 @@
         removeMatchedRuleLabel(el);
       }
     });
-    if (!showHiddenResults) {
+    if (showHiddenResults) {
+      document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
+        parent.style.display = '';
+      });
+    } else {
       document.querySelectorAll('[data-blocker-yandex-parent]').forEach(parent => {
         const hasVisibleSiblings = Array.from(parent.children).some(sibling =>
           sibling.style.display !== 'none' && sibling.getAttribute('data-is-blocked') !== 'true'
@@ -4577,6 +4813,11 @@
     const textarea = document.getElementById('serh-rules');
     if (!textarea) return;
     const clean = stripRuleComment(String(rule).trim());
+    const panel = document.getElementById('serh-panel');
+    if (panel && Array.isArray(panel._initialRules) &&
+        !panel._initialRules.some(r => getRuleKey(r) === getRuleKey(rule))) {
+      panel._initialRules.push(rule);
+    }
     const lines = textarea.value ? textarea.value.split('\n') : [];
     if (lines.some(l => stripRuleComment(l.trim()) === clean)) return;
     lines.push(rule);
@@ -4618,11 +4859,17 @@
       if (container.parentElement !== panel) {
         panel.appendChild(container);
       }
+      const anchoredBottom = !!(panel.style && panel.style.bottom && panel.style.bottom !== 'auto');
       container.style.position = 'absolute';
-      container.style.top = 'calc(100% + 4px)';
+      if (anchoredBottom) {
+        container.style.top = 'auto';
+        container.style.bottom = 'calc(100% + 4px)';
+      } else {
+        container.style.top = 'calc(100% + 4px)';
+        container.style.bottom = '';
+      }
       container.style.left = '0';
       container.style.right = '0';
-      container.style.bottom = '';
       container.style.width = 'auto';
       container.style.maxWidth = 'none';
     } else {
@@ -5041,13 +5288,13 @@
                 </label>
             </div>
             
-            <div class="option-row" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px;">
-                <span class="option-label" style="margin-bottom: 0;">${t('bubbleSize')} <span id="serh-bubble-size-val">${initialSize}px</span></span>
+            <div class="serh-option-row" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px;">
+                <span class="serh-option-label" style="margin-bottom: 0;">${t('bubbleSize')} <span id="serh-bubble-size-val">${initialSize}px</span></span>
                 <input type="range" id="serh-bubble-size-slider" min="15" max="40" value="${initialSize}" style="flex: 1; margin-left: 5px; height: 4px; background: #cbd5e0; border-radius: 2px; outline: none; -webkit-appearance: none; cursor: pointer;">
             </div>
             
             <div style="margin-bottom: 0px;">
-                <div class="compact-row">
+                <div class="serh-compact-row">
                     <span style="font-size: 12px; color: #4a5568;">${t('blockRules')}</span>
                     <div style="display: flex; gap: 4px; flex: 0 0 auto;">
                         <button id="serh-subscribe" class="serh-button serh-button-secondary" style="padding: 3px 8px; border: 1px solid transparent; min-width: 0 !important; width: auto !important; flex: 0 0 auto !important;">${t('subscription')}</button>
@@ -5056,7 +5303,7 @@
                         <button id="serh-export-file" class="serh-button serh-button-success" style="padding: 3px 8px; border: 1px solid transparent; min-width: 0 !important; width: auto !important; flex: 0 0 auto !important;">${t('export')}</button>
                     </div>
                 </div>
-                <div class="rules-container">
+                <div class="serh-rules-container">
                     <div id="serh-line-numbers"></div>
                     <textarea id="serh-rules" placeholder="${t('placeholder')}" wrap="off">${escHtml(currentConfig.rules.join('\n'))}</textarea>
                     <div id="serh-scroll-top" class="serh-scroll-btn" style="top: 2px;">⬆️</div>
@@ -5065,9 +5312,9 @@
             </div>
             
             <div style="display: flex; gap: 6px; margin-top: 8px;" id="serh-panel-footer">
-                <button id="serh-save" class="serh-button serh-button-primary action-button" style="flex: 2;">${t('save')}</button>
-                <button id="serh-test" class="serh-button serh-button-secondary action-button" style="flex: 1;">${t('stats')}</button>
-                <button id="serh-close" class="serh-button serh-button-danger action-button" style="flex: 1;">${t('close')}</button>
+                <button id="serh-save" class="serh-button serh-button-primary serh-action-button" style="flex: 2;">${t('save')}</button>
+                <button id="serh-test" class="serh-button serh-button-secondary serh-action-button" style="flex: 1;">${t('stats')}</button>
+                <button id="serh-close" class="serh-button serh-button-danger serh-action-button" style="flex: 1;">${t('close')}</button>
             </div>
             
             <div id="serh-stats-panel">
@@ -5376,6 +5623,7 @@
 
   // 高亮面板
   function showHighlightColorPanel() {
+    injectWidgetStyles();
     const existing = document.getElementById('serh-hlcolor-panel');
     if (existing) {
       if (typeof existing._cleanupClick === 'function') existing._cleanupClick();
@@ -5709,6 +5957,7 @@
         `  titles: [${(def.titles || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
         `  snippets: [${(def.snippets || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
         `  links: ${links},\n` +
+        `  extraElements: [${(def.extraElements || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
         (disabled ? `  disabled: true,\n` : '') +
         `}`;
     };
@@ -5716,7 +5965,11 @@
       if (key === 'other') continue;
       const def = merged[key];
       if (def && def.disabled) {
-        const hasCustom = !!(def.match || def.containers || (def.titles && def.titles.length) || (def.snippets && def.snippets.length));
+        let hasCustom = !!(def.match || def.containers || (def.titles && def.titles.length) || (def.snippets && def.snippets.length) || (def.extraElements && def.extraElements.length));
+        if (!hasCustom && def.links !== undefined) {
+          const norm = (v) => JSON.stringify(normalizeSelectorList(v));
+          hasCustom = norm(def.links) !== norm('a[href]');
+        }
         if (hasCustom) {
           parts.push(`${keyToText(key)}: ${defToText(def, true)}`);
           continue;
@@ -5752,6 +6005,17 @@
       if (key === 'other') { errors.push(t('selectorReservedKey', { key })); continue; }
       if (!/^[A-Za-z0-9_-]+$/.test(key)) { errors.push(t('selectorInvalidKey', { key })); continue; }
       if (!def || typeof def !== 'object' || Array.isArray(def)) { errors.push(t('selectorFieldRequired', { key, field: 'match' })); continue; }
+      if (def.extraElements !== undefined) {
+        if (!Array.isArray(def.extraElements)) {
+          errors.push(t('selectorFieldRequired', { key, field: 'extraElements' }));
+        } else {
+          for (const s of def.extraElements) {
+            if (typeof s !== 'string' || !s.trim() || s.includes(',') || hasPseudoElement(s) || !isValidCssSelector(':scope > :nth-child(1) ' + s)) {
+              errors.push(t('selectorInvalidCss', { key, field: 'extraElements', value: s }));
+            }
+          }
+        }
+      }
       if (def.disabled === true || def.disable === true) continue;
       if ((def.disabled === false || def.disable === false) && Object.keys(def).every(k => k === 'disabled' || k === 'disable')) continue;
       if (typeof def.match === 'string' && def.match) {
@@ -5809,6 +6073,7 @@
     const norm = (v) => JSON.stringify(normalizeSelectorList(v));
     if (norm(a.titles) !== norm(b.titles)) return false;
     if (norm(a.snippets) !== norm(b.snippets)) return false;
+    if (norm(a.extraElements) !== norm(b.extraElements)) return false;
     if (norm(a.links) !== norm(b.links)) return false;
     return true;
   }
@@ -6042,14 +6307,14 @@
                 </div>
             </div>
             <div style="font-size:11px;color:#718096;margin-bottom:6px;">${t('selectorHint')}</div>
-            <div class="rules-container" style="height:255px;">
+            <div class="serh-rules-container" style="height:255px;">
                 <div id="serh-sel-line-numbers"></div>
                 <textarea id="serh-sel-rules" spellcheck="false" wrap="off">${escHtml(serializeSelectors())}</textarea>
             </div>
             <div style="display:flex;gap:6px;margin-top:8px;">
-                <button id="serh-selector-save" class="serh-button serh-button-primary action-button" style="flex:2;">${t('save')}</button>
-                <button id="serh-selector-reset" class="serh-button serh-button-danger action-button" style="flex:1;">${t('hlColorReset')}</button>
-                <button id="serh-selector-cancel" class="serh-button serh-button-secondary action-button" style="flex:1;">${t('cancel')}</button>
+                <button id="serh-selector-save" class="serh-button serh-button-primary serh-action-button" style="flex:2;">${t('save')}</button>
+                <button id="serh-selector-reset" class="serh-button serh-button-danger serh-action-button" style="flex:1;">${t('hlColorReset')}</button>
+                <button id="serh-selector-cancel" class="serh-button serh-button-secondary serh-action-button" style="flex:1;">${t('cancel')}</button>
             </div>
         `;
 
@@ -6214,7 +6479,7 @@
   }
 
   // 应用云端订阅
-  function applyCloudSubscriptions(subscriptions, cloudSubTombstones) {
+  function applyCloudSubscriptions(subscriptions, cloudSubTombstones, preferLocal = false) {
     if (!cloudSubTombstones || typeof cloudSubTombstones !== 'object') cloudSubTombstones = {};
     if (!Array.isArray(subscriptions)) return;
     const existing = getSubscriptions();
@@ -6230,20 +6495,24 @@
     pruneTombstones(mergedSubTombstones);
     GM_setValue(SUBSCRIPTION_TOMBSTONES_KEY, mergedSubTombstones);
 
+    const addedAtFor = s => Math.max(Number(s.addedAt) || 0,
+      Number((existing.find(e => e && e.url === s.url) || {}).addedAt) || 0);
     const merged = subscriptions
-      .filter(s => s && s.url && (!mergedSubTombstones[s.url] || (s.lastUpdate && s.lastUpdate > mergedSubTombstones[s.url])))
+      .filter(s => s && s.url && (!mergedSubTombstones[s.url] || addedAtFor(s) > mergedSubTombstones[s.url]))
       .map(s => {
         const local = existing.find(e => e && e.url === s.url);
+        if (preferLocal && local) s = { ...s, ...local };
         const isNew = !local || !Array.isArray(local.rules) || local.rules.length === 0;
         if (isNew && s.url && s.enabled !== false) hasNewSub = true;
         const rules = Array.isArray(local && local.rules) && local.rules.length > 0
           ? local.rules
           : (Array.isArray(s.rules) ? s.rules : []);
         const lastUpdate = (local && local.rules && local.rules.length > 0)
-          ? (s.lastUpdate || (local && local.lastUpdate) || 0)
+          ? (local.lastUpdate || 0)
           : 0;
         return {
           ...s,
+          addedAt: addedAtFor(s),
           enabled: s.enabled !== undefined ? s.enabled !== false : (local ? local.enabled !== false : true),
           rules,
           lastUpdate,
@@ -6254,7 +6523,7 @@
     // 订阅同步
     const localOnly = existing.filter(localSub =>
       localSub && localSub.url &&
-      (!mergedSubTombstones[localSub.url] || (localSub.lastUpdate && localSub.lastUpdate > mergedSubTombstones[localSub.url])) &&
+      (!mergedSubTombstones[localSub.url] || (localSub.addedAt && localSub.addedAt > mergedSubTombstones[localSub.url])) &&
       !merged.some(s => s && s.url === localSub.url)
     );
     saveSubscriptions([...merged, ...localOnly]);    if (hasNewSub) {
@@ -6425,7 +6694,7 @@
         url: s.url,
         name: s.name,
         enabled: s.enabled,
-        lastUpdate: s.lastUpdate
+        addedAt: s.addedAt || 0
       })),
       subscriptionTombstones: getSubscriptionTombstones(),
       tombstones: getLocalTombstones(),
@@ -6549,6 +6818,9 @@
     const rootPath = parsed.origin + '/';
     if (url === rootPath || parsed.pathname === '/') return;
 
+
+
+    // 兼容套壳浏览器
     let propfindResp;
     try {
       propfindResp = await gmRequest('PROPFIND', url, {
@@ -6556,22 +6828,43 @@
         allow404: true
       });
     } catch (e) {
-      throw e;
+      if (currentConfig && currentConfig.debug) console.warn('[WebDAV] PROPFIND 请求失败，跳过目录检查:', e && e.message);
+      return;
     }
 
     if (propfindResp.status === 207 || propfindResp.status === 200) return;
     if (propfindResp.status !== 404) {
-      throw new Error(`WebDAV PROPFIND failed: HTTP ${propfindResp.status}`);
+      if (currentConfig && currentConfig.debug) console.warn(`[WebDAV] PROPFIND 返回 HTTP ${propfindResp.status}，跳过目录检查`);
+      return;
     }
 
     const trimmedPath = url.slice(0, url.lastIndexOf('/', url.length - 2) + 1);
     if (trimmedPath && trimmedPath !== rootPath && trimmedPath.length > parsed.origin.length) {
-      await ensureWebDAVFolder(trimmedPath, headers);
+      try {
+        await ensureWebDAVFolder(trimmedPath, headers);
+      } catch (_) {}
     }
 
-    const mkcolResp = await gmRequest('MKCOL', url, { headers, allow404: false });
-    if (mkcolResp.status < 200 || mkcolResp.status >= 300) {
-      throw new Error(`WebDAV MKCOL failed: HTTP ${mkcolResp.status}`);
+    let mkcolResp;
+    try {
+      mkcolResp = await gmRequest('MKCOL', url, { headers, allow404: false });
+    } catch (err) {
+      if (currentConfig && currentConfig.debug) console.warn('[WebDAV] MKCOL 请求失败，交由上传请求判定目录状态:', err && err.message);
+      return;
+    }
+    if (mkcolResp && mkcolResp.status !== 405 && mkcolResp.status !== 301 && mkcolResp.status !== 409 && (mkcolResp.status < 200 || mkcolResp.status >= 300)) {
+      if (currentConfig && currentConfig.debug) console.warn(`[WebDAV] MKCOL 返回 HTTP ${mkcolResp.status}，交由上传请求判定目录状态`);
+    }
+  }
+
+  // WebDAV PUT：目录缺失(409)时尝试创建目录后重试一次
+  async function gmPutWebDAV(fullUrl, putOptions, folderUrl, headers) {
+    try {
+      return await gmRequest('PUT', fullUrl, putOptions);
+    } catch (err) {
+      if (!err || err.message !== 'HTTP 409') throw err;
+      await ensureWebDAVFolder(folderUrl, headers);
+      return await gmRequest('PUT', fullUrl, putOptions);
     }
   }
 
@@ -6639,9 +6932,25 @@
     const items = [];
     const stripQ = (raw) => {
       const s = raw.trim();
-      if (s.length > 1 &&
-          ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'")))) {
-        return s.slice(1, -1).trim();
+      if (s.startsWith("'")) {
+        const match = s.match(/^'((?:[^']|'')*)'(?:\s*#.*)?$/);
+        if (!match) throw new Error('Invalid YAML single-quoted scalar');
+        return match[1].replace(/''/g, "'");
+      }
+      if (s.startsWith('"')) {
+        const match = s.match(/^"((?:[^"\\]|\\.)*)"(?:\s*#.*)?$/);
+        if (!match) throw new Error('Invalid YAML double-quoted scalar');
+        const escapes = { '0': '\0', a: '\x07', b: '\b', t: '\t', n: '\n',
+          v: '\v', f: '\f', r: '\r', e: '\x1b', ' ': ' ', '"': '"',
+          '/': '/', '\\': '\\', N: '\u0085', _: '\u00a0', L: '\u2028', P: '\u2029' };
+        return match[1].replace(/\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[\s\S])/g, (_, escape) => {
+          if (Object.prototype.hasOwnProperty.call(escapes, escape)) return escapes[escape];
+          if (/^(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})$/.test(escape)) {
+            const code = parseInt(escape.slice(1), 16);
+            if (code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)) return String.fromCodePoint(code);
+          }
+          throw new Error('Invalid YAML escape: ' + escape);
+        });
       }
       return s;
     };
@@ -6684,12 +6993,7 @@
         if (/^[a-zA-Z0-9_]+\s*:(?!\/\/)/.test(rawItem)) {
           continue;
         }
-        const qMatch = rawItem.match(/^((?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'))(?:\s*#.*)?$/);
-        if (qMatch) {
-          rawItem = qMatch[1].slice(1, -1);
-        } else if ((rawItem.startsWith('"') && rawItem.endsWith('"')) || (rawItem.startsWith("'") && rawItem.endsWith("'"))) {
-          rawItem = rawItem.slice(1, -1);
-        }
+        rawItem = stripQ(rawItem);
         let item = rawItem.trim();
         if (sectionKind === 'whitelist' && item && !item.startsWith('@')) item = '@' + item;
         if (item) items.push(item);
@@ -6747,6 +7051,10 @@ function collectSubscriptionRules(lines) {
 }
 
 async function performSubscriptionForUrl(url, showAlerts = true) {
+  if (!getSubscriptions().some(s => s.url === url)) {
+    return { success: false, cancelled: true, count: 0 };
+  }
+  const initialTombstone = getSubscriptionTombstones()[url];
   const resp = await gmRequest('GET', url);
   const content = resp.responseText;
 
@@ -6756,6 +7064,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   const subs = getSubscriptions();
   const existing = subs.find(s => s.url === url);
+  const subTombstones = getSubscriptionTombstones();
+  if (!existing || subTombstones[url] !== initialTombstone) {
+    return { success: false, cancelled: true, count: 0 };
+  }
 
   if (isHtmlResponse(content) || validRules.length === 0) {
     throw new Error(t('subImportFailed'));
@@ -6764,6 +7076,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   const existingIndex = subs.findIndex(s => s.url === url);
   const subData = {
     url,
+    addedAt: existing.addedAt || 0,
     enabled: existing ? existing.enabled !== false : true,
     lastUpdate: Date.now(),
     rules: validRules
@@ -6771,13 +7084,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   if (meta.name) subData.name = meta.name;
   else if (existing && existing.name) subData.name = existing.name;
 
-  if (existingIndex >= 0) subs[existingIndex] = subData;
-  else subs.push(subData);
-  const subTombstones = getSubscriptionTombstones();
-  if (subTombstones[url]) {
-    delete subTombstones[url];
-    GM_setValue(SUBSCRIPTION_TOMBSTONES_KEY, subTombstones);
-  }
+  subs[existingIndex] = subData;
   saveSubscriptions(subs);
 
     if (showAlerts) alert(t('subscriptionSuccess', {
@@ -6801,15 +7108,17 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     const panel = createPanel('serh-subscription-panel', '320px', '20px');
 
     let subscriptions = getSubscriptions();
+    const deletedUrls = new Set();
 
     function createSubscriptionRow(sub = {}) {
       const url = typeof sub === 'string' ? sub : (sub.url || '');
       const enabled = typeof sub === 'object' && sub.enabled !== undefined ? sub.enabled : true;
       const row = document.createElement('div');
-      row.className = 'subscription-row';
+      row.className = 'serh-subscription-row';
       row.innerHTML = `<div class="subscription-meta-row"><span class="subscription-index"></span><div class="subscription-status-message"></div><span class="subscription-info"></span></div><div class="subscription-input-row"><label class="serh-switch subscription-toggle-switch" style="margin:0 2px 0 0;"><input type="checkbox" class="subscription-enable-toggle" ${enabled ? 'checked' : ''}><span class="serh-slider"></span></label><input type="text" class="subscription-url" placeholder="https://example.com/rules.txt"><button class="delete-subscription-btn">❌</button></div>`;
       row.querySelector('.subscription-url').value = url;
       row.dataset.originalUrl = url;
+      row.dataset.originalEnabled = String(enabled !== false);
       const toggle = row.querySelector('.subscription-enable-toggle');
       toggle.addEventListener('change', () => {
         if (persistCurrentSubscriptions()) {
@@ -6855,11 +7164,11 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
 
     function reindexRows() {
-      const rows = container.querySelectorAll('.subscription-row');
+      const rows = container.querySelectorAll('.serh-subscription-row');
       rows.forEach((row, index) => {
         row.querySelector('.subscription-index').textContent = `${t('subscription')}${index + 1}`;
         const infoEl = row.querySelector('.subscription-info');
-        const sub = subscriptions[index];
+        const sub = subscriptions.find(s => s.url === row.dataset.originalUrl);
         if (sub && sub.lastUpdate) {
           const d = new Date(sub.lastUpdate);
           const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -6871,14 +7180,15 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       });
     }
 
-    function collectSubscriptionsFromRows() {
-      const newSubs = [];
+    function collectSubscriptionsFromRows(latestSubs = subscriptions, removedUrls = []) {
+      const removed = new Set(removedUrls);
+      const newSubs = latestSubs.filter(s => !removed.has(s.url));
       let hasError = false;
       const seenUrls = new Set();
-      container.querySelectorAll('.subscription-row').forEach(row => {
+      container.querySelectorAll('.serh-subscription-row').forEach(row => {
         const input = row.querySelector('.subscription-url');
         const url = input.value.trim();
-        const origUrl = row.dataset.originalUrl || url;
+        const origUrl = row.dataset.originalUrl || '';
         const toggle = row.querySelector('.subscription-enable-toggle');
         const enabled = toggle ? toggle.checked : true;
         const msgDiv = row.querySelector('.subscription-status-message');
@@ -6897,27 +7207,45 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           return;
         }
         seenUrls.add(url);
-        const existingSub = subscriptions.find(s => s && s.url === origUrl) ||
-          subscriptions.find(s => s && s.url === url);
-        newSubs.push({
+        const existingSub = latestSubs.find(s => s && s.url === url) ||
+          latestSubs.find(s => s && s.url === origUrl);
+        // 未编辑的旧行不能恢复另一页已经删除的订阅。
+        if (origUrl && url === origUrl && !existingSub) return;
+        const enabledChanged = row.dataset.originalEnabled === undefined ||
+          String(enabled) !== row.dataset.originalEnabled;
+        const subData = {
           url,
-          enabled,
+          addedAt: existingSub && existingSub.url === url ? (existingSub.addedAt || 0) : Date.now(),
+          enabled: existingSub && !enabledChanged ? existingSub.enabled !== false : enabled,
           lastUpdate: existingSub ? existingSub.lastUpdate : 0,
           rules: existingSub && Array.isArray(existingSub.rules) ? existingSub.rules : [],
           name: existingSub ? existingSub.name : undefined
-        });
+        };
+        if (origUrl && origUrl !== url) {
+          const oldIndex = newSubs.findIndex(s => s.url === origUrl);
+          if (oldIndex >= 0) newSubs.splice(oldIndex, 1);
+        }
+        const index = newSubs.findIndex(s => s.url === url);
+        if (index >= 0) newSubs[index] = subData;
+        else newSubs.push(subData);
       });
       return { newSubs, hasError };
     }
 
     function persistCurrentSubscriptions() {
-      const { newSubs, hasError } = collectSubscriptionsFromRows();
+      const latestSubs = getSubscriptions();
+      const { newSubs, hasError } = collectSubscriptionsFromRows(latestSubs, deletedUrls);
       if (hasError) return false;
+      const retainedUrls = new Set(newSubs.map(s => s.url));
+      recordSubscriptionDeletions(latestSubs.filter(s => s.url && !retainedUrls.has(s.url)).map(s => s.url));
       saveSubscriptions(newSubs.filter(s => s.url));
+      deletedUrls.clear();
       subscriptions = getSubscriptions();
-      container.querySelectorAll('.subscription-row').forEach(row => {
+      container.querySelectorAll('.serh-subscription-row').forEach(row => {
         const input = row.querySelector('.subscription-url');
         if (input) row.dataset.originalUrl = input.value.trim();
+        const toggle = row.querySelector('.subscription-enable-toggle');
+        if (toggle) row.dataset.originalEnabled = String(toggle.checked);
       });
       GM_setValue(LOCAL_LAST_MODIFIED_KEY, Date.now());
       if (typeof triggerWebDAVSyncDelayed === 'function') {
@@ -6930,12 +7258,15 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       container.querySelectorAll('.delete-subscription-btn').forEach(btn => {
         btn.onclick = (e) => {
           e.stopPropagation();
-          const row = btn.closest('.subscription-row');
+          const row = btn.closest('.serh-subscription-row');
           const input = row.querySelector('.subscription-url');
           const origUrl = (row.dataset.originalUrl || '').trim();
           const inputVal = input ? input.value.trim() : '';
           const deletedUrl = origUrl || inputVal;
-          if (deletedUrl) recordSubscriptionDeletions([deletedUrl]);
+          if (deletedUrl) {
+            deletedUrls.add(deletedUrl);
+            recordSubscriptionDeletions([deletedUrl]);
+          }
           row.remove();
           reindexRows();
           if (persistCurrentSubscriptions()) {
@@ -6961,7 +7292,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     });
 
     document.getElementById('serh-subscription-import').onclick = async () => {
-      const rows = Array.from(container.querySelectorAll('.subscription-row'));
+      const rows = Array.from(container.querySelectorAll('.serh-subscription-row'));
       if (!persistCurrentSubscriptions()) return;
       showToast(t('importing'), 'info');
       for (const row of rows) {
@@ -6980,6 +7311,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         }
         try {
           const result = await performSubscriptionForUrl(url, false);
+          if (!result.success) continue;
           row.dataset.originalUrl = url;
           msgDiv.textContent = t('subImportSuccess');
           msgDiv.className = 'subscription-status-message success';
@@ -7015,10 +7347,28 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   }
 
+  function hasMatchingWebDAVCredentials(saved, url, username) {
+    return !!saved.password && String(saved.url || '').trim() === url.trim() &&
+      String(saved.username || '').trim() === username.trim();
+  }
+
+  function resolveWebDAVPanelConfig(saved, values) {
+    const url = values.url.trim();
+    const username = values.username.trim();
+    let password = values.password;
+    if (!password && saved.password) {
+      if (!hasMatchingWebDAVCredentials(saved, url, username)) return null;
+      password = saved.password;
+    }
+    return { url, username, password, filename: values.filename.trim() || 'rules.txt' };
+  }
+
   function showWebDAVPanel() {
     hideStatsPanel();
     const existing = document.getElementById('serh-webdav-panel');
     if (existing) {
+      const password = existing.querySelector('#serh-webdav-password');
+      if (password) password.value = '';
       if (typeof existing._cleanupClick === 'function') existing._cleanupClick();
       existing.remove();
       return;
@@ -7062,8 +7412,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     <div class="webdav-row">
         <label>${t('webdavPass')}</label>
         <div style="position: relative; display: flex; align-items: center;">
-            <input id="serh-webdav-password" type="password" style="padding-right: 35px !important;">
-            <button id="serh-webdav-toggle-password" type="button" style="position: absolute; right: 4px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; padding: 4px; font-size: 16px; line-height: 1; color: #718096; display: flex; align-items: center; justify-content: center; z-index: 1;">🐵</button>
+            <input id="serh-webdav-password" type="password" autocomplete="new-password" style="padding-right: 35px !important;">
+            <button id="serh-webdav-toggle-password" type="button" style="position: absolute; right: 4px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; padding: 4px; font-size: 16px; line-height: 1; color: #718096; display: none; align-items: center; justify-content: center; z-index: 1;">🐵</button>
         </div>
     </div>
     <div class="webdav-row"><label>${t('filename')}</label><input id="serh-webdav-filename" type="text" placeholder="rules.txt"></div>
@@ -7081,7 +7431,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     const filenameInput = document.getElementById('serh-webdav-filename');
     urlInput.value = webdavConfig.url || '';
     usernameInput.value = webdavConfig.username || '';
-    passwordInput.value = webdavConfig.password || '';
+    passwordInput.value = '';
     filenameInput.value = webdavConfig.filename || 'rules.txt';
 
     // 密码显隐
@@ -7090,28 +7440,34 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       togglePasswordBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        if (!passwordInput.value) return;
         const type = passwordInput.type === 'password' ? 'text' : 'password';
         passwordInput.type = type;
         togglePasswordBtn.textContent = type === 'password' ? '🐵' : '🙈';
       });
     }
 
-    function saveWebDAVConfig() {
-      const rawUrl = urlInput.value.trim();
-      const prevConfig = GM_getValue(WEBDAV_KEY, {}) || {};
-      let url = rawUrl;
-      if (rawUrl && !isHttpsUrl(rawUrl)) {
-        showToast(t('webdavHttpsRequired'), 'error');
-        url = isHttpsUrl(prevConfig.url) ? String(prevConfig.url).trim() : '';
+    function updateWebDAVPasswordState() {
+      const saved = GM_getValue(WEBDAV_KEY, {}) || {};
+      passwordInput.placeholder = hasMatchingWebDAVCredentials(saved, urlInput.value, usernameInput.value)
+        ? t('webdavPasswordSaved') : '';
+      togglePasswordBtn.style.display = passwordInput.value ? 'flex' : 'none';
+      if (!passwordInput.value) {
+        passwordInput.type = 'password';
+        togglePasswordBtn.textContent = '🐵';
       }
-      const config = {
-        url,
-        username: usernameInput.value.trim(),
-        password: passwordInput.value,
-        filename: filenameInput.value.trim() || 'rules.txt'
-      };
+    }
+
+    function saveSuccessfulWebDAVConfig(config) {
       GM_setValue(WEBDAV_KEY, config);
-      return config;
+      passwordInput.value = '';
+      updateWebDAVPasswordState();
+    }
+
+    function setWebDAVBusy(busy) {
+      [urlInput, usernameInput, passwordInput, filenameInput, togglePasswordBtn,
+        panel.querySelector('#serh-webdav-upload'), panel.querySelector('#serh-webdav-download')]
+        .forEach(input => { input.disabled = busy; });
     }
 
     // 校验面板输入
@@ -7125,19 +7481,24 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         showToast(t('webdavHttpsRequired'), 'error');
         return null;
       }
-      return saveWebDAVConfig();
+      const config = resolveWebDAVPanelConfig(GM_getValue(WEBDAV_KEY, {}) || {}, {
+        url,
+        username: usernameInput.value,
+        password: passwordInput.value,
+        filename: filenameInput.value
+      });
+      if (!config) showToast(t('webdavPasswordRequired'), 'error');
+      return config;
     }
 
-    urlInput.addEventListener('change', saveWebDAVConfig);
-    usernameInput.addEventListener('change', saveWebDAVConfig);
-    passwordInput.addEventListener('change', saveWebDAVConfig);
-    filenameInput.addEventListener('change', saveWebDAVConfig);
+    urlInput.addEventListener('input', updateWebDAVPasswordState);
+    usernameInput.addEventListener('input', updateWebDAVPasswordState);
+    passwordInput.addEventListener('input', updateWebDAVPasswordState);
+    updateWebDAVPasswordState();
 
-    let isExplicitCancel = false;
     const closePanel = bindOutsideClickClose(panel, () => {
-      if (!isExplicitCancel) {
-        saveWebDAVConfig();
-      }
+      passwordInput.value = '';
+      updateWebDAVPasswordState();
     });
 
     // webdav上传
@@ -7146,7 +7507,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       if (!config) return;
       const uploadBtn = document.getElementById('serh-webdav-upload');
       if (uploadBtn.disabled) return;
-      uploadBtn.disabled = true;
+      setWebDAVBusy(true);
       const textarea = document.getElementById('serh-rules');
       if (textarea) {
         const newRules = filterValidRuleLines(textarea.value.split('\n'));
@@ -7178,14 +7539,14 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           } catch (_) {}
           const uploadedTime = Math.max(Date.now(), remoteSyncedAt + 1000);
           const uploadData = buildUploadContent(content, uploadedTime, remotePreserved);
-          await gmRequest('PUT', fullUrl, {
+          await gmPutWebDAV(fullUrl, {
             headers: {
               ...headers,
               'Content-Type': 'text/plain; charset=utf-8',
               'X-OC-Mtime': Math.floor(uploadedTime / 1000).toString()
             },
             data: uploadData
-          });
+          }, folderUrl, headers);
           GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime);
           GM_setValue(WEBDAV_LAST_SYNC_KEY, uploadedTime);
         });
@@ -7193,6 +7554,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         if (lockAcquired === false) {
           showToast(t('webdavSyncLocked'), 'error', 4000);
         } else {
+          saveSuccessfulWebDAVConfig(config);
           showToast(t('uploadSuccess'), 'success');
           const mainPanel = document.getElementById('serh-panel');
           if (mainPanel && Array.isArray(currentConfig.rules)) {
@@ -7204,7 +7566,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         loadingToast.dismiss();
         showToast(t('webdavUploadFailed') + err.message, 'error', 5000);
       } finally {
-        uploadBtn.disabled = false;
+        setWebDAVBusy(false);
       }
     };
 
@@ -7221,7 +7583,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       if (!config) return;
       const downloadBtn = document.getElementById('serh-webdav-download');
       if (downloadBtn.disabled) return;
-      downloadBtn.disabled = true;
+      setWebDAVBusy(true);
       const loadingToast = showToast(t('webdavDownloading'), 'info', 10000);
       try {
         const lockAcquired = await runWithSyncLock('webdav', async () => {
@@ -7231,19 +7593,19 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         if (lockAcquired === false) {
           showToast(t('webdavSyncLocked'), 'error', 4000);
         } else {
+          saveSuccessfulWebDAVConfig(config);
           showToast(t('downloadSuccess'), 'success');
         }
       } catch (err) {
         loadingToast.dismiss();
         showToast(t('webdavDownloadFailed') + err.message, 'error', 5000);
       } finally {
-        downloadBtn.disabled = false;
+        setWebDAVBusy(false);
       }
     };
 
     document.getElementById('serh-webdav-cancel').onclick = (e) => {
       e.stopPropagation();
-      isExplicitCancel = true;
       closePanel();
     };
 
@@ -7359,12 +7721,12 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       }
       let lastModTime = 0;
       if (resp.responseHeaders && typeof resp.responseHeaders === 'string') {
-        const lastModMatch = resp.responseHeaders.match(/last-modified:\s*(.*)/i);
+        const lastModMatch = resp.responseHeaders.match(/last-modified:\s*(.+)$/im);
         if (lastModMatch) {
           cloudLastMod = lastModMatch[1].trim();
           lastModTime = Date.parse(cloudLastMod) || 0;
         }
-        const etagMatch = resp.responseHeaders.match(/etag:\s*(.*)/i);
+        const etagMatch = resp.responseHeaders.match(/etag:\s*(.+)$/im);
         if (etagMatch) {
           cloudETag = etagMatch[1].trim();
         }
@@ -7373,6 +7735,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       if (isNaN(cloudTime)) cloudTime = 0;
     }
 
+    adoptStoredConfigIfNewer();
     const localTime = GM_getValue(LOCAL_LAST_MODIFIED_KEY, 0);
     const localRules = currentConfig.rules || [];
 
@@ -7383,14 +7746,14 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       const uploadedTime = Math.max(Date.now(), 1);
       const uploadData = buildUploadContent(localContent, uploadedTime);
       try {
-        await gmRequest('PUT', fullUrl, {
+        await gmPutWebDAV(fullUrl, {
           headers: {
             ...headers,
             'Content-Type': 'text/plain; charset=utf-8',
             'X-OC-Mtime': Math.floor(uploadedTime / 1000).toString()
           },
           data: uploadData
-        });
+        }, folderUrl, headers);
         GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime);
       } catch (err) {
         console.warn('[自动 WebDAV] 初始上传失败:', err.message);
@@ -7421,12 +7784,16 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         }
       }
 
+      if (cloudConfig && GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
+        applyCloudSubscriptions(Array.isArray(cloudConfig.subscriptions) ? cloudConfig.subscriptions : [],
+          cloudConfig.subscriptionTombstones, localTime >= cloudTime);
+      }
+
       // 应用云端设置
       if (cloudTime > localTime && cloudConfig) {
         const { syncedAt, subscriptions, subscriptionTombstones, bubbleState, bubbleSize, selectors, tombstones, ruleAddedTimes, ...settings } = cloudConfig;
         if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
           Object.assign(currentConfig, settings);
-          if (subscriptions) applyCloudSubscriptions(subscriptions, subscriptionTombstones);
         }
         if (selectors && typeof selectors === 'object' && !Array.isArray(selectors) && GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false)) {
           GM_setValue(SELECTORS_KEY, selectors);
@@ -7444,7 +7811,24 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       const syncSelectors = GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false);
       const contentChanged = mergedContent !== cloudContent;
       const localNewer = localTime > cloudTime;
-      const shouldUpload = contentChanged || (localNewer && (syncConfig || syncSelectors));
+      const metadata = syncConfig ? buildSyncPayload(cloudTime) :
+        JSON.parse(buildMetadataConfigPayload(parsedHeader ? parsedHeader.rawScriptConfig : null, cloudTime));
+      const sameTimeMap = (a, b) => {
+        a = a || {};
+        b = b || {};
+        return Object.keys(a).length === Object.keys(b).length &&
+          Object.keys(a).every(key => a[key] === b[key]);
+      };
+      const metadataChanged = !sameTimeMap(metadata.tombstones, cloudTombstones) ||
+        !sameTimeMap(metadata.ruleAddedTimes, cloudAddedTimes);
+      const subscriptionSignature = subs => JSON.stringify((Array.isArray(subs) ? subs : [])
+        .filter(s => s && s.url)
+        .map(s => [s.url, s.name || '', s.enabled !== false, s.addedAt || 0])
+        .sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+      const subscriptionsChanged = syncConfig && (
+        subscriptionSignature(metadata.subscriptions) !== subscriptionSignature(cloudConfig && cloudConfig.subscriptions) ||
+        !sameTimeMap(metadata.subscriptionTombstones, cloudConfig && cloudConfig.subscriptionTombstones));
+      const shouldUpload = contentChanged || metadataChanged || subscriptionsChanged || (localNewer && (syncConfig || syncSelectors));
 
       if (shouldUpload) {
         console.log('[自动 WebDAV] 规则合并或配置更新完成，上传至云端...');
@@ -7462,9 +7846,13 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           putHeaders['If-Match'] = cloudETag;
         }
         try {
-          await gmRequest('PUT', fullUrl, { headers: putHeaders, data: uploadData });
+          await gmPutWebDAV(fullUrl, { headers: putHeaders, data: uploadData }, folderUrl, headers);
           GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime);
         } catch (err) {
+          if (err && err.message && err.message.includes('412')) {
+            console.warn('[自动 WebDAV] 云端并发更新检测到版本冲突 (412)，重新发起同步');
+            return performAutoWebDAVSync(config);
+          }
           console.warn('[自动 WebDAV] 上传失败:', err.message);
           return;
         }
@@ -7733,19 +8121,59 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     updateStatus(0);
     scanNewResults();
 
-    let _scanPending = false;
-    _domObserver = new MutationObserver((mutations) => {
-      if (mutations.some(m => m.addedNodes.length > 0)) {
-        if (_scanPending) return;
-        _scanPending = true;
-        requestAnimationFrame(() => {
-          _scanPending = false;
-          scanNewResults();
-        });
+    let _pendingRecords = [];
+    let _mutationRafPending = false;
+    const flushMutations = () => {
+      _mutationRafPending = false;
+      const records = _pendingRecords;
+      _pendingRecords = [];
+      if (!records.length) return;
+      if (_domObserver) _domObserver.disconnect();
+      try {
+        const selector = getContainerSelector(getSearchEngine());
+        for (const m of records) {
+          if (m.type !== 'attributes' || m.attributeName !== 'href') continue;
+          const target = m.target;
+          if (!target || typeof target.closest !== 'function' || !selector) continue;
+          let container = null;
+          try { container = target.closest(selector); } catch (e) { container = null; }
+          if (container) _hrefChangedContainers.add(container);
+        }
+        if (_hrefChangedContainers.size) {
+          for (const container of _hrefChangedContainers) {
+            if (!container.isConnected) continue;
+            const cachedUrl = _hrefUrlCache.get(container);
+            const currentUrl = peekResultUrl(container);
+            if (cachedUrl !== undefined && cachedUrl === currentUrl) continue;
+            reprocessContainerAfterHrefChange(container);
+          }
+          _hrefChangedContainers.clear();
+          updateStatus(document.querySelectorAll('[data-is-blocked="true"]').length);
+        }
+        const hasAddedNodes = records.some(m => m.type === 'childList' && m.addedNodes.length > 0);
+        if (hasAddedNodes) scanNewResults();
+      } finally {
+        if (_engineSiteSetup && _domObserver) {
+          _domObserver.observe(document.body, {
+            childList: true,
+            attributes: true,
+            attributeFilter: ['href'],
+            subtree: true
+          });
+        }
       }
+    };
+    _domObserver = new MutationObserver((records) => {
+      if (!_mutationRafPending) {
+        _mutationRafPending = true;
+        requestAnimationFrame(flushMutations);
+      }
+      _pendingRecords = _pendingRecords.concat(records);
     });
     _domObserver.observe(document.body, {
       childList: true,
+      attributes: true,
+      attributeFilter: ['href'],
       subtree: true
     });
 
@@ -7793,12 +8221,15 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   function teardownEngineSite() {
     if (!_engineSiteSetup) return;
+    restoreResultExtraElements();
     _engineSiteSetup = false;
     forceReprocessBatchId++;
     if (_domObserver) {
       _domObserver.disconnect();
       _domObserver = null;
     }
+    _hrefUrlCache = new WeakMap();
+    _hrefChangedContainers.clear();
     if (_searchForm && _searchFormHandler) {
       _searchForm.removeEventListener('submit', _searchFormHandler);
     }
