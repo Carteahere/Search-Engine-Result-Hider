@@ -20,8 +20,20 @@
       snippets: ['.st', '.VwiC3b', '.s3v9rd', '.IsZvec', '.lyLwlc', '.yXK7lf'],
       links: 'a[href]',
     },
+    duckduckgo_lite: {
+      match: /^lite\.duckduckgo\.com$/,
+      containers: 'tr:has(.result-link)',
+      titles: ['.result-link'],
+      snippets: ['.result-snippet'],
+      links: ['a.result-link[href]'],
+      extraElements: [
+        '+ tr:not(:has(.result-link))',
+        '+ tr:not(:has(.result-link)) + tr:not(:has(.result-link))',
+        '+ tr:not(:has(.result-link)) + tr:not(:has(.result-link)) + tr:not(:has(.result-link))',
+      ],
+    },
     duckduckgo: {
-      match: /^(?:(?:www|html|start|lite|m|safe|noai)\.)?(?:duckduckgo\.com|ddg\.gg)$/,
+      match: /^(?:(?:www|html|start|m|safe|noai)\.)?(?:duckduckgo\.com|ddg\.gg)$/,
       containers: '[data-testid="result"], [data-testid="web-vertical"] li > article, .result, .web-result, .tile',
       titles: ['a[data-testid="result-title-a"]', '.result__title', '.tile__title', '.tile--title__title', 'h2 a', 'a h2', 'h2'],
       snippets: ['[data-testid="result-snippet"]', '[data-result="snippet"]', '.result__snippet'],
