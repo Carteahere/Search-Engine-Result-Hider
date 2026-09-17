@@ -6,7 +6,7 @@
 
 Implements complex-rule search result blocking on browsers that **only support user script installation**.  
 Supports URL matching including uBlacklist basic rules, regex matching, title matching, whitelist matching, target result highlighting, and result snippet matching.  
-Currently supported search engines: Bing, Google, Google Scholar, DuckDuckGo, Yandex, Brave, Yahoo  
+Currently supported search engines: Bing, Google, Google Scholar, DuckDuckGo(&lite), Yandex, Brave, Yahoo(&Japan)  
 Automatic redirect removal engines: Bing, Google, Google Scholar, DuckDuckGo, Yahoo
 
 Install sources [Github](https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [Greasy Fork](https://update.greasyfork.org/scripts/552394/%E6%90%9C%E7%B4%A2%E5%BC%95%E6%93%8E%E7%BB%93%E6%9E%9C%E5%B1%8F%E8%94%BD%E5%99%A8.user.js)
@@ -51,7 +51,7 @@ Open with a browser that supports script installation to install directly.
 
 1. One-click blocking logic:  
 When secondary confirmation is enabled, a panel pops up offering options to block or add to whitelist; when disabled, adds `*://example.com/*` or `*://*.example.com/*` depending on the block-domain switch.  
-Unblocking: when secondary confirmation is enabled, a panel pops up offering options to delete local source rules or add to whitelist; when disabled, adds a whitelist entry by default.
+Unblock: When enabling secondary confirmation, a panel pops up where you can choose to delete local source rules or add to whitelist; When closed, the local source rule is deleted by default; when the subscription rule is hit, the selection panel is displayed to add whitelist.
 2. Rule priority: Local whitelist > Local blacklist > Subscription whitelist > Subscription blacklist
 3. The script is injected site-wide via `@match *://*/*`; the floating bubble and blocking filters only take effect on search engines.
 4. Comment line format: `# + space + content`. ⬆️/⬇️ jump to the previous/next comment line; when on the first line or first comment line, ⬆️ jumps to the last line.

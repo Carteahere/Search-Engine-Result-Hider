@@ -73,7 +73,7 @@ URL通配规则按匹配模式语义从URL开头匹配，`*://`仅匹配`http/ht
 
 | 条件类型 | 语法 | 说明 |
 | --- | --- | --- |
-| 搜索引擎 | `$site = "google"` | 仅在指定搜索引擎中生效，可写`google`、`google_scholar`、`bing`、`duckduckgo`(`ddg`)、`yandex`、`brave`、`yahoo`(`yahoo-japan`)，忽略大小写，分隔符可用`=`或`:`，值支持省略引号（如`$site=google`） |
+| 搜索引擎 | `$site = "google"` | 仅在指定搜索引擎中生效，可写`google`、`google_scholar`、`bing`、`duckduckgo`(`ddg`)、`duckduckgo_lite`、`yandex`、`brave`、`yahoo`(`yahoo-japan`)，忽略大小写，分隔符可用`=`或`:`，值支持省略引号（如`$site=google`）；`$site=duckduckgo` 或 `$site=ddg` 同样匹配 Lite，`$site=duckduckgo_lite` 仅匹配 Lite |
 | 搜索类型 | `$category = "web"` | 仅在指定搜索类型中生效，可写`web`、`images`、`videos`、`news`，由当前页 URL 推断，网页搜索默认为`web`，值支持省略引号（如`$category=images`） |
 | 搜索站点 | `site = "google.com.hk"` | 仅在指定搜索引擎地区站点中生效，值支持省略引号（如`site=google.com.hk`） |
 | 标题包含 | `title *= "关键词"` | 标题中包含指定字符串`关键词` |
@@ -125,6 +125,7 @@ URL通配规则按匹配模式语义从URL开头匹配，`*://`仅匹配`http/ht
 | `links` | string \| string\[\] | 可选，链接选择器，默认 `a[href]` |
 | `titles` | string \| string\[\] | 可选，标题选择器列表 |
 | `snippets` | string \| string\[\] | 可选，摘要选择器列表 |
+| `extraElements` | string\[\] | 可选，CSS 相对选择器数组，以每个结果容器为起点选出关联元素；这些元素随结果同步隐藏、展开和恢复，也用于摘要后备提取；自定义引擎同样可用 |
 | `disabled` | boolean | 可选，`true` 停用该引擎，内置引擎同样适用；别名 `disable`，单独写 `disabled: false`（或 `disable: false`）恢复内置 |
 
 **示例：**
@@ -145,5 +146,5 @@ bing: {disabled: true},
 1. 优先级：自定义选择器 > 内置选择器，把覆盖改回内置值或使用“重置”可恢复跟随脚本更新
 2. 自定义引擎支持 `$site = "引擎ID"` 条件以及屏蔽/高亮/白名单规则，`titles`/`snippets` 可省略
 3. 引擎ID仅允许字母/数字/`_`/`-`，`other` 为保留键不可写，与内置引擎同ID或站点重叠时会覆盖内置选择器，如匹配 `cn.bing.com` 时将优先于内置 `bing` 命中
-4. 内置引擎标准ID：`google`、`google_scholar`、`bing`、`duckduckgo`、`yandex`、`brave`、`yahoo`（注：`ddg` 与 `yahoo-japan` 仅作为 `@if($site=...)` 条件规则中的简写别名，在选择器配置中覆盖内置引擎时请使用标准 ID `duckduckgo` 与 `yahoo`）
+4. 内置引擎标准ID：`google`、`google_scholar`、`bing`、`duckduckgo_lite`、`duckduckgo`、`yandex`、`brave`、`yahoo`（注：`ddg` 与 `yahoo-japan` 仅作为 `@if($site=)` 条件规则简写别名，Lite 使用独立 ID `duckduckgo_lite` ）
 5. 保存时仅存储与内置有差异的键，未改动的内置不会写入存储

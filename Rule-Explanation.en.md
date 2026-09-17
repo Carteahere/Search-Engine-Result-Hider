@@ -73,7 +73,7 @@ Note: Only 5 colors, `@N` = `@1`–`@5`; open the custom color panel from the sc
 
 | Condition Type | Syntax | Description |
 | --- | --- | --- |
-| Search Engine | `$site = "google"` | Only takes effect on the specified engine: `google`, `google_scholar`, `bing`, `duckduckgo`(`ddg`), `yandex`, `brave`, `yahoo`(`yahoo-japan`); case-insensitive, `=` or `:`, quotes can be omitted (e.g. `$site=google`) |
+| Search Engine | `$site = "google"` | Only takes effect on the specified engine: `google`, `google_scholar`, `bing`, `duckduckgo`(`ddg`), `duckduckgo_lite`, `yandex`, `brave`, `yahoo`(`yahoo-japan`); case-insensitive, `=` or `:`, quotes can be omitted (e.g. `$site=google`); `$site=duckduckgo` or `$site=ddg` also matches Lite, while `$site=duckduckgo_lite` matches only Lite |
 | Search Type | `$category = "web"` | Only takes effect on the specified search type: `web`, `images`, `videos`, `news`; inferred from the page URL, defaults to `web`, quotes can be omitted (e.g. `$category=images`) |
 | Search Site | `site = "google.com.hk"` | Only takes effect on the specified regional site, quotes can be omitted (e.g. `site=google.com.hk`) |
 | Title Contains | `title *= "keyword"` | Title contains `keyword` |
@@ -125,6 +125,7 @@ Open the edit panel via script manager menu `🖋️ Custom Selectors` (JS forma
 | `links` | string \| string\[\] | Optional, link selector, defaults to `a[href]` |
 | `titles` | string \| string\[\] | Optional, title selector list |
 | `snippets` | string \| string\[\] | Optional, snippet selector list |
+| `extraElements` | string\[\] | Optional, array of relative CSS selectors anchored at each result container to select associated elements; these elements are hidden, expanded, and restored together with the result and are also used for fallback snippet extraction; available to custom engines as well |
 | `disabled` | boolean | Optional, `true` disables the engine (built-ins included); alias `disable`; writing `disabled: false` (or `disable: false`) alone restores the built-in |
 
 **Examples:**
@@ -145,5 +146,5 @@ bing: {disabled: true},
 1. Priority: Custom > Built-in. Change overrides back to built-in values or use "Reset" to follow script updates again.
 2. Custom engines support the `$site = "Engine ID"` condition and block/highlight/whitelist rules; `titles`/`snippets` can be omitted.
 3. Engine IDs allow only letters/digits/`_`/`-`; `other` is reserved. The same ID as, or a site overlapping, a built-in overrides it, e.g. `cn.bing.com` takes priority over built-in `bing`.
-4. Built-in engine standard IDs: `google`, `google_scholar`, `bing`, `duckduckgo`, `yandex`, `brave`, `yahoo` (Note: `ddg` and `yahoo-japan` are aliases only in `@if($site=...)` conditions; use `duckduckgo`/`yahoo` when overriding built-ins)
+4. Built-in engine standard IDs: `google`, `google_scholar`, `bing`, `duckduckgo_lite`, `duckduckgo`, `yandex`, `brave`, `yahoo` (Note: `ddg` and `yahoo-japan` are aliases only in `@if($site=)` , Lite uses the separate ID `duckduckgo_lite` )
 5. On save, only keys that differ from built-ins are stored.

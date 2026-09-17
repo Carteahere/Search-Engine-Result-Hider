@@ -6,9 +6,8 @@
 
 在**仅支持安装脚本**的浏览器上实现复杂规则屏蔽搜索结果功能  
 支持包括ublacklist基础规则在内的URL匹配、正则匹配、标题匹配、白名单匹配、高亮目标结果以及结果摘要(snippet)匹配  
-当前支持的搜索引擎：Bing、Google、Google Scholar、DuckDuckGo、Yandex、Brave、Yahoo  
+当前支持的搜索引擎：Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Yahoo(&Japan)  
 自动去除重定向引擎：Bing、Google、Google Scholar、DuckDuckGo、Yahoo
-
 
 安装源 [Github](https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [Greasy Fork](https://update.greasyfork.org/scripts/552394/%E6%90%9C%E7%B4%A2%E5%BC%95%E6%93%8E%E7%BB%93%E6%9E%9C%E5%B1%8F%E8%94%BD%E5%99%A8.user.js)
 
@@ -52,7 +51,7 @@
 
 1. 一键屏蔽逻辑：  
 开启二次确认时弹出面板可选屏蔽或添加白名单，关闭时按屏蔽域名开关添加`*://example.com/*`或`*://*.example.com/*`；  
-取消屏蔽在开启二次确认时弹出面板可选删除本地源规则或添加白名单，关闭时默认新增白名单。
+取消屏蔽在开启二次确认时弹出面板可选删除本地源规则或添加白名单；关闭时默认删除本地源规则，命中订阅规则时显示选择面板添加白名单。
 2. 规则优先级：本地白名单 > 本地黑名单 > 订阅白名单 > 订阅黑名单
 3. 脚本通过`@match *://*/*`全站注入，悬浮球与屏蔽过滤仅在搜索引擎生效
 4. 注释行格式`#+空格+内容`，⬆️/⬇️功能为移动到上一个/下一个注释行，在第一行或第一个注释行时⬆️会跳到最后一行
