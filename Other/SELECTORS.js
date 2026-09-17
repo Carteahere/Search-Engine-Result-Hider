@@ -26,11 +26,7 @@
       titles: ['.result-link'],
       snippets: ['.result-snippet'],
       links: ['a.result-link[href]'],
-      extraElements: [
-        '+ tr:not(:has(.result-link))',
-        '+ tr:not(:has(.result-link)) + tr:not(:has(.result-link))',
-        '+ tr:not(:has(.result-link)) + tr:not(:has(.result-link)) + tr:not(:has(.result-link))',
-      ],
+      extraElements: ['+ tr:not(:has(.result-link))', '+ tr:not(:has(.result-link)) + tr:not(:has(.result-link))', '+ tr:not(:has(.result-link)) + tr:not(:has(.result-link)) + tr:not(:has(.result-link))'],
     },
     duckduckgo: {
       match: /^(?:(?:www|html|start|m|safe|noai)\.)?(?:duckduckgo\.com|ddg\.gg)$/,
