@@ -63,7 +63,7 @@ Note: Only 5 colors, `@N` = `@1`–`@5`; open the custom color panel from the sc
 ### 2.7 Composite Rules:
 
 **Description:**
-1. Append `@if(...)` after a rule as an extra condition; multiple `@if` conditions all apply (logical AND `&`, can be merged into one `@if`). Composite matching is case-insensitive by default.
+1. Append `@if(...)` after a rule as an extra condition, rules and `@if` must be separated by spaces; multiple `@if` conditions all apply (logical AND `&`, can be merged into one `@if`). Composite matching is case-insensitive by default.
 2. Condition expressions can be used standalone, e.g. `host $= ".example.com"`, `path *= "/download/"`, applying to all search results.
 3. Within a single `@if`: `|` OR, `&` AND, `!` NOT, grouped with `( )`, precedence `!` > `&` > `|`.
 4. `!` negates the condition itself; missing content (e.g. no title) fails the condition, so the negation passes, e.g. `!(title *= "keyword")` matches results without a title.
