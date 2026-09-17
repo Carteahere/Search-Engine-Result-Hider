@@ -67,7 +67,7 @@ Note: Only 5 colors, `@N` = `@1`–`@5`; open the custom color panel from the sc
 2. Condition expressions can be used standalone, e.g. `host $= ".example.com"`, `path *= "/download/"`, applying to all search results.
 3. Within a single `@if`: `|` OR, `&` AND, `!` NOT, grouped with `( )`, precedence `!` > `&` > `|`.
 4. `!` negates the condition itself; missing content (e.g. no title) fails the condition, so the negation passes, e.g. `!(title *= "keyword")` matches results without a title.
-5. Quotes can be omitted for space-free values, e.g. `@if($site=google)`, `@if(site=google.com)`, `@if(scheme=https)`, compatible with uBlacklist syntax style.
+5. Quotes can be omitted for space-free values, e.g. `@if($site=google)`, `@if(scheme=https)`
 
 **Conditions supported by `@if`:**
 
