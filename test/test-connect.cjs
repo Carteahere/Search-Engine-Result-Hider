@@ -59,7 +59,7 @@ const syncFns = [
   'getRuleKey', 'getLocalRuleAddedTimes', 'recordRuleAddedTimes', 'getLocalTombstones', 'recordRuleDeletions', 'pruneTombstones', 'mergeRulesWithTombstones',
   'getSubscriptionTombstones', 'recordSubscriptionDeletions',
   'stripRuleComment', 'isHttpsUrl', 'getWebDAVRequest', 'ensureWebDAVFolder', 'isHtmlResponse', 'isInvalidSyncResponse', 'parseSyncHeader', 'parseRemoteConfig', 'mergeTimeMaps',
-  'buildMetadataConfigPayload', 'buildUploadContent',
+  'buildMetadataConfigPayload', 'buildUploadContent', 'gmPutWebDAV',
   'buildSyncPayload', 'applyCloudSubscriptions', 'adoptStoredConfigIfNewer',
   'checkExternalConfigChange', 'triggerWebDAVSyncDelayed', 'performAutoWebDAVSync', 'performWebDAVDownload',
 ].map((n) => extractFn(src, n));
@@ -101,6 +101,7 @@ function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], local
     }
     function getSubscriptions() { return store.get('subs') || []; }
     function saveSubscriptions(subs) { store.set('subs', subs); }
+    function checkAutoSubscription() {}
     function getUserSelectors() { return {}; }
     function getSelectorStoreSignature() { return null; }
     function resetSelectorCache() {}
@@ -133,7 +134,7 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   const cur = env.getCurrent();
   assert('T1: 云端较新时应用云端设置', cur.enabled === false && cur.language === 'en');
   assert('T1b: 智能合并云端与本地规则', cur.rules.includes('*://cloud.example.com/*') && cur.rules.includes('*://local-old.example.com/*') && cur.rules.length === 2);
-  assert('T1c: 本地订阅规则数组保留', env.store.get('subs')[0].rules[0] === 'title/foo/' && env.store.get('subs')[0].lastUpdate === 9);
+  assert('T1c: 本地订阅规则与其下载时间一起保留', env.store.get('subs')[0].rules[0] === 'title/foo/' && env.store.get('subs')[0].lastUpdate === 1);
   assert('T1d: 合并产生新内容时上传合并结果', env.calls.some((c) => c.method === 'PUT'));
   assert('T1e: 对齐本地修改时间戳', env.store.get(KEYS.LOCAL_LAST_MODIFIED_KEY) >= 2000);
 }
@@ -624,6 +625,191 @@ rules:
   await env.run(syncCfg);
   assert('T21: 自动同步遇到错误响应不合并', env.getCurrent().rules.join('|') === '*://local.example.com/*');
   assert('T21b: 自动同步遇到错误响应不上传覆盖云端', !env.calls.some((c) => c.method === 'PUT'));
+}
+
+// 网络等待期间另一页保存规则，提交必须使用最新本地正文。
+{
+  const original = { rules: ['a.example'], enabled: true };
+  const env = makeSyncEnv({ cloudText: 'a.example', storedConfig: original, localTime: 1, syncConfig: false });
+  env.setCurrent(structuredClone(original));
+  const pending = env.run(syncCfg);
+  env.store.set(KEYS.CONFIG_KEY, { rules: ['a.example', 'new.example'], enabled: false });
+  env.store.set(KEYS.LOCAL_LAST_MODIFIED_KEY, 2);
+  await pending;
+  assert('R2: GET期间新增规则不丢失', env.store.get(KEYS.CONFIG_KEY).rules.includes('new.example'));
+  assert('R2b: GET期间修改设置不回滚', env.store.get(KEYS.CONFIG_KEY).enabled === false);
+}
+
+// 旧面板只提交编辑，不覆盖最新订阅内容或未显示的条目。
+{
+  const a = 'https://a/rules';
+  const b = 'https://b/rules';
+  const row = {
+    dataset: { originalUrl: a, originalEnabled: 'true' },
+    querySelector: sel => sel === '.subscription-url' ? { value: a } :
+      sel === '.subscription-enable-toggle' ? { checked: true } : {}
+  };
+  const collect = new Function('container', 'subscriptions', 't', `
+    ${extractFn(src, 'collectSubscriptionsFromRows')}
+    return collectSubscriptionsFromRows;
+  `)({ querySelectorAll: () => [row] }, [{ url: a, rules: ['old.example'] }], k => k);
+  const latest = [
+    { url: a, enabled: false, rules: ['new.example'], lastUpdate: 20, name: 'New' },
+    { url: b, enabled: true, rules: ['b.example'] }
+  ];
+  const result = collect(latest).newSubs;
+  assert('R3: 旧面板保留最新规则和时间', result[0].rules[0] === 'new.example' && result[0].lastUpdate === 20);
+  assert('R3b: 保留其他页面新增订阅', result.some(s => s.url === b));
+  assert('R3c: 未编辑的开关保留最新状态', result[0].enabled === false);
+  assert('R3d: 旧行不恢复已删除订阅', collect([latest[1]]).newSubs.length === 1);
+  row.dataset.originalEnabled = 'false';
+  assert('R3e: 明确编辑的开关正常保存', collect(latest).newSubs[0].enabled === true);
+  const emptyCollect = new Function('container', 'subscriptions', 't', `
+    ${extractFn(src, 'collectSubscriptionsFromRows')}
+    return collectSubscriptionsFromRows;
+  `)({ querySelectorAll: () => [] }, [], k => k);
+  assert('R3f: 显式删除仅移除目标订阅', emptyCollect(latest, [a]).newSubs.map(s => s.url).join() === b);
+}
+
+// 正则/条件内部的 # 不能当作行尾注释参与去重。
+{
+  const key = new Function(`${extractFn(src, 'stripRuleComment')}\n${extractFn(src, 'getRuleKey')}\nreturn getRuleKey;`)();
+  assert('R6: 正则中的空格#保留', key('title/foo #one/') === 'title/foo #one/');
+  assert('R6b: 不同正则不碰撞', key('title/foo #one/') !== key('title/foo #two/'));
+  assert('R6c: 条件字符串中的#保留', key('title = "foo #one"') === 'title = "foo #one"');
+  assert('R6d: 真正行尾注释仍剥离', key('title/foo/ # comment') === 'title/foo/');
+  const env = makeSyncEnv({ cloudText: '', syncConfig: false });
+  env.setCurrent({ rules: ['title/foo #one/', 'title/foo #two/'] });
+  await env.run(syncCfg);
+  assert('R6e: 同步合并保留两条不同正则', env.getCurrent().rules.length === 2);
+}
+
+// 请求结束后已删除的订阅不能重建，也不能清除删除墓碑。
+{
+  const url = 'https://sub/rules';
+  let subs = [{ url, enabled: false, rules: ['old.example'] }];
+  let tombstones = {};
+  let resolveResponse;
+  const update = new Function('getSubscriptions', 'getSubscriptionTombstones', 'saveSubscriptions', 'gmRequest', 'GM_setValue', `
+    const SUBSCRIPTION_TOMBSTONES_KEY = 'tombstones';
+    const parseRulesetContent = content => ({ lines: [content], meta: {} });
+    const collectSubscriptionRules = lines => lines;
+    const isHtmlResponse = () => false;
+    const t = k => k;
+    ${extractFn(src, 'performSubscriptionForUrl')}
+    return performSubscriptionForUrl;
+  `)(() => structuredClone(subs), () => ({ ...tombstones }), value => { subs = value; },
+    () => new Promise(resolve => { resolveResponse = resolve; }),
+    (key, value) => { tombstones = value; });
+  const pending = update(url, false);
+  subs = [];
+  tombstones[url] = 123;
+  resolveResponse({ responseText: 'new.example' });
+  const result = await pending;
+  assert('R7: 迟到响应不恢复已删除订阅', result.cancelled === true && subs.length === 0);
+  assert('R7b: 迟到响应保留删除墓碑', tombstones[url] === 123);
+  subs = [{ url, enabled: false, rules: [] }];
+  const retry = update(url, false);
+  resolveResponse({ responseText: 'new.example' });
+  const success = await retry;
+  assert('R7c: 已保存的新订阅可以正常导入', success.success && subs[0].rules[0] === 'new.example');
+  assert('R7d: 正常更新保留禁用状态', subs[0].enabled === false);
+}
+
+// WebDAV 保存密码不得进入 DOM，复用必须同时匹配地址与用户名。
+{
+  const saved = { url: 'https://dav.example/a/', username: 'alice', password: 'secret', filename: 'rules.txt' };
+  const api = new Function(`
+    ${extractFn(src, 'hasMatchingWebDAVCredentials')}
+    ${extractFn(src, 'resolveWebDAVPanelConfig')}
+    return { resolve: resolveWebDAVPanelConfig };
+  `)();
+  const values = { ...saved, password: '' };
+  assert('CRED1: 双参数匹配才复用密码', api.resolve(saved, values).password === 'secret');
+  assert('CRED2: 更改地址拒绝复用', api.resolve(saved, { ...values, url: 'https://dav.example/b/' }) === null);
+  assert('CRED3: 同服务商不同用户名拒绝复用', api.resolve(saved, { ...values, username: 'bob' }) === null);
+  assert('CRED4: 用户名大小写不混用', api.resolve(saved, { ...values, username: 'Alice' }) === null);
+  assert('CRED5: 新密码可用于新账号', api.resolve(saved, { ...values, username: 'bob', password: 'new' }).password === 'new');
+  assert('CRED6: 修改文件名仍可复用', api.resolve(saved, { ...values, filename: 'other.txt' }).password === 'secret');
+  const passwordInput = { value: '', type: 'password' };
+  const togglePasswordBtn = { style: {}, textContent: '🐵' };
+  const urlInput = { value: saved.url };
+  const usernameInput = { value: saved.username };
+  let stored = { ...saved };
+  const ui = new Function('passwordInput', 'togglePasswordBtn', 'urlInput', 'usernameInput', 'GM_getValue', 'GM_setValue', `
+    const WEBDAV_KEY = 'webdav';
+    const t = k => k === 'webdavPasswordSaved' ? '已保存密码，输入以更换' : k;
+    ${extractFn(src, 'hasMatchingWebDAVCredentials')}
+    ${extractFn(src, 'updateWebDAVPasswordState')}
+    ${extractFn(src, 'saveSuccessfulWebDAVConfig')}
+    return { update: updateWebDAVPasswordState, save: saveSuccessfulWebDAVConfig };
+  `)(passwordInput, togglePasswordBtn, urlInput, usernameInput, () => stored, (key, value) => { stored = value; });
+  ui.update();
+  assert('CRED7: 已保存密码仅显示占位提示', passwordInput.value === '' && passwordInput.placeholder === '已保存密码，输入以更换');
+  assert('CRED8: 空密码框隐藏显隐按钮', togglePasswordBtn.style.display === 'none');
+  passwordInput.value = 'replacement';
+  ui.update();
+  assert('CRED9: 输入后显示显隐按钮', togglePasswordBtn.style.display === 'flex');
+  passwordInput.type = 'text';
+  ui.save({ ...saved, password: 'replacement' });
+  assert('CRED10: 成功保存并清空输入', stored.password === 'replacement' && passwordInput.value === '');
+  assert('CRED11: 保存后重置显隐状态', passwordInput.type === 'password' && togglePasswordBtn.style.display === 'none');
+  usernameInput.value = 'bob';
+  ui.update();
+  assert('CRED12: 切换账号移除已保存提示', passwordInput.placeholder === '');
+}
+
+// 相同正文也必须传播重新添加时间，且下一轮应收敛。
+{
+  const now = Date.now();
+  const rule = 'readded.example';
+  const cloud = { syncedAt: now - 3000, ruleAddedTimes: { [rule]: now - 5000 } };
+  const env = makeSyncEnv({ cloudText: '# ScriptConfig:' + JSON.stringify(cloud) + '\n' + rule, syncConfig: false });
+  env.setCurrent({ rules: [rule] });
+  env.store.set('searchfilter_rule_added_times', { [rule]: now });
+  await env.run(syncCfg);
+  const put = env.calls.find(c => c.method === 'PUT');
+  assert('META1: 正文相同仍上传新添加时间', !!put && JSON.parse(put.data.split('\n')[0].slice('# ScriptConfig:'.length)).ruleAddedTimes[rule] === now);
+  const next = makeSyncEnv({ cloudText: put.data, syncConfig: false });
+  next.setCurrent({ rules: [rule] });
+  next.store.set('searchfilter_rule_added_times', { [rule]: now });
+  await next.run(syncCfg);
+  assert('META2: 元数据一致不重复上传', !next.calls.some(c => c.method === 'PUT'));
+  const replica = makeSyncEnv({ cloudText: put.data, syncConfig: false });
+  replica.setCurrent({ rules: [] });
+  replica.store.set(KEYS.TOMBSTONES_KEY, { [rule]: now - 1000 });
+  await replica.run(syncCfg);
+  assert('META3: 新添加时间胜过另一设备旧删除', replica.getCurrent().rules.includes(rule));
+  const deletion = makeSyncEnv({ cloudText: rule, syncConfig: false });
+  deletion.setCurrent({ rules: [rule] });
+  deletion.store.set(KEYS.TOMBSTONES_KEY, { 'absent.example': now });
+  await deletion.run(syncCfg);
+  assert('META4: 仅删除元数据变化也上传', deletion.calls.some(c => c.method === 'PUT'));
+}
+
+// 普通下载不能抵消删除；云端下载时间不代表本地缓存的新鲜程度。
+{
+  const now = Date.now();
+  const url = 'https://sub/example';
+  const makeCloud = subscriptions => '# ScriptConfig:' + JSON.stringify({
+    syncedAt: now, subscriptions, subscriptionTombstones: { [url]: now - 1000 }
+  }) + '\nexample.com';
+  for (const remote of [[], [{ url, lastUpdate: now + 1 }]]) {
+    const env = makeSyncEnv({ cloudText: makeCloud(remote), localSubs: [{ url, lastUpdate: now + 1, rules: ['old.example'] }] });
+    env.setCurrent({ rules: ['example.com'] });
+    await env.run(syncCfg);
+    assert('SUBDEL1: 刷新时间晚于删除也不能复活', env.store.get('subs').length === 0);
+  }
+  const readded = makeSyncEnv({ cloudText: makeCloud([{ url, addedAt: now }]), localSubs: [{ url, addedAt: now, lastUpdate: 1, rules: ['old.example'] }] });
+  readded.setCurrent({ rules: ['example.com'] });
+  await readded.run(syncCfg);
+  assert('SUBDEL2: 显式重新添加可以胜过旧删除', readded.store.get('subs')[0].addedAt === now);
+  const staleTime = now - 13 * 60 * 60 * 1000;
+  const fresh = makeSyncEnv({ cloudText: '# ScriptConfig:' + JSON.stringify({ syncedAt: now, subscriptions: [{ url, lastUpdate: now }] }) + '\nexample.com',
+    localSubs: [{ url, lastUpdate: staleTime, rules: ['old.example'] }] });
+  fresh.setCurrent({ rules: ['example.com'] });
+  await fresh.run(syncCfg);
+  assert('SUBTIME1: 旧规则保留旧下载时间仍然到期', fresh.store.get('subs')[0].lastUpdate === staleTime);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

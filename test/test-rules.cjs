@@ -197,6 +197,7 @@ return { collectSubscriptionRules, parseRulesetContent, isScriptRuleLine, isElem
 const api = new Function(moduleBody)();
 
 
+
 // ---- 元素规则判定(uBO DOM 规则) ----
 const elementRules = [
   'example.com##.ad',
@@ -350,6 +351,18 @@ return {
 
 const api = new Function(moduleBody)();
 
+
+for (const subscription of [false, true]) {
+  for (const suffix of ['', ' @if(title *= "t")']) {
+    for (const prefix of ['', '@', '@2 ']) {
+      const rules = (prefix === '@' ? ['*://example.com/*'] : []).concat(prefix + '/^example[.]com$/' + suffix);
+      api.setState(subscription ? [] : rules, subscription ? [{ enabled: true, rules }] : []);
+      api.buildRuleIndex();
+      const result = api.checkRuleMatchOptimized('https://example.com/x', 'example.com', 't', '', ['example.com']);
+      assert(`URL正则不补测域名 ${subscription}/${prefix}/${suffix}`, prefix === '@' ? result.blocked === true : !result);
+    }
+  }
+}
 
 // 本地与订阅重复规则：来源必须按位置区分
 api.setState(
@@ -857,30 +870,30 @@ await (async () => {
   assert('R_EMPTY3: 空白正则 /   / 判定无效', analyzeRule('/   /').valid === false);
   assert('R_VALID_RE: 正常正则 /abc/ 有有效结果', analyzeRule('/abc/').valid === true);
 
-  const getCleanUrlAndFixDOM = new Function(
+  const getCleanUrl = new Function(
     extractFn(src, 'decodeRedirectTarget') + '\n' +
     extractFn(src, 'decodeBingCkTarget') + '\n' +
     extractFn(src, 'unwrapRedirectUrl') + '\n' +
-    extractFn(src, 'getCleanUrlAndFixDOM') + '\nreturn getCleanUrlAndFixDOM;'
+    extractFn(src, 'getCleanUrl') + '\nreturn getCleanUrl;'
   )();
 
   const ddgLink = { href: 'https://duckduckgo.com/l/?uddg=https%3A%2F%2Ftarget.example.com%2Fpath%3Fa%3D1&rut=xxx' };
-  const cleanUrl = getCleanUrlAndFixDOM(ddgLink);
+  const cleanUrl = getCleanUrl(ddgLink);
   assert('DDG1: 解码 uddg 重定向', cleanUrl === 'https://target.example.com/path?a=1');
-  assert('DDG2: 同步修改 DOM link.href', ddgLink.href === 'https://target.example.com/path?a=1');
+  assert('DDG2: 只读不回写 DOM link.href', ddgLink.href === 'https://duckduckgo.com/l/?uddg=https%3A%2F%2Ftarget.example.com%2Fpath%3Fa%3D1&rut=xxx');
   const ddgNoSlash = { href: 'https://duckduckgo.com/l?uddg=https%3A%2F%2Ftarget.example.com%2Fx' };
-  assert('DDG3: /l 无尾斜杠也解包', getCleanUrlAndFixDOM(ddgNoSlash) === 'https://target.example.com/x');
+  assert('DDG3: /l 无尾斜杠也解包', getCleanUrl(ddgNoSlash) === 'https://target.example.com/x');
   const scholarLink = { href: 'https://scholar.google.com/scholar_url?url=https%3A%2F%2Farxiv.org%2Fabs%2F1234&hl=en' };
-  assert('SCH1: scholar_url 解包', getCleanUrlAndFixDOM(scholarLink) === 'https://arxiv.org/abs/1234');
+  assert('SCH1: scholar_url 解包', getCleanUrl(scholarLink) === 'https://arxiv.org/abs/1234');
   const scholarJp = { href: 'https://scholar.google.co.jp/scholar_url?url=https%3A%2F%2Fexample.com%2Fpaper' };
-  assert('SCH2: scholar 地区站解包', getCleanUrlAndFixDOM(scholarJp) === 'https://example.com/paper');
+  assert('SCH2: scholar 地区站解包', getCleanUrl(scholarJp) === 'https://example.com/paper');
   const gUrl = { href: 'https://www.google.com/url?q=https%3A%2F%2Fexample.com%2Fa' };
-  assert('G1: google /url 解包', getCleanUrlAndFixDOM(gUrl) === 'https://example.com/a');
+  assert('G1: google /url 解包', getCleanUrl(gUrl) === 'https://example.com/a');
   const yahooTw = { href: 'https://tw.search.yahoo.com/r/RU=https%3A%2F%2Fexample.com%2Fy/RK=2' };
   const yahooHk = { href: 'https://search.yahoo.com.hk/r/RU=https%3A%2F%2Fexample.com%2Fhk/RK=2' };
-  assert('Y1: yahoo 地区站 RU= 解包', getCleanUrlAndFixDOM(yahooTw) === 'https://example.com/y' && getCleanUrlAndFixDOM(yahooHk) === 'https://example.com/hk');
+  assert('Y1: yahoo 地区站 RU= 解包', getCleanUrl(yahooTw) === 'https://example.com/y' && getCleanUrl(yahooHk) === 'https://example.com/hk');
   const customEngineLink = { href: 'https://scholar.google.com/scholar_url?url=https%3A%2F%2Fpapers.example.com%2Fx' };
-  assert('C1: 不依赖引擎ID仍解包', getCleanUrlAndFixDOM(customEngineLink) === 'https://papers.example.com/x');
+  assert('C1: 不依赖引擎ID仍解包', getCleanUrl(customEngineLink) === 'https://papers.example.com/x');
 })();
 
 })();

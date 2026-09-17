@@ -22,7 +22,11 @@ function extractFn(text, fnName) {
     if (text[i] === '{') depth++;
     else if (text[i] === '}') { depth--; if (depth === 0) break; }
   }
-  return text.slice(idx, i + 1);
+  const fn = text.slice(idx, i + 1);
+  if (['scanNewResults', 'teardownEngineSite'].includes(fnName)) {
+    return 'function restoreResultExtraElements() {}\n' + fn;
+  }
+  return fn;
 }
 
 
@@ -121,7 +125,7 @@ const CUSTOM = {
 
 // ---- 默认合并 ----
 check('D1 默认无用户配置时返回内置', api.getSelectors().google.containers === 'div.g, div.MjjYud');
-check('D2 内置键序在前', Object.keys(api.getSelectors()).slice(0, 8).join(',') === ['bing', 'google_scholar', 'google', 'duckduckgo', 'yandex', 'brave', 'yahoo', 'other'].join(','));
+check('D2 内置键序在前', Object.keys(api.getSelectors()).join(',') === ['bing', 'google_scholar', 'google', 'duckduckgo_lite', 'duckduckgo', 'yandex', 'brave', 'yahoo', 'other'].join(','));
 check('D3 getContainerSelector 内置', api.getContainerSelector('bing') === 'li.b_algo, div.b_algo');
 
 // ---- 覆盖内置 ----
@@ -315,6 +319,38 @@ storeRef.current = { bing: JSON.parse(JSON.stringify(bingCopy)), myse: { match: 
 api.resetSelectorCache();
 api.pruneUserSelectors();
 check('W6 旧版固化的内置副本被清理', storeRef.current && !('bing' in storeRef.current) && !!storeRef.current.myse);
+// extraElements participates in validation, merge, editor round trips and diff.
+const extraDef = { ...CUSTOM.mysearx, extraElements: ['+ .summary', '~ .metadata'] };
+api.setStore({ customExtra: extraDef });
+check('EX1 普通分支保留关联选择器', JSON.stringify(api.getSelectors().customExtra.extraElements) === JSON.stringify(extraDef.extraElements));
+check('EX2 相对CSS配置校验通过', api.validateUserSelectors({ customExtra: extraDef }).length === 0);
+const extraRoundTrip = api.parseSelectorText(api.serializeSelectors());
+check('EX3 序列化解析保留关联配置', !extraRoundTrip.errors.length && api.sameSelectorDef(extraRoundTrip.config.customExtra, extraDef));
+for (const value of ['+ tr', null, [1], [''], ['+ tr, body'], ['+ tr::after']]) {
+  check('EX4 非法关联配置被拒 ' + JSON.stringify(value), api.validateUserSelectors({ customExtra: { ...extraDef, extraElements: value } }).some(e => e.includes('extraElements')));
+}
+check('EX5 disabled配置仍校验关联CSS', api.validateUserSelectors({ customExtra: { disabled: true, extraElements: ['+ tr, body'] } }).length === 1);
+api.setStore({ customExtra: { ...extraDef, disabled: true } });
+check('EX6 禁用分支保留关联配置', JSON.stringify(api.getSelectors().customExtra.extraElements) === JSON.stringify(extraDef.extraElements));
+const disabledExtra = api.parseSelectorText(api.serializeSelectors());
+check('EX7 禁用配置往返保留关联配置', disabledExtra.config.customExtra.disabled && api.sameSelectorDef(disabledExtra.config.customExtra, extraDef));
+api.setStore({ duckduckgo_lite: { disabled: true } });
+const disabledLite = api.parseSelectorText(api.serializeSelectors());
+check('EX8 禁用内置Lite往返保留关联配置', disabledLite.config.duckduckgo_lite.extraElements.length === 3);
+api.setHost('lite.duckduckgo.com');
+check('EX9 禁用Lite不回退普通DDG', api.getSearchEngine() === 'other');
+api.setStore({});
+const liteDef = api.getSelectors().duckduckgo_lite;
+check('EX10 未改动Lite不固化', !api.diffUserSelectors({ duckduckgo_lite: liteDef }).duckduckgo_lite);
+check('EX11 清空关联配置属于有效修改', !!api.diffUserSelectors({ duckduckgo_lite: { ...liteDef, extraElements: [] } }).duckduckgo_lite);
+check('EX12 缺省与空关联相等', api.sameSelectorDef(CUSTOM.mysearx, { ...CUSTOM.mysearx, extraElements: [] }));
+api.setStore({ duckduckgo_lite: { ...liteDef, match: liteDef.match.source, extraElements: [] } });
+check('EX13 覆盖可清空内置关联', api.getSelectors().duckduckgo_lite.extraElements.length === 0);
+const parseCondition = new Function(extractFn(src, 'parseConditionPart') + '; return parseConditionPart;')();
+for (const id of ['duckduckgo', 'ddg', 'duckduckgo_lite']) {
+  check('EX14 Lite条件匹配 ' + id, parseCondition('$site=' + id, 'duckduckgo_lite', 'lite.duckduckgo.com').static === true);
+}
+check('EX15 专有ID不匹配普通DDG', parseCondition('$site=duckduckgo_lite', 'duckduckgo', 'duckduckgo.com').static === false);
 })();
 
 // ==== 来源: test-selector-import.cjs ====
@@ -652,6 +688,14 @@ function createEnv() {
   const outerOnly = makeNode([obsInner], [makeNode([], []), { id: 'o2' }]);
   const kept3 = filterFn([outerOnly], 'div.g');
   check('NEST-N4 内层不在批次时外层按自身链接判断', kept3.includes(outerOnly));
+
+  // 已观察内层不在增量候选中，但仍属于外层的后代结果。
+  wrapper.querySelectorAll = sel => sel === 'a[href]' ? [wrapLink] : [wsub];
+  wrapper.querySelector = () => wsub;
+  check('NEST-N5 仅剩外层候选时仍排除纯包装', filterFn([wrapper], 'div.g').length === 0);
+  check('NEST-N6 多候选增量扫描也排除纯包装', !filterFn([wrapper, plain], 'div.g').includes(wrapper));
+  wrapper.querySelectorAll = sel => sel === 'a[href]' ? [wrapLink, ownLink] : [wsub];
+  check('NEST-N7 增量扫描保留真正独立链接', filterFn([wrapper], 'div.g').includes(wrapper));
 }
 })();
 
@@ -750,7 +794,8 @@ function createTeardownEnv() {
   const api = new Function('document', 'resultObserver', 'statusEl', 'observer', 'counters', `
     let _engineSiteSetup = true;
     let _domObserver = observer;
-    const yandexParentTimeouts = new Set();
+    let _hrefUrlCache = new WeakMap();
+    const _hrefChangedContainers = new Set();
     let showHiddenResults = true;
     let _observedSelector = '.a';
     let forceReprocessBatchId = 5;
@@ -962,7 +1007,8 @@ const cases = [
   ['www5.bing.com', 'other'],
   ['noai.duckduckgo.com', 'duckduckgo'],
   ['start.duckduckgo.com', 'duckduckgo'],
-  ['lite.duckduckgo.com', 'duckduckgo'],
+  ['lite.duckduckgo.com', 'duckduckgo_lite'],
+  ['lite.ddg.gg', 'other'],
   ['google.com', 'google'],
   ['m.google.com', 'google'],
   ['www.google.co.jp', 'google'],
@@ -1011,7 +1057,7 @@ for (const [host, expected] of cases) {
   assert(`${host} -> ${expected}`, got === expected);
 }
 
-assert('SELECTORS键序为引擎检测顺序', JSON.stringify(Object.keys(selectors)) === JSON.stringify(['bing', 'google_scholar', 'google', 'duckduckgo', 'yandex', 'brave', 'yahoo', 'other']));
+assert('SELECTORS键序为引擎检测顺序', JSON.stringify(Object.keys(selectors)) === JSON.stringify(['bing', 'google_scholar', 'google', 'duckduckgo_lite', 'duckduckgo', 'yandex', 'brave', 'yahoo', 'other']));
 assert('缓存:同hostname二次调用返回相同结果', factory({ location: { hostname: 'www.google.com' } }, selectors).getSearchEngine() === 'google');
 assert('内置引擎不因URL尾部误判(google查询含.bing.com)', factory({ location: { hostname: 'www.google.com', href: 'https://www.google.com/search?q=x.bing.com' } }, selectors).getSearchEngine() === 'google');
 assert('内置引擎不因URL尾部误判(普通站查询含.bing.com)', factory({ location: { hostname: 'example.com', href: 'https://example.com/?ref=x.bing.com' } }, selectors).getSearchEngine() === 'other');
