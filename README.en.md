@@ -58,7 +58,7 @@ Unblock: When enabling secondary confirmation, a panel pops up where you can cho
 
 ## Docs
 
-For custom selectors and detailed rule syntax, see [Rule-Explanation](Rule-Explanation.en.md)
+For custom engine selectors and detailed rule syntax, see [Rule-Explanation](Rule-Explanation.en.md)
 
 For debug mode and troubleshooting, see [Debug](Debug.en.md)
 

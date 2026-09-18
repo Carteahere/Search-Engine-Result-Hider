@@ -58,7 +58,7 @@
 
 ## 文档
 
-自定义选择器、具体规则语法说明见 [规则说明](Rule-Explanation.md)
+自定义引擎选择器、具体规则语法说明见 [规则说明](Rule-Explanation.md)
 
 调试模式、故障排除见 [测试说明](Debug.md)
 
