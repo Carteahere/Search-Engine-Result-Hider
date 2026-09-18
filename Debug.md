@@ -24,7 +24,7 @@ node test/test-conditions.cjs 2>&1 | grep "FAIL"
 
 ### 3.3 调试模式
 
-使用[网页调试](https://greasyfork.org/zh-CN/scripts/475228)脚本或浏览器F12开发者工具Console标签`window.__SERH_DEBUG__`查看输出
+使用[网页调试](https://greasyfork.org/zh-CN/scripts/475228)脚本或浏览器F12开发者工具 → Console标签查看输出
 
 ```javascript
 const d = window.__SERH_DEBUG__;
@@ -71,4 +71,3 @@ console.timeEnd('结果查询');
 
 // 表示：规则语法有误，需要检查规则格式
 ```
-

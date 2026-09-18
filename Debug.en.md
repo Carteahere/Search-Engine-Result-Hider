@@ -24,7 +24,7 @@ Success output looks like `10 passed, 0 failed`
 
 ### 3.3 Debug Mode
 
-Use the [Web Debug](https://greasyfork.org/zh-CN/scripts/475228) script, or browser F12 DevTools Console with `window.__SERH_DEBUG__`, to view output.
+Use the [Web Debug](https://greasyfork.org/zh-CN/scripts/475228) script or browser F12 DevTools  → Console tab to view output.
 
 ```javascript
 const d = window.__SERH_DEBUG__;
