@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/SadYuyuko
-// @version      8.3.0
+// @version      8.3.1
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -30,7 +30,7 @@
 (function() {
   'use strict';
 
-  // 顶层页面运行
+  // 顶层运行
   if (window.top !== window.self) return;
   let preventPanelClose = false;
   let _engineSiteSetup = false;
@@ -64,6 +64,8 @@
   const HL_STATS_REGEX = /^@\d+/;
   const AUTO_UPDATE_INTERVAL = 12 * 60 * 60 * 1000;
   const WEBDAV_AUTO_SYNC_INTERVAL = 1 * 60 * 60 * 1000;
+  const WEBDAV_SYNC_MAX_RETRIES = 3;
+  const WEBDAV_SYNC_RETRY_DELAY = 2000;
 
   // 默认配置
   let currentConfig = GM_getValue(CONFIG_KEY, {
@@ -84,6 +86,10 @@
     subscriptionAutoUpdate: false,
     errorDetection: true
   });
+
+  if (!currentConfig || typeof currentConfig !== 'object' || Array.isArray(currentConfig)) currentConfig = {};
+  if (!Array.isArray(currentConfig.rules)) currentConfig.rules = [];
+  currentConfig.rules = currentConfig.rules.filter(rule => typeof rule === 'string');
 
   // 兼容旧配置
   if (currentConfig.showBlockBtn === undefined) currentConfig.showBlockBtn = false;
@@ -110,7 +116,7 @@
       containers: 'li.b_algo, div.b_algo',
       titles: ['h2 a', 'a h2', '.b_title'],
       snippets: ['.b_caption p', '.b_snippet', '.b_paractl p', '.b_lineclamp2'],
-      links: 'a[href]',
+      links: ['h3 a[href]', 'div[role="heading"] a[href]', 'a[href]'],
     },
     google_scholar: {
       match: /^(?:www\.)?scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/,
@@ -195,14 +201,17 @@
       const def = user[key];
       if (!def || typeof def !== 'object' || Array.isArray(def)) continue;
       if (def.disabled || def.disable) {
+        const base = SELECTORS[key] && typeof SELECTORS[key] === 'object' ? SELECTORS[key] : {};
         merged[key] = {
-          match: def.match,
-          containers: typeof def.containers === 'string' ? def.containers : '',
-          titles: normalizeSelectorList(def.titles),
-          snippets: normalizeSelectorList(def.snippets),
-          extraElements: normalizeSelectorList(def.extraElements),
-          links: Array.isArray(def.links) ? normalizeSelectorList(def.links)
-            : (typeof def.links === 'string' && def.links ? def.links : 'a[href]'),
+          ...base,
+          match: def.match !== undefined ? def.match : base.match,
+          containers: typeof def.containers === 'string' ? def.containers : (base.containers || ''),
+          titles: def.titles !== undefined ? normalizeSelectorList(def.titles) : (base.titles || []),
+          snippets: def.snippets !== undefined ? normalizeSelectorList(def.snippets) : (base.snippets || []),
+          extraElements: def.extraElements !== undefined ? normalizeSelectorList(def.extraElements) : (base.extraElements || []),
+          links: def.links !== undefined
+            ? (Array.isArray(def.links) ? normalizeSelectorList(def.links) : (typeof def.links === 'string' && def.links ? def.links : 'a[href]'))
+            : (base.links || 'a[href]'),
           disabled: true
         };
         continue;
@@ -212,7 +221,8 @@
         if (SELECTORS[key]) merged[key] = SELECTORS[key];
         continue;
       }
-      let match = null;
+      const base = SELECTORS[key] && typeof SELECTORS[key] === 'object' ? SELECTORS[key] : {};
+      let match = base.match || null;
       try {
         if (typeof def.match === 'string' && def.match) {
           match = new RegExp(def.match);
@@ -222,12 +232,13 @@
       } catch (e) { match = null; }
       merged[key] = {
         match,
-        containers: typeof def.containers === 'string' ? def.containers : '',
-        titles: normalizeSelectorList(def.titles),
-        snippets: normalizeSelectorList(def.snippets),
-        extraElements: normalizeSelectorList(def.extraElements),
-        links: Array.isArray(def.links) ? normalizeSelectorList(def.links)
-          : (typeof def.links === 'string' && def.links ? def.links : 'a[href]'),
+        containers: typeof def.containers === 'string' ? def.containers : (base.containers || ''),
+        titles: def.titles !== undefined ? normalizeSelectorList(def.titles) : (base.titles || []),
+        snippets: def.snippets !== undefined ? normalizeSelectorList(def.snippets) : (base.snippets || []),
+        extraElements: def.extraElements !== undefined ? normalizeSelectorList(def.extraElements) : (base.extraElements || []),
+        links: def.links !== undefined
+          ? (Array.isArray(def.links) ? normalizeSelectorList(def.links) : (typeof def.links === 'string' && def.links ? def.links : 'a[href]'))
+          : (base.links || 'a[href]'),
       };
     }
     for (const key of Object.keys(SELECTORS)) {
@@ -260,7 +271,6 @@
     _observedSelector = '';
   }
 
-  // 引擎检测
   let _engineCacheHost = null;
   let _engineCacheResult = 'other';
   function getSearchEngine() {
@@ -305,12 +315,11 @@
     return (getSelectors()[engine] || SELECTORS.other).containers;
   }
 
-  // 判断引擎站点
   function isEngineSite() {
     return getSearchEngine() !== 'other';
   }
 
-  // 文本映射
+  // 语言
   const LANG_TEXTS = {
     'zh-CN': {
       enableBlock: '启用屏蔽',
@@ -335,7 +344,7 @@
       webdavUrl: '地址',
       webdavUser: '账号',
       webdavPass: '密码',
-      webdavPasswordSaved: '已保存密码，输入以更换',
+      webdavPasswordSaved: '密码已保存，输入以更换',
       webdavPasswordRequired: '地址或用户名已更改，请输入对应密码',
       filename: '文件名',
       upload: '上传',
@@ -578,7 +587,6 @@
   let _lineDebounceTimer = null;
   let forceReprocessBatchId = 0;
 
-  // 语言
   function t(key, params = {}) {
     const lang = currentConfig.language;
     const texts = LANG_TEXTS[lang] || LANG_TEXTS['zh-CN'];
@@ -606,7 +614,7 @@
     return raw.split('.').map(label => label ? hostLabelToASCII(label) : label).join('.');
   }
 
-  // 中文域名解码
+  // 中文解码
   function punycodeDecodeLabel(label) {
     const s = String(label || '').toLowerCase();
     if (!s.startsWith('xn--')) return label;
@@ -702,7 +710,6 @@
     }
   }
 
-  // 规则处理
   function filterValidRuleLines(lines) {
     return lines
       .map(line => line.trim())
@@ -717,7 +724,6 @@
     return stripped.trim();
   }
 
-  // 剥离行尾注释
   function stripRuleComment(line) {
     const n = line.length;
     let i = 0;
@@ -730,6 +736,7 @@
     const body = line.slice(i);
     const prefixRegexMatch = body.match(/^(?:title|text|host|path|url|scheme)\/(?:[^/\\]|\\.)*\//i);
     let inRE = false;
+    let justClosedIf = false;
     if (/^\/(?:[^/\\]|\\.)*\//.test(body)) {
       i += 1;
       inRE = true;
@@ -779,9 +786,21 @@
           continue;
         }
       }
-      if (ch === '@' && line.substr(i, 3).toLowerCase() === '@if') { atIf = true; i += 2; continue; }
+      if (justClosedIf) {
+        if (/\s/.test(ch)) continue;
+        justClosedIf = false;
+        if (ch === '/') { inRE = true; continue; }
+        const prefixM = /^(?:title|text|host|path|url|scheme)\//i.exec(line.slice(i));
+        if (prefixM) { i += prefixM[0].length; inRE = true; continue; }
+      }
+      if (ch === '@' && line.substr(i, 3).toLowerCase() === '@if') {
+        const prevChar = i > 0 ? line[i - 1] : '';
+        if (i === 0 || /\s/.test(prevChar) || prevChar === '@' || prevChar === '(' || prevChar === ')') atIf = true;
+        i += 2;
+        continue;
+      }
       if (ch === '(' && ifDepth > 0) { ifDepth++; continue; }
-      if (ch === ')' && ifDepth > 0) { ifDepth--; continue; }
+      if (ch === ')' && ifDepth > 0) { ifDepth--; if (ifDepth === 0) justClosedIf = true; continue; }
       if (ch === '#') {
         if (ifDepth === 0) {
           const prev = line[i - 1];
@@ -964,7 +983,7 @@
     return ast;
   }
 
-  // 分析@if条件
+  // @if条件
   function analyzeCondExpr(condStr, engine, site, category) {
     if (engine === undefined) {
       engine = getSearchEngine();
@@ -1002,7 +1021,6 @@
     return { ast, errors };
   }
 
-  // 常量折叠
   function foldCondExpr(node) {
     if (node.type === 'const' || node.type === 'leaf') return node;
     if (node.type === 'not') {
@@ -1019,7 +1037,6 @@
     return rest.length === 1 ? rest[0] : { type: isAnd ? 'and' : 'or', children: rest };
   }
 
-  // 动态条件求值
   function evalDynamicLeaf(cond, title, url) {
     if (cond.type === 'title') {
       if (!title) return false;
@@ -1090,14 +1107,13 @@
           } catch (_) {}
           return safeRegexTest(cond.regex, raw) || safeRegexTest(cond.regex, uHost) || safeRegexTest(cond.regex, unicodeHost);
         }
-        return safeRegexTest(cond.regex, raw) || safeRegexTest(cond.regex, altValue);
+        return safeRegexTest(cond.regex, raw) || safeRegexTest(cond.regex, safeDecodeURIComponent(raw));
       }
       return false;
     }
     return false;
   }
 
-  // 运行求值
   function evalCondAST(ast, title, url) {
     if (!ast) return true;
     if (ast.type === 'and') {
@@ -1117,7 +1133,6 @@
     return !!ast.value;
   }
 
-  // 解析条件片段
   function parseConditionPart(trimmed, currentEngine, currentSite, currentCategory) {
     const stripQuotes = (str) => {
       const s = String(str || '').trim();
@@ -1145,19 +1160,9 @@
     if (!siteMatch) siteMatch = trimmed.match(/^site\s*\(\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s\)]+))\s*\)\s*i?\s*$/i);
     if (siteMatch) {
       const rawVal = (siteMatch[1] !== undefined ? siteMatch[1] : (siteMatch[2] !== undefined ? siteMatch[2] : siteMatch[3]));
-      const target = rawVal.trim().toLowerCase().replace(/^\.+|\.+$/g, '');
-      const curSite = String(currentSite || '').toLowerCase();
+      const target = toASCIIHostname(rawVal.trim().replace(/^\.+|\.+$/g, ''));
+      const curSite = toASCIIHostname(String(currentSite || ''));
       return { matched: true, static: curSite === target || curSite.endsWith(`.${target}`) };
-    }
-
-    const strMatch = trimmed.match(/^(title|url|host|path|scheme)\s*(\^=|\$=|\*=|=|:)\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s"']+))\s*i?\s*$/i);
-    if (strMatch) {
-      const op = strMatch[2] === ':' ? '=' : strMatch[2];
-      const rawVal = (strMatch[3] !== undefined ? strMatch[3] : (strMatch[4] !== undefined ? strMatch[4] : strMatch[5]));
-      let val = rawVal.replace(/\\(["'])/g, '$1').toLowerCase();
-      const condType = strMatch[1].toLowerCase();
-      if (condType === 'host') val = toASCIIHostname(val);
-      return { matched: true, dynamic: { type: condType, op, val } };
     }
 
     const reMatch = trimmed.match(/^(title|url|host|path|scheme)\s*(?:=\~\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
@@ -1169,6 +1174,17 @@
         flags += 'i';
       }
       return { matched: true, dynamic: { type: condType, op: '=~', regex: new RegExp(reMatch[2], flags) } };
+    }
+
+    const strMatch = trimmed.match(/^(title|url|host|path|scheme)\s*(\^=|\$=|\*=|=|:)\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s"']+))\s*i?\s*$/i);
+    if (strMatch) {
+      if (strMatch[5] !== undefined && strMatch[5].startsWith('~')) return { matched: false };
+      const op = strMatch[2] === ':' ? '=' : strMatch[2];
+      const rawVal = (strMatch[3] !== undefined ? strMatch[3] : (strMatch[4] !== undefined ? strMatch[4] : strMatch[5]));
+      let val = rawVal.replace(/\\(["'])/g, '$1').toLowerCase();
+      const condType = strMatch[1].toLowerCase();
+      if (condType === 'host') val = toASCIIHostname(val);
+      return { matched: true, dynamic: { type: condType, op, val } };
     }
 
     return { matched: false };
@@ -1192,7 +1208,7 @@
     if (rule.includes('^')) return false;
     const hostPart = rule.includes('://') ? (rule.split('/')[2] || '') : rule.split('/')[0];
     if (/[$~]/.test(hostPart)) return false;
-    if (/^\*:\/\/\*\*+/.test(rule) || /\*{3,}/.test(rule)) return false;
+    if (/^\*:\/\/\*\*+/.test(rule) || /^\*{2,}:\//.test(rule) || /\*{3,}/.test(rule)) return false;
     if (rule.startsWith('*://') && !/^\*:\/\/[^/]+(?:\/.*)?$/.test(rule)) return false;
     return true;
   }
@@ -1273,6 +1289,7 @@
     let inReClass = false;
     let inSQ = false;
     let inDQ = false;
+    let justClosedIf = false;
     const prefixRegexMatch = /^(?:url|host|path|scheme|title|text)\/(?:[^/\\]|\\.)*\//i.exec(ruleStr.slice(start));
     if (ruleStr[start] === '/' && /^\/(?:[^/\\]|\\.)*\//.test(ruleStr.slice(start))) {
       inRE = true;
@@ -1313,6 +1330,13 @@
           continue;
         }
       }
+      if (justClosedIf) {
+        if (/\s/.test(ch)) continue;
+        justClosedIf = false;
+        if (ch === '/') { inRE = true; continue; }
+        const prefixM = /^(?:url|host|path|scheme|title|text)\//i.exec(ruleStr.slice(i));
+        if (prefixM) { i += prefixM[0].length; inRE = true; continue; }
+      }
       if (ch === '@' && ruleStr.substr(i, 3).toLowerCase() === '@if') {
         const prevChar = i > 0 ? ruleStr[i - 1] : '';
         const isBoundary = i === 0 || /\s/.test(prevChar) || prevChar === '@' || prevChar === '(' || prevChar === ')';
@@ -1324,7 +1348,7 @@
         if (ruleStr[j] === '(') {
           occurrences.push({ index: i, condStart: j });
           const parenResult = extractBalancedParens(ruleStr, j);
-          if (parenResult) i = parenResult.endIndex - 1;
+          if (parenResult) { i = parenResult.endIndex - 1; justClosedIf = true; }
         }
         continue;
       }
@@ -1332,7 +1356,6 @@
     return occurrences;
   }
 
-  // 剥离@if条件
   function stripIfConditions(ruleStr, evaluateCond) {
     let coreRule = ruleStr.trim();
     let staticPass = true;
@@ -1385,7 +1408,6 @@
       || /^\s*!\s*(?:(?:\$site|\$category|engine|category|site|title|url|host|path|scheme)\b|\()/i.test(str);
   }
 
-  // 判断规则行
   function isScriptRuleLine(line) {
     const s = line.trim();
     if (!s) return false;
@@ -1395,7 +1417,6 @@
     return looksLikeCondExpr(s);
   }
 
-  // uBO元素判定
   function isElementRuleLine(line) {
     if (!/(?:##|#@#|#(?:@)?[$?%]{1,2}#)/.test(line)) return false;
     return !isScriptRuleLine(line);
@@ -1437,7 +1458,6 @@
     };
   }
 
-  // 处理@if条件
   function extractIfConditions(ruleStr) {
     const conds = [];
     for (const occ of findIfOccurrences(ruleStr)) {
@@ -1447,7 +1467,6 @@
     return conds;
   }
 
-  // 校验@if条件语法
   function validateCondition(condStr) {
     const errors = [];
     const warnings = [];
@@ -1467,7 +1486,7 @@
     return { errors, warnings };
   }
 
-  // 规则语法分析
+  // 规则分析
   function analyzeRule(rule) {
     if (!rule || rule.trim() === '') return { valid: true, errors: [], warnings: [] };
 
@@ -1479,7 +1498,7 @@
     const warnings = [];
 
     let hlN = null;
-    const hlValMatch = ruleToCheck.match(/^@(\d+)/);
+    const hlValMatch = ruleToCheck.match(/^@(\d+)(?=\s|$)/);
     if (hlValMatch) {
       const N = parseInt(hlValMatch[1]);
       if (N < 1 || N > 5) {
@@ -1490,7 +1509,6 @@
       if (!ruleToCheck) return { valid: false, errors: [t('emptyPrefixRule')], warnings };
     }
 
-    // @if条件语法检查
     const hasIfCond = /@if\s*\(/i.test(ruleToCheck);
     if (hasIfCond) {
         let unbalanced = false;
@@ -1512,10 +1530,13 @@
     const stripped = stripIfConditions(ruleToCheck);
     ruleToCheck = stripped.coreRule;
 
-    // 白名单规则
     if (ruleToCheck.startsWith('@')) {
       if (hlN !== null) {
         errors.push(t('hlWhitelistConflict'));
+        return { valid: false, errors, warnings };
+      }
+      if (ruleToCheck.startsWith('@@')) {
+        errors.push(t('invalidUrlWildcard', { rule: ruleToCheck }));
         return { valid: false, errors, warnings };
       }
       ruleToCheck = ruleToCheck.substring(1).trim();
@@ -1536,7 +1557,6 @@
       return { valid: errors.length === 0, errors, warnings };
     }
 
-    // 未闭合正则提示
     if (ruleToCheck.startsWith('/') && ruleToCheck.lastIndexOf('/') === 0) {
       errors.push(t('regexError'));
     }
@@ -1581,7 +1601,6 @@
     return { valid: errors.length === 0, errors, warnings };
   }
 
-  // 语法检查
   function validateRule(rule) {
     return analyzeRule(rule).valid;
   }
@@ -1610,7 +1629,7 @@
         const lower = str.toLowerCase();
         return /^[imsu]+$/.test(lower) && new Set(lower).size === lower.length;
       };
-      if (isUniqueFlags(possibleFlags)) {
+        if (isUniqueFlags(possibleFlags)) {
         flags = possibleFlags.toLowerCase();
         pattern = remaining.substring(0, lastSlashIndex);
       } else {
@@ -1640,7 +1659,6 @@
     return { pattern, flags: String(flags || '').toLowerCase() };
   }
 
-  // 通配符片段转正则
   function escapeWildcardPart(part, isHost) {
     const starPattern = isHost ? '[^/]*' : '.*';
     if (isHost && part && !/^[\x00-\x7F]*$/.test(part)) {
@@ -1662,7 +1680,7 @@
         i++;
         continue;
       }
-      if (ch === '*') { out += starPattern; continue; }
+      if (ch === '*') { out += (isHost && i > 0 && part[i - 1] === '.') ? '[^./]*' : starPattern; continue; }
       if (ch === '?') { out += '\\?'; continue; }
       if ('.+^${}()|[]\\'.includes(ch)) { out += '\\' + ch; continue; }
       out += ch;
@@ -1758,7 +1776,6 @@
       return parsePrefixedRegexRule(rule, 5);
     }
 
-    // URL规则
     return {
       pattern: wildcardToRegex(rule),
       flags: 'i'
@@ -1788,6 +1805,7 @@
   }
 
   function extractSimpleWhitelistDomain(rule) {
+    if (!rule || !rule.startsWith('@') || rule.startsWith('@@')) return null;
     const m = matchWildcardDomainPattern(rule.substring(1));
     if (!m) return null;
     return { domain: m.domain, type: m.domainType };
@@ -1797,7 +1815,6 @@
     return matchWildcardDomainPattern(coreRule);
   }
 
-  // 辅助分类正则
   function compileRuleRegex(coreRule) {
     let type = 'url';
     let pattern = '';
@@ -1826,7 +1843,10 @@
     if (!pattern || !pattern.trim()) {
       throw new Error('Empty regex pattern');
     }
-    return { type, regex: new RegExp(pattern, String(flags || '').toLowerCase()) };
+    const sanitizedFlags = Array.from(new Set(String(flags || '').toLowerCase().split('')))
+      .filter(f => 'imsu'.includes(f))
+      .join('');
+    return { type, regex: new RegExp(pattern, sanitizedFlags) };
   }
 
   function isLocalEntry(entry) {
@@ -1835,7 +1855,7 @@
     return entry.source === t('localRule') || entry.source === '本地规则' || entry.source === 'Local Rule';
   }
 
-  // 预编译规则索引
+  // 规则预编译
   function buildRuleIndex() {
     validationCache.clear();
     subdomainCache.clear();
@@ -1876,8 +1896,7 @@
       rule = stripRuleComment(rule.trim());
       if (!rule) return;
 
-      // @N高亮规则
-      const hlMatch = rule.match(/^@(\d+)/);
+      const hlMatch = rule.match(/^@(\d+)(?=\s|$)/);
       if (hlMatch) {
         const N = parseInt(hlMatch[1]);
         if (N < 1 || N > 5) return;
@@ -1953,7 +1972,8 @@
       const coreRule = parsed.coreRule;
       const hasDynamic = parsed.dynamicConditions.length > 0;
 
-      // 白名单处理
+      if (coreRule.startsWith('@@')) return;
+
       if (coreRule.startsWith('@')) {
         const simpleDomain = extractSimpleWhitelistDomain(coreRule);
         if (simpleDomain) {
@@ -2009,7 +2029,6 @@
         return;
       }
 
-      // 处理域名规则
       if (!coreRule.startsWith('/') && !coreRule.startsWith('text/') && !coreRule.startsWith('title/')) {
         const dm = matchSimpleDomain(coreRule);
         if (dm) {
@@ -2029,7 +2048,6 @@
         }
       }
 
-      // 预编译正则
       try {
         const compiled = compileRuleRegex(coreRule);
         ruleObj.type = compiled.type;
@@ -2054,7 +2072,6 @@
     return validationCache.get(rule);
   }
 
-  // 条件运行求值
   function checkDynamicConditions(conditions, title, url) {
     if (!conditions || !conditions.length) return true;
     for (let i = 0; i < conditions.length; i++) {
@@ -2408,7 +2425,7 @@
     return /^https?:\/\//i.test(value) ? value : '';
   }
 
-  // bing重定向解码
+  // bing解码
   function decodeBingCkTarget(u) {
     if (!u) return '';
     let rawEncoded = u;
@@ -2473,12 +2490,27 @@
         const realUrl = decodeRedirectTarget(urlObj.searchParams.get('uddg'));
         if (realUrl) return realUrl;
       }
-      if (/(?:^|\.)(?:[a-z]{2,3}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host)) {
-        for (const part of path.split('/')) {
-          if (part.startsWith('RU=')) {
-            const realUrl = decodeRedirectTarget(part.substring(3));
+      if (/(?:^|\.)(?:[a-z]{2,6}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) || /(?:^|\.)(?:search|rd|rds|ard)\.yahoo\.co\.jp$/i.test(host)) {
+        if (path.includes('RU=')) {
+          const ruMatch = path.match(/(?:^|\/)RU=([\s\S]*?)(?=(?:\/(?:RK|RS|RO|RV|CR|_ylt|_ylu)=|\/$|$))/i);
+          if (ruMatch && ruMatch[1]) {
+            const realUrl = decodeRedirectTarget(ruMatch[1]);
             if (realUrl) return realUrl;
-            break;
+          }
+        }
+        if (path.includes('/*')) {
+          const starMatch = path.match(/\/\*(https?(?::|%3A)[\s\S]*)$/i);
+          if (starMatch && starMatch[1]) {
+            const realUrl = decodeRedirectTarget(starMatch[1]);
+            if (realUrl) return realUrl;
+          }
+        }
+        const candidateParams = ['ru', 'u', 'url', 'target', 'dest', 'dst', 'r'];
+        for (const param of candidateParams) {
+          const val = urlObj.searchParams.get(param);
+          if (val) {
+            const realUrl = decodeRedirectTarget(val);
+            if (realUrl) return realUrl;
           }
         }
       }
@@ -2491,7 +2523,6 @@
     return unwrapRedirectUrl(link.href) || link.href;
   }
 
-  // 提取链接
   function resolveUrlDomain(link) {
     const rawUrl = getCleanUrl(link);
     const url = toASCIIUrl(rawUrl) || rawUrl;
@@ -2513,11 +2544,13 @@
     }
   }
 
-  // 选择器适配
   function getResultText(result, selectors) {
     if (!Array.isArray(selectors)) return '';
     for (let selector of selectors) {
-      const elem = result.querySelector(selector);
+      let elem = null;
+      try {
+        elem = result.querySelector(selector);
+      } catch (e) { continue; }
       if (elem && elem.textContent) return elem.textContent.trim();
     }
     return '';
@@ -2528,8 +2561,13 @@
     const snippet = getResultText(result, selectors);
     if (snippet) return snippet;
     for (const element of getResultExtraElements(result, engine)) {
-      const text = selectors.some(selector => element.matches(selector))
-        ? element.textContent.trim() : getResultText(element, selectors);
+      let matchedSelf = false;
+      for (const selector of selectors) {
+        try {
+          if (element.matches(selector)) { matchedSelf = true; break; }
+        } catch (e) { }
+      }
+      const text = matchedSelf ? element.textContent.trim() : getResultText(element, selectors);
       if (text) return text;
     }
     return '';
@@ -2582,18 +2620,19 @@
     let foundEl = null;
     if (Array.isArray(linkSelectors)) {
       for (let selector of linkSelectors) {
-        const el = result.querySelector(selector);
-        if (el && el.href) {
-          foundEl = el;
-          break;
-        }
+        try {
+          const el = result.querySelector(selector);
+          if (el && el.href) {
+            foundEl = el;
+            break;
+          }
+        } catch (_) { /* skip invalid custom selector and try the next one */ }
       }
     } else if (typeof linkSelectors === 'string') {
-      const el = result.querySelector(linkSelectors);
-      if (el && el.href) foundEl = el;
-    }
-    if (!foundEl) {
-      foundEl = result.querySelector('a[href]');
+      try {
+        const el = result.querySelector(linkSelectors);
+        if (el && el.href) foundEl = el;
+      } catch (_) { /* invalid custom selector means no usable result link */ }
     }
     if (engine === 'bing' && foundEl && foundEl.href) {
       try {
@@ -2606,8 +2645,16 @@
               const citeText = attrEl.textContent.trim();
               const domainMatch = citeText.match(/^https?:\/\/([^/\s]+)/i) ||
                 citeText.match(/^(?:[\p{L}\p{N}][\p{L}\p{N}_-]*\.)+\p{L}{2,}/u);
-              if (domainMatch) {
-                const candidateDomain = domainMatch[1] || domainMatch[0];
+               if (domainMatch) {
+                 if (domainMatch[0].startsWith('http')) {
+                   try {
+                     const citedUrl = new URL(domainMatch[0]);
+                     if (!/(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(citedUrl.hostname)) {
+                       return { href: citedUrl.href, getAttribute: (attr) => foundEl.getAttribute(attr), setAttribute: (attr, val) => foundEl.setAttribute(attr, val) };
+                     }
+                   } catch (_) {}
+                 }
+                 const candidateDomain = domainMatch[1] || domainMatch[0];
                 if (!/(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(candidateDomain) &&
                     !candidateDomain.includes('..') && candidateDomain.includes('.')) {
                   try {
@@ -2636,7 +2683,6 @@
     if (window.getComputedStyle(el).position === 'static') el.style.position = 'relative';
   }
 
-  // 一键屏蔽规则
   function buildBlockRuleOptions(domain) {
     const d = String(domain || '');
     const ipParts = d.split('.');
@@ -2645,13 +2691,13 @@
       return n >= 0 && n <= 255 && String(n) === p;
     });
     const baseDomain = (!isIP && d.startsWith('www.')) ? d.substring(4) : d;
+    const tldWide = !isIP && !baseDomain.includes('.');
     const exactRule = `*://${d}/*`;
     const domainRule = isIP ? exactRule : `*://*.${baseDomain}/*`;
     const whitelistRule = `@${exactRule}`;
-    return { isIP, domainRule, exactRule, whitelistRule };
+    return { isIP, tldWide, domainRule, exactRule, whitelistRule };
   }
 
-  // 添加屏蔽规则
   function applyBlockRule(result, newRule) {
     adoptStoredConfigBeforeWrite();
     const cleanRule = stripRuleComment(newRule.trim());
@@ -2664,7 +2710,6 @@
     forceReprocessAll();
   }
 
-  // 二次确认面板
   let _blockConfirmOutsideHandler = null;
   function showBlockConfirmPanel(anchor, domain, onConfirm, customOptions = null) {
     injectWidgetStyles();
@@ -2782,7 +2827,6 @@
     const btn = document.createElement('div');
     btn.className = 'serh-quick-block';
 
-    // 屏蔽按钮
     const iconColor = isBlocked ? '#3182ce' : 'currentColor';
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="${iconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line></svg>`;
 
@@ -2807,7 +2851,6 @@
       e.preventDefault();
       e.stopPropagation();
 
-      // 误屏蔽确认
       const currentHost = String(window.location.hostname || '').toLowerCase();
       const targetDomain = String(domain || '').toLowerCase();
       if (targetDomain && (currentHost === targetDomain || currentHost.endsWith('.' + targetDomain) || targetDomain.endsWith('.' + currentHost))) {
@@ -2815,7 +2858,6 @@
         return;
       }
 
-      // 取消屏蔽
       if (isBlocked) {
         const opts = buildBlockRuleOptions(domain);
         const whitelistRule = '@' + (currentConfig.blockDomain ? opts.domainRule : opts.exactRule);
@@ -2862,10 +2904,16 @@
         return;
       }
 
-      // 添加规则
       const opts = buildBlockRuleOptions(domain);
-      if (currentConfig.blockConfirm) {
-        showBlockConfirmPanel(btn, domain, (chosenRule) => applyBlockRule(result, chosenRule));
+      if (currentConfig.blockConfirm || (currentConfig.blockDomain && opts.tldWide)) {
+        const panelOptions = opts.tldWide
+          ? [
+              { label: t('bcExact'), rule: opts.exactRule },
+              { label: t('bcDomain'), rule: opts.domainRule },
+              { label: t('bcWhitelist'), rule: opts.whitelistRule }
+            ]
+          : null;
+        showBlockConfirmPanel(btn, domain, (chosenRule) => applyBlockRule(result, chosenRule), panelOptions);
         return;
       }
       applyBlockRule(result, currentConfig.blockDomain ? opts.domainRule : opts.exactRule);
@@ -2873,7 +2921,6 @@
     result.appendChild(btn);
   }
 
-  // 移除标签
   function removeMatchedRuleLabel(result) {
     const label = result.querySelector('.serh-matched-rule');
     if (label) label.remove();
@@ -2882,6 +2929,11 @@
   function clearMatchedData(result) {
     result.removeAttribute('data-matched-rule');
     result.removeAttribute('data-matched-source');
+  }
+
+  function saveOriginalDisplay(el) {
+    if (!el || el.hasAttribute('data-serh-orig-display')) return;
+    el.setAttribute('data-serh-orig-display', el.style.display || '');
   }
 
   function resetResultStyles(result) {
@@ -2895,20 +2947,64 @@
     result.classList.remove('serh-blocked-visible');
     result.style.outline = '';
     result.style.outlineOffset = '';
-    result.style.display = '';
+    const origDisplay = result.getAttribute('data-serh-orig-display');
+    if (origDisplay !== null) {
+      result.style.display = origDisplay;
+      result.removeAttribute('data-serh-orig-display');
+    } else {
+      result.style.display = '';
+    }
     if (result.parentElement && result.parentElement.dataset.blockerYandexParent) {
-      result.parentElement.style.display = '';
-      result.parentElement.removeAttribute('data-blocker-yandex-parent');
+      const parent = result.parentElement;
+      const stillHasBlockedHidden = Array.from(parent.children).some(el =>
+        el !== result && el.getAttribute('data-is-blocked') === 'true' && el.style.display === 'none');
+      const parentOrig = parent.getAttribute('data-serh-orig-display');
+      if (stillHasBlockedHidden) {
+        parent.style.display = 'none';
+      } else {
+        parent.style.display = parentOrig !== null ? parentOrig : '';
+        parent.removeAttribute('data-blocker-yandex-parent');
+        parent.removeAttribute('data-serh-orig-display');
+      }
     }
     const googleParent = result.closest ? result.closest('[data-blocker-google-parent]') : null;
     if (googleParent) {
-      googleParent.style.display = '';
-      googleParent.removeAttribute('data-blocker-google-parent');
+      const stillHasBlockedHidden = Array.from(googleParent.querySelectorAll('div.g')).some(el =>
+        el !== result && el.getAttribute('data-is-blocked') === 'true' && el.style.display === 'none');
+      const parentOrig = googleParent.getAttribute('data-serh-orig-display');
+      if (stillHasBlockedHidden) {
+        googleParent.style.display = 'none';
+      } else {
+        googleParent.style.display = parentOrig !== null ? parentOrig : '';
+        googleParent.removeAttribute('data-blocker-google-parent');
+        googleParent.removeAttribute('data-serh-orig-display');
+      }
     }
     removeMatchedRuleLabel(result);
   }
 
-  // href变更处理
+  function reconcileHiddenParents() {
+    document.querySelectorAll('[data-blocker-yandex-parent]').forEach(parent => {
+      const hasVisibleUnblocked = Array.from(parent.children).some(el =>
+        el.style.display !== 'none' && el.getAttribute('data-is-blocked') !== 'true');
+      if (!hasVisibleUnblocked) return;
+      const parentOrig = parent.getAttribute('data-serh-orig-display');
+      parent.style.display = parentOrig !== null ? parentOrig : '';
+      parent.removeAttribute('data-blocker-yandex-parent');
+      parent.removeAttribute('data-serh-orig-display');
+    });
+    document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
+      const hasVisibleUnblocked = Array.from(parent.querySelectorAll('div.g')).some(el =>
+        el.style.display !== 'none' && el.getAttribute('data-is-blocked') !== 'true');
+      if (!hasVisibleUnblocked) return;
+      const parentOrig = parent.getAttribute('data-serh-orig-display');
+      parent.style.display = parentOrig !== null ? parentOrig : '';
+      parent.removeAttribute('data-blocker-google-parent');
+      parent.removeAttribute('data-serh-orig-display');
+    });
+  }
+
+  // href变化
   function reprocessContainerAfterHrefChange(container) {
     try {
       if (!container || !container.isConnected) return;
@@ -2929,6 +3025,7 @@
       } else {
         container.setAttribute('data-observed', 'true');
       }
+      reconcileHiddenParents();
     } catch (e) {
       if (currentConfig.debug) {
         console.error('[屏蔽] href变更重处理失败:', container, e);
@@ -2936,7 +3033,6 @@
     }
   }
 
-  // 添加标签
   function addMatchedRuleLabel(result) {
     if (!result.dataset.matchedRule) return;
     removeMatchedRuleLabel(result);
@@ -2949,7 +3045,7 @@
     result.appendChild(label);
   }
 
-  // 屏蔽过滤
+  // 屏蔽处理
   function processSingleResult(result) {
     if (result.closest('.sys_algo_rs, .AlsoTry_M, [data-yga*="sugg"]')) return false;
 
@@ -2979,14 +3075,14 @@
 
     const matchResult = checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels);
 
-    // 容器处理
     if (matchResult && matchResult.blocked) {
+      saveOriginalDisplay(result);
       result.style.display = showHiddenResults ? '' : 'none';
       setResultExtraElementsVisible(result, showHiddenResults);
       result.setAttribute('data-blocker-processed', 'true');
       result.setAttribute('data-is-blocked', 'true');
 
-      // 清除yandex空白
+      // yandex空白
       if (engine === 'yandex') {
         const parent = result.parentElement;
         if (parent) {
@@ -2996,13 +3092,14 @@
               sibling.getAttribute('data-is-blocked') !== 'true';
           });
           if (!hasVisibleSiblings) {
+            saveOriginalDisplay(parent);
             parent.style.display = showHiddenResults ? '' : 'none';
             parent.dataset.blockerYandexParent = 'true';
           }
         }
       }
 
-      // 清除google空白
+      // google空白
       if (engine === 'google' && result.matches && result.matches('div.g')) {
         const parent = result.closest('div.MjjYud');
         if (parent && parent !== result) {
@@ -3012,6 +3109,7 @@
               otherG.getAttribute('data-is-blocked') !== 'true';
           });
           if (!hasVisibleSiblings) {
+            saveOriginalDisplay(parent);
             parent.style.display = showHiddenResults ? '' : 'none';
             parent.dataset.blockerGoogleParent = 'true';
           }
@@ -3031,6 +3129,7 @@
     if (matchResult && matchResult.highlight) {
       const matchHL = matchResult.highlight;
       const color = currentConfig.highlightColors[matchHL] || '#CE2029';
+      saveOriginalDisplay(result);
       result.style.display = '';
       result.style.outline = `2px solid ${color}`;
       result.style.outlineOffset = '-2px';
@@ -3052,7 +3151,6 @@
     return false;
   }
 
-  // 视口观察器
   const resultObserver = new IntersectionObserver((entries, observer) => {
     let newlyBlocked = 0;
     entries.forEach(entry => {
@@ -3168,7 +3266,6 @@
     if (!selector) return;
     syncObservedSelector(selector);
 
-    // 调试1
     if (currentConfig.debug) {
       const allMatches = document.querySelectorAll(selector);
       console.log(`[屏蔽] 引擎: ${engine}, 选择器: "${selector}", 匹配数量: ${allMatches.length}`);
@@ -3230,7 +3327,6 @@
     if (!selector) return;
     syncObservedSelector(selector);
 
-    // 调试2
     if (currentConfig.debug) {
       console.log(`[屏蔽] 引擎: ${engine}, 选择器: "${selector}"`);
       console.log(`[屏蔽] 规则数量: domains=${compiledRules.domains.size}, urls=${compiledRules.urls.length}, titles=${compiledRules.titles.length}, texts=${compiledRules.texts.length}`);
@@ -3238,12 +3334,16 @@
 
     document.querySelectorAll('.serh-quick-block').forEach(btn => btn.remove());
     document.querySelectorAll('[data-blocker-yandex-parent]').forEach(el => {
-      el.style.display = '';
+      const orig = el.getAttribute('data-serh-orig-display');
+      el.style.display = orig !== null ? orig : '';
       el.removeAttribute('data-blocker-yandex-parent');
+      el.removeAttribute('data-serh-orig-display');
     });
     document.querySelectorAll('[data-blocker-google-parent]').forEach(el => {
-      el.style.display = '';
+      const orig = el.getAttribute('data-serh-orig-display');
+      el.style.display = orig !== null ? orig : '';
       el.removeAttribute('data-blocker-google-parent');
+      el.removeAttribute('data-serh-orig-display');
     });
 
     const newResults = queryUnobserved(selector);
@@ -3281,12 +3381,12 @@
           console.log(`[屏蔽] 共屏蔽 ${totalBlocked} 个结果`);
         }
         updateStatus(totalBlocked);
+        reconcileHiddenParents();
       }
     }
     requestAnimationFrame(processBatch);
   }
 
-  // UI
   const LAYOUT_CSS = `
         /* 预留翻页高度 */
         body { min-height: 101vh !important; }
@@ -4359,7 +4459,6 @@
     `);
   }
 
-  // 仅内置引擎注入布局
   function injectGlobalStyles() {
     const engine = getSearchEngine();
     const applyLayout = engine !== 'other' && !!SELECTORS[engine];
@@ -4404,7 +4503,6 @@
         `;
   }
 
-  // 悬浮球大小
   function getBubbleSize() {
     let size = 20;
     if (typeof currentConfig.bubbleSize === 'number') {
@@ -4430,7 +4528,6 @@
     element.style.lineHeight = (1 + (size - 12) * 0.015).toFixed(2);
   }
 
-  // 悬浮球内容
   function updateBubbleContent(statusBtn, blocked) {
     const isLeft = currentConfig.bubbleState ? currentConfig.bubbleState.isLeftHalf : true;
     const isToggleMode = currentConfig.bubbleAction === 'toggleHidden';
@@ -4456,7 +4553,7 @@
     }
   }
 
-  // 拖动与边缘吸附
+  // 悬浮球移动
   function updateStatus(blocked) {
     if (!isEngineSite()) return;
     function applyBubbleStatePosition(el) {
@@ -4482,7 +4579,6 @@
       let isDragging = false;
       let startX, startY, initialLeft, initialTop;
 
-      // 长按定时器
       let longPressTimer = null;
       let hasLongPressed = false;
 
@@ -4524,7 +4620,6 @@
         });
         document.addEventListener('touchend', endDrag);
 
-        // 判断长按触发
         if (currentConfig.bubbleAction === 'toggleHidden') {
           longPressTimer = setTimeout(() => {
             if (!isDragging) {
@@ -4602,7 +4697,6 @@
         } else {
           applyBubbleStatePosition(status);
 
-          // 判断点击
           if (!hasLongPressed) {
             if (currentConfig.bubbleAction === 'openPanel') {
               setTimeout(() => {
@@ -4637,12 +4731,10 @@
   function toggleHiddenResults() {
     showHiddenResults = !showHiddenResults;
     document.querySelectorAll('[data-is-blocked="true"]').forEach(el => {
+      saveOriginalDisplay(el);
       el.style.display = showHiddenResults ? '' : 'none';
       setResultExtraElementsVisible(el, showHiddenResults);
       if (showHiddenResults) {
-        if (el.parentElement && el.parentElement.style.display === 'none') {
-          el.parentElement.style.display = '';
-        }
         el.classList.add('serh-blocked-visible');
         const engine = getSearchEngine();
         const link = getResultLink(el, engine);
@@ -4659,7 +4751,7 @@
       }
     });
     if (showHiddenResults) {
-      document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
+      document.querySelectorAll('[data-blocker-google-parent], [data-blocker-yandex-parent]').forEach(parent => {
         parent.style.display = '';
       });
     } else {
@@ -4667,13 +4759,19 @@
         const hasVisibleSiblings = Array.from(parent.children).some(sibling =>
           sibling.style.display !== 'none' && sibling.getAttribute('data-is-blocked') !== 'true'
         );
-        if (!hasVisibleSiblings) parent.style.display = 'none';
+        if (!hasVisibleSiblings) {
+          saveOriginalDisplay(parent);
+          parent.style.display = 'none';
+        }
       });
       document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
         const hasVisibleSiblings = Array.from(parent.querySelectorAll('div.g')).some(otherG =>
           otherG.style.display !== 'none' && otherG.getAttribute('data-is-blocked') !== 'true'
         );
-        if (!hasVisibleSiblings) parent.style.display = 'none';
+        if (!hasVisibleSiblings) {
+          saveOriginalDisplay(parent);
+          parent.style.display = 'none';
+        }
       });
     }
     const status = document.getElementById('serh-status');
@@ -4777,7 +4875,6 @@
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
-  // 配置持久化
   function adoptStoredConfigBeforeWrite() {
     adoptStoredConfigIfNewer();
     if (!Array.isArray(currentConfig.rules)) currentConfig.rules = [];
@@ -4793,7 +4890,6 @@
     }
   }
 
-  // 配置项更新时间戳
   function persistConfigItem(key, value, updateModifiedTime = true) {
     adoptStoredConfigBeforeWrite();
     currentConfig[key] = value;
@@ -4808,7 +4904,6 @@
     }
   }
 
-  // 一键屏蔽增量
   function appendRuleToTextarea(rule) {
     const textarea = document.getElementById('serh-rules');
     if (!textarea) return;
@@ -4903,7 +4998,6 @@
     return { dismiss };
   }
 
-  // 统计面板
   function hideStatsPanel() {
     const statsPanel = document.getElementById('serh-stats-panel');
     if (statsPanel) statsPanel.style.display = 'none';
@@ -4922,7 +5016,7 @@
     statsPanel.style.display = 'flex';
   }
 
-  // 统计分类
+  // 统计
   function updateStatsContent() {
     const statsContent = document.getElementById('serh-stats-content');
     if (!statsContent) return;
@@ -4936,7 +5030,6 @@
       .map(rule => stripRuleComment(rule))
       .filter(rule => rule.length > 0);
 
-    // 静态语法
     const ruleErrors = {};
     const ruleWarnings = {};
     const ruleCounts = new Map();
@@ -4953,13 +5046,14 @@
     const whitelistRules = [];
     const highlightRules = [];
     activeRules.forEach(rule => {
-      const hlMatch = rule.match(/^@(\d+)/);
+      const hlMatch = rule.match(/^@(\d+)(?=\s|$)/);
       if (hlMatch) {
         const N = parseInt(hlMatch[1]);
         const hlBody = rule.substring(hlMatch[0].length).trim();
         if (N >= 1 && N <= 5 && hlBody) {
           try {
-            if (parseRuleWithConditions(hlBody).staticPass) highlightRules.push(rule);
+            const hlParsed = parseRuleWithConditions(hlBody);
+            if (hlParsed.staticPass && !hlParsed.coreRule.startsWith('@')) highlightRules.push(rule);
           } catch (e) {
             if (currentConfig.debug) console.warn('统计高亮规则解析失败:', rule, e);
           }
@@ -4971,6 +5065,7 @@
         const parsed = parseRuleWithConditions(rule);
         const isWhitelist = parsed.staticPass
           && parsed.coreRule.startsWith('@')
+          && !parsed.coreRule.startsWith('@@')
           && (parsed.coreRule.length > 1 || parsed.standaloneExpr || parsed.dynamicConditions.length > 0);
         if (isWhitelist) whitelistRules.push(rule);
       } catch (e) {
@@ -5010,7 +5105,6 @@
     }));
     let resultHTML = '';
 
-    // 统计面板复用
     function issueBlockHtml(title, accent, bg, wordKey, rows) {
       if (!rows.length) return '';
       let html = `<div style="color: ${accent}; background: ${bg}; padding: 8px; border-radius: 4px; margin-bottom: 12px;"><strong>${title}</strong><br>`;
@@ -5032,7 +5126,6 @@
       resultHTML += issueBlockHtml(t('statsWarnings', {count: ruleWarningsArray.length}), '#b7791f', '#fffff0', 'warningWord', ruleWarningsArray);
     }
 
-    // 匹配规则
     const sourceOrder = getSubscriptions().map((_, i) => `${t('subscription')}${i + 1}`).concat(t('localRule'));
     let hasMatches = false;
 
@@ -5106,7 +5199,6 @@
     statsContent.innerHTML = resultHTML;
   }
 
-  // 面板定位
   function getPanelPositionStyles() {
     const statusBtn = document.getElementById('serh-status');
     if (currentConfig.panelCentered) {
@@ -5137,7 +5229,6 @@
     return 'bottom: 10px; right: 10px; transform: none;';
   }
 
-  // 创建面板
   function createPanel(id, width = '320px', padding = '15px') {
     const panel = document.createElement('div');
     panel.id = id;
@@ -5156,7 +5247,6 @@
     return panel;
   }
 
-  // 面板淡出移除
   function fadeOutAndRemovePanel(panel, onClosed) {
     panel.classList.remove('show');
     let done = false;
@@ -5170,7 +5260,6 @@
     setTimeout(finish, 350);
   }
 
-  // 点击面板外关闭
   function bindOutsideClickClose(panel, onBeforeClose) {
     const closeHandler = (e) => {
       if (preventPanelClose) return;
@@ -5195,7 +5284,7 @@
     return closePanel;
   }
 
-  // 主面板样式
+  // 面板样式
   function showConfigPanel() {
     injectWidgetStyles();
     const existingPanel = document.getElementById('serh-panel');
@@ -5224,7 +5313,6 @@
     const panel = createPanel('serh-panel');
     panel._initialRules = Array.isArray(currentConfig.rules) ? [...currentConfig.rules] : [];
 
-    // 兼容旧悬浮球设置
     const initialSize = getBubbleSize();
 
     panel.innerHTML = `
@@ -5373,7 +5461,6 @@
 
     const COMMENT_HEADING_REGEX = /^\s*#\s+\S+/;
 
-    // 快速跳转
     function findCommentLineIndices(lines) {
       const indices = [];
       for (let i = 0; i < lines.length; i++) {
@@ -5473,7 +5560,6 @@
     bindScrollBtn('serh-scroll-top', 'prev');
     bindScrollBtn('serh-scroll-bottom', 'next');
 
-    // 悬浮球大小滑条
     const sizeSlider = panel.querySelector('#serh-bubble-size-slider');
     const sizeValueDisplay = panel.querySelector('#serh-bubble-size-val');
     if (sizeSlider) {
@@ -5494,7 +5580,6 @@
       });
     }
 
-    // 滑块开关
     const switchDefs = [
       { id: 'serh-enabled', key: 'enabled', apply: () => { forceReprocessAll(); } },
       { id: 'serh-show-count', key: 'showCount', apply: () => { const s = document.getElementById('serh-status'); if (s) updateBubbleContent(s, parseInt(s.dataset.blockedCount || 0)); } },
@@ -5531,7 +5616,7 @@
     }, 200);
   }
 
-  // 记录墓碑时间
+  // 墓碑时间
   function applyRuleDiff(prevRules, newRules) {
     const prevList = Array.isArray(prevRules) ? prevRules : [];
     const nextList = Array.isArray(newRules) ? newRules : [];
@@ -5551,7 +5636,6 @@
     return true;
   }
 
-  // 保存配置
   function saveConfig() {
     const rulesText = document.getElementById('serh-rules').value;
     const enabled = document.getElementById('serh-enabled').checked;
@@ -5914,7 +5998,6 @@
     };
   }
 
-  // 选择器正则转入
   function regexSourceToLiteralText(source) {
     let out = '';
     for (let i = 0; i < source.length; i++) {
@@ -5940,7 +6023,6 @@
     return out;
   }
 
-  // 选择器序列化
   function serializeSelectors() {
     const merged = getSelectors();
     const parts = [];
@@ -5996,7 +6078,7 @@
     return /::/.test(String(selector).replace(/(["'])(?:\\.|(?!\1).)*\1/g, ''));
   }
 
-  // 选择器配置校验
+  // 选择器校验
   function validateUserSelectors(config) {
     if (!config || typeof config !== 'object' || Array.isArray(config)) return [t('selectorJsonError')];
     const errors = [];
@@ -6106,7 +6188,6 @@
     return out;
   }
 
-  // 恢复更新
   function pruneUserSelectors() {
     const user = getUserSelectors();
     let changed = false;
@@ -6122,7 +6203,7 @@
     }
   }
 
-  // 解析编辑器JS
+  // 选择器解析
   function parseSelectorText(text) {
     const fail = () => ({ config: null, errors: [t('selectorJsonError')] });
     let s = String(text == null ? '' : text).trim();
@@ -6234,7 +6315,6 @@
     return { config, errors: [] };
   }
 
-  // 选择器文件导入
   function importSelectorsFromFile(textarea, onLoaded) {
     preventPanelClose = true;
     const fileInput = document.createElement('input');
@@ -6277,7 +6357,7 @@
     fileInput.click();
   }
 
-  // 自定义选择器面板
+  // 选择器面板
   function showSelectorPanel() {
     injectWidgetStyles();
     hideStatsPanel();
@@ -6437,7 +6517,9 @@
   }
 
   function getSubscriptions() {
-    return GM_getValue(SUBSCRIPTIONS_KEY, []);
+    const value = GM_getValue(SUBSCRIPTIONS_KEY, []);
+    if (!Array.isArray(value)) return [];
+    return value.filter(s => s && typeof s === 'object' && !Array.isArray(s) && typeof s.url === 'string');
   }
 
   function saveSubscriptions(subscriptions) {
@@ -6478,7 +6560,6 @@
     }
   }
 
-  // 应用云端订阅
   function applyCloudSubscriptions(subscriptions, cloudSubTombstones, preferLocal = false) {
     if (!cloudSubTombstones || typeof cloudSubTombstones !== 'object') cloudSubTombstones = {};
     if (!Array.isArray(subscriptions)) return;
@@ -6520,7 +6601,6 @@
         };
       });
 
-    // 订阅同步
     const localOnly = existing.filter(localSub =>
       localSub && localSub.url &&
       (!mergedSubTombstones[localSub.url] || (localSub.addedAt && localSub.addedAt > mergedSubTombstones[localSub.url])) &&
@@ -6533,7 +6613,6 @@
     }
   }
 
-  // 订阅管理
   function gmRequest(method, url, { headers, data, allow404 = false, timeout = 30000, anonymous = true } = {}) {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
@@ -6581,6 +6660,14 @@
     });
     if (changed) GM_setValue(LOCAL_RULE_ADDED_KEY, times);
     if (tsChanged) GM_setValue(TOMBSTONES_KEY, tombstones);
+  }
+
+  function filterRulesForDownloadStamp(rules, cloudAddedTimes) {
+    if (!cloudAddedTimes || typeof cloudAddedTimes !== 'object' || Array.isArray(cloudAddedTimes)) return rules;
+    return rules.filter(r => {
+      const k = getRuleKey(r);
+      return !k || k.startsWith('#') || cloudAddedTimes[k] === undefined;
+    });
   }
 
   function getLocalTombstones() {
@@ -6641,7 +6728,6 @@
       const delTime = mergedTombstones[key];
       if (!delTime) return true;
 
-      // 时间基准
       const localAdded = localAddedTimes[key] || 0;
       if (localAdded > delTime) {
         delete mergedTombstones[key];
@@ -6683,7 +6769,6 @@
     return { mergedRules: merged, mergedTombstones };
   }
 
-  // 同步配置处理
   function buildSyncPayload(syncedAt = Date.now()) {
     const stored = GM_getValue(CONFIG_KEY);
     const base = (stored && typeof stored === 'object' && !Array.isArray(stored)) ? stored : currentConfig;
@@ -6708,7 +6793,6 @@
     return /^\s*<!DOCTYPE\s+html|^\s*<html[\s>]/i.test(String(content || ''));
   }
 
-  // 识别非规则响应
   function isInvalidSyncResponse(content, responseHeaders) {
     const text = String(content || '');
     if (isHtmlResponse(text)) return true;
@@ -6723,7 +6807,7 @@
     }
     const ctMatch = responseHeaders && String(responseHeaders).match(/content-type:\s*([^\r\n;]+)/i);
     const ct = ctMatch ? ctMatch[1].trim().toLowerCase() : '';
-    if (/\b(?:application\/(?:json|xml)|text\/html)\b/.test(ct)) return true;
+    if (/\b(?:application\/(?:json|xml))\b/.test(ct)) return true;
     const firstLine = trimmed.split('\n')[0].trim();
     if (/^(?:4\d\d|5\d\d)(?:\s|$)/.test(firstLine)) return true;
     return /^(?:not found|forbidden|unauthorized|unauthenticated|bad request|proxy authentication required|request timeout|internal server error|bad gateway|service unavailable|gateway time-?out|error\d*|exception)\s*$/i.test(firstLine);
@@ -6744,17 +6828,17 @@
         try {
           config = JSON.parse(line.substring('# ScriptConfig:'.length));
         } catch (e) {
-          if (currentConfig.debug) console.warn('[WebDAV] 配置头解析失败:', e);
+          if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[WebDAV] 配置头解析失败:', e);
         }
-        headerLineIndexes.add(i);
+          if (config) headerLineIndexes.add(i);
       } else if (line.startsWith('# Selectors:')) {
         rawSelectors = line;
         try {
           selectors = JSON.parse(line.substring('# Selectors:'.length));
         } catch (e) {
-          if (currentConfig.debug) console.warn('[WebDAV] 选择器头解析失败:', e);
+          if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[WebDAV] 选择器头解析失败:', e);
         }
-        headerLineIndexes.add(i);
+          if (selectors) headerLineIndexes.add(i);
       } else if (!line.startsWith('#')) {
         break;
       }
@@ -6783,7 +6867,6 @@
     }
   }
 
-  // WebDAV请求
   function isHttpsUrl(url) {
     return /^https:\/\//i.test(String(url || '').trim());
   }
@@ -6818,9 +6901,6 @@
     const rootPath = parsed.origin + '/';
     if (url === rootPath || parsed.pathname === '/') return;
 
-
-
-    // 兼容套壳浏览器
     let propfindResp;
     try {
       propfindResp = await gmRequest('PROPFIND', url, {
@@ -6857,7 +6937,6 @@
     }
   }
 
-  // WebDAV PUT：目录缺失(409)时尝试创建目录后重试一次
   async function gmPutWebDAV(fullUrl, putOptions, folderUrl, headers) {
     try {
       return await gmRequest('PUT', fullUrl, putOptions);
@@ -6897,7 +6976,6 @@
     return JSON.stringify({ ...remote, tombstones, ruleAddedTimes, syncedAt });
   }
 
-  // 配置头上传
   function buildUploadContent(content, syncedAt, remotePreserved) {
     syncedAt = syncedAt || Date.now();
     remotePreserved = remotePreserved || {};
@@ -6922,7 +7000,7 @@
     return prefix + content;
   }
 
-  // 提取YAML
+  // yaml解析
   function extractYamlRuleItems(lines) {
     let hasSection = false;
     let inSection = false;
@@ -6993,19 +7071,44 @@
         if (/^[a-zA-Z0-9_]+\s*:(?!\/\/)/.test(rawItem)) {
           continue;
         }
-        rawItem = stripQ(rawItem);
+        try {
+          rawItem = stripQ(rawItem);
+        } catch (e) {
+          if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[订阅] YAML列表项已跳过:', rawItem, e);
+          continue;
+        }
         let item = rawItem.trim();
         if (sectionKind === 'whitelist' && item && !item.startsWith('@')) item = '@' + item;
         if (item) items.push(item);
         continue;
       }
-      if (s === '-') continue;
+      if (s === '-') {
+        let nextIdx = idx + 1;
+        while (nextIdx < lines.length && (!lines[nextIdx].trim() || lines[nextIdx].trim().startsWith('#'))) nextIdx++;
+        if (nextIdx < lines.length) {
+          const nextLine = lines[nextIdx];
+          const nextIndent = nextLine.search(/\S/);
+          const nextValue = nextLine.trim();
+          if (nextIndent > sectionIndent && nextValue && !nextValue.startsWith('-') && !/^[a-zA-Z0-9_]+\s*:(?!\/\/)/.test(nextValue)) {
+            let item;
+            try {
+              item = stripQ(nextValue).trim();
+            } catch (e) {
+              if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[订阅] YAML列表项已跳过:', nextValue, e);
+              idx = nextIdx;
+              continue;
+            }
+            if (sectionKind === 'whitelist' && item && !item.startsWith('@')) item = '@' + item;
+            if (item) items.push(item);
+            idx = nextIdx;
+          }
+        }
+      }
     }
     if (!hasSection || !items.length) return null;
     return { items, name };
   }
 
-  // 解析订阅
   function parseRulesetContent(content) {
     let lines = String(content || '').replace(/^\uFEFF/, '').split('\n');
     let meta = {};
@@ -7034,6 +7137,7 @@ function collectSubscriptionRules(lines) {
   const validRules = [];
   for (let line of lines) {
     if (line.length === 0) continue;
+    if (/^!\s*(?:site|title|url|description|version|expires|homepage)\s*=/i.test(line)) continue;
     if (line.startsWith('!') && !looksLikeCondExpr(line)) continue;
     if (line.startsWith('[') && line.endsWith(']')) continue;
     if (line.startsWith('@@')) continue;
@@ -7209,7 +7313,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         seenUrls.add(url);
         const existingSub = latestSubs.find(s => s && s.url === url) ||
           latestSubs.find(s => s && s.url === origUrl);
-        // 未编辑的旧行不能恢复另一页已经删除的订阅。
         if (origUrl && url === origUrl && !existingSub) return;
         const enabledChanged = row.dataset.originalEnabled === undefined ||
           String(enabled) !== row.dataset.originalEnabled;
@@ -7265,7 +7368,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           const deletedUrl = origUrl || inputVal;
           if (deletedUrl) {
             deletedUrls.add(deletedUrl);
-            recordSubscriptionDeletions([deletedUrl]);
           }
           row.remove();
           reindexRows();
@@ -7386,7 +7488,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     const autoSyncEnabled = GM_getValue(WEBDAV_AUTO_SYNC_KEY, false);
     const syncConfigEnabled = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false);
 
-    // webdav面板布局
+    // webdav面板
     panel.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0;">
         <h3 style="margin:0;font-size:16px;color:#2d3748;line-height:1;">${t('webdavTitle')}</h3>
@@ -7424,7 +7526,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     </div>
 `;
 
-    // 获取输入
     const urlInput = document.getElementById('serh-webdav-url');
     const usernameInput = document.getElementById('serh-webdav-username');
     const passwordInput = document.getElementById('serh-webdav-password');
@@ -7434,7 +7535,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     passwordInput.value = '';
     filenameInput.value = webdavConfig.filename || 'rules.txt';
 
-    // 密码显隐
     const togglePasswordBtn = document.getElementById('serh-webdav-toggle-password');
     if (togglePasswordBtn && passwordInput) {
       togglePasswordBtn.addEventListener('click', (e) => {
@@ -7470,7 +7570,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         .forEach(input => { input.disabled = busy; });
     }
 
-    // 校验面板输入
     function getValidatedWebDAVConfig() {
       const url = urlInput.value.trim();
       if (!url) {
@@ -7664,7 +7763,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       GM_setValue(TOMBSTONES_KEY, localTombstones);
     }
 
-    recordRuleAddedTimes(newRules, Date.now(), true);
+    recordRuleAddedTimes(filterRulesForDownloadStamp(newRules, parsedHeader.config && parsedHeader.config.ruleAddedTimes), Date.now(), true);
     currentConfig.rules = newRules;
     persistConfig(false);
     let cloudTime = 0;
@@ -7693,8 +7792,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     GM_setValue(WEBDAV_LAST_SYNC_KEY, Date.now());
   }
 
-  // 同步逻辑
-  async function performAutoWebDAVSync(config) {
+  // webdav逻辑
+  async function performAutoWebDAVSync(config, depth = 0) {
     adoptStoredConfigIfNewer();
     const { folderUrl, fullUrl, headers } = getWebDAVRequest(config);
 
@@ -7767,7 +7866,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         ? cloudConfig.ruleAddedTimes
         : {};
 
-      // 合并
       const { mergedRules, mergedTombstones } = mergeRulesWithTombstones(localRules, cloudRules, localTime, cloudTime, cloudTombstones, cloudAddedTimes);
       const mergedContent = mergedRules.join('\n');
       const localContent = localRules.join('\n');
@@ -7789,7 +7887,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           cloudConfig.subscriptionTombstones, localTime >= cloudTime);
       }
 
-      // 应用云端设置
       if (cloudTime > localTime && cloudConfig) {
         const { syncedAt, subscriptions, subscriptionTombstones, bubbleState, bubbleSize, selectors, tombstones, ruleAddedTimes, ...settings } = cloudConfig;
         if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
@@ -7803,7 +7900,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         }
       }
 
-      // 更新本地规则
       currentConfig.rules = mergedRules;
       persistConfig(false);
 
@@ -7850,8 +7946,13 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime);
         } catch (err) {
           if (err && err.message && err.message.includes('412')) {
-            console.warn('[自动 WebDAV] 云端并发更新检测到版本冲突 (412)，重新发起同步');
-            return performAutoWebDAVSync(config);
+            if (depth >= WEBDAV_SYNC_MAX_RETRIES) {
+              console.warn(`[自动 WebDAV] 云端并发更新冲突 (412) 重试 ${WEBDAV_SYNC_MAX_RETRIES} 次后放弃，等待下一轮同步`);
+              return;
+            }
+            console.warn(`[自动 WebDAV] 云端并发更新检测到版本冲突 (412)，稍后重试 (${depth + 1}/${WEBDAV_SYNC_MAX_RETRIES})`);
+            await delay(WEBDAV_SYNC_RETRY_DELAY * Math.pow(2, depth));
+            return performAutoWebDAVSync(config, depth + 1);
           }
           console.warn('[自动 WebDAV] 上传失败:', err.message);
           return;
@@ -8016,7 +8117,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
   }
 
-  // 跨标签页同步锁
+  // 跨页锁
   const SYNC_LOCK_KEY_PREFIX = 'searchfilter_sync_lock_';
   const SYNC_LOCK_TTL = 2 * 60 * 1000;
   const SYNC_TAB_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -8038,7 +8139,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   function tryAcquireSyncLock(task, ttl = SYNC_LOCK_TTL) {
     const now = Date.now();
     const held = readSyncLock(task);
-    if (held && held.owner !== SYNC_TAB_ID && held.expires > now) return false;
+    if (held && held.expires > now) return false;
     writeSyncLock(task, { owner: SYNC_TAB_ID, expires: now + ttl });
     return true;
   }
@@ -8074,7 +8175,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
   }
 
-  // 订阅
   function checkAutoSubscription(force = false) {
     if (!force && !currentConfig.subscriptionAutoUpdate) return;
     const subs = getSubscriptions();
@@ -8097,7 +8197,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }).catch(err => console.error('[订阅] 更新失败:', err.message));
   }
 
-  // 同步定时器
+  // 同步定时
   function startBackgroundSync() {
     if (_syncIntervalIds.length) return;
     _syncIntervalIds = [
@@ -8111,7 +8211,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }, 5000 + Math.floor(Math.random() * 5000));
   }
 
-  // 站点运行环境
   function ensureEngineSiteSetup() {
     if (_engineSiteSetup || !isEngineSite()) return;
     _engineSiteSetup = true;
@@ -8239,12 +8338,16 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     const confirmPanel = document.getElementById('serh-block-confirm-dialog');
     if (confirmPanel) confirmPanel.remove();
     document.querySelectorAll('[data-blocker-yandex-parent]').forEach(el => {
-      el.style.display = '';
+      const orig = el.getAttribute('data-serh-orig-display');
+      el.style.display = orig !== null ? orig : '';
       el.removeAttribute('data-blocker-yandex-parent');
+      el.removeAttribute('data-serh-orig-display');
     });
     document.querySelectorAll('[data-blocker-google-parent]').forEach(el => {
-      el.style.display = '';
+      const orig = el.getAttribute('data-serh-orig-display');
+      el.style.display = orig !== null ? orig : '';
       el.removeAttribute('data-blocker-google-parent');
+      el.removeAttribute('data-serh-orig-display');
     });
     document.querySelectorAll('[data-observed]').forEach(el => {
       resultObserver.unobserve(el);
@@ -8301,7 +8404,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     return true;
   }
 
-  // 多标签页感知
   function checkExternalConfigChange() {
     if (document.getElementById('serh-panel')) return false;
     if (!adoptStoredConfigIfNewer()) return false;
