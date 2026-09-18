@@ -56,7 +56,7 @@ const KEYS = {
 };
 
 const syncFns = [
-  'getRuleKey', 'getLocalRuleAddedTimes', 'recordRuleAddedTimes', 'getLocalTombstones', 'recordRuleDeletions', 'pruneTombstones', 'mergeRulesWithTombstones',
+  'getRuleKey', 'getLocalRuleAddedTimes', 'recordRuleAddedTimes', 'filterRulesForDownloadStamp', 'getLocalTombstones', 'recordRuleDeletions', 'pruneTombstones', 'mergeRulesWithTombstones',
   'getSubscriptionTombstones', 'recordSubscriptionDeletions',
   'stripRuleComment', 'isHttpsUrl', 'getWebDAVRequest', 'ensureWebDAVFolder', 'isHtmlResponse', 'isInvalidSyncResponse', 'parseSyncHeader', 'parseRemoteConfig', 'mergeTimeMaps',
   'buildMetadataConfigPayload', 'buildUploadContent', 'gmPutWebDAV',
@@ -64,7 +64,7 @@ const syncFns = [
   'checkExternalConfigChange', 'triggerWebDAVSyncDelayed', 'performAutoWebDAVSync', 'performWebDAVDownload',
 ].map((n) => extractFn(src, n));
 
-function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], localTime = 0, localSubs = [], storedConfig = undefined, syncConfig = true, responseHeaders = '' }) {
+function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], localTime = 0, localSubs = [], storedConfig = undefined, syncConfig = true, responseHeaders = '', putFailures = 0 }) {
   const store = new Map();
   store.set(KEYS.WEBDAV_SYNC_CONFIG_KEY, syncConfig);
   store.set(KEYS.WEBDAV_SYNC_SELECTORS_KEY, false);
@@ -73,10 +73,13 @@ function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], local
   store.set('subs', localSubs);
   if (storedConfig !== undefined) store.set(KEYS.CONFIG_KEY, storedConfig);
   const calls = [];
-  const state = { reprocess: 0 };
+  const state = { reprocess: 0, putFailures };
   const factory = new Function('store', 'calls', 'state', 'mockResponse', `
     const console = { log: () => {}, warn: () => {} };
     const t = (k) => k;
+    const WEBDAV_SYNC_MAX_RETRIES = 3;
+    const WEBDAV_SYNC_RETRY_DELAY = 1;
+    function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
     const CONFIG_KEY = ${JSON.stringify(KEYS.CONFIG_KEY)};
     const WEBDAV_SYNC_CONFIG_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_CONFIG_KEY)};
     const WEBDAV_SYNC_SELECTORS_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_SELECTORS_KEY)};
@@ -92,6 +95,7 @@ function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], local
     async function gmRequest(method, url, opts = {}) {
       calls.push({ method, url, data: opts.data });
       if (method === 'GET') return mockResponse;
+      if (state.putFailures > 0) { state.putFailures--; throw new Error('HTTP 412'); }
       return { status: 200 };
     }
     function forceReprocessAll() { state.reprocess++; }
@@ -154,6 +158,28 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   const header = JSON.parse(put.data.split('\n')[0].substring('# ScriptConfig:'.length));
   assert('T2c: 上传头含本地配置', header.enabled === true && header.language === 'zh-CN');
   assert('T2d: 更新本地修改时间戳与上传时间戳对齐', env.store.get(KEYS.LOCAL_LAST_MODIFIED_KEY) >= 1000);
+}
+
+// T2e: 412 冲突 -> 重新同步后成功
+{
+  const cloud = { syncedAt: 500 };
+  const cloudText = '# ScriptConfig:' + JSON.stringify(cloud) + '\n*://cloud.example.com/*';
+  const env = makeSyncEnv({ cloudText, localRules: ['*://local.example.com/*'], localTime: 1000, putFailures: 1 });
+  env.setCurrent({ rules: ['*://local.example.com/*'] });
+  await env.run(syncCfg);
+  const puts = env.calls.filter((c) => c.method === 'PUT').length;
+  assert('T2e: 412冲突后重新同步并成功上传', puts === 2 && env.store.get(KEYS.LOCAL_LAST_MODIFIED_KEY) >= 1000);
+}
+
+// T2f: 412 持续冲突 -> 重试有上限，不会无限循环
+{
+  const cloud = { syncedAt: 500 };
+  const cloudText = '# ScriptConfig:' + JSON.stringify(cloud) + '\n*://cloud.example.com/*';
+  const env = makeSyncEnv({ cloudText, localRules: ['*://local.example.com/*'], localTime: 1000, putFailures: 99 });
+  env.setCurrent({ rules: ['*://local.example.com/*'] });
+  await env.run(syncCfg);
+  const puts = env.calls.filter((c) => c.method === 'PUT').length;
+  assert('T2f: 412持续冲突最多重试3次后放弃', puts === 4);
 }
 
 // T3: 时间戳相等且规则一致 -> 无操作
@@ -496,7 +522,7 @@ rules:
   };
   const cloudText = '# ScriptConfig:' + JSON.stringify(cloud) + '\n*://valid.com/*\n*://deleted-by-local.com/*';
   
-  const dlFactory = new Function('currentConfig', 'store', `
+  const dlFactory = new Function('currentConfig', 'store', 'cloudText', `
     const console = { log: () => {}, warn: () => {} };
     const t = (k) => k;
     const CONFIG_KEY = ${JSON.stringify(KEYS.CONFIG_KEY)};
@@ -511,7 +537,7 @@ rules:
     const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
     const GM_setValue = (k, v) => { store.set(k, v); };
     async function gmRequest(method, url, opts = {}) {
-      return { status: 200, responseText: ${JSON.stringify(cloudText)}, responseHeaders: '' };
+      return { status: 200, responseText: cloudText, responseHeaders: '' };
     }
     function forceReprocessAll() {}
     function persistConfig() {}
@@ -534,12 +560,25 @@ rules:
   store.set(KEYS.TOMBSTONES_KEY, { '*://deleted-by-local.com/*': now - 4000 });
   store.set(KEYS.LOCAL_RULE_ADDED_KEY, { '*://deleted-by-local.com/*': now - 10000 });
   
-  const env = dlFactory({ rules: [] }, store);
+  const env = dlFactory({ rules: [] }, store, cloudText);
   await env.download(syncCfg);
   const finalRules = env.current().rules;
   assert('T19: 手动下载正确保留有效规则', finalRules.includes('*://valid.com/*'));
   assert('T19b: 手动下载强制覆盖保留云端存在的规则(即使本地曾有墓碑)', finalRules.includes('*://deleted-by-local.com/*'));
   assert('T19c: 手动下载清理了覆盖规则的本地墓碑', !env.store.get(KEYS.TOMBSTONES_KEY)['*://deleted-by-local.com/*']);
+
+  const cloudAdded = now - 60000;
+  const cloudText2 = '# ScriptConfig:' + JSON.stringify({
+    syncedAt: now - 5000,
+    ruleAddedTimes: { '*://kept.com/*': cloudAdded }
+  }) + '\n*://kept.com/*\n*://fresh.com/*';
+  const store2 = new Map();
+  store2.set(KEYS.WEBDAV_SYNC_CONFIG_KEY, false);
+  const env2 = dlFactory({ rules: [] }, store2, cloudText2);
+  await env2.download(syncCfg);
+  const times2 = env2.store.get('searchfilter_rule_added_times');
+  assert('T20: 云端已有 ruleAddedTimes 的下载规则不被本机时间覆盖', times2['*://kept.com/*'] === cloudAdded);
+  assert('T20b: 云端无时间戳的下载规则仍盖本机时间', typeof times2['*://fresh.com/*'] === 'number' && times2['*://fresh.com/*'] >= now - 2000);
 }
 
 // G: 垃圾响应识别单元测试(网关 200 + JSON/纯文本错误页)
@@ -557,6 +596,18 @@ rules:
   assert('G8: 带同步头文件放行', isInvalid('# ScriptConfig: {"syncedAt":1}\n*://a.com/*', 'content-type: text/plain') === false);
   assert('G9: 空文件放行', isInvalid('', '') === false);
   assert('G10: YAML段落文件放行', isInvalid('[Section]\nname: x', 'text/plain') === false);
+  assert('G11: 合法规则不因 text/html 类型拒绝', isInvalid('*://a.com/*', 'content-type: text/html; charset=utf-8') === false);
+}
+
+// G12-G13: 损坏同步头必须保留原始注释，合法头才从规则正文移除
+{
+  const parse = new Function(
+    extractFn(src, 'parseSyncHeader') + '\nreturn parseSyncHeader;'
+  )();
+  const broken = parse('# ScriptConfig:{broken-json}\n*://a.com/*');
+  assert('G12: 损坏 ScriptConfig 头保留', broken.restLines[0] === '# ScriptConfig:{broken-json}');
+  const valid = parse('# ScriptConfig: {"syncedAt":1}\n*://a.com/*');
+  assert('G13: 合法 ScriptConfig 头移除', valid.restLines[0] === '*://a.com/*' && valid.config.syncedAt === 1);
 }
 
 // T20: 网关 200 + JSON/纯文本错误页不被当作规则写入本地, 也不回传云端
@@ -810,6 +861,72 @@ rules:
   fresh.setCurrent({ rules: ['example.com'] });
   await fresh.run(syncCfg);
   assert('SUBTIME1: 旧规则保留旧下载时间仍然到期', fresh.store.get('subs')[0].lastUpdate === staleTime);
+}
+
+// T9: 白名单/高亮前缀变体与同主体黑名单规则互不冲突
+{
+  const cloud = { syncedAt: 500 };
+  const cloudText = '# ScriptConfig:' + JSON.stringify(cloud) + '\n@good.com';
+  const env = makeSyncEnv({ cloudText, localRules: ['good.com', '@good.com', '@2 fast.com', 'fast.com'], localTime: 1000 });
+  env.setCurrent({ rules: ['good.com', '@good.com', '@2 fast.com', 'fast.com'] });
+  await env.run(syncCfg);
+  const cur = env.getCurrent();
+  assert('T9: 黑名单与白名单变体合并共存', cur.rules.includes('good.com') && cur.rules.includes('@good.com'));
+  assert('T9b: 高亮规则与黑名单变体合并共存', cur.rules.includes('@2 fast.com') && cur.rules.includes('fast.com'));
+  assert('T9c: 前缀变体去重后仅保留一份', cur.rules.filter((r) => r === '@good.com').length === 1);
+}
+
+// T10: 删除白名单变体不误删黑名单主体（墓碑键保留前缀）
+{
+  const store = new Map();
+  const factory = new Function('store', `
+    const TOMBSTONES_KEY = ${JSON.stringify(KEYS.TOMBSTONES_KEY)};
+    const LOCAL_RULE_ADDED_KEY = 'searchfilter_rule_added_times';
+    const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
+    const GM_setValue = (k, v) => { store.set(k, v); };
+    ${extractFn(src, 'stripRuleComment')}
+    ${extractFn(src, 'getRuleKey')}
+    ${extractFn(src, 'getLocalTombstones')}
+    ${extractFn(src, 'recordRuleDeletions')}
+    ${extractFn(src, 'pruneTombstones')}
+    ${extractFn(src, 'getLocalRuleAddedTimes')}
+    ${extractFn(src, 'recordRuleAddedTimes')}
+    ${extractFn(src, 'mergeRulesWithTombstones')}
+    return { del: (rules) => recordRuleDeletions(rules), merge: (l, c, lt, ct) => mergeRulesWithTombstones(l, c, lt, ct, {}, {}) };
+  `);
+  const env2 = factory(store);
+  env2.del(['@good.com']);
+  const { mergedRules } = env2.merge(['good.com', '@good.com'], ['good.com'], 1000, 900);
+  assert('T10: 删除白名单变体不误删黑名单主体', mergedRules.includes('good.com') && !mergedRules.includes('@good.com'));
+}
+
+// L: 同步锁互斥（含同页重入禁止与TTL过期）
+{
+  const store = new Map();
+  const makeLockEnv = (myTab) => {
+    const f = new Function('store', 'myTab', `
+      const SYNC_LOCK_KEY_PREFIX = 'searchfilter_sync_lock_';
+      const SYNC_TAB_ID = myTab;
+      const SYNC_LOCK_TTL = 120000;
+      const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
+      const GM_setValue = (k, v) => { store.set(k, v); };
+      ${extractFn(src, 'readSyncLock')}
+      ${extractFn(src, 'writeSyncLock')}
+      ${extractFn(src, 'tryAcquireSyncLock')}
+      return { tryAcquire: (ttl) => tryAcquireSyncLock('webdav', ttl), read: () => GM_getValue(SYNC_LOCK_KEY_PREFIX + 'webdav') };
+    `);
+    return f(store, myTab);
+  };
+  const tabA = makeLockEnv('tabA');
+  assert('L1: 首次获取锁成功', tabA.tryAcquire() === true);
+  const tabA2 = makeLockEnv('tabA');
+  assert('L2: 同页持锁期间不允许重入', tabA2.tryAcquire() === false);
+  const tabB = makeLockEnv('tabB');
+  assert('L3: 他页持锁期间获取失败', tabB.tryAcquire() === false);
+  const lock = tabA.read();
+  lock.expires = Date.now() - 1;
+  store.set('searchfilter_sync_lock_webdav', lock);
+  assert('L4: 锁过期后可重新获取', tabB.tryAcquire() === true);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -127,7 +127,7 @@ assert('S8: 多标志保留', (() => {
   const compiled = api.compileRuleRegex('title/foo/is');
   return compiled.regex.flags.includes('i') && compiled.regex.flags.includes('s');
 })());
-assert('S10: 尾部重复flag字符不被识别为flag', (() => {
+assert('S10: 尾部重复flag字符不再识别为flags', (() => {
   const parsed = api.parsePrefixedRegexRule('title/path/ii', 6);
   return parsed.flags === '' && parsed.pattern === 'path/ii';
 })());
@@ -161,6 +161,32 @@ assert('S18: /pattern/I 编译不抛错', (() => {
   const compiled = api.compileRuleRegex('/FOO/I');
   return compiled.regex.flags.includes('i') && compiled.regex.test('foo');
 })());
+assert('S19: 尾部非flag字母组合保持为pattern', (() => {
+  const parsed = api.parsePrefixedRegexRule('title/abc/def', 6);
+  return parsed.flags === '' && parsed.pattern === 'abc/def';
+})());
+assert('S20: 多段路径尾部字母保持为pattern', (() => {
+  const parsed = api.parsePrefixedRegexRule('text/example.com/path/sub', 5);
+  return parsed.flags === '' && parsed.pattern === 'example.com/path/sub';
+})());
+assert('S21: 订阅式非法flags(y)编译时被过滤', (() => {
+  const compiled = api.compileRuleRegex('/foo/y');
+  return compiled.regex.flags === '' && api.safeRegexTest(compiled.regex, 'bar foo');
+})());
+assert('S22: 编译过滤保留合法flags去除非法', (() => {
+  const flags = api.compileRuleRegex('/foo/gyi').regex.flags;
+  return flags.includes('i') && !flags.includes('g') && !flags.includes('y');
+})());
+
+// 主机非前缀星号不跨点（*.example.* 只匹配到二级+顶级域）
+assert('W46: *.example.* 匹配主域', match('*://*.example.*/*', 'https://example.com/'));
+assert('W47: *.example.* 匹配子域', match('*://*.example.*/*', 'https://a.example.com/'));
+assert('W48: *.example.* 带路径不匹配多段后缀', !match('*://*.example.*/*', 'https://example.com.evil.net/'));
+assert('W49: *.example.* 无路径不匹配多段后缀', !match('*://*.example.*', 'https://example.com.evil.net/'));
+assert('W50: example.* 不匹配多段后缀', !match('*://example.*/*', 'https://example.com.evil.net/'));
+assert('W51: 中部主机星号不跨点', !match('*://mail.*.com/*', 'https://mail.a.b.com/') && match('*://mail.*.com/*', 'https://mail.a.com/'));
+assert('W52: 整体主机星号仍匹配任意主机', match('*://*/x/*', 'https://any.host.com/x/1'));
+assert('W53: *example* 宽松语义保留', match('*example*', 'https://any.example.org/x'));
 })();
 
 // ==== 来源: test-rule-filter.cjs ====
@@ -402,6 +428,27 @@ api.buildRuleIndex();
 cr = api.getCR();
 assert('B1: 高亮+白名单组合不编译', cr.highlightUrls.length === 0 && cr.highlightConditionalRules.length === 0);
 assert('B2: 正常高亮域名规则不受影响', cr.highlightDomains.has('good.com'));
+
+// @N 前缀需要分隔符：@数字后紧跟字母视为白名单域名规则
+api.setState(['@2fast.com'], []);
+api.buildRuleIndex();
+cr = api.getCR();
+assert('B3: @2fast.com 不再误判为高亮', !cr.highlightDomains.has('fast.com'));
+assert('B4: @2fast.com 按白名单域名解析', cr.whitelistDomains.has('2fast.com'));
+api.setState(['@2 fast.com'], []);
+api.buildRuleIndex();
+cr = api.getCR();
+assert('B5: @2 fast.com 仍为高亮', cr.highlightDomains.has('fast.com'));
+api.setState(['@7example.com'], []);
+api.buildRuleIndex();
+cr = api.getCR();
+assert('B6: @7example.com 按白名单域名解析', cr.whitelistDomains.has('7example.com'));
+assert('B7: @N 高亮 N 越界仍跳过', (() => {
+  api.setState(['@9 fast9.com'], []);
+  api.buildRuleIndex();
+  const c = api.getCR();
+  return !c.highlightDomains.has('fast9.com');
+})());
 })();
 
 // ==== 来源: test-priority.cjs ====
@@ -837,6 +884,17 @@ await (async () => {
   assert('K11: 裸域域名选项不误剥', o.domainRule === '*://*.example.co.uk/*');
   o = build('www.news.bbc.co.uk');
   assert('K12: 仅剥离最外层www', o.domainRule === '*://*.news.bbc.co.uk/*');
+
+  o = build('www.com');
+  assert('K13: www单标签标记TLD级', o.tldWide === true && o.domainRule === '*://*.com/*');
+  o = build('www.io');
+  assert('K14: www单标签TLD标记', o.tldWide === true);
+  o = build('com');
+  assert('K15: 裸单标签标记TLD级', o.tldWide === true);
+  o = build('www.example.com');
+  assert('K16: 正常www不标记TLD级', o.tldWide === false);
+  o = build('1.2.3.4');
+  assert('K17: IP不标记TLD级', o.tldWide === false);
 })();
 
 // ==== 校验空正则与 DDG 重定向解包测试 ====
@@ -869,6 +927,9 @@ await (async () => {
   assert('R_EMPTY2: 空正则 //i 判定无效', analyzeRule('//i').valid === false);
   assert('R_EMPTY3: 空白正则 /   / 判定无效', analyzeRule('/   /').valid === false);
   assert('R_VALID_RE: 正常正则 /abc/ 有有效结果', analyzeRule('/abc/').valid === true);
+  assert('R_STAR1: **:// 前缀判定无效', analyzeRule('**://example.com/*').valid === false);
+  assert('R_STAR2: 路径尾部/**不误伤', analyzeRule('*://*.example.com/**').valid === true);
+  assert('R_STAR3: *://**.x 仍判定无效', analyzeRule('*://**.example.com/*').valid === false);
 
   const getCleanUrl = new Function(
     extractFn(src, 'decodeRedirectTarget') + '\n' +
@@ -891,9 +952,177 @@ await (async () => {
   assert('G1: google /url 解包', getCleanUrl(gUrl) === 'https://example.com/a');
   const yahooTw = { href: 'https://tw.search.yahoo.com/r/RU=https%3A%2F%2Fexample.com%2Fy/RK=2' };
   const yahooHk = { href: 'https://search.yahoo.com.hk/r/RU=https%3A%2F%2Fexample.com%2Fhk/RK=2' };
+  const yahooComplex = { href: 'https://search.yahoo.com/r/_ylt=Awr9Il1j/RU=https%3A%2F%2Fexample.com%2Fnested%2Fpath/RK=2/RS=abc123xyz' };
+  const yahooDoubleEnc = { href: 'https://tw.search.yahoo.com/r/RU=https%253A%252F%252Fexample.com%252Fpath%253Fk%253Dv/RK=2' };
+  const yahooJpStar = { href: 'https://rd.yahoo.co.jp/search/web/result/*https://example.jp/page' };
+  const yahooJpParam = { href: 'https://search.yahoo.co.jp/rd?url=https%3A%2F%2Fstore.yahoo.co.jp%2Fitem' };
+  const yahooQueryRu = { href: 'https://search.yahoo.com/search?ru=https%3A%2F%2Fexample.org%2Fwiki' };
   assert('Y1: yahoo 地区站 RU= 解包', getCleanUrl(yahooTw) === 'https://example.com/y' && getCleanUrl(yahooHk) === 'https://example.com/hk');
+  assert('Y2: yahoo 复杂路径 /RK= 截断与路径保留', getCleanUrl(yahooComplex) === 'https://example.com/nested/path');
+  assert('Y3: yahoo 双重编码解码', getCleanUrl(yahooDoubleEnc) === 'https://example.com/path?k=v');
+  assert('Y4: yahoo japan 星号与参数解包', getCleanUrl(yahooJpStar) === 'https://example.jp/page' && getCleanUrl(yahooJpParam) === 'https://store.yahoo.co.jp/item');
+  assert('Y5: yahoo query ru= 参数解包', getCleanUrl(yahooQueryRu) === 'https://example.org/wiki');
   const customEngineLink = { href: 'https://scholar.google.com/scholar_url?url=https%3A%2F%2Fpapers.example.com%2Fx' };
   assert('C1: 不依赖引擎ID仍解包', getCleanUrl(customEngineLink) === 'https://papers.example.com/x');
+})();
+
+// ==== 已知问题复现: 记录当前缺陷行为, 修复对应问题后应反转该断言 ====
+await (async () => {
+  // KI-A: 用户/订阅正则无灾难性回溯防护(safeRegexTest 无超时/无静态检查)
+  {
+    const fnsToExtract = [
+      'hostLabelToASCII', 'toASCIIHostname', 'safeRegexTest', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
+      'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr',
+      'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
+      'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr',
+      'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule',
+      'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain',
+      'validateCondition', 'analyzeRule'
+    ];
+    const langMatch = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
+    const consts = src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0];
+    const analyzeRule = new Function(
+      `${consts}\n${langMatch}\n` +
+      `function t(key, params = {}) { return key; }\n` +
+      fnsToExtract.map(n => extractFn(src, n)).join('\n') +
+      '\nreturn analyzeRule;'
+    )();
+    check('KI-A1[已知问题] 嵌套量词正则 (a+)+$ 通过校验(热路径存在卡死风险)', analyzeRule('/(a+)+$/').valid === true);
+  }
+
+  // KI-B: 含 userinfo 的 URL 漏匹配(host 通配正则不识别 user@ 前缀)
+  {
+    const api = new Function(
+      ['hostLabelToASCII', 'toASCIIHostname', 'escapeWildcardPart', 'wildcardToRegex', 'parsePrefixedRegexRule', 'ruleToRegex', 'compileRuleRegex', 'safeRegexTest']
+        .map(n => extractFn(src, n)).join('\n') +
+      '\nreturn { compileRuleRegex, safeRegexTest };'
+    )();
+    const match = (rule, url) => { const c = api.compileRuleRegex(rule); return api.safeRegexTest(c.regex, url); };
+    check('KI-B1[已知问题] *://*.example.com/* 不匹配 https://user@example.com/', match('*://*.example.com/*', 'https://user@example.com/') === false);
+  }
+
+  // KI-C: YAML 双引号项含非标准转义时单行错误毒化整份订阅
+  {
+    const parseRulesetContent = new Function('currentConfig',
+      extractFn(src, 'extractYamlRuleItems') + '\n' + extractFn(src, 'parseRulesetContent') + '\nreturn parseRulesetContent;'
+    )({ debug: false });
+    let threw = false;
+    try { parseRulesetContent('name: t\nrules:\n  - "bad \\q escape"\n  - example.com'); } catch (e) { threw = true; }
+  check('KI-C1 单个坏转义项跳过且保留其他规则', threw === false && parseRulesetContent('name: t\nrules:\n  - "bad \\q escape"\n  - example.com').lines.includes('example.com'));
+  }
+
+  // KI-D: Content-Type 误判 —— 自家格式的合法内容因响应头 text/html 被判无效
+  {
+    const isInvalidSyncResponse = new Function(
+      extractFn(src, 'isHtmlResponse') + '\n' + extractFn(src, 'isInvalidSyncResponse') + '\nreturn isInvalidSyncResponse;'
+    )();
+    const good = '# ScriptConfig: {"t":1}\n*://example.com/*';
+    check('KI-D1: 合法规则内容 + text/html CT 仍可用', isInvalidSyncResponse(good, 'content-type: text/html; charset=utf-8') === false);
+  }
+
+  // KI-E: 前 50 行内 JSON 解析失败的 # ScriptConfig: 行仍被剥离(规则注释丢失)
+  {
+    const parseSyncHeaderFn = extractFn(src, 'parseSyncHeader');
+    const run = (content) => new Function('currentConfig', 'console', `${parseSyncHeaderFn}\nreturn parseSyncHeader;`)({ debug: false }, { warn: () => {} })(content);
+    const r = run('# ScriptConfig: 我的分组说明\nrule1');
+    check('KI-E1: 坏头行作为注释保留', r.config === null && r.restLines.join('\n') === '# ScriptConfig: 我的分组说明\nrule1');
+  }
+
+  // KI-F: 部分覆盖内置引擎时 match 丢失(WebDAV 选择器下行未校验即写入可触发)
+  {
+    const selectorsDecl = src.match(/const SELECTORS = \{[\s\S]*?\n  \};/)[0];
+    const makeGetSelectors = (gmGetValue) => new Function(
+      'GM_getValue',
+      'let activeSelectors = null;\n' +
+      "const SELECTORS_KEY = 'searchfilter_selectors';\n" +
+      selectorsDecl + '\n' +
+      ['normalizeSelectorList', 'getUserSelectors', 'getSelectors'].map(n => extractFn(src, n)).join('\n') +
+      '\nreturn getSelectors;'
+    )(gmGetValue);
+    const merged = makeGetSelectors(() => ({ bing: { snippets: ['.my-snip'] } }))();
+    check('KI-F1 部分覆盖选择器时继承内置 bing match', merged.bing.match instanceof RegExp && merged.bing.snippets[0] === '.my-snip');
+    const ok = makeGetSelectors(() => ({ bing: { match: 'bing\\.com', containers: 'li.b_algo' } }))();
+    check('KI-F2[对照] 提供 match 时正常编译为 RegExp', ok.bing.match instanceof RegExp);
+  }
+
+  // KI-G/H: 双重白名单前缀和uBO元数据注释的回归
+  {
+    const fnsToExtract = [
+      'hostLabelToASCII', 'toASCIIHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment',
+      'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr',
+      'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences',
+      'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr',
+      'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule',
+      'escapeWildcardPart', 'wildcardToRegex', 'splitHostAndPort', 'escapeHostPart',
+      'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
+      'validateCondition', 'analyzeRule', 'validateRule', 'isScriptRuleLine', 'isElementRuleLine',
+      'collectSubscriptionRules'
+    ];
+    const langMatch = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
+    const consts = src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0];
+    const api = new Function(
+      `${consts}\n${langMatch}\n` +
+      `const window = { location: { hostname: 'www.google.com' } };\n` +
+      `function getSearchEngine() { return 'google'; }\n` +
+      `function getSearchCategory() { return 'web'; }\n` +
+      `function t(key, params = {}) { return key; }\n` +
+      `const currentConfig = { debug: false };\n` +
+      fnsToExtract.map(n => extractFn(src, n)).join('\n') +
+      '\nreturn { analyzeRule, validateRule, validateUrlWildcard, extractSimpleWhitelistDomain, matchWildcardDomainPattern, looksLikeCondExpr, collectSubscriptionRules, parseRuleWithConditions };'
+    )();
+    check('KI-G1 @@example.com 被语法拒绝', api.analyzeRule('@@example.com').valid === false);
+    check('KI-G2 @@example.com 不生成白名单索引键', api.extractSimpleWhitelistDomain('@@example.com') === null);
+    check('KI-H1 uBO注释 !site = example.com 被过滤', api.collectSubscriptionRules(['!site = example.com']).length === 0);
+    check('KI-H2[对照] 普通 ! 注释仍被过滤', api.collectSubscriptionRules(['! 普通注释说明']).length === 0);
+
+    const wlGuard = (rule) => {
+      const parsed = api.parseRuleWithConditions(rule);
+      return parsed.staticPass && parsed.coreRule.startsWith('@') && !parsed.coreRule.startsWith('@@')
+        && (parsed.coreRule.length > 1 || parsed.standaloneExpr || parsed.dynamicConditions.length > 0);
+    };
+    const hlGuard = (rule) => {
+      const hlBody = rule.replace(/^@\d+\s*/, '');
+      const parsed = api.parseRuleWithConditions(hlBody);
+      return parsed.staticPass && !parsed.coreRule.startsWith('@');
+    };
+    check('SG1: @@规则不再计入白名单(与编译器跳过一致)', wlGuard('@@example.com') === false);
+    check('SG2[对照] 正常白名单仍计入', wlGuard('@*://*.example.com/*') === true);
+    check('SG3[对照] @+条件表达式白名单仍计入', wlGuard('@ $site = "google"') === true);
+    check('SG4: @N+白名单组合不再计入高亮(与编译器拒绝一致)', hlGuard('@1 @example.com') === false);
+    check('SG5[对照] 正常高亮仍计入', hlGuard('@1 example.com') === true);
+  }
+
+  // KI-I: title/…//gi 等非法标志段被静默吞进模式(与 /regex/ 路径的报错行为不一致)
+  {
+    const parsePrefixedRegexRule = new Function(
+      extractFn(src, 'parsePrefixedRegexRule') + '\nreturn parsePrefixedRegexRule;'
+    )();
+    const r = parsePrefixedRegexRule('title/abc/gi', 6);
+  check('KI-I1 title/abc/gi 尾部非法flags保留为pattern', r.pattern === 'abc/gi' && r.flags === '');
+  }
+
+  // KI-J: 规则含未配对单引号时行尾注释不被剥离(注释并入规则致匹配失效)
+  {
+    const stripRuleComment = new Function(extractFn(src, 'stripRuleComment') + '\nreturn stripRuleComment;')();
+    check('KI-J1[已知问题] don\'t-example.com # comment 注释未剥离', stripRuleComment("don't-example.com # comment").includes('# comment') === true);
+  }
+
+  // KI-K: YAML 块序列 "-" 换行后的缩进标量回归
+  {
+    const parseRulesetContent = new Function(
+      extractFn(src, 'extractYamlRuleItems') + '\n' + extractFn(src, 'parseRulesetContent') + '\nreturn parseRulesetContent;'
+    )();
+    const r = parseRulesetContent('name: mix\nwhitelist:\n  -\n    good.example.com\nblacklist:\n  - ads.example.com');
+    check('KI-K1 whitelist 的 "-\\n    good.example.com" 项被保留', r.lines.includes('@good.example.com') && r.lines.includes('ads.example.com'));
+  }
+
+  // KI-L: xn-- 空主体标签解码为空(域名标签被吞)
+  {
+    const toUnicodeHostname = new Function(
+      extractFn(src, 'punycodeDecodeLabel') + '\n' + extractFn(src, 'toUnicodeHostname') + '\nreturn toUnicodeHostname;'
+    )();
+    check('KI-L1[已知问题] xn-- 空主体解码为空标签(a.xn-- → a.)', toUnicodeHostname('a.xn--') === 'a.');
+  }
 })();
 
 })();

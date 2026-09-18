@@ -346,7 +346,7 @@ check('EX11 清空关联配置属于有效修改', !!api.diffUserSelectors({ duc
 check('EX12 缺省与空关联相等', api.sameSelectorDef(CUSTOM.mysearx, { ...CUSTOM.mysearx, extraElements: [] }));
 api.setStore({ duckduckgo_lite: { ...liteDef, match: liteDef.match.source, extraElements: [] } });
 check('EX13 覆盖可清空内置关联', api.getSelectors().duckduckgo_lite.extraElements.length === 0);
-const parseCondition = new Function(extractFn(src, 'parseConditionPart') + '; return parseConditionPart;')();
+const parseCondition = new Function(extractFn(src, 'hostLabelToASCII') + extractFn(src, 'toASCIIHostname') + extractFn(src, 'parseConditionPart') + '; return parseConditionPart;')();
 for (const id of ['duckduckgo', 'ddg', 'duckduckgo_lite']) {
   check('EX14 Lite条件匹配 ' + id, parseCondition('$site=' + id, 'duckduckgo_lite', 'lite.duckduckgo.com').static === true);
 }
@@ -1201,6 +1201,83 @@ function createLockEnv(tabId, ttl = 2000) {
   const engineMenus = runMenuTest(true);
   check('M6 引擎站点显示全部8个菜单项', engineMenus.length === 8);
 }
+
+// ---- 结果摘要后备提取: 相对选择器(extraElements)不得抛异常中断结果处理 ----
+await (async () => {
+  const selectorsDecl = src.match(/const SELECTORS = \{[\s\S]*?\n  \};/)[0];
+  const getResultSnippet = new Function('GM_getValue',
+    'let activeSelectors = null;\nconst SELECTORS_KEY = \'searchfilter_selectors\';\n' +
+    selectorsDecl + '\n' +
+    ['normalizeSelectorList', 'getUserSelectors', 'getSelectors', 'getResultText', 'getResultExtraElements', 'getResultSnippet'].map(n => extractFn(src, n)).join('\n') +
+    '\nreturn getResultSnippet;'
+  )(() => undefined);
+
+  const throwIfRel = (fn) => (sel) => {
+    if (sel.startsWith('+')) { const e = new Error(sel + ' is not a valid selector'); e.name = 'SyntaxError'; throw e; }
+    return fn(sel);
+  };
+
+  let threw = false, out = '';
+
+  const extraRow = {
+    textContent: '  extra text  ',
+    matches: throwIfRel(() => false),
+    querySelector: throwIfRel(() => null),
+    contains: () => false,
+  };
+  const resultEl = {
+    textContent: '',
+    querySelector: throwIfRel(() => null),
+    parentElement: null,
+  };
+  resultEl.parentElement = {
+    children: [resultEl, extraRow],
+    querySelectorAll: (sel) => (String(sel).includes(':nth-child(1)') ? [extraRow] : []),
+  };
+  try { out = getResultSnippet(resultEl, 'duckduckgo_lite'); } catch (e) { threw = true; }
+  check('RS1 相对选择器后备提取不抛异常(旧代码SyntaxError致整结果漏处理)', threw === false && out === '');
+
+  const selfSnippet = {
+    textContent: ' self text ',
+    matches: throwIfRel((sel) => sel === '.result-snippet'),
+    querySelector: throwIfRel(() => null),
+    contains: () => false,
+  };
+  resultEl.parentElement = {
+    children: [resultEl, selfSnippet],
+    querySelectorAll: (sel) => (String(sel).includes(':nth-child(1)') ? [selfSnippet] : []),
+  };
+  out = ''; threw = false;
+  try { out = getResultSnippet(resultEl, 'duckduckgo_lite'); } catch (e) { threw = true; }
+  check('RS2 后备元素自我命中有效选择器仍返回文本', threw === false && out === 'self text');
+
+  const primaryEl = { textContent: ' primary ' };
+  const resultWithPrimary = {
+    textContent: '',
+    querySelector: (sel) => (sel === '.result-snippet' ? primaryEl : null),
+    parentElement: null,
+  };
+  resultWithPrimary.parentElement = { children: [resultWithPrimary], querySelectorAll: () => [] };
+  out = ''; threw = false;
+  try { out = getResultSnippet(resultWithPrimary, 'duckduckgo_lite'); } catch (e) { threw = true; }
+  check('RS3 主摘要选择器路径不受影响', threw === false && out === 'primary');
+})();
+
+// ==== 已知问题复现: 记录当前缺陷行为, 修复对应问题后应反转该断言 ====
+await (async () => {
+  const parseSelectorText = new Function(
+    "const SUPPORTED_REGEX_FLAGS = 'imsu';\n" +
+    "function t(key, params = {}) { return key; }\n" +
+    extractFn(src, 'getInvalidRegexFlags') + '\n' + extractFn(src, 'parseSelectorText') +
+    '\nreturn parseSelectorText;'
+  )();
+  // KI-N: JSON 风格 \uXXXX / \/ 转义未解码(.json 导入的合法转义串原样保留, 后续CSS校验误报非法)
+  const R13 = parseSelectorText('{"e13":{"match":"a","containers":"div\\u002Eresult"}}');
+  check('KI-N1[已知问题] JSON \\uXXXX 转义未解码(containers 含字面反斜杠u序列)', !!R13.config && R13.config.e13.containers !== 'div.result' && R13.config.e13.containers.includes('\\u002E'));
+  // KI-O: __proto__ 键赋值落入原型, 条目静默消失且无任何报错
+  const R14 = parseSelectorText('__proto__: { match: "a", containers: ".x" }');
+  check('KI-O1[已知问题] __proto__ 键静默丢失(解析成功但配置为空)', !R14.errors.length && !!R14.config && !Object.hasOwn(R14.config, '__proto__') && Object.keys(R14.config).length === 0);
+})();
 })();
 
 console.log(`\n${pass} passed, ${fail} failed`);

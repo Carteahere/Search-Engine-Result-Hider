@@ -126,6 +126,13 @@ assert('旧6b: site静态未命中', r.const === false);
 r = condExpr('site("google.com.hk")', 'google', 'www.google.com.hk');
 assert('旧6c: site(...) 旧括号形式兼容', r.const === true);
 
+r = condExpr('site = "例子.com"', 'google', 'xn--fsqu00a.com');
+assert('旧6d: site条件IDN归一化(Unicode条件匹配punycode站点)', r.const === true);
+r = condExpr('site = "xn--fsqu00a.com"', 'google', '例子.com');
+assert('旧6e: site条件IDN归一化(punycode条件匹配Unicode站点)', r.const === true);
+r = condExpr('site = "例子.com"', 'google', 'www.例子.com');
+assert('旧6f: site条件IDN子域后缀匹配', r.const === true);
+
 r = condExpr('title =~ /kw1|kw2/', 'google');
 assert('旧7: 标题正则(正则内|不被切分)', !r.errors && r.ast.type === 'leaf');
 assert('旧7a: kw1命中', ev(r, 'kw1 hit', 'https://x.com/') === true);
@@ -240,6 +247,19 @@ assert('U5: url正则(=~)', !r.errors && ev(r, 't', 'https://x.com/a.pdf') === t
 assert('U5b: url正则默认大小写敏感', ev(r, 't', 'https://x.com/a.PDF') === false);
 r = condExpr('url =~ /\\.pdf$/i', 'google');
 assert('U5c: 加i忽略大小写', ev(r, 't', 'https://x.com/a.PDF') === true);
+
+r = condExpr('title=~/广告|推广/', 'google');
+assert('U9: 紧凑=~/无空格识别为正则(旧代码静默变字面比较)', !r.errors && ev(r, '广告页', 'https://x/') === true && ev(r, '正常页', 'https://x/') === false);
+r = condExpr('title =~/x/', 'google');
+assert('U10: 空格在=~与/之间仍为正则', !r.errors && ev(r, 'xxx', 'https://x/') === true);
+r = condExpr('url=~/ads/', 'google');
+assert('U11: url紧凑=~/正则', !r.errors && ev(r, 't', 'https://x.com/ads/1') === true && ev(r, 't', 'https://x.com/clean/') === false);
+r = condExpr('url*=~/ads/', 'google');
+assert('U12: 运算符后接=~为显式报错(旧代码静默字面比较)', !!r.errors);
+r = condExpr('title=~/未闭合', 'google');
+assert('U13: 未闭合紧凑正则报错而非字面比较', !!r.errors);
+r = condExpr('title *= "~波浪线"', 'google');
+assert('U14: 引号内~开头的字面值不受影响', !r.errors && ev(r, '~波浪线', 'https://x/') === true);
 
 r = condExpr('url/example\\.(com|net)/', 'google');
 assert('U6: url简写(正则内括号与|整吞)', !r.errors && ev(r, 't', 'https://example.com/') === true && ev(r, 't', 'https://example.net/') === true && ev(r, 't', 'https://other.net/') === false);
@@ -1178,7 +1198,40 @@ addExpr(cr, 'path *= "/download/"');
 addWlExpr(cr, '@host $= ".example.com"', '订阅规则1');
 r = doCheck(cr, urlEx, 'www.example.com', 't', null, slEx);
 assert('W15: 本地path黑名单压过订阅host白名单', isBlocked(r) && r.source === '本地规则');
+
+// ---- 修复回归: path 正则大小写敏感 + 规则键前缀保留 ----
+{
+  const pc = m.parseRuleWithConditions('path/search/');
+  assert('P20: path正则默认大小写敏感(大写URL不命中)', m.evalCondAST(pc.dynamicConditions[0], 't', 'https://x.com/SEARCH') === false);
+  assert('P21: path正则匹配原文小写', m.evalCondAST(pc.dynamicConditions[0], 't', 'https://x.com/search') === true);
+  const pd = m.parseRuleWithConditions('path/案例/');
+  assert('P22: path正则仍匹配percent解码变体', m.evalCondAST(pd.dynamicConditions[0], 't', 'https://x.com/%E6%A1%88%E4%BE%8B') === true);
+  assert('K1: 白名单/高亮前缀保留在规则键中', m.stripRuleComment('@example.com') === '@example.com' && m.stripRuleComment('@2 fast.com') === '@2 fast.com' && m.stripRuleComment('example.com') === 'example.com');
+}
 })();
+
+// ---- 修复回归: @if(...) 组后独立正则的上下文恢复 ----
+{
+  const api = new Function(
+    ['stripRuleComment', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions'].map((n) => extractFn(src, n)).join('\n') +
+    '\nreturn { stripRuleComment, findIfOccurrences, stripIfConditions };'
+  )();
+  const sr = api.stripRuleComment;
+  assert('IFR1: @if组后独立正则内#不再截断', sr('@if(site("x.com")) /ab[ #]cd/') === '@if(site("x.com")) /ab[ #]cd/');
+  assert('IFR2: @if组后独立正则+行尾注释正确剥离', sr('@if(title *= "a") /ab[ #]cd/ # note') === '@if(title *= "a") /ab[ #]cd/');
+  assert('IFR3: @N + @if组后正则', sr('@1 @if(engine=bing) /ab[ #]cd/ # note') === '@1 @if(engine=bing) /ab[ #]cd/');
+  assert('IFR4: @if组后text/前缀正则内#保留', sr('@if(a) text/ab[ #]cd/') === '@if(a) text/ab[ #]cd/');
+  assert('IFR5: @if组后title/前缀正则内#保留', sr('@if(a) title/ab[ #]cd/') === '@if(a) title/ab[ #]cd/');
+  assert('IFR6: URL通配符中字面@if(不被当条件组', sr('*://example.com/api/@if(test)/* # c') === '*://example.com/api/@if(test)/*');
+  assert('IFR7[对照] @前缀简写规则注释剥离不受影响', sr('@ *://x/* # c') === '@ *://x/*');
+  assert('IFR8[对照] @@前缀注释剥离不受影响', sr('@@example.com # c') === '@@example.com');
+  assert('IFR9[对照] @N前缀注释剥离不受影响', sr('@1 *://example.com/* # note') === '@1 *://example.com/*');
+  assert('IFR10: 连续@if组后正则上下文恢复', sr('@if(a) @if(b) /ab[ #]cd/ # note') === '@if(a) @if(b) /ab[ #]cd/');
+  assert('IFR11: @if组后正则体内@if(...)不被剥离为条件', api.stripIfConditions('@if(engine=google) /x[ @if(y)]z/').coreRule === '/x[ @if(y)]z/');
+  assert('IFR12: @if组后正则体内@if(不产生伪条件', api.findIfOccurrences('@if(a) /x@if(b)y/').length === 1);
+  assert('IFR13: @if组后text/正则体内@if(不产生伪条件', api.findIfOccurrences('@if(a) text/x[ @if(b)]y/').length === 1);
+  assert('IFR14[对照] 无@if正则行为不变', sr('/ab[ #]cd/ # note') === '/ab[ #]cd/');
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
