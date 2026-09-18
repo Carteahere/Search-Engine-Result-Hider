@@ -7,7 +7,7 @@
 | `*://abc.example.com/*` | 匹配`abc.example.com` |
 | `*://*.example.com/*` | 匹配`example.com`及其所有子域名 |
 | `*://*.example.com/path/*` | 匹配`example.com`特定路径 |
-| `*://*.example.*` | 匹配`example.com`所有顶级域名 |
+| `*://*.example.*` | 匹配`example.com`所有顶级/二级域名 |
 | `example.com` | 等效`*://*.example.com/*`，仅用于脚本的简单写法，对于需要同时在ublacklist使用的规则必须加`*://*.`前缀 |
 
 URL通配规则按匹配模式语义从URL开头匹配，`*://`仅匹配`http/https`，主机通配`*`不跨越路径，`*.`前缀同时匹配裸域；中文等 IDN 域名与 punycode（如`例子.com`与`xn--fsqu00a.com`）视为同一主机
@@ -147,4 +147,4 @@ bing: {disabled: true},
 2. 自定义引擎支持 `$site = "引擎ID"` 条件以及屏蔽/高亮/白名单规则，`titles`/`snippets` 可省略
 3. 引擎ID仅允许字母/数字/`_`/`-`，`other` 为保留键不可写，与内置引擎同ID或站点重叠时会覆盖内置选择器，如匹配 `cn.bing.com` 时将优先于内置 `bing` 命中
 4. 内置引擎标准ID：`google`、`google_scholar`、`bing`、`duckduckgo_lite`、`duckduckgo`、`yandex`、`brave`、`yahoo`（注：`ddg` 与 `yahoo-japan` 仅作为 `@if($site=)` 条件规则简写别名，Lite 使用独立 ID `duckduckgo_lite` ）
-5. 保存时仅存储与内置有差异的键，未改动的内置不会写入存储
+5. 保存时仅存储与内置有差异的键，未改动的内置不会写入存储，选择器未匹配到时默认退回other（置空）

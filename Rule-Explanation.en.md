@@ -7,7 +7,7 @@
 | `*://abc.example.com/*` | Matches `abc.example.com` |
 | `*://*.example.com/*` | Matches `example.com` and all its subdomains |
 | `*://*.example.com/path/*` | Matches a specific path on `example.com` |
-| `*://*.example.*` | Matches all top-level domains of `example.com` |
+| `*://*.example.*` | Matches all Top-level/Second-level domains of `example.com` |
 | `example.com` | Equivalent to `*://*.example.com/*`, script-only shorthand; rules also used in uBlacklist must keep the `*://*.` prefix |
 
 URL wildcard rules match from the start of the URL per match-pattern semantics: `*://` only matches `http/https`, host wildcard `*` does not cross paths, `*.` also matches the bare domain; IDN domains (e.g. `例子.com`) and punycode (`xn--fsqu00a.com`) are treated as the same host.
@@ -147,4 +147,4 @@ bing: {disabled: true},
 2. Custom engines support the `$site = "Engine ID"` condition and block/highlight/whitelist rules; `titles`/`snippets` can be omitted.
 3. Engine IDs allow only letters/digits/`_`/`-`; `other` is reserved. The same ID as, or a site overlapping, a built-in overrides it, e.g. `cn.bing.com` takes priority over built-in `bing`.
 4. Built-in engine standard IDs: `google`, `google_scholar`, `bing`, `duckduckgo_lite`, `duckduckgo`, `yandex`, `brave`, `yahoo` (Note: `ddg` and `yahoo-japan` are aliases only in `@if($site=)` , Lite uses the separate ID `duckduckgo_lite` )
-5. On save, only keys that differ from built-ins are stored.
+5. On save, only keys that differ from built-ins are stored. If the selector is not matched, it defaults to 'other' (leave blank) by default.
