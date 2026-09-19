@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/SadYuyuko
-// @version      8.3.1
+// @version      8.3.2
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -43,6 +43,9 @@
   let _syncInitialTimeout = null;
   let _hrefUrlCache = new WeakMap();
   const _hrefChangedContainers = new Set();
+  const _contentChangedContainers = new Set();
+  let _resultContentCache = new WeakMap();
+  let _resultRetryCounts = new WeakMap();
 
   // 配置存储键
   const CONFIG_KEY = 'searchfilter_blocker';
@@ -58,6 +61,7 @@
   const WEBDAV_SYNC_SELECTORS_KEY = 'searchfilter_webdav_sync_selectors';
   const TOMBSTONES_KEY = 'searchfilter_rule_tombstones';
   const SUBSCRIPTION_TOMBSTONES_KEY = 'searchfilter_subscription_tombstones';
+  const TOMBSTONE_MAX_ENTRIES = 1000;
   const LOCAL_RULE_ADDED_KEY = 'searchfilter_rule_added_times';
   const WEBDAV_LAST_SYNC_SELECTORS_KEY = 'searchfilter_webdav_last_sync_selectors';
   const SELECTORS_KEY = 'searchfilter_selectors';
@@ -66,6 +70,8 @@
   const WEBDAV_AUTO_SYNC_INTERVAL = 1 * 60 * 60 * 1000;
   const WEBDAV_SYNC_MAX_RETRIES = 3;
   const WEBDAV_SYNC_RETRY_DELAY = 2000;
+  const RESULT_RETRY_LIMIT = 3;
+  const RESULT_RETRY_DELAY = 200;
 
   // 默认配置
   let currentConfig = GM_getValue(CONFIG_KEY, {
@@ -303,7 +309,7 @@
         const u = new URL(loc.href);
         if (!path) path = u.pathname.toLowerCase();
         if (!search) search = u.search.toLowerCase();
-      } catch (e) { /* ignore */ }
+      } catch (e) {}
     }
     if (/^images\./.test(host) || /(?:^|\/)images(?:\/|$)/.test(path) || /[?&](?:tbm=isch|udm=2|iax?=images)(?:&|$)/.test(search)) return 'images';
     if (/^videos?\./.test(host) || /(?:^|\/)videos?(?:\/|$)/.test(path) || /[?&](?:tbm=vid|udm=7|iax?=videos)(?:&|$)/.test(search)) return 'videos';
@@ -344,7 +350,7 @@
       webdavUrl: '地址',
       webdavUser: '账号',
       webdavPass: '密码',
-      webdavPasswordSaved: '密码已保存，输入以更换',
+      webdavPasswordSaved: '已保存密码，输入新密码以替换',
       webdavPasswordRequired: '地址或用户名已更改，请输入对应密码',
       filename: '文件名',
       upload: '上传',
@@ -463,7 +469,7 @@
       webdavUrl: 'URL',
       webdavUser: 'Username',
       webdavPass: 'Password',
-      webdavPasswordSaved: 'Password saved; enter to replace',
+      webdavPasswordSaved: 'Password saved, enter new to replace',
       webdavPasswordRequired: 'Address or username changed; enter the corresponding password',
       filename: 'Filename',
       upload: 'Upload',
@@ -835,7 +841,7 @@
     const pushChar = (ch) => { leaf += ch; };
     const canStartRegex = () => {
       const s = leaf.trim();
-      return s === '' || /(?:=~|~)$/.test(s) || /^(url|title|host|path|scheme)$/i.test(s);
+      return s === '' || /(?:=~|~|=|:)$/.test(s) || /^(url|title|host|path|scheme)$/i.test(s);
     };
 
     while (i < n) {
@@ -1084,7 +1090,7 @@
       let altCmpVal = cmpVal;
       if (cond.type === 'path') {
         altValue = safeDecodeURIComponent(raw).toLowerCase();
-        altCmpVal = safeDecodeURIComponent(cmpVal);
+        altCmpVal = safeDecodeURIComponent(cmpVal).toLowerCase();
       }
       if (cond.op === '=') return value === cmpVal || altValue === altCmpVal;
       if (cond.op === '^=') return value.startsWith(cmpVal) || altValue.startsWith(altCmpVal);
@@ -1170,9 +1176,7 @@
       const condType = reMatch[1].toLowerCase();
       let flags = String(reMatch[3] || '').toLowerCase();
       if (getInvalidRegexFlags(flags)) return { matched: false };
-      if ((condType === 'host' || condType === 'scheme') && !flags.includes('i')) {
-        flags += 'i';
-      }
+      if (!String(reMatch[2] || '').trim()) return { matched: false };
       return { matched: true, dynamic: { type: condType, op: '=~', regex: new RegExp(reMatch[2], flags) } };
     }
 
@@ -1576,7 +1580,7 @@
         new RegExp(pattern, String(flags || '').toLowerCase());
       } else if (ruleToCheck.startsWith('text/') || ruleToCheck.startsWith('title/')) {
         const prefixLen = ruleToCheck.startsWith('title/') ? 6 : 5;
-        const { pattern, flags } = parsePrefixedRegexRule(ruleToCheck, prefixLen);
+        const { pattern, flags, flagsCandidate } = parsePrefixedRegexRule(ruleToCheck, prefixLen);
         if (!pattern.trim()) {
           errors.push(t('emptyPrefixRule'));
           return { valid: false, errors, warnings };
@@ -1584,6 +1588,10 @@
         const invalidFlags = getInvalidRegexFlags(flags);
         if (invalidFlags) {
           errors.push(t('invalidRegexFlags', { flags: invalidFlags }));
+          return { valid: false, errors, warnings };
+        }
+        if (flagsCandidate && /^[a-z]+$/i.test(flagsCandidate) && /[gy]/i.test(flagsCandidate)) {
+          errors.push(t('invalidRegexFlags', { flags: getInvalidRegexFlags(flagsCandidate) }));
           return { valid: false, errors, warnings };
         }
         new RegExp(pattern, String(flags || '').toLowerCase());
@@ -1608,6 +1616,7 @@
   function parsePrefixedRegexRule(rawRule, prefixLen) {
     let remaining = rawRule.substring(prefixLen);
     let pattern, flags = '';
+    let flagsCandidate = '';
     let lastSlashIndex = -1;
     for (let i = remaining.length - 1; i >= 0; i--) {
       if (remaining[i] === '/') {
@@ -1634,6 +1643,7 @@
         pattern = remaining.substring(0, lastSlashIndex);
       } else {
         pattern = remaining;
+        flagsCandidate = possibleFlags;
       }
     } else {
       pattern = remaining;
@@ -1656,7 +1666,7 @@
         pattern = pattern.substring(oldFlagMatch[0].length);
       }
     }
-    return { pattern, flags: String(flags || '').toLowerCase() };
+    return { pattern, flags: String(flags || '').toLowerCase(), flagsCandidate };
   }
 
   function escapeWildcardPart(part, isHost) {
@@ -1680,7 +1690,14 @@
         i++;
         continue;
       }
-      if (ch === '*') { out += (isHost && i > 0 && part[i - 1] === '.') ? '[^./]*' : starPattern; continue; }
+      if (ch === '*') {
+        if (isHost && i > 0 && part[i - 1] === '.') {
+          out += (i === part.length - 1) ? '[^./]*(?:\\.[^./]*)?' : '[^./]*';
+        } else {
+          out += starPattern;
+        }
+        continue;
+      }
       if (ch === '?') { out += '\\?'; continue; }
       if ('.+^${}()|[]\\'.includes(ch)) { out += '\\' + ch; continue; }
       out += ch;
@@ -1708,7 +1725,16 @@
       const { host, port, hasPort } = splitHostAndPort(part);
       const escapedHost = escapeWildcardPart(host, true);
       if (hasPort) {
-        return escapedHost + escapeWildcardPart(port, false);
+        let out = '';
+        for (let i = 0; i < port.length; i++) {
+          const ch = port[i];
+          if (ch === '\\' && i + 1 < port.length) { out += ch + port[i + 1]; i++; continue; }
+          if (ch === '*') { out += '[^/:]*'; continue; }
+          if (ch === '?') { out += '\\?'; continue; }
+          if ('.+^${}()|[]\\'.includes(ch)) { out += '\\' + ch; continue; }
+          out += ch;
+        }
+        return escapedHost + out;
       }
       return escapedHost + '(?::\\d+)?';
     }
@@ -1819,6 +1845,9 @@
     let type = 'url';
     let pattern = '';
     let flags = '';
+    if (coreRule.startsWith('/') && coreRule.lastIndexOf('/') === 0) {
+      throw new Error('Unbalanced regex');
+    }
     if (coreRule.startsWith('/') && coreRule.lastIndexOf('/') > 0) {
       type = 'regex';
       const r = ruleToRegex(coreRule);
@@ -1895,6 +1924,16 @@
     allRules.forEach((rule, ruleIndex) => {
       rule = stripRuleComment(rule.trim());
       if (!rule) return;
+      let ruleValid = true;
+      try {
+        ruleValid = validateRule(rule);
+      } catch (e) {
+        ruleValid = false;
+      }
+      if (!ruleValid) {
+        if (currentConfig.debug) console.warn('规则校验未通过, 已跳过:', rule);
+        return;
+      }
 
       const hlMatch = rule.match(/^@(\d+)(?=\s|$)/);
       if (hlMatch) {
@@ -2544,6 +2583,21 @@
     }
   }
 
+  function buildContentSignature(url, title, snippet) {
+    return `${url || ''}\u0000${title || ''}\u0000${snippet || ''}`;
+  }
+
+  function getResultContentSignature(container) {
+    try {
+      const engine = getSearchEngine();
+      const link = getResultLink(container, engine);
+      const url = link && link.href ? (resolveUrlDomain(link).url || '') : '';
+      return buildContentSignature(url, getResultTitle(container, engine), getResultSnippet(container, engine));
+    } catch (e) {
+      return null;
+    }
+  }
+
   function getResultText(result, selectors) {
     if (!Array.isArray(selectors)) return '';
     for (let selector of selectors) {
@@ -2585,7 +2639,7 @@
         for (const element of parent.querySelectorAll(':scope > :nth-child(' + index + ') ' + selector)) {
           if (element !== result && !element.contains(result)) elements.add(element);
         }
-      } catch (e) { /* Invalid custom CSS must not interrupt result processing. */ }
+      } catch (e) {}
     }
     return [...elements];
   }
@@ -2626,13 +2680,13 @@
             foundEl = el;
             break;
           }
-        } catch (_) { /* skip invalid custom selector and try the next one */ }
+        } catch (_) {}
       }
     } else if (typeof linkSelectors === 'string') {
       try {
         const el = result.querySelector(linkSelectors);
         if (el && el.href) foundEl = el;
-      } catch (_) { /* invalid custom selector means no usable result link */ }
+      } catch (_) {}
     }
     if (engine === 'bing' && foundEl && foundEl.href) {
       try {
@@ -2683,6 +2737,15 @@
     if (window.getComputedStyle(el).position === 'static') el.style.position = 'relative';
   }
 
+  function isPublicSuffixBase(host) {
+    const labels = String(host || '').toLowerCase().replace(/\.+$/, '').split('.').filter(Boolean);
+    if (labels.length <= 1) return true;
+    if (labels.length !== 2) return false;
+    const genericSlds = new Set(['co', 'com', 'net', 'org', 'gov', 'edu', 'ac', 'or', 'ne', 'in', 'gv', 'ed', 'mil', 'ltd', 'plc', 'govt']);
+    const ccTlds = new Set(['uk', 'jp', 'kr', 'cn', 'tw', 'hk', 'mo', 'pl', 'au', 'nz', 'br', 'mx', 'in', 'il', 'sg', 'my', 'ph', 'vn', 'th', 'tr', 'ar', 'co', 'pe', 've', 'bo', 'py', 'uy', 'ec', 'cl', 'za', 'eg', 'sa', 'ua', 'kz', 'id', 'pt', 'es', 'it', 'mt', 'ke', 'ng', 'gh', 'tz', 'ug', 'zw', 'bw', 'na', 'mz', 'ma', 'dz', 'tn', 'ly', 'sd', 'et', 'ao', 'jm', 'tt', 'do', 'gt', 'sv', 'hn', 'ni', 'cr', 'pa', 'cu']);
+    return genericSlds.has(labels[0]) && ccTlds.has(labels[1]);
+  }
+
   function buildBlockRuleOptions(domain) {
     const d = String(domain || '');
     const ipParts = d.split('.');
@@ -2690,12 +2753,14 @@
       const n = parseInt(p, 10);
       return n >= 0 && n <= 255 && String(n) === p;
     });
-    const baseDomain = (!isIP && d.startsWith('www.')) ? d.substring(4) : d;
+    let baseDomain = (!isIP && d.startsWith('www.')) ? d.substring(4) : d;
+    const suffixLike = !isIP && baseDomain !== d && isPublicSuffixBase(baseDomain);
+    if (suffixLike) baseDomain = d;
     const tldWide = !isIP && !baseDomain.includes('.');
     const exactRule = `*://${d}/*`;
     const domainRule = isIP ? exactRule : `*://*.${baseDomain}/*`;
     const whitelistRule = `@${exactRule}`;
-    return { isIP, tldWide, domainRule, exactRule, whitelistRule };
+    return { isIP, tldWide, domainRule, exactRule, whitelistRule, suffixLike };
   }
 
   function applyBlockRule(result, newRule) {
@@ -2939,6 +3004,8 @@
   function resetResultStyles(result) {
     restoreResultExtraElements(result);
     _hrefUrlCache.delete(result);
+    _resultContentCache.delete(result);
+    _resultRetryCounts.delete(result);
     result.removeAttribute('data-blocker-processed');
     result.removeAttribute('data-is-blocked');
     result.removeAttribute('data-is-highlighted');
@@ -3004,8 +3071,7 @@
     });
   }
 
-  // href变化
-  function reprocessContainerAfterHrefChange(container) {
+  function reprocessContainer(container) {
     try {
       if (!container || !container.isConnected) return;
       const staleBtn = container.querySelector('.serh-quick-block');
@@ -3018,7 +3084,6 @@
         if (currentConfig.debug) {
           console.error('[屏蔽] 处理结果时出错:', container, e);
         }
-        container.setAttribute('data-blocker-processed', 'true');
       }
       if (!container.hasAttribute('data-blocker-processed')) {
         resultObserver.observe(container);
@@ -3028,7 +3093,7 @@
       reconcileHiddenParents();
     } catch (e) {
       if (currentConfig.debug) {
-        console.error('[屏蔽] href变更重处理失败:', container, e);
+        console.error('[屏蔽] 结果重处理失败:', container, e);
       }
     }
   }
@@ -3069,6 +3134,8 @@
 
     const title = getResultTitle(result, engine);
     const snippet = getResultSnippet(result, engine);
+    _resultContentCache.set(result, buildContentSignature(url, title, snippet));
+    _resultRetryCounts.delete(result);
 
     const lowerDomain = domain.toLowerCase();
     const subdomainLevels = getSubdomainLevels(domain);
@@ -3163,7 +3230,7 @@
           if (currentConfig.debug) {
             console.error('[屏蔽] 处理结果时出错:', result, e);
           }
-          result.setAttribute('data-blocker-processed', 'true');
+          scheduleResultRetry(result);
         }
         if (blocked) newlyBlocked++;
         if (result.hasAttribute('data-blocker-processed')) {
@@ -3184,6 +3251,28 @@
     rootMargin: '1000px 0px',
     threshold: 0
   });
+
+  function scheduleResultRetry(result) {
+    const attempt = (_resultRetryCounts.get(result) || 0) + 1;
+    if (attempt > RESULT_RETRY_LIMIT) {
+      _resultRetryCounts.delete(result);
+      result.setAttribute('data-blocker-processed', 'true');
+      return;
+    }
+    _resultRetryCounts.set(result, attempt);
+    setTimeout(() => {
+      if (!result.isConnected || !_engineSiteSetup) {
+        _resultRetryCounts.delete(result);
+        return;
+      }
+      if (result.hasAttribute('data-blocker-processed')) {
+        _resultRetryCounts.delete(result);
+        return;
+      }
+      result.removeAttribute('data-observed');
+      resultObserver.observe(result);
+    }, RESULT_RETRY_DELAY * attempt);
+  }
 
   function clearStaleObserved(selector) {
     document.querySelectorAll('[data-observed]').forEach(result => {
@@ -3295,6 +3384,8 @@
       result.setAttribute('data-observed', 'true');
       resultObserver.observe(result);
     });
+
+    reconcileHiddenParents();
   }
 
   function exposeDebugApi() {
@@ -3367,7 +3458,6 @@
           if (currentConfig.debug) {
             console.error('[屏蔽] 处理结果时出错:', result, e);
           }
-          result.setAttribute('data-blocker-processed', 'true');
         }
         if (!result.hasAttribute('data-blocker-processed')) {
           result.removeAttribute('data-observed');
@@ -3401,7 +3491,7 @@
     if (widgetStylesInjected) return;
     widgetStylesInjected = true;
     GM_addStyle(`
-        /* 强隔离样式 */
+        /* 隔离样式 */
         [id^="serh-"]:not(button) {
             text-align: left !important;
             letter-spacing: normal !important;
@@ -3426,7 +3516,6 @@
             transition: all 0.3s ease;
         }
 
-        /* 强隔离按钮 */
         [id^="serh-"] button,
         .serh-button {
             border: none !important;
@@ -3449,7 +3538,6 @@
             transition: background-color 0.2s;
         }
 
-        /* 次级小按钮 */
         [id^="serh-"] button:not(.serh-action-button),
         .serh-button:not(.serh-action-button) {
             font-size: 11px !important;
@@ -3529,7 +3617,7 @@
             text-align: center !important;
         }
 
-        /* 规则栏输入 */
+        /* 输入栏 */
         .serh-rules-container {
             display: flex;
             border: 1px solid #e2e8f0;
@@ -3541,7 +3629,6 @@
             overflow: hidden;
         }
 
-        /* 行号排版锁定 */
         #serh-line-numbers,
         #serh-sel-line-numbers {
             min-width: 20px;
@@ -3587,7 +3674,6 @@
         #serh-rules::-webkit-scrollbar-thumb, #serh-sel-rules::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
         #serh-rules::-webkit-scrollbar-thumb:hover, #serh-sel-rules::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
 
-        /* 统计面板 */
         #serh-stats-panel {
             position: absolute;
             top: 10px;
@@ -3644,7 +3730,6 @@
             }
         }
 
-        /* 屏蔽确认面板 */
         #serh-block-confirm-dialog {
             position: fixed;
             z-index: 10002;
@@ -3683,7 +3768,6 @@
             font-weight: normal;
             white-space: nowrap;
         }
-        /* 开关控件防污染 */
         #serh-block-confirm-dialog .sfb-confirm-option input[type="radio"] {
             margin: 0 !important;
             padding: 0 !important;
@@ -3781,7 +3865,7 @@
             }
         }
 
-        /* 快速滑动按钮 */
+        /* 快速跳转 */
         .serh-scroll-btn {
             position: absolute;
             right: 7px;
@@ -3801,7 +3885,7 @@
         .serh-scroll-btn:hover { opacity: 1; transform: scale(1.2); }
         .serh-quick-block:hover { transform: scale(1.1); opacity: 1; }
 
-        /* 非正文区域隐藏按钮 */
+        /* 隐藏按钮 */
         .isv-r .serh-quick-block, 
         .image-section .serh-quick-block,
         g-img .serh-quick-block,
@@ -3817,7 +3901,6 @@
         #top_nav .serh-quick-block,
         #extabar .serh-quick-block { display: none !important; }
 
-        /* 面板隔离 */
         #serh-webdav-panel,
         #serh-subscription-panel {
             height: 332px;
@@ -3856,7 +3939,6 @@
         box-sizing: border-box !important;
         }
 
-        /* 主面板深色 */
         @media (prefers-color-scheme: dark) {
         #serh-panel {
         background: #171717 !important; 
@@ -3893,7 +3975,6 @@
             color: #6b7280 !important;
         }
 
-        /* 统计面板深色 */
         #serh-stats-panel {
             background: #171717 !important;
             border-color: #374151 !important;
@@ -4023,7 +4104,6 @@
             flex: 1 !important;
         }
 
-        /* Webdav订阅面板深色 */
         @media (prefers-color-scheme: dark) {
             #serh-webdav-panel,
             #serh-subscription-panel,
@@ -4071,7 +4151,7 @@
             }
         }
 
-        /* 面板渐入渐出动画 */
+        /* 渐变动画 */
         .serh-panel-fade {
             opacity: 0;
             transform: translate(-50%, -48%);
@@ -4095,7 +4175,6 @@
             transition: opacity 0.1s ease;
         }
 
-        /* 订阅布局 */
         .subscription-panel-header {
             flex-shrink: 0;
         }
@@ -4232,7 +4311,6 @@
         color: #000000 !important;
         }
 
-        /* 匹配规则标签 */
         .serh-matched-rule {
             position: absolute;
             top: 2px;
@@ -4329,7 +4407,7 @@
             flex-shrink: 0 !important;
         }
 
-        /* 开关样式 */
+        /* 开关 */
         .serh-switch {
             position: relative;
             display: inline-block;
@@ -4378,7 +4456,6 @@
             transform: translateX(12px);
         }
 
-        /* 暗色模式适配 */
         @media (prefers-color-scheme: dark) {
             .serh-slider {
                 background-color: #4b5563;
@@ -4388,7 +4465,7 @@
             }
         }
 
-        /* 悬浮球大小滑条 */
+        /* 滑条 */
         #serh-bubble-size-slider::-webkit-slider-thumb {
             -webkit-appearance: none;
             width: 14px;
@@ -5459,7 +5536,7 @@
     document.getElementById('serh-import-file').onclick = importRulesFromFile;
     document.getElementById('serh-export-file').onclick = exportRulesToFile;
 
-    const COMMENT_HEADING_REGEX = /^\s*#\s+\S+/;
+    const COMMENT_HEADING_REGEX = /^\s*#+\s+\S+/;
 
     function findCommentLineIndices(lines) {
       const indices = [];
@@ -6700,12 +6777,10 @@
   }
 
   function pruneTombstones(tombstones) {
-    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    for (const k in tombstones) {
-      if (typeof tombstones[k] !== 'number' || tombstones[k] < cutoff) {
-        delete tombstones[k];
-      }
-    }
+    const entries = Object.entries(tombstones).filter(([, v]) => typeof v === 'number');
+    entries.sort((a, b) => b[1] - a[1]);
+    for (const k in tombstones) delete tombstones[k];
+    entries.slice(0, TOMBSTONE_MAX_ENTRIES).forEach(([k, v]) => { tombstones[k] = v; });
   }
 
   function mergeRulesWithTombstones(localRules, cloudRules, localTime, cloudTime, cloudTombstones, cloudAddedTimes) {
@@ -6799,7 +6874,9 @@
     const trimmed = text.replace(/^\uFEFF/, '').trim();
     if (/^<\?xml/i.test(trimmed)) return true;
     const c0 = trimmed.charAt(0);
-    if (c0 === '\u007B' || c0 === '\u005B') {
+    if (c0 === '<') return true;
+    if (c0 === '\u007B') return true;
+    if (c0 === '\u005B') {
       try {
         JSON.parse(trimmed);
         return true;
@@ -7137,7 +7214,7 @@ function collectSubscriptionRules(lines) {
   const validRules = [];
   for (let line of lines) {
     if (line.length === 0) continue;
-    if (/^!\s*(?:site|title|url|description|version|expires|homepage)\s*=/i.test(line)) continue;
+    if (/^!\s*(?:site|title|url|description|version|expires|homepage)\s*[:=]/i.test(line)) continue;
     if (line.startsWith('!') && !looksLikeCondExpr(line)) continue;
     if (line.startsWith('[') && line.endsWith(']')) continue;
     if (line.startsWith('@@')) continue;
@@ -7389,8 +7466,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     reindexRows();
     bindDeleteEvents();
 
+    let cancelDiscardsEdits = false;
     const closePanel = bindOutsideClickClose(panel, () => {
-      persistCurrentSubscriptions();
+      if (!cancelDiscardsEdits) persistCurrentSubscriptions();
     });
 
     document.getElementById('serh-subscription-import').onclick = async () => {
@@ -7444,6 +7522,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
     document.getElementById('serh-subscription-cancel').onclick = (e) => {
       e.stopPropagation();
+      cancelDiscardsEdits = true;
       closePanel();
     };
 
@@ -8231,22 +8310,53 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       try {
         const selector = getContainerSelector(getSearchEngine());
         for (const m of records) {
-          if (m.type !== 'attributes' || m.attributeName !== 'href') continue;
-          const target = m.target;
-          if (!target || typeof target.closest !== 'function' || !selector) continue;
+          let node = null;
+          if (m.type === 'attributes') {
+            if (m.attributeName !== 'href') continue;
+            node = m.target;
+          } else if (m.type === 'childList') {
+            if (!m.addedNodes || !m.addedNodes.length) continue;
+            node = m.target;
+          } else if (m.type === 'characterData') {
+            node = m.target ? m.target.parentElement : null;
+          } else {
+            continue;
+          }
+          if (!node || typeof node.closest !== 'function' || !selector) continue;
           let container = null;
-          try { container = target.closest(selector); } catch (e) { container = null; }
-          if (container) _hrefChangedContainers.add(container);
+          try { container = node.closest(selector); } catch (e) { container = null; }
+          if (!container) continue;
+          if (m.type === 'attributes') {
+            _hrefChangedContainers.add(container);
+          } else if (container.hasAttribute('data-blocker-processed')) {
+            _contentChangedContainers.add(container);
+          }
         }
+        let statusDirty = false;
         if (_hrefChangedContainers.size) {
           for (const container of _hrefChangedContainers) {
             if (!container.isConnected) continue;
             const cachedUrl = _hrefUrlCache.get(container);
             const currentUrl = peekResultUrl(container);
             if (cachedUrl !== undefined && cachedUrl === currentUrl) continue;
-            reprocessContainerAfterHrefChange(container);
+            reprocessContainer(container);
+            statusDirty = true;
           }
           _hrefChangedContainers.clear();
+        }
+        if (_contentChangedContainers.size) {
+          for (const container of _contentChangedContainers) {
+            if (!container.isConnected) continue;
+            if (!container.hasAttribute('data-blocker-processed')) continue;
+            const cachedSig = _resultContentCache.get(container);
+            const currentSig = getResultContentSignature(container);
+            if (currentSig === null || cachedSig === currentSig) continue;
+            reprocessContainer(container);
+            statusDirty = true;
+          }
+          _contentChangedContainers.clear();
+        }
+        if (statusDirty) {
           updateStatus(document.querySelectorAll('[data-is-blocked="true"]').length);
         }
         const hasAddedNodes = records.some(m => m.type === 'childList' && m.addedNodes.length > 0);
@@ -8257,6 +8367,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
             childList: true,
             attributes: true,
             attributeFilter: ['href'],
+            characterData: true,
             subtree: true
           });
         }
@@ -8273,6 +8384,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       childList: true,
       attributes: true,
       attributeFilter: ['href'],
+      characterData: true,
       subtree: true
     });
 
@@ -8329,6 +8441,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
     _hrefUrlCache = new WeakMap();
     _hrefChangedContainers.clear();
+    _resultContentCache = new WeakMap();
+    _resultRetryCounts = new WeakMap();
+    _contentChangedContainers.clear();
     if (_searchForm && _searchFormHandler) {
       _searchForm.removeEventListener('submit', _searchFormHandler);
     }
