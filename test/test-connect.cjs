@@ -87,6 +87,7 @@ function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], local
     const LOCAL_LAST_MODIFIED_KEY = ${JSON.stringify(KEYS.LOCAL_LAST_MODIFIED_KEY)};
     const WEBDAV_LAST_SYNC_KEY = ${JSON.stringify(KEYS.WEBDAV_LAST_SYNC_KEY)};
     const TOMBSTONES_KEY = ${JSON.stringify(KEYS.TOMBSTONES_KEY)};
+    const TOMBSTONE_MAX_ENTRIES = 1000;
     const SUBSCRIPTION_TOMBSTONES_KEY = 'searchfilter_subscription_tombstones';
     const LOCAL_RULE_ADDED_KEY = 'searchfilter_rule_added_times';
     const MAX_SUBSCRIPTIONS = 100;
@@ -480,6 +481,7 @@ rules:
     const LOCAL_LAST_MODIFIED_KEY = ${JSON.stringify(KEYS.LOCAL_LAST_MODIFIED_KEY)};
     const WEBDAV_LAST_SYNC_KEY = ${JSON.stringify(KEYS.WEBDAV_LAST_SYNC_KEY)};
     const TOMBSTONES_KEY = ${JSON.stringify(KEYS.TOMBSTONES_KEY)};
+    const TOMBSTONE_MAX_ENTRIES = 1000;
     const SUBSCRIPTION_TOMBSTONES_KEY = 'searchfilter_subscription_tombstones';
     const LOCAL_RULE_ADDED_KEY = 'searchfilter_rule_added_times';
     const MAX_SUBSCRIPTIONS = 100;
@@ -532,6 +534,7 @@ rules:
     const LOCAL_LAST_MODIFIED_KEY = ${JSON.stringify(KEYS.LOCAL_LAST_MODIFIED_KEY)};
     const WEBDAV_LAST_SYNC_KEY = ${JSON.stringify(KEYS.WEBDAV_LAST_SYNC_KEY)};
     const TOMBSTONES_KEY = ${JSON.stringify(KEYS.TOMBSTONES_KEY)};
+    const TOMBSTONE_MAX_ENTRIES = 1000;
     const SUBSCRIPTION_TOMBSTONES_KEY = 'searchfilter_subscription_tombstones';
     const LOCAL_RULE_ADDED_KEY = 'searchfilter_rule_added_times';
     const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
@@ -597,6 +600,16 @@ rules:
   assert('G9: 空文件放行', isInvalid('', '') === false);
   assert('G10: YAML段落文件放行', isInvalid('[Section]\nname: x', 'text/plain') === false);
   assert('G11: 合法规则不因 text/html 类型拒绝', isInvalid('*://a.com/*', 'content-type: text/html; charset=utf-8') === false);
+  assert('G14: HTML注释开头拒绝', isInvalid('<!-- SSO portal -->\n<html><body>login</body></html>', '') === true);
+  assert('G15: 任意标签开头拒绝', isInvalid('<div>gateway error</div>', '') === true);
+  assert('G16: 截断JSON拒绝', isInvalid('{"error":"Not Fou', '') === true);
+  assert('G17: 合法JSON数组体仍拒绝', isInvalid('[1,2]', '') === true);
+}
+
+// SUB-CANCEL: 订阅面板取消必须放弃未持久化的编辑(不触发保存/上传)
+{
+  assert('SUB-CANCEL1: 取消按钮先置放弃标记再关闭', /cancelDiscardsEdits = true;[\s\S]{0,120}closePanel\(\);/.test(src));
+  assert('SUB-CANCEL2: 关闭回调仅在非取消路径持久化', /if \(!cancelDiscardsEdits\) persistCurrentSubscriptions\(\);/.test(src));
 }
 
 // G12-G13: 损坏同步头必须保留原始注释，合法头才从规则正文移除
@@ -630,7 +643,8 @@ rules:
       const SELECTORS_KEY = ${JSON.stringify(KEYS.SELECTORS_KEY)};
       const LOCAL_LAST_MODIFIED_KEY = ${JSON.stringify(KEYS.LOCAL_LAST_MODIFIED_KEY)};
       const WEBDAV_LAST_SYNC_KEY = ${JSON.stringify(KEYS.WEBDAV_LAST_SYNC_KEY)};
-      const TOMBSTONES_KEY = ${JSON.stringify(KEYS.TOMBSTONES_KEY)};
+    const TOMBSTONES_KEY = ${JSON.stringify(KEYS.TOMBSTONES_KEY)};
+    const TOMBSTONE_MAX_ENTRIES = 1000;
       const SUBSCRIPTION_TOMBSTONES_KEY = 'searchfilter_subscription_tombstones';
       const LOCAL_RULE_ADDED_KEY = 'searchfilter_rule_added_times';
       const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
@@ -881,6 +895,7 @@ rules:
   const store = new Map();
   const factory = new Function('store', `
     const TOMBSTONES_KEY = ${JSON.stringify(KEYS.TOMBSTONES_KEY)};
+    const TOMBSTONE_MAX_ENTRIES = 1000;
     const LOCAL_RULE_ADDED_KEY = 'searchfilter_rule_added_times';
     const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
     const GM_setValue = (k, v) => { store.set(k, v); };

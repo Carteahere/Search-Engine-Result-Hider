@@ -24,7 +24,7 @@ function extractFn(text, fnName) {
   }
   const fn = text.slice(idx, i + 1);
   if (['scanNewResults', 'teardownEngineSite'].includes(fnName)) {
-    return 'function restoreResultExtraElements() {}\n' + fn;
+    return 'function restoreResultExtraElements() {}\nfunction reconcileHiddenParents() {}\n' + fn;
   }
   return fn;
 }
@@ -796,6 +796,11 @@ function createTeardownEnv() {
     let _domObserver = observer;
     let _hrefUrlCache = new WeakMap();
     const _hrefChangedContainers = new Set();
+    const _contentChangedContainers = new Set();
+    let _resultContentCache = new WeakMap();
+    let _resultRetryCounts = new WeakMap();
+    _contentChangedContainers.add({});
+    _resultRetryCounts.set({}, 1);
     let showHiddenResults = true;
     let _observedSelector = '.a';
     let forceReprocessBatchId = 5;
@@ -808,7 +813,7 @@ function createTeardownEnv() {
     ${teardownEngineSiteFn}
     return {
       teardownEngineSite,
-      state: () => ({ setup: _engineSiteSetup, observer: _domObserver, showHidden: showHiddenResults, observedSelector: _observedSelector, batchId: forceReprocessBatchId }),
+      state: () => ({ setup: _engineSiteSetup, observer: _domObserver, showHidden: showHiddenResults, observedSelector: _observedSelector, batchId: forceReprocessBatchId, contentSetSize: _contentChangedContainers.size }),
     };
   `)(documentStub, resultObserver, statusEl, observer, counters);
   return { api, counters, statusEl, observer, observed };
@@ -825,6 +830,155 @@ function createTeardownEnv() {
   check('T6 teardown 不停止全站后台同步', counters.stopSyncCalls === 0);
   api.teardownEngineSite();
   check('T5 重复 teardown 不重复执行', counters.removeGlobalCalls === 1 && statusEl.removed === 1 && counters.stopSyncCalls === 0);
+}
+
+// ---- 内容快照签名: buildContentSignature / getResultContentSignature ----
+{
+  const sigApi = new Function(`
+    function getSearchEngine() { return 'test'; }
+    function getResultLink(container) { return container.link; }
+    function resolveUrlDomain(link) { return { url: link.href, domain: 'example.com' }; }
+    function getResultTitle(container) { return container.title; }
+    function getResultSnippet(container) { return container.snippet; }
+    ${extractFn(src, 'buildContentSignature')}
+    ${extractFn(src, 'getResultContentSignature')}
+    return { buildContentSignature, getResultContentSignature };
+  `)();
+
+  check('SIG-S1 相同 url/title/snippet 生成相同签名', sigApi.buildContentSignature('https://a.com/', 't', 's') === sigApi.buildContentSignature('https://a.com/', 't', 's'));
+  check('SIG-S2 标题变化导致签名变化', sigApi.buildContentSignature('https://a.com/', 't1', 's') !== sigApi.buildContentSignature('https://a.com/', 't2', 's'));
+  check('SIG-S3 URL变化导致签名变化', sigApi.buildContentSignature('https://a.com/1', 't', 's') !== sigApi.buildContentSignature('https://a.com/2', 't', 's'));
+  check('SIG-S4 摘要变化导致签名变化', sigApi.buildContentSignature('u', 't', 's1') !== sigApi.buildContentSignature('u', 't', 's2'));
+  check('SIG-S5 空值部分按空串处理', sigApi.buildContentSignature(null, undefined, '') === sigApi.buildContentSignature('', '', ''));
+
+  const c = { link: { href: 'https://a.com/x' }, title: '标题', snippet: '摘要' };
+  const before = sigApi.getResultContentSignature(c);
+  check('SIG-S6 结果签名包含 url/title/snippet', before === sigApi.buildContentSignature('https://a.com/x', '标题', '摘要'));
+  c.title = '广告新标题';
+  check('SIG-S7 容器内容变化后签名不同', sigApi.getResultContentSignature(c) !== before);
+  c.link = null;
+  check('SIG-S8 链接缺失时签名的 url 段为空且可用', sigApi.getResultContentSignature(c) === sigApi.buildContentSignature('', '广告新标题', '摘要'));
+  const bad = { link: { get href() { throw new Error('boom'); } }, title: 't', snippet: 's' };
+  check('SIG-S9 提取异常返回 null 而不崩溃', sigApi.getResultContentSignature(bad) === null);
+}
+
+// ---- reprocessContainer: href/内容变化共用的重处理核心 ----
+{
+  const reprocessFn = extractFn(src, 'reprocessContainer');
+  function makeFactory(processImpl) {
+    const calls = { process: 0, reset: 0, reconcile: 0, observe: 0 };
+    const api = new Function('calls', 'resultObserver', `
+      const currentConfig = { debug: false };
+      function resetResultStyles(el) { calls.reset++; }
+      function processSingleResult(el) { calls.process++; ${processImpl} }
+      function reconcileHiddenParents() { calls.reconcile++; }
+      ${reprocessFn}
+      return { reprocessContainer };
+    `)(calls, { observe() { calls.observe++; } });
+    return { calls, api };
+  }
+  function makeContainer(connected) {
+    return {
+      isConnected: connected !== false,
+      attrs: {},
+      staleBtn: null,
+      setAttribute(n, v) { this.attrs[n] = String(v); },
+      getAttribute(n) { return Object.prototype.hasOwnProperty.call(this.attrs, n) ? this.attrs[n] : null; },
+      hasAttribute(n) { return Object.prototype.hasOwnProperty.call(this.attrs, n); },
+      removeAttribute(n) { delete this.attrs[n]; },
+      querySelector(sel) { return sel === '.serh-quick-block' ? this.staleBtn : null; },
+    };
+  }
+
+  {
+    const { calls, api } = makeFactory("el.setAttribute('data-blocker-processed', 'true'); return true;");
+    const el = makeContainer();
+    el.staleBtn = { removed: 0, remove() { this.removed++; } };
+    api.reprocessContainer(el);
+    check('RP1 重处理清理旧按钮并复位后重新判定', el.staleBtn.removed === 1 && calls.reset === 1 && calls.process === 1 && calls.reconcile === 1);
+    check('RP2 重处理成功后不再重新观察', calls.observe === 0 && el.getAttribute('data-observed') === 'true');
+  }
+  {
+    const { calls, api } = makeFactory('return false;');
+    const el2 = makeContainer();
+    api.reprocessContainer(el2);
+    check('RP3 未标记完成时重新观察结果', calls.observe === 1 && el2.hasAttribute('data-observed') === false);
+  }
+  {
+    const { calls, api } = makeFactory("throw new Error('boom');");
+    const el = makeContainer();
+    api.reprocessContainer(el);
+    check('RP4 重处理异常不标记 data-blocker-processed 且转交观察器重试', el.hasAttribute('data-blocker-processed') === false && calls.observe === 1);
+    const gone = makeContainer(false);
+    api.reprocessContainer(gone);
+    check('RP5 已脱离文档的容器不触发重处理', calls.process === 1);
+  }
+}
+
+// ---- scheduleResultRetry: 处理异常后的有限次重试 ----
+{
+  const retryFn = extractFn(src, 'scheduleResultRetry');
+  const limitMatch = src.match(/const RESULT_RETRY_LIMIT = (\d+)/);
+  const delayMatch = src.match(/const RESULT_RETRY_DELAY = (\d+)/);
+  check('RT0 重试常量存在', !!limitMatch && !!delayMatch);
+  function makeRetryEnv() {
+    const timers = [];
+    const api = new Function('resultObserver', 'timers', `
+      let _engineSiteSetup = true;
+      let _resultRetryCounts = new WeakMap();
+      const RESULT_RETRY_LIMIT = ${limitMatch ? limitMatch[1] : 3};
+      const RESULT_RETRY_DELAY = ${delayMatch ? delayMatch[1] : 200};
+      const setTimeout = (fn, ms) => { timers.push({ fn, ms }); return timers.length; };
+      ${retryFn}
+      return { scheduleResultRetry, hasCount: (el) => _resultRetryCounts.has(el) };
+    `)({ observe(el) { el.observeCount = (el.observeCount || 0) + 1; } }, timers);
+    return { api, timers };
+  }
+  function makeRetryEl() {
+    return {
+      isConnected: true,
+      attrs: {},
+      setAttribute(n, v) { this.attrs[n] = String(v); },
+      hasAttribute(n) { return Object.prototype.hasOwnProperty.call(this.attrs, n); },
+      removeAttribute(n) { delete this.attrs[n]; },
+    };
+  }
+
+  {
+    const { api, timers } = makeRetryEnv();
+    const el = makeRetryEl();
+    api.scheduleResultRetry(el);
+    check('RT1 首次异常安排一次延迟重试', timers.length === 1 && timers[0].ms === Number(delayMatch[1]));
+    timers[0].fn();
+    check('RT2 重试触发后重新观察结果', el.observeCount === 1 && el.hasAttribute('data-observed') === false);
+    check('RT3 重试计数保留用于升级', api.hasCount(el));
+  }
+  {
+    const { api, timers } = makeRetryEnv();
+    const el = makeRetryEl();
+    api.scheduleResultRetry(el);
+    el.setAttribute('data-blocker-processed', 'true');
+    timers[0].fn();
+    check('RT4 重试前已成功处理则不再重试', el.observeCount === undefined && !api.hasCount(el));
+  }
+  {
+    const { api, timers } = makeRetryEnv();
+    const el = makeRetryEl();
+    el.isConnected = false;
+    api.scheduleResultRetry(el);
+    timers[0].fn();
+    check('RT5 结果脱离文档后放弃重试', !api.hasCount(el));
+  }
+  {
+    const { api, timers } = makeRetryEnv();
+    const el = makeRetryEl();
+    api.scheduleResultRetry(el);
+    api.scheduleResultRetry(el);
+    api.scheduleResultRetry(el);
+    check('RT6 连续异常达到上限前不标记完成', timers.length === 3 && el.hasAttribute('data-blocker-processed') === false);
+    api.scheduleResultRetry(el);
+    check('RT7 超过上限停止重试并标记完成', timers.length === 3 && el.hasAttribute('data-blocker-processed') === true && !api.hasCount(el));
+  }
 }
 
 // ---- ensureEngineSiteSetup: 装配时启动后台同步 ----

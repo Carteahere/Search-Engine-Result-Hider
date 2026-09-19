@@ -225,6 +225,25 @@ assert('错11: 正则无效', r.errors && r.errors[0].startsWith('regex'));
 r = condExpr('title =~ /a\\', 'google');
 assert('错12: 正则未闭合(tail转义)', r.errors);
 
+r = condExpr('title//', 'google');
+assert('错13: 空正则简写报错(不再恒匹配)', r.errors && r.errors.some((e) => e.startsWith('unknown')));
+r = condExpr('url =~ //', 'google');
+assert('错14: =~空正则报错(不再恒匹配)', r.errors && r.errors.some((e) => e.startsWith('unknown')));
+r = condExpr('title/ /', 'google');
+assert('错14b: 空白pattern正则同样报错', r.errors && r.errors.some((e) => e.startsWith('unknown')));
+r = condExpr('host//', 'google');
+assert('错14c: host空正则报错', r.errors && r.errors.some((e) => e.startsWith('unknown')));
+
+r = condExpr('host =~ /ABC/', 'google');
+assert('修17: host正则无i大小写敏感(不再强制加i)', !r.errors && ev(r, 't', 'https://abc.com/') === false);
+r = condExpr('host =~ /ABC/i', 'google');
+assert('修17b: host正则加i忽略大小写', !r.errors && ev(r, 't', 'https://abc.com/') === true);
+r = condExpr('scheme = "HTTPS"', 'google');
+assert('修17c: scheme字符串比较仍忽略大小写', !r.errors && ev(r, 't', 'https://x.com/') === true);
+r = condExpr('host $= ".EXAMPLE.COM"', 'google');
+assert('修17d: host字符串比较仍忽略大小写', ev(r, 't', 'https://www.example.com/') === true);
+
+
 // 引擎别名 ddg($site 值归一)
 r = condExpr('$site = "DDG"', 'duckduckgo');
 assert('旧11: DDG别名(大写)', r.const === true);
