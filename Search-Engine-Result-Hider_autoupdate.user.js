@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/SadYuyuko
-// @version      8.3.2
+// @version      8.3.3
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -59,10 +59,8 @@
   const WEBDAV_AUTO_SYNC_KEY = 'searchfilter_webdav_auto_sync';
   const WEBDAV_SYNC_CONFIG_KEY = 'searchfilter_webdav_sync_config';
   const WEBDAV_SYNC_SELECTORS_KEY = 'searchfilter_webdav_sync_selectors';
-  const TOMBSTONES_KEY = 'searchfilter_rule_tombstones';
-  const SUBSCRIPTION_TOMBSTONES_KEY = 'searchfilter_subscription_tombstones';
-  const TOMBSTONE_MAX_ENTRIES = 1000;
-  const LOCAL_RULE_ADDED_KEY = 'searchfilter_rule_added_times';
+  const WEBDAV_SYNC_SNAPSHOT_KEY = 'searchfilter_webdav_sync_snapshot';
+  const SUBSCRIPTION_SYNC_SNAPSHOT_KEY = 'searchfilter_subscription_sync_snapshot';
   const WEBDAV_LAST_SYNC_SELECTORS_KEY = 'searchfilter_webdav_last_sync_selectors';
   const SELECTORS_KEY = 'searchfilter_selectors';
   const HL_STATS_REGEX = /^@\d+/;
@@ -70,28 +68,35 @@
   const WEBDAV_AUTO_SYNC_INTERVAL = 1 * 60 * 60 * 1000;
   const WEBDAV_SYNC_MAX_RETRIES = 3;
   const WEBDAV_SYNC_RETRY_DELAY = 2000;
+  const WEBDAV_TIME_TOLERANCE = 5 * 60 * 1000;
+  const NET_TIME_CACHE_TTL = 30 * 60 * 1000;
+  const NET_TIME_FAIL_TTL = 10 * 60 * 1000;
   const RESULT_RETRY_LIMIT = 3;
   const RESULT_RETRY_DELAY = 200;
 
   // 默认配置
-  let currentConfig = GM_getValue(CONFIG_KEY, {
-    rules: ['*://*.example.com/*'],
-    enabled: true,
-    showCount: false,
-    bubbleSize: 30,
-    debug: false,
-    showBlockBtn: false,
-    blockDomain: false,
-    blockConfirm: true,
-    showBubble: true,
-    bubbleState: null,
-    panelCentered: true,
-    bubbleAction: 'openPanel',
-    language: 'zh-CN',
-    highlightColors: {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'},
-    subscriptionAutoUpdate: false,
-    errorDetection: true
-  });
+  function getDefaultConfig() {
+    return {
+      rules: ['*://*.example.com/*'],
+      enabled: true,
+      showCount: false,
+      bubbleSize: 30,
+      debug: false,
+      showBlockBtn: false,
+      blockDomain: false,
+      blockConfirm: true,
+      showBubble: true,
+      bubbleState: null,
+      panelCentered: true,
+      bubbleAction: 'openPanel',
+      language: 'zh-CN',
+      highlightColors: {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'},
+      subscriptionAutoUpdate: false,
+      errorDetection: true
+    };
+  }
+
+  let currentConfig = GM_getValue(CONFIG_KEY, getDefaultConfig());
 
   if (!currentConfig || typeof currentConfig !== 'object' || Array.isArray(currentConfig)) currentConfig = {};
   if (!Array.isArray(currentConfig.rules)) currentConfig.rules = [];
@@ -111,8 +116,14 @@
   } else {
     currentConfig.highlightColors = Object.assign({}, DEFAULT_HIGHLIGHT_COLORS, currentConfig.highlightColors);
   }
-  if (currentConfig.subscriptionAutoUpdate === undefined) currentConfig.subscriptionAutoUpdate = false;
-  if (currentConfig.errorDetection === undefined) currentConfig.errorDetection = true;
+  ['searchfilter_rule_tombstones', 'searchfilter_subscription_tombstones', 'searchfilter_rule_added_times'].forEach(k => {
+    if (typeof GM_deleteValue === 'function') GM_deleteValue(k);
+  });
+  if (currentConfig && typeof currentConfig === 'object') {
+    delete currentConfig.tombstones;
+    delete currentConfig.ruleAddedTimes;
+    delete currentConfig.subscriptionTombstones;
+  }
   let showHiddenResults = false;
 
   // 选择器
@@ -345,7 +356,6 @@
       cancel: '取消',
       placeholder: '每行一个规则',
       panelTitle: '订阅管理',
-      addSubscription: '添加订阅',
       webdavTitle: 'WebDAV',
       webdavUrl: '地址',
       webdavUser: '账号',
@@ -366,7 +376,6 @@
       noMatch: '无匹配项',
       whitelistRules: '白名单规则',
       menuOpenPanel: '⚙️ 打开配置面板',
-      menuEnable: '屏蔽功能',
       menuErrorDetection: '错误检测',
       menuCenter: '面板居中',
       menuBubble: '悬浮球状态',
@@ -375,11 +384,9 @@
       menuLangEn: 'Language: English',
       subscriptionSuccess: '订阅成功！已更新 {count} 条规则。',
       saved: '已保存',
-      importDone: '导入操作完成',
       uploadSuccess: '上传成功！',
       downloadSuccess: '下载成功！规则已加载到编辑区，保存生效',
       noRulesExport: '没有规则可导出',
-      confirmBlock: '确定要屏蔽并添加规则 [ {rule} ] 吗？',
       bcDomain: '域名',
       bcExact: '精确',
       bcWhitelist: '白名单',
@@ -464,7 +471,6 @@
       cancel: 'Cancel',
       placeholder: 'One rule per line',
       panelTitle: 'Subscription Manager',
-      addSubscription: 'Add Subscription',
       webdavTitle: 'WebDAV',
       webdavUrl: 'URL',
       webdavUser: 'Username',
@@ -485,7 +491,6 @@
       noMatch: 'No matches',
       whitelistRules: 'Whitelist Rules',
       menuOpenPanel: '⚙️ Open Panel',
-      menuEnable: 'Block',
       menuErrorDetection: 'Error Detection',
       menuCenter: 'Center Panel',
       menuBubble: 'Bubble',
@@ -494,11 +499,9 @@
       menuLangEn: 'Language: English',
       subscriptionSuccess: 'Subscription successful! Updated {count} rules.',
       saved: 'Saved',
-      importDone: 'Import completed',
       uploadSuccess: 'Upload successful!',
       downloadSuccess: 'Download successful! Rules loaded into editor, save to apply.',
       noRulesExport: 'No rules to export',
-      confirmBlock: 'Add block rule [ {rule} ] ?',
       bcDomain: 'Domain',
       bcExact: 'Exact',
       bcWhitelist: 'Whitelist',
@@ -1140,14 +1143,6 @@
   }
 
   function parseConditionPart(trimmed, currentEngine, currentSite, currentCategory) {
-    const stripQuotes = (str) => {
-      const s = String(str || '').trim();
-      if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
-        return s.slice(1, -1);
-      }
-      return s;
-    };
-
     const enginePropMatch = trimmed.match(/^(?:\$site|engine)\s*[=:]\s*(?:['"](.*?)['"]|([^\s\)]+))\s*i?\s*$/i);
     if (enginePropMatch) {
       const raw = (enginePropMatch[1] !== undefined ? enginePropMatch[1] : enginePropMatch[2]).trim().toLowerCase();
@@ -1686,7 +1681,9 @@
     for (; i < part.length; i++) {
       const ch = part[i];
       if (ch === '\\' && i + 1 < part.length) {
-        out += ch + part[i + 1];
+        const nxt = part[i + 1];
+        if (/[a-z0-9]/i.test(nxt)) out += '\\\\' + nxt;
+        else out += ch + nxt;
         i++;
         continue;
       }
@@ -1728,7 +1725,13 @@
         let out = '';
         for (let i = 0; i < port.length; i++) {
           const ch = port[i];
-          if (ch === '\\' && i + 1 < port.length) { out += ch + port[i + 1]; i++; continue; }
+          if (ch === '\\' && i + 1 < port.length) {
+            const nxt = port[i + 1];
+            if (/[a-z0-9]/i.test(nxt)) out += '\\\\' + nxt;
+            else out += ch + nxt;
+            i++;
+            continue;
+          }
           if (ch === '*') { out += '[^/:]*'; continue; }
           if (ch === '?') { out += '\\?'; continue; }
           if ('.+^${}()|[]\\'.includes(ch)) { out += '\\' + ch; continue; }
@@ -2768,7 +2771,6 @@
     const cleanRule = stripRuleComment(newRule.trim());
     if (!currentConfig.rules.some(rule => stripRuleComment(rule.trim()) === cleanRule)) {
       currentConfig.rules.push(newRule);
-      recordRuleAddedTimes([newRule]);
       persistConfig(true);
       appendRuleToTextarea(newRule);
     }
@@ -2932,8 +2934,6 @@
         const deleteLocalRule = (rule) => {
           adoptStoredConfigBeforeWrite();
           const cleanTarget = stripRuleComment(rule.trim());
-          const deleted = currentConfig.rules.filter(r => stripRuleComment(r.trim()) === cleanTarget);
-          recordRuleDeletions(deleted);
           currentConfig.rules = currentConfig.rules.filter(r => stripRuleComment(r.trim()) !== cleanTarget);
           persistConfig(true);
           removeRulesFromTextarea([rule]);
@@ -2956,7 +2956,6 @@
             adoptStoredConfigBeforeWrite();
             if (!currentConfig.rules.some(rule => stripRuleComment(rule.trim()) === chosenRule)) {
               currentConfig.rules.push(chosenRule);
-              recordRuleAddedTimes([chosenRule]);
             }
             persistConfig(true);
             appendRuleToTextarea(chosenRule);
@@ -4967,10 +4966,41 @@
     }
   }
 
-  function persistConfigItem(key, value, updateModifiedTime = true) {
-    adoptStoredConfigBeforeWrite();
-    currentConfig[key] = value;
-    persistConfig(updateModifiedTime);
+  function applyConfigToMainPanel() {
+    if (!document.getElementById('serh-panel')) return;
+    const checkboxMap = {
+      'serh-enabled': 'enabled',
+      'serh-show-count': 'showCount',
+      'serh-debug': 'debug',
+      'serh-show-block-btn': 'showBlockBtn',
+      'serh-block-domain': 'blockDomain',
+      'serh-block-confirm': 'blockConfirm'
+    };
+    Object.keys(checkboxMap).forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.checked = currentConfig[checkboxMap[id]] === true;
+    });
+    const textarea = document.getElementById('serh-rules');
+    if (textarea && Array.isArray(currentConfig.rules)) {
+      textarea.value = currentConfig.rules.join('\n');
+      updateLineNumbers();
+    }
+  }
+
+  function collectMainPanelConfigState() {
+    if (!document.getElementById('serh-panel')) return;
+    const checkboxMap = {
+      'serh-enabled': 'enabled',
+      'serh-show-count': 'showCount',
+      'serh-debug': 'debug',
+      'serh-show-block-btn': 'showBlockBtn',
+      'serh-block-domain': 'blockDomain',
+      'serh-block-confirm': 'blockConfirm'
+    };
+    Object.keys(checkboxMap).forEach(id => {
+      const el = document.getElementById(id);
+      if (el) currentConfig[checkboxMap[id]] = el.checked;
+    });
   }
 
   function syncRulesTextarea() {
@@ -5001,6 +5031,10 @@
     const textarea = document.getElementById('serh-rules');
     if (!textarea || !rulesToRemove || !rulesToRemove.length) return;
     const cleanSet = new Set(rulesToRemove.map(r => stripRuleComment(String(r).trim())));
+    const panel = document.getElementById('serh-panel');
+    if (panel && Array.isArray(panel._initialRules)) {
+      panel._initialRules = panel._initialRules.filter(r => !cleanSet.has(stripRuleComment(String(r).trim())));
+    }
     const lines = textarea.value ? textarea.value.split('\n') : [];
     const filtered = lines.filter(l => {
       const trimmed = l.trim();
@@ -5693,26 +5727,6 @@
     }, 200);
   }
 
-  // 墓碑时间
-  function applyRuleDiff(prevRules, newRules) {
-    const prevList = Array.isArray(prevRules) ? prevRules : [];
-    const nextList = Array.isArray(newRules) ? newRules : [];
-    if (JSON.stringify(prevList) === JSON.stringify(nextList)) return false;
-    const prevKeySet = new Set(prevList.map(getRuleKey));
-    const nextKeySet = new Set(nextList.map(getRuleKey));
-    const deletedRules = prevList.filter(r => {
-      const k = getRuleKey(r);
-      return k && !k.startsWith('#') && !nextKeySet.has(k);
-    });
-    const addedRules = nextList.filter(r => {
-      const k = getRuleKey(r);
-      return k && !k.startsWith('#') && !prevKeySet.has(k);
-    });
-    if (deletedRules.length > 0) recordRuleDeletions(deletedRules);
-    if (addedRules.length > 0) recordRuleAddedTimes(addedRules);
-    return true;
-  }
-
   function saveConfig() {
     const rulesText = document.getElementById('serh-rules').value;
     const enabled = document.getElementById('serh-enabled').checked;
@@ -5727,34 +5741,18 @@
 
     const panel = document.getElementById('serh-panel');
     const baseRules = (panel && Array.isArray(panel._initialRules)) ? panel._initialRules : (Array.isArray(currentConfig.rules) ? currentConfig.rules : []);
-    const rulesChanged = applyRuleDiff(baseRules, userRules);
+    const rulesChanged = JSON.stringify(baseRules) !== JSON.stringify(userRules);
 
     adoptStoredConfigBeforeWrite();
 
     const initialKeySet = new Set(baseRules.map(getRuleKey));
     const userKeySet = new Set(userRules.map(getRuleKey));
-    const tombstones = getLocalTombstones();
-    const addedTimes = getLocalRuleAddedTimes();
-
-    const activeUserRules = userRules.filter(r => {
-      const k = getRuleKey(r);
-      if (!k || k.startsWith('#')) return true;
-      const delTime = tombstones[k];
-      if (!delTime) return true;
-      if (!initialKeySet.has(k)) {
-        delete tombstones[k];
-        return true;
-      }
-      const addedTime = addedTimes[k] || 0;
-      if (addedTime > delTime) return true;
-      return false;
-    });
 
     const backgroundNewRules = (Array.isArray(currentConfig.rules) ? currentConfig.rules : []).filter(r => {
       const k = getRuleKey(r);
-      return k && !k.startsWith('#') && !initialKeySet.has(k) && !userKeySet.has(k) && (!tombstones[k] || (addedTimes[k] && addedTimes[k] > tombstones[k]));
+      return k && !k.startsWith('#') && !initialKeySet.has(k) && !userKeySet.has(k);
     });
-    const finalRules = backgroundNewRules.length > 0 ? [...activeUserRules, ...backgroundNewRules] : activeUserRules;
+    const finalRules = backgroundNewRules.length > 0 ? [...userRules, ...backgroundNewRules] : userRules;
 
     const settingsChanged = currentConfig.enabled !== enabled ||
       currentConfig.showCount !== showCount ||
@@ -6615,75 +6613,99 @@
     return rules;
   }
 
-  function getSubscriptionTombstones() {
-    const raw = GM_getValue(SUBSCRIPTION_TOMBSTONES_KEY, {});
-    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  function getSubscriptionSyncSnapshot() {
+    const raw = GM_getValue(SUBSCRIPTION_SYNC_SNAPSHOT_KEY, null);
+    return Array.isArray(raw) ? raw : null;
   }
 
-  function recordSubscriptionDeletions(urls, deletedAt = Date.now()) {
-    if (!Array.isArray(urls) || !urls.length) return;
-    const tombstones = getSubscriptionTombstones();
-    let changed = false;
-    urls.forEach(u => {
-      const url = String(u || '').trim();
-      if (url) {
-        tombstones[url] = deletedAt;
-        changed = true;
-      }
-    });
-    if (changed) {
-      pruneTombstones(tombstones);
-      GM_setValue(SUBSCRIPTION_TOMBSTONES_KEY, tombstones);
-    }
+  function setSubscriptionSyncSnapshot(subs) {
+    if (!Array.isArray(subs)) return;
+    const simplified = subs.map(s => ({
+      url: s.url,
+      name: s.name,
+      enabled: s.enabled !== false
+    }));
+    GM_setValue(SUBSCRIPTION_SYNC_SNAPSHOT_KEY, simplified);
   }
 
-  function applyCloudSubscriptions(subscriptions, cloudSubTombstones, preferLocal = false) {
-    if (!cloudSubTombstones || typeof cloudSubTombstones !== 'object') cloudSubTombstones = {};
-    if (!Array.isArray(subscriptions)) return;
+  function applyCloudSubscriptions(cloudSubs, preferLocal = false) {
+    if (!Array.isArray(cloudSubs)) return;
     const existing = getSubscriptions();
     let hasNewSub = false;
 
-    const localSubTombstones = getSubscriptionTombstones();
-    const mergedSubTombstones = { ...(cloudSubTombstones || {}), ...localSubTombstones };
-    for (const k in cloudSubTombstones) {
-      if (typeof cloudSubTombstones[k] === 'number') {
-        mergedSubTombstones[k] = Math.max(mergedSubTombstones[k] || 0, cloudSubTombstones[k]);
-      }
-    }
-    pruneTombstones(mergedSubTombstones);
-    GM_setValue(SUBSCRIPTION_TOMBSTONES_KEY, mergedSubTombstones);
+    const baseSubs = getSubscriptionSyncSnapshot();
+    let finalSubs = [];
 
-    const addedAtFor = s => Math.max(Number(s.addedAt) || 0,
-      Number((existing.find(e => e && e.url === s.url) || {}).addedAt) || 0);
-    const merged = subscriptions
-      .filter(s => s && s.url && (!mergedSubTombstones[s.url] || addedAtFor(s) > mergedSubTombstones[s.url]))
-      .map(s => {
+    if (!baseSubs) {
+      const cloudMap = new Map();
+      cloudSubs.forEach(s => { if (s && s.url) cloudMap.set(s.url, s); });
+      const seen = new Set();
+      const merged = [];
+
+      cloudSubs.forEach(s => {
+        if (!s || !s.url || seen.has(s.url)) return;
+        seen.add(s.url);
         const local = existing.find(e => e && e.url === s.url);
-        if (preferLocal && local) s = { ...s, ...local };
         const isNew = !local || !Array.isArray(local.rules) || local.rules.length === 0;
-        if (isNew && s.url && s.enabled !== false) hasNewSub = true;
-        const rules = Array.isArray(local && local.rules) && local.rules.length > 0
-          ? local.rules
-          : (Array.isArray(s.rules) ? s.rules : []);
-        const lastUpdate = (local && local.rules && local.rules.length > 0)
-          ? (local.lastUpdate || 0)
-          : 0;
-        return {
+        if (isNew && s.enabled !== false) hasNewSub = true;
+        merged.push({
           ...s,
-          addedAt: addedAtFor(s),
-          enabled: s.enabled !== undefined ? s.enabled !== false : (local ? local.enabled !== false : true),
-          rules,
-          lastUpdate,
-          name: s.name !== undefined ? s.name : (local && local.name)
-        };
+          enabled: preferLocal && local ? local.enabled !== false : (s.enabled !== false),
+          rules: (local && Array.isArray(local.rules) && local.rules.length > 0) ? local.rules : (Array.isArray(s.rules) ? s.rules : []),
+          lastUpdate: (local && local.rules && local.rules.length > 0) ? (local.lastUpdate || 0) : 0,
+          name: (preferLocal && local && local.name) ? local.name : s.name
+        });
       });
 
-    const localOnly = existing.filter(localSub =>
-      localSub && localSub.url &&
-      (!mergedSubTombstones[localSub.url] || (localSub.addedAt && localSub.addedAt > mergedSubTombstones[localSub.url])) &&
-      !merged.some(s => s && s.url === localSub.url)
-    );
-    saveSubscriptions([...merged, ...localOnly]);    if (hasNewSub) {
+      existing.forEach(localSub => {
+        if (localSub && localSub.url && !seen.has(localSub.url)) {
+          seen.add(localSub.url);
+          merged.push(localSub);
+        }
+      });
+      finalSubs = merged;
+    } else {
+      const baseMap = new Map();
+      baseSubs.forEach(s => { if (s && s.url) baseMap.set(s.url, s); });
+      const localMap = new Map();
+      existing.forEach(s => { if (s && s.url) localMap.set(s.url, s); });
+      const cloudMap = new Map();
+      cloudSubs.forEach(s => { if (s && s.url) cloudMap.set(s.url, s); });
+
+      const localDeleted = new Set([...baseMap.keys()].filter(u => !localMap.has(u)));
+      const cloudDeleted = new Set([...baseMap.keys()].filter(u => !cloudMap.has(u)));
+
+      const allUrls = new Set([...baseMap.keys(), ...localMap.keys(), ...cloudMap.keys()]);
+      const merged = [];
+
+      for (const url of allUrls) {
+        if (!url) continue;
+        if (localDeleted.has(url) || cloudDeleted.has(url)) {
+          continue;
+        }
+        const local = localMap.get(url);
+        const cloud = cloudMap.get(url);
+        const item = cloud || local;
+        if (!item) continue;
+
+        const isNew = !local || !Array.isArray(local.rules) || local.rules.length === 0;
+        if (isNew && item.enabled !== false) hasNewSub = true;
+
+        merged.push({
+          url,
+          name: (preferLocal && local && local.name) ? local.name : (cloud ? cloud.name : (local && local.name)),
+          enabled: (preferLocal && local) ? local.enabled !== false : (cloud ? cloud.enabled !== false : (local ? local.enabled !== false : true)),
+          rules: (local && Array.isArray(local.rules) && local.rules.length > 0) ? local.rules : (Array.isArray(item.rules) ? item.rules : []),
+          lastUpdate: (local && local.rules && local.rules.length > 0) ? (local.lastUpdate || 0) : (item.lastUpdate || 0)
+        });
+      }
+      finalSubs = merged;
+    }
+
+    saveSubscriptions(finalSubs);
+    setSubscriptionSyncSnapshot(finalSubs);
+
+    if (hasNewSub) {
       setTimeout(() => {
         checkAutoSubscription(true);
       }, 1000);
@@ -6711,137 +6733,198 @@
     });
   }
 
-  function getLocalRuleAddedTimes() {
-    const raw = GM_getValue(LOCAL_RULE_ADDED_KEY, {});
-    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
-  }
+  let _netTimeOffset = null;
+  let _netTimeCheckedAt = 0;
+  let _netTimeQuerying = null;
 
-  function recordRuleAddedTimes(addedRules, addedAt = Date.now(), overwriteExisting = true) {
-    if (!Array.isArray(addedRules) || !addedRules.length) return;
-    const times = getLocalRuleAddedTimes();
-    const tombstones = getLocalTombstones();
-    let changed = false;
-    let tsChanged = false;
-    addedRules.forEach(r => {
-      const key = getRuleKey(r);
-      if (key && !key.startsWith('#')) {
-        if (overwriteExisting || times[key] === undefined) {
-          times[key] = addedAt;
-          changed = true;
-          if (overwriteExisting && tombstones[key]) {
-            delete tombstones[key];
-            tsChanged = true;
+  function firstSuccess(promises) {
+    return new Promise((resolve, reject) => {
+      let pending = promises.length;
+      let settled = false;
+      if (!pending) {
+        reject(new Error('net time unavailable'));
+        return;
+      }
+      promises.forEach(p => p.then(
+        value => {
+          if (!settled) {
+            settled = true;
+            resolve(value);
           }
+        },
+        () => {
+          if (--pending === 0 && !settled) reject(new Error('net time unavailable'));
         }
-      }
-    });
-    if (changed) GM_setValue(LOCAL_RULE_ADDED_KEY, times);
-    if (tsChanged) GM_setValue(TOMBSTONES_KEY, tombstones);
-  }
-
-  function filterRulesForDownloadStamp(rules, cloudAddedTimes) {
-    if (!cloudAddedTimes || typeof cloudAddedTimes !== 'object' || Array.isArray(cloudAddedTimes)) return rules;
-    return rules.filter(r => {
-      const k = getRuleKey(r);
-      return !k || k.startsWith('#') || cloudAddedTimes[k] === undefined;
+      ));
     });
   }
 
-  function getLocalTombstones() {
-    const raw = GM_getValue(TOMBSTONES_KEY, {});
-    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  function parseHttpDateHeader(responseHeaders) {
+    const m = responseHeaders && String(responseHeaders).match(/^date:\s*(.+)$/im);
+    if (!m) return 0;
+    const parsed = Date.parse(m[1].trim());
+    return isNaN(parsed) ? 0 : parsed;
   }
 
-  function recordRuleDeletions(deletedRules, deletedAt = Date.now()) {
-    if (!Array.isArray(deletedRules) || !deletedRules.length) return;
-    const tombstones = getLocalTombstones();
-    const addedTimes = getLocalRuleAddedTimes();
-    let changed = false;
-    let addedChanged = false;
-    deletedRules.forEach(r => {
-      const key = getRuleKey(r);
-      if (key && !key.startsWith('#')) {
-        tombstones[key] = deletedAt;
-        changed = true;
-        if (addedTimes[key]) {
-          delete addedTimes[key];
-          addedChanged = true;
+  function extractValidCloudTimes(cloudConfig, trustedNow) {
+    const times = [];
+    const limit = trustedNow + WEBDAV_TIME_TOLERANCE;
+    if (cloudConfig && typeof cloudConfig === 'object' && !Array.isArray(cloudConfig)) {
+      [cloudConfig.syncedAt, cloudConfig.rulesSyncedAt].forEach(v => {
+        if (typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= limit) times.push(v);
+      });
+    }
+    return times;
+  }
+
+  async function queryNetworkTimeEndpoint(url, parseResp) {
+    const t0 = Date.now();
+    const resp = await gmRequest('GET', url, { timeout: 5000 });
+    const t1 = Date.now();
+    const serverTime = parseResp(resp);
+    if (!(serverTime > 0)) throw new Error('invalid time');
+    return serverTime - Math.round((t0 + t1) / 2);
+  }
+
+  async function getNetworkTimeOffset() {
+    const now = Date.now();
+    const ttl = _netTimeOffset === null ? NET_TIME_FAIL_TTL : NET_TIME_CACHE_TTL;
+    if (_netTimeCheckedAt > 0 && now - _netTimeCheckedAt < ttl) return _netTimeOffset;
+    if (_netTimeQuerying) return _netTimeQuerying;
+    _netTimeQuerying = firstSuccess([
+      queryNetworkTimeEndpoint('https://cloudflare.com/cdn-cgi/trace', (resp) => {
+        const m = /(?:^|\n)ts=([0-9.]+)(?:\n|$)/.exec(String(resp.responseText || ''));
+        const sec = m ? parseFloat(m[1]) : 0;
+        return sec > 0 ? Math.round(sec * 1000) : 0;
+      }),
+      queryNetworkTimeEndpoint('https://acs.m.taobao.com/gw/mtop.common.getTimestamp/', (resp) => {
+        try {
+          const data = JSON.parse(String(resp.responseText || ''));
+          const t = data && data.data && typeof data.data.t === 'string' ? parseInt(data.data.t, 10) : 0;
+          return t > 0 ? t : 0;
+        } catch (_) {
+          return 0;
         }
+      }),
+      queryNetworkTimeEndpoint('https://worldtimeapi.org/api/timezone/Etc/UTC', (resp) => {
+        try {
+          const data = JSON.parse(String(resp.responseText || ''));
+          return typeof data.unixtime === 'number' && data.unixtime > 0 ? data.unixtime * 1000 : 0;
+        } catch (_) {
+          return 0;
+        }
+      })
+    ]).then(offset => {
+      _netTimeOffset = offset;
+      _netTimeCheckedAt = Date.now();
+      return offset;
+    }).catch(() => {
+      _netTimeOffset = null;
+      _netTimeCheckedAt = Date.now();
+      return null;
+    }).finally(() => {
+      _netTimeQuerying = null;
+    });
+    return _netTimeQuerying;
+  }
+
+  async function getTrustedNow() {
+    const offset = await getNetworkTimeOffset();
+    return offset !== null ? Date.now() + offset : Date.now();
+  }
+
+  function getRuleSyncSnapshot() {
+    const raw = GM_getValue(WEBDAV_SYNC_SNAPSHOT_KEY, null);
+    return Array.isArray(raw) ? raw : null;
+  }
+
+  function setRuleSyncSnapshot(rules) {
+    if (!Array.isArray(rules)) return;
+    GM_setValue(WEBDAV_SYNC_SNAPSHOT_KEY, rules);
+  }
+
+  function getSelectorSyncSnapshot() {
+    const raw = GM_getValue(WEBDAV_LAST_SYNC_SELECTORS_KEY, null);
+    return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : null;
+  }
+
+  function setSelectorSyncSnapshot(selectors) {
+    if (!selectors || typeof selectors !== 'object' || Array.isArray(selectors)) return;
+    GM_setValue(WEBDAV_LAST_SYNC_SELECTORS_KEY, selectors);
+  }
+
+  function selectorsEqual(a, b) {
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+
+  function mergeSelectors3Way(baseSelectors, localSelectors, cloudSelectors) {
+    const asObject = (v) => (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+    const base = asObject(baseSelectors);
+    const local = asObject(localSelectors);
+    const cloud = asObject(cloudSelectors);
+    const keys = new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(cloud)]);
+    const result = {};
+    keys.forEach(key => {
+      const inBase = Object.prototype.hasOwnProperty.call(base, key);
+      const inLocal = Object.prototype.hasOwnProperty.call(local, key);
+      const inCloud = Object.prototype.hasOwnProperty.call(cloud, key);
+      if (inBase) {
+        if (!inLocal || !inCloud) return;
+        const bStr = JSON.stringify(base[key]);
+        const localChanged = JSON.stringify(local[key]) !== bStr;
+        const cloudChanged = JSON.stringify(cloud[key]) !== bStr;
+        if (localChanged) {
+          result[key] = local[key];
+          return;
+        }
+        if (cloudChanged) {
+          result[key] = cloud[key];
+          return;
+        }
+        result[key] = local[key];
+        return;
+      }
+      if (inLocal) {
+        result[key] = local[key];
+        return;
+      }
+      if (inCloud) {
+        result[key] = cloud[key];
       }
     });
-    if (addedChanged) GM_setValue(LOCAL_RULE_ADDED_KEY, addedTimes);
-    if (changed) {
-      pruneTombstones(tombstones);
-      GM_setValue(TOMBSTONES_KEY, tombstones);
-    }
+    return result;
   }
 
-  function pruneTombstones(tombstones) {
-    const entries = Object.entries(tombstones).filter(([, v]) => typeof v === 'number');
-    entries.sort((a, b) => b[1] - a[1]);
-    for (const k in tombstones) delete tombstones[k];
-    entries.slice(0, TOMBSTONE_MAX_ENTRIES).forEach(([k, v]) => { tombstones[k] = v; });
-  }
+  function mergeRules3Way(baseRules, localRules, cloudRules) {
+    baseRules = Array.isArray(baseRules) ? baseRules : [];
+    localRules = Array.isArray(localRules) ? localRules : [];
+    cloudRules = Array.isArray(cloudRules) ? cloudRules : [];
 
-  function mergeRulesWithTombstones(localRules, cloudRules, localTime, cloudTime, cloudTombstones, cloudAddedTimes) {
-    cloudTombstones = cloudTombstones || {};
-    cloudAddedTimes = cloudAddedTimes || {};
-    const localTombstones = getLocalTombstones();
-    const localAddedTimes = getLocalRuleAddedTimes();
-    const mergedTombstones = { ...cloudTombstones, ...localTombstones };
-    for (const k in cloudTombstones) {
-      if (typeof cloudTombstones[k] === 'number') {
-        mergedTombstones[k] = Math.max(mergedTombstones[k] || 0, cloudTombstones[k]);
-      }
-    }
+    const baseKeys = new Set(baseRules.map(getRuleKey).filter(Boolean));
+    const localKeys = new Set(localRules.map(getRuleKey).filter(Boolean));
+    const cloudKeys = new Set(cloudRules.map(getRuleKey).filter(Boolean));
 
-    const isRuleActive = (rule) => {
-      const trimmed = rule.trim();
-      if (!trimmed) return false;
-      const key = getRuleKey(trimmed);
-      if (!key || key.startsWith('#')) return true;
-      const delTime = mergedTombstones[key];
-      if (!delTime) return true;
+    const localDeleted = new Set([...baseKeys].filter(k => !localKeys.has(k)));
+    const cloudDeleted = new Set([...baseKeys].filter(k => !cloudKeys.has(k)));
 
-      const localAdded = localAddedTimes[key] || 0;
-      if (localAdded > delTime) {
-        delete mergedTombstones[key];
-        return true;
-      }
-
-      const cloudAdded = cloudAddedTimes[key] || 0;
-      if (cloudAdded > delTime) {
-        delete mergedTombstones[key];
-        return true;
-      }
-
-      return false;
-    };
-
-    const merged = [];
+    const result = [];
     const seen = new Set();
-    const addRule = (r) => {
-      const trimmed = r.trim();
+
+    const addIfActive = (r) => {
+      const trimmed = (r || '').trim();
       if (!trimmed) return;
-      if (!isRuleActive(trimmed)) return;
       const key = getRuleKey(trimmed);
-      if (!seen.has(key)) {
-        seen.add(key);
-        merged.push(trimmed);
-      }
+      if (!key) return;
+      if (seen.has(key)) return;
+      if (localDeleted.has(key) || cloudDeleted.has(key)) return;
+      seen.add(key);
+      result.push(trimmed);
     };
 
-    if (localTime >= cloudTime) {
-      localRules.forEach(addRule);
-      cloudRules.forEach(addRule);
-    } else {
-      cloudRules.forEach(addRule);
-      localRules.forEach(addRule);
-    }
+    localRules.forEach(addIfActive);
+    cloudRules.forEach(addIfActive);
 
-    pruneTombstones(mergedTombstones);
-    GM_setValue(TOMBSTONES_KEY, mergedTombstones);
-    return { mergedRules: merged, mergedTombstones };
+    return result;
   }
 
   function buildSyncPayload(syncedAt = Date.now()) {
@@ -6853,12 +6936,8 @@
       subscriptions: getSubscriptions().map(s => ({
         url: s.url,
         name: s.name,
-        enabled: s.enabled,
-        addedAt: s.addedAt || 0
+        enabled: s.enabled
       })),
-      subscriptionTombstones: getSubscriptionTombstones(),
-      tombstones: getLocalTombstones(),
-      ruleAddedTimes: getLocalRuleAddedTimes(),
       syncedAt
     };
     return payload;
@@ -6966,7 +7045,6 @@
     return {
       folderUrl: cleanFolderUrl,
       fullUrl: cleanFolderUrl + encodedFilename,
-      filename: cleanFilename,
       headers
     };
   }
@@ -7024,35 +7102,6 @@
     }
   }
 
-  function parseRemoteConfig(raw) {
-    if (!raw || typeof raw !== 'string' || !raw.startsWith('# ScriptConfig:')) return null;
-    try {
-      const parsed = JSON.parse(raw.substring('# ScriptConfig:'.length));
-      return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : null;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function mergeTimeMaps(base, extra) {
-    const out = { ...(base && typeof base === 'object' && !Array.isArray(base) ? base : {}) };
-    if (!extra || typeof extra !== 'object') return out;
-    for (const k in extra) {
-      const v = extra[k];
-      if (typeof v === 'number') out[k] = Math.max(typeof out[k] === 'number' ? out[k] : 0, v);
-      else out[k] = v;
-    }
-    return out;
-  }
-
-  function buildMetadataConfigPayload(remoteRaw, syncedAt) {
-    const remote = parseRemoteConfig(remoteRaw) || {};
-    const tombstones = mergeTimeMaps(remote.tombstones, getLocalTombstones());
-    const ruleAddedTimes = mergeTimeMaps(remote.ruleAddedTimes, getLocalRuleAddedTimes());
-    pruneTombstones(tombstones);
-    return JSON.stringify({ ...remote, tombstones, ruleAddedTimes, syncedAt });
-  }
-
   function buildUploadContent(content, syncedAt, remotePreserved) {
     syncedAt = syncedAt || Date.now();
     remotePreserved = remotePreserved || {};
@@ -7062,10 +7111,20 @@
 
     if (syncConfig) {
       const payload = buildSyncPayload(syncedAt);
-      pruneTombstones(payload.tombstones);
+      payload.rulesSyncedAt = syncedAt;
       prefix += '# ScriptConfig:' + JSON.stringify(payload) + '\n';
+    } else if (remotePreserved.rawScriptConfig) {
+      let updatedHeader = remotePreserved.rawScriptConfig;
+      try {
+        const parsed = JSON.parse(updatedHeader.substring('# ScriptConfig:'.length));
+        if (parsed && typeof parsed === 'object') {
+          parsed.rulesSyncedAt = syncedAt;
+          updatedHeader = '# ScriptConfig:' + JSON.stringify(parsed);
+        }
+      } catch (_) {}
+      prefix += updatedHeader + '\n';
     } else {
-      prefix += '# ScriptConfig:' + buildMetadataConfigPayload(remotePreserved.rawScriptConfig, syncedAt) + '\n';
+      prefix += '# ScriptConfig:' + JSON.stringify({ syncedAt: 0, rulesSyncedAt: syncedAt }) + '\n';
     }
 
     if (syncSelectors) {
@@ -7235,7 +7294,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   if (!getSubscriptions().some(s => s.url === url)) {
     return { success: false, cancelled: true, count: 0 };
   }
-  const initialTombstone = getSubscriptionTombstones()[url];
   const resp = await gmRequest('GET', url);
   const content = resp.responseText;
 
@@ -7245,8 +7303,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   const subs = getSubscriptions();
   const existing = subs.find(s => s.url === url);
-  const subTombstones = getSubscriptionTombstones();
-  if (!existing || subTombstones[url] !== initialTombstone) {
+  if (!existing) {
     return { success: false, cancelled: true, count: 0 };
   }
 
@@ -7416,8 +7473,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       const latestSubs = getSubscriptions();
       const { newSubs, hasError } = collectSubscriptionsFromRows(latestSubs, deletedUrls);
       if (hasError) return false;
-      const retainedUrls = new Set(newSubs.map(s => s.url));
-      recordSubscriptionDeletions(latestSubs.filter(s => s.url && !retainedUrls.has(s.url)).map(s => s.url));
       saveSubscriptions(newSubs.filter(s => s.url));
       deletedUrls.clear();
       subscriptions = getSubscriptions();
@@ -7686,14 +7741,13 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       const uploadBtn = document.getElementById('serh-webdav-upload');
       if (uploadBtn.disabled) return;
       setWebDAVBusy(true);
+      adoptStoredConfigBeforeWrite();
       const textarea = document.getElementById('serh-rules');
       if (textarea) {
-        const newRules = filterValidRuleLines(textarea.value.split('\n'));
-        applyRuleDiff(currentConfig.rules, newRules);
-        adoptStoredConfigBeforeWrite();
-        currentConfig.rules = newRules;
-        persistConfig(false);
+        currentConfig.rules = filterValidRuleLines(textarea.value.split('\n'));
       }
+      collectMainPanelConfigState();
+      persistConfig(false);
       let content = currentConfig.rules.join('\n');
       const loadingToast = showToast(t('webdavUploading'), 'info', 10000);
       try {
@@ -7701,32 +7755,40 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           const { folderUrl, fullUrl, headers } = getWebDAVRequest(config);
           await ensureWebDAVFolder(folderUrl, headers);
           let remotePreserved = {};
-          let remoteSyncedAt = 0;
-          try {
-            const resp = await gmRequest('GET', fullUrl, { headers, allow404: true });
-            if (resp.status !== 404 && !isInvalidSyncResponse(resp.responseText, resp.responseHeaders)) {
-              const parsed = parseSyncHeader(resp.responseText);
-              remotePreserved = {
-                rawScriptConfig: parsed.rawScriptConfig,
-                rawSelectors: parsed.rawSelectors
-              };
-              if (parsed.config && typeof parsed.config.syncedAt === 'number') {
-                remoteSyncedAt = parsed.config.syncedAt;
-              }
-            }
-          } catch (_) {}
-          const uploadedTime = Math.max(Date.now(), remoteSyncedAt + 1000);
+          let remoteConfig = null;
+          const resp = await gmRequest('GET', fullUrl, { headers, allow404: true });
+          if (resp.status !== 404 && !isInvalidSyncResponse(resp.responseText, resp.responseHeaders)) {
+            const parsed = parseSyncHeader(resp.responseText);
+            remotePreserved = {
+              rawScriptConfig: parsed.rawScriptConfig,
+              rawSelectors: parsed.rawSelectors
+            };
+            remoteConfig = parsed.config;
+          }
+          const serverTime = parseHttpDateHeader(resp.responseHeaders);
+          const trustedNow = serverTime > 0 ? serverTime : await getTrustedNow();
+          const validRemoteTimes = extractValidCloudTimes(remoteConfig, trustedNow);
+          const remoteSyncedAt = validRemoteTimes.length > 0 ? Math.max(...validRemoteTimes) : 0;
+          const uploadedTime = Math.max(remoteSyncedAt + 1000, trustedNow);
           const uploadData = buildUploadContent(content, uploadedTime, remotePreserved);
+          const putHeaders = {
+            ...headers,
+            'Content-Type': 'text/plain; charset=utf-8',
+            'X-OC-Mtime': Math.floor(uploadedTime / 1000).toString()
+          };
           await gmPutWebDAV(fullUrl, {
-            headers: {
-              ...headers,
-              'Content-Type': 'text/plain; charset=utf-8',
-              'X-OC-Mtime': Math.floor(uploadedTime / 1000).toString()
-            },
+            headers: putHeaders,
             data: uploadData
           }, folderUrl, headers);
           GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime);
           GM_setValue(WEBDAV_LAST_SYNC_KEY, uploadedTime);
+          setRuleSyncSnapshot(currentConfig.rules);
+          if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
+            setSubscriptionSyncSnapshot(getSubscriptions());
+          }
+          if (GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false)) {
+            setSelectorSyncSnapshot(getUserSelectors());
+          }
         });
         loadingToast.dismiss();
         if (lockAcquired === false) {
@@ -7764,9 +7826,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       setWebDAVBusy(true);
       const loadingToast = showToast(t('webdavDownloading'), 'info', 10000);
       try {
-        const lockAcquired = await runWithSyncLock('webdav', async () => {
-          await performWebDAVDownload(config, true);
-        });
+        const lockAcquired = await runWithSyncLock('webdav', async () => performWebDAVDownload(config));
         loadingToast.dismiss();
         if (lockAcquired === false) {
           showToast(t('webdavSyncLocked'), 'error', 4000);
@@ -7789,92 +7849,88 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   }
 
-  async function performWebDAVDownload(config, showAlerts = true) {
+  async function performWebDAVDownload(config) {
+    adoptStoredConfigIfNewer();
     const { fullUrl, headers } = getWebDAVRequest(config);
     const resp = await gmRequest('GET', fullUrl, { headers });
     const content = resp.responseText;
     if (isInvalidSyncResponse(content, resp.responseHeaders)) throw new Error(t('subImportFailed'));
     const parsedHeader = parseSyncHeader(content);
+    const newRules = filterValidRuleLines(parsedHeader.restLines);
     if (parsedHeader.config) {
-      const { syncedAt, subscriptions, subscriptionTombstones, bubbleState, bubbleSize, selectors, tombstones, ruleAddedTimes, ...settings } = parsedHeader.config;
-      
-      if (tombstones && typeof tombstones === 'object') {
-        const localTombstones = getLocalTombstones();
-        const merged = { ...tombstones, ...localTombstones };
-        for (const k in tombstones) {
-          if (typeof tombstones[k] === 'number') merged[k] = Math.max(merged[k] || 0, tombstones[k]);
-        }
-        pruneTombstones(merged);
-        GM_setValue(TOMBSTONES_KEY, merged);
-      }
-      if (ruleAddedTimes && typeof ruleAddedTimes === 'object') {
-        const localTimes = getLocalRuleAddedTimes();
-        const mergedTimes = { ...ruleAddedTimes, ...localTimes };
-        for (const k in ruleAddedTimes) {
-          if (typeof ruleAddedTimes[k] === 'number') mergedTimes[k] = Math.max(mergedTimes[k] || 0, ruleAddedTimes[k]);
-        }
-        GM_setValue(LOCAL_RULE_ADDED_KEY, mergedTimes);
-      }
+      const {
+        syncedAt, rulesSyncedAt, subscriptions,
+        bubbleState, bubbleSize, selectors, ...settings
+      } = parsedHeader.config;
+      delete settings.subscriptionTombstones;
+      delete settings.tombstones;
+      delete settings.ruleAddedTimes;
 
       if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
-        Object.assign(currentConfig, settings);
-        GM_setValue(CONFIG_KEY, currentConfig);
-        if (subscriptions) applyCloudSubscriptions(subscriptions, subscriptionTombstones);
+        if (Object.keys(settings).length > 0) {
+          currentConfig = Object.assign(getDefaultConfig(), settings, {
+            rules: currentConfig.rules || [],
+            bubbleState: currentConfig.bubbleState,
+            bubbleSize: currentConfig.bubbleSize
+          });
+          GM_setValue(CONFIG_KEY, currentConfig);
+        }
+        if (Array.isArray(subscriptions)) {
+          const existingMap = new Map(getSubscriptions().map(s => [s.url, s]));
+          saveSubscriptions(subscriptions.map(s => {
+            const existing = existingMap.get(s.url);
+            return {
+              url: s.url,
+              name: s.name || (existing && existing.name) || '',
+              enabled: s.enabled !== false,
+              rules: (existing && Array.isArray(existing.rules) && existing.rules.length > 0) ? existing.rules : [],
+              lastUpdate: (existing && existing.rules && existing.rules.length > 0) ? (existing.lastUpdate || 0) : 0
+            };
+          }));
+          setSubscriptionSyncSnapshot(subscriptions);
+          setTimeout(() => { checkAutoSubscription(true); }, 1000);
+        }
       }
       if (selectors && typeof selectors === 'object' && !Array.isArray(selectors) && GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false)) {
         GM_setValue(SELECTORS_KEY, selectors);
+        setSelectorSyncSnapshot(selectors);
         _selectorStoreSignature = getSelectorStoreSignature();
         resetSelectorCache();
         refreshEngineSite();
       }
     }
-    const newRules = parsedHeader.restLines.map(r => r.trim()).filter(r => r);
-    const localTombstones = getLocalTombstones();
-    let tombstonesCleaned = false;
-    for (const r of newRules) {
-      const k = getRuleKey(r);
-      if (k && !k.startsWith('#') && localTombstones[k]) {
-        delete localTombstones[k];
-        tombstonesCleaned = true;
-      }
-    }
-    if (tombstonesCleaned) {
-      GM_setValue(TOMBSTONES_KEY, localTombstones);
-    }
-
-    recordRuleAddedTimes(filterRulesForDownloadStamp(newRules, parsedHeader.config && parsedHeader.config.ruleAddedTimes), Date.now(), true);
-    currentConfig.rules = newRules;
-    persistConfig(false);
+    const trustedNow = await getTrustedNow();
     let cloudTime = 0;
-    if (parsedHeader.config && typeof parsedHeader.config.syncedAt === 'number') {
-      cloudTime = parsedHeader.config.syncedAt;
+    const validCloudTimes = extractValidCloudTimes(parsedHeader.config, trustedNow);
+    if (validCloudTimes.length > 0) {
+      cloudTime = Math.max(...validCloudTimes);
     } else {
-      const lastModHeader = resp.responseHeaders && resp.responseHeaders.match(/last-modified:\s*(.+)$/im);
+      const lastModHeader = resp.responseHeaders && String(resp.responseHeaders).match(/last-modified:\s*(.+)$/im);
       if (lastModHeader) {
         const parsed = Date.parse(lastModHeader[1].trim());
-        if (!isNaN(parsed)) cloudTime = parsed;
+        if (!isNaN(parsed) && parsed <= trustedNow + WEBDAV_TIME_TOLERANCE) cloudTime = parsed;
       }
     }
-    if (cloudTime > 0) {
-      GM_setValue(LOCAL_LAST_MODIFIED_KEY, cloudTime);
-    }
+
+    currentConfig.rules = newRules;
+    persistConfig(false);
+    GM_setValue(LOCAL_LAST_MODIFIED_KEY, cloudTime > 0 ? cloudTime : trustedNow);
+    setRuleSyncSnapshot(newRules);
+
     const mainPanel = document.getElementById('serh-panel');
     if (mainPanel && Array.isArray(currentConfig.rules)) {
       mainPanel._initialRules = [...currentConfig.rules];
     }
-    const textarea = document.getElementById('serh-rules');
-    if (textarea) {
-      textarea.value = newRules.join('\n');
-      updateLineNumbers();
-    }
+    applyConfigToMainPanel();
     forceReprocessAll();
-    GM_setValue(WEBDAV_LAST_SYNC_KEY, Date.now());
+    GM_setValue(WEBDAV_LAST_SYNC_KEY, trustedNow);
   }
 
   // webdav逻辑
   async function performAutoWebDAVSync(config, depth = 0) {
     adoptStoredConfigIfNewer();
     const { folderUrl, fullUrl, headers } = getWebDAVRequest(config);
+    const trustedNow = await getTrustedNow();
 
     const resp = await gmRequest('GET', fullUrl, { headers, allow404: true });
 
@@ -7893,10 +7949,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       parsedHeader = parseSyncHeader(content);
       cloudConfig = parsedHeader.config;
       cloudRules = parsedHeader.restLines.map(r => r.trim()).filter(r => r);
-      let headerTime = 0;
-      if (parsedHeader.config && typeof parsedHeader.config.syncedAt === 'number') {
-        headerTime = parsedHeader.config.syncedAt;
-      }
+      const validHeaderTimes = extractValidCloudTimes(parsedHeader.config, trustedNow);
       let lastModTime = 0;
       if (resp.responseHeaders && typeof resp.responseHeaders === 'string') {
         const lastModMatch = resp.responseHeaders.match(/last-modified:\s*(.+)$/im);
@@ -7909,105 +7962,126 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           cloudETag = etagMatch[1].trim();
         }
       }
-      cloudTime = headerTime > 0 ? headerTime : lastModTime;
-      if (isNaN(cloudTime)) cloudTime = 0;
+      if (validHeaderTimes.length > 0) {
+        cloudTime = Math.max(...validHeaderTimes);
+      } else {
+        cloudTime = lastModTime;
+        if (isNaN(cloudTime) || cloudTime > trustedNow + WEBDAV_TIME_TOLERANCE) cloudTime = 0;
+      }
     }
 
     adoptStoredConfigIfNewer();
-    const localTime = GM_getValue(LOCAL_LAST_MODIFIED_KEY, 0);
+    let localTime = GM_getValue(LOCAL_LAST_MODIFIED_KEY, 0);
+    if (localTime > trustedNow + WEBDAV_TIME_TOLERANCE) localTime = trustedNow;
     const localRules = currentConfig.rules || [];
 
     if (resp.status === 404) {
       console.log('[自动 WebDAV] 云端文件不存在，初始上传中...');
       await ensureWebDAVFolder(folderUrl, headers);
       const localContent = localRules.join('\n');
-      const uploadedTime = Math.max(Date.now(), 1);
+      const uploadedTime = trustedNow;
       const uploadData = buildUploadContent(localContent, uploadedTime);
       try {
         await gmPutWebDAV(fullUrl, {
           headers: {
             ...headers,
             'Content-Type': 'text/plain; charset=utf-8',
-            'X-OC-Mtime': Math.floor(uploadedTime / 1000).toString()
+            'X-OC-Mtime': Math.floor(uploadedTime / 1000).toString(),
+            'If-None-Match': '*'
           },
           data: uploadData
         }, folderUrl, headers);
         GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime);
+        setRuleSyncSnapshot(localRules);
+        if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
+          setSubscriptionSyncSnapshot(getSubscriptions());
+        }
+        if (GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false)) {
+          setSelectorSyncSnapshot(getUserSelectors());
+        }
       } catch (err) {
+        if (err && err.message && err.message.includes('412') && depth < WEBDAV_SYNC_MAX_RETRIES) {
+          console.warn(`[自动 WebDAV] 云端文件被并发创建 (412)，重新同步 (${depth + 1}/${WEBDAV_SYNC_MAX_RETRIES})`);
+          await delay(WEBDAV_SYNC_RETRY_DELAY * Math.pow(2, depth));
+          return performAutoWebDAVSync(config, depth + 1);
+        }
         console.warn('[自动 WebDAV] 初始上传失败:', err.message);
         return;
       }
     } else {
-      const cloudTombstones = (cloudConfig && cloudConfig.tombstones && typeof cloudConfig.tombstones === 'object')
-        ? cloudConfig.tombstones
-        : {};
-      const cloudAddedTimes = (cloudConfig && cloudConfig.ruleAddedTimes && typeof cloudConfig.ruleAddedTimes === 'object')
-        ? cloudConfig.ruleAddedTimes
-        : {};
+      const baseRules = getRuleSyncSnapshot();
+      let mergedRules;
+      if (!baseRules) {
+        const seen = new Set();
+        const union = [];
+        const addRule = (r) => {
+          const trimmed = (r || '').trim();
+          if (!trimmed) return;
+          const k = getRuleKey(trimmed);
+          if (k && !seen.has(k)) {
+            seen.add(k);
+            union.push(trimmed);
+          }
+        };
+        localRules.forEach(addRule);
+        cloudRules.forEach(addRule);
+        mergedRules = union;
+      } else {
+        mergedRules = mergeRules3Way(baseRules, localRules, cloudRules);
+      }
 
-      const { mergedRules, mergedTombstones } = mergeRulesWithTombstones(localRules, cloudRules, localTime, cloudTime, cloudTombstones, cloudAddedTimes);
       const mergedContent = mergedRules.join('\n');
       const localContent = localRules.join('\n');
       const cloudContent = cloudRules.join('\n');
 
-      if (cloudConfig) {
-        if (cloudConfig.ruleAddedTimes && typeof cloudConfig.ruleAddedTimes === 'object') {
-          const localTimes = getLocalRuleAddedTimes();
-          const mergedTimes = { ...cloudConfig.ruleAddedTimes, ...localTimes };
-          for (const k in cloudConfig.ruleAddedTimes) {
-            if (typeof cloudConfig.ruleAddedTimes[k] === 'number') mergedTimes[k] = Math.max(mergedTimes[k] || 0, cloudConfig.ruleAddedTimes[k]);
-          }
-          GM_setValue(LOCAL_RULE_ADDED_KEY, mergedTimes);
-        }
-      }
-
       if (cloudConfig && GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
-        applyCloudSubscriptions(Array.isArray(cloudConfig.subscriptions) ? cloudConfig.subscriptions : [],
-          cloudConfig.subscriptionTombstones, localTime >= cloudTime);
+        applyCloudSubscriptions(Array.isArray(cloudConfig.subscriptions) ? cloudConfig.subscriptions : [], localTime >= cloudTime);
       }
 
       if (cloudTime > localTime && cloudConfig) {
-        const { syncedAt, subscriptions, subscriptionTombstones, bubbleState, bubbleSize, selectors, tombstones, ruleAddedTimes, ...settings } = cloudConfig;
-        if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
+        const {
+          syncedAt, rulesSyncedAt, subscriptions,
+          bubbleState, bubbleSize, selectors, ...settings
+        } = cloudConfig;
+        delete settings.subscriptionTombstones;
+        delete settings.tombstones;
+        delete settings.ruleAddedTimes;
+        if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) && Object.keys(settings).length > 0) {
           Object.assign(currentConfig, settings);
-        }
-        if (selectors && typeof selectors === 'object' && !Array.isArray(selectors) && GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false)) {
-          GM_setValue(SELECTORS_KEY, selectors);
-          _selectorStoreSignature = getSelectorStoreSignature();
-          resetSelectorCache();
-          refreshEngineSite();
         }
       }
 
       currentConfig.rules = mergedRules;
       persistConfig(false);
+      setRuleSyncSnapshot(mergedRules);
 
       const syncConfig = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false);
       const syncSelectors = GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false);
+      const cloudSelectors = (cloudConfig && cloudConfig.selectors && typeof cloudConfig.selectors === 'object' && !Array.isArray(cloudConfig.selectors)) ? cloudConfig.selectors : null;
+      let mergedSelectors = null;
+      if (syncSelectors && cloudSelectors) {
+        mergedSelectors = mergeSelectors3Way(getSelectorSyncSnapshot(), getUserSelectors(), cloudSelectors);
+        if (!selectorsEqual(mergedSelectors, getUserSelectors())) {
+          GM_setValue(SELECTORS_KEY, mergedSelectors);
+          _selectorStoreSignature = getSelectorStoreSignature();
+          resetSelectorCache();
+          refreshEngineSite();
+        }
+      }
+      const selectorsChanged = !!mergedSelectors && !selectorsEqual(mergedSelectors, cloudSelectors);
       const contentChanged = mergedContent !== cloudContent;
       const localNewer = localTime > cloudTime;
-      const metadata = syncConfig ? buildSyncPayload(cloudTime) :
-        JSON.parse(buildMetadataConfigPayload(parsedHeader ? parsedHeader.rawScriptConfig : null, cloudTime));
-      const sameTimeMap = (a, b) => {
-        a = a || {};
-        b = b || {};
-        return Object.keys(a).length === Object.keys(b).length &&
-          Object.keys(a).every(key => a[key] === b[key]);
-      };
-      const metadataChanged = !sameTimeMap(metadata.tombstones, cloudTombstones) ||
-        !sameTimeMap(metadata.ruleAddedTimes, cloudAddedTimes);
       const subscriptionSignature = subs => JSON.stringify((Array.isArray(subs) ? subs : [])
         .filter(s => s && s.url)
-        .map(s => [s.url, s.name || '', s.enabled !== false, s.addedAt || 0])
+        .map(s => [s.url, s.name || '', s.enabled !== false])
         .sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
       const subscriptionsChanged = syncConfig && (
-        subscriptionSignature(metadata.subscriptions) !== subscriptionSignature(cloudConfig && cloudConfig.subscriptions) ||
-        !sameTimeMap(metadata.subscriptionTombstones, cloudConfig && cloudConfig.subscriptionTombstones));
-      const shouldUpload = contentChanged || metadataChanged || subscriptionsChanged || (localNewer && (syncConfig || syncSelectors));
+        subscriptionSignature(getSubscriptions()) !== subscriptionSignature(cloudConfig && cloudConfig.subscriptions));
+      const shouldUpload = contentChanged || subscriptionsChanged || selectorsChanged || (localNewer && (syncConfig || syncSelectors));
 
       if (shouldUpload) {
         console.log('[自动 WebDAV] 规则合并或配置更新完成，上传至云端...');
-        const uploadedTime = Math.max(Date.now(), cloudTime + 1000, localTime + 1);
+        const uploadedTime = Math.max(cloudTime + 1000, localTime + 1, trustedNow);
         const uploadData = buildUploadContent(mergedContent, uploadedTime, {
           rawScriptConfig: parsedHeader ? parsedHeader.rawScriptConfig : null,
           rawSelectors: parsedHeader ? parsedHeader.rawSelectors : null
@@ -8019,10 +8093,17 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         };
         if (cloudETag) {
           putHeaders['If-Match'] = cloudETag;
+        } else if (cloudLastMod) {
+          putHeaders['If-Unmodified-Since'] = cloudLastMod;
         }
         try {
           await gmPutWebDAV(fullUrl, { headers: putHeaders, data: uploadData }, folderUrl, headers);
           GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime);
+          if (mergedSelectors) {
+            setSelectorSyncSnapshot(mergedSelectors);
+          } else if (syncSelectors) {
+            setSelectorSyncSnapshot(getUserSelectors());
+          }
         } catch (err) {
           if (err && err.message && err.message.includes('412')) {
             if (depth >= WEBDAV_SYNC_MAX_RETRIES) {
@@ -8037,6 +8118,11 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           return;
         }
       } else {
+        if (mergedSelectors) {
+          setSelectorSyncSnapshot(mergedSelectors);
+        } else if (syncSelectors) {
+          setSelectorSyncSnapshot(getUserSelectors());
+        }
         if (cloudTime > 0) {
           GM_setValue(LOCAL_LAST_MODIFIED_KEY, cloudTime);
         }
@@ -8044,7 +8130,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
 
     forceReprocessAll();
-    GM_setValue(WEBDAV_LAST_SYNC_KEY, Date.now());
+    GM_setValue(WEBDAV_LAST_SYNC_KEY, trustedNow);
   }
 
   let _webdavSyncDelayedTimer = null;
@@ -8066,19 +8152,21 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }, delayMs);
   }
 
-  function checkAutoWebDAV() {
+  async function checkAutoWebDAV() {
     if (!GM_getValue(WEBDAV_AUTO_SYNC_KEY, false)) return;
     const config = GM_getValue(WEBDAV_KEY);
     if (!config || !config.url) return;
     if (!isHttpsUrl(config.url)) return;
-    const lastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0);
-    const now = Date.now();
-    if (lastSync > 0 && now >= lastSync && now - lastSync < WEBDAV_AUTO_SYNC_INTERVAL) return;
+    const now = await getTrustedNow();
+    let lastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0);
+    if (lastSync > now + WEBDAV_TIME_TOLERANCE) lastSync = 0;
+    if (lastSync > 0 && now - lastSync < WEBDAV_AUTO_SYNC_INTERVAL) return;
     if (document.getElementById('serh-panel')) return;
     runWithSyncLock('webdav', async () => {
-      const currentLastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0);
-      const currentTime = Date.now();
-      if (currentLastSync > 0 && currentTime >= currentLastSync && currentTime - currentLastSync < WEBDAV_AUTO_SYNC_INTERVAL) return;
+      const trustedNow = await getTrustedNow();
+      let currentLastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0);
+      if (currentLastSync > trustedNow + WEBDAV_TIME_TOLERANCE) currentLastSync = 0;
+      if (currentLastSync > 0 && trustedNow - currentLastSync < WEBDAV_AUTO_SYNC_INTERVAL) return;
       await performAutoWebDAVSync(config);
     }).catch(err => console.error('[自动 WebDAV] 同步失败:', err.message));
   }
