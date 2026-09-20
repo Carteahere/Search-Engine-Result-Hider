@@ -1,5 +1,7 @@
-// 选择器与引擎: 合并/覆盖/序列化/校验 / 选择器导入 / DOM增量扫描 / 引擎站装配拆卸与跨页同步 / 引擎检测与全站门控
+// 选择器与引擎: 合并/覆盖/序列化/校验 / 选择器导入 / DOM增量扫描 / 引擎站装配拆卸与跨页同步 / 引擎检测与全站门控 / 跨标签页同步锁
 // 由功能相近的测试文件合并而成: test-selectors.cjs, test-selector-import.cjs, test-dom-scan.cjs, test-engine-lifecycle.cjs, test-engine.cjs
+// 测试项统一命名: "选择器-###: 描述", 序号按文件出现顺序 001 起连续递增;
+// 已知问题标记为 "选择器-###(已知问题)", 循环组为 "选择器-###-N: 描述 区分信息"
 (async () => {
 const fs = require('fs');
 const path = require('path');
@@ -24,7 +26,7 @@ function extractFn(text, fnName) {
   }
   const fn = text.slice(idx, i + 1);
   if (['scanNewResults', 'teardownEngineSite'].includes(fnName)) {
-    return 'function restoreResultExtraElements() {}\nfunction reconcileHiddenParents() {}\n' + fn;
+    return 'function restoreResultExtraElements() {}\nfunction reconcileHiddenParents() {}\nfunction restoreAllHiddenParents() {}\n' + fn;
   }
   return fn;
 }
@@ -60,7 +62,7 @@ function extractObjectLiteral(text, openIdx) {
   throw new Error('unbalanced SELECTORS object literal');
 }
 
-// ==== 来源: test-selectors.cjs ====
+// ==== [选择器-001~096] 默认合并/覆盖/序列化/校验/关联选择器 (来源: test-selectors.cjs) ====
 await (async () => {
 const selectorsStart = src.indexOf('const SELECTORS = {');
 if (selectorsStart === -1) throw new Error('SELECTORS block not found');
@@ -83,7 +85,11 @@ global.document = {
   }
 };
 
-const fns = ['normalizeSelectorList', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'isEngineSite', 'getContainerSelector', 'isValidCssSelector', 'hasPseudoElement', 'validateUserSelectors', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'parseSelectorText', 'sameSelectorDef', 'diffUserSelectors', 'pruneUserSelectors'].map((n) => extractFn(src, n));
+const fns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'isEngineSite', 'getContainerSelector', 'isValidCssSelector', 'hasPseudoElement', 'validateUserSelectors', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'parseSelectorText', 'sameSelectorDef', 'diffUserSelectors', 'pruneUserSelectors'].map((n) => extractFn(src, n));
+
+// builtinSelectorOf 为 const 箭头函数, extractFn 提取不到, 按行原样提取以跟随源码
+const builtinSelectorOfLine = src.match(/const builtinSelectorOf = .+?;/);
+if (!builtinSelectorOfLine) throw new Error('builtinSelectorOf not found');
 
 const body = `
 const WEBDAV_SYNC_SELECTORS_KEY = 'searchfilter_webdav_sync_selectors';
@@ -92,6 +98,7 @@ const SUPPORTED_REGEX_FLAGS = 'imsu';
 const SELECTORS = ${selectorsObjectText};
 let activeSelectors = null;
 let _engineCacheHost = null;
+${builtinSelectorOfLine[0]}
 let _engineCacheResult = 'other';
 let _observedSelector = '';
 const window = { location: { get hostname() { return currentHost; }, get href() { return currentHref; } } };
@@ -124,130 +131,130 @@ const CUSTOM = {
 };
 
 // ---- 默认合并 ----
-check('D1 默认无用户配置时返回内置', api.getSelectors().google.containers === 'div.g, div.MjjYud');
-check('D2 内置键序在前', Object.keys(api.getSelectors()).join(',') === ['bing', 'google_scholar', 'google', 'duckduckgo_lite', 'duckduckgo', 'yandex', 'brave', 'yahoo', 'other'].join(','));
-check('D3 getContainerSelector 内置', api.getContainerSelector('bing') === 'li.b_algo, div.b_algo');
+check('选择器-001: 默认无用户配置时返回内置', api.getSelectors().google.containers === 'div.g, div.MjjYud');
+check('选择器-002: 内置键序在前', Object.keys(api.getSelectors()).join(',') === ['bing', 'google_scholar', 'google', 'duckduckgo_lite', 'duckduckgo', 'yandex', 'brave', 'yahoo', 'other'].join(','));
+check('选择器-003: getContainerSelector 内置', api.getContainerSelector('bing') === 'li.b_algo, div.b_algo');
 
 // ---- 覆盖内置 ----
 api.setStore({ google: { match: '(?:^|\\.)google\\.', containers: 'div.myg', titles: ['h3'], snippets: ['.s'], links: 'a[href]' } });
-check('O1 覆盖后 containers 生效', api.getContainerSelector('google') === 'div.myg');
-check('O2 未覆盖引擎不受影响', api.getContainerSelector('bing') === 'li.b_algo, div.b_algo');
-check('O3 match 被编译为 RegExp', api.getSelectors().google.match instanceof RegExp);
+check('选择器-004: 覆盖后 containers 生效', api.getContainerSelector('google') === 'div.myg');
+check('选择器-005: 未覆盖引擎不受影响', api.getContainerSelector('bing') === 'li.b_algo, div.b_algo');
+check('选择器-006: match 被编译为 RegExp', api.getSelectors().google.match instanceof RegExp);
 
 // ---- 新增引擎 ----
 api.setStore(CUSTOM);
 api.setHost('searx.example.com');
-check('A1 自定义引擎被识别', api.getSearchEngine() === 'mysearx');
-check('A2 自定义引擎 isEngineSite 为真', api.isEngineSite() === true);
-check('A3 自定义引擎容器选择器', api.getContainerSelector('mysearx') === '.result');
+check('选择器-007: 自定义引擎被识别', api.getSearchEngine() === 'mysearx');
+check('选择器-008: 自定义引擎 isEngineSite 为真', api.isEngineSite() === true);
+check('选择器-009: 自定义引擎容器选择器', api.getContainerSelector('mysearx') === '.result');
 api.setHost('sub.searx.example.com');
-check('A4 子域名同样命中', api.getSearchEngine() === 'mysearx');
+check('选择器-010: 子域名同样命中', api.getSearchEngine() === 'mysearx');
 
 // ---- other 保留键 ----
 api.setStore({ other: { match: '.*', containers: 'body' } });
 api.setHost('random.site.org');
-check('R1 other 保留键被忽略', api.getSearchEngine() === 'other' && api.isEngineSite() === false);
+check('选择器-011: other 保留键被忽略', api.getSearchEngine() === 'other' && api.isEngineSite() === false);
 
 // ---- 防御:非法 match 静默置空 ----
 api.setStore({ broken: { match: '([', containers: '.x', titles: [], snippets: [], links: 'a[href]' } });
 api.setHost('broken.example');
-check('B1 非法match不崩溃且不激活', api.getSearchEngine() === 'other' && api.getSelectors().broken.match === null);
+check('选择器-012: 非法match不崩溃且不激活', api.getSearchEngine() === 'other' && api.getSelectors().broken.match === null);
 
 // ---- 缓存失效 ----
 api.setStore(CUSTOM);
 api.setHost('searx.example.com');
-check('C1 setStore 后缓存失效重新合并', api.getSearchEngine() === 'mysearx');
+check('选择器-013: setStore 后缓存失效重新合并', api.getSearchEngine() === 'mysearx');
 
 // ---- validateUserSelectors ----
-check('V1 合法配置通过', api.validateUserSelectors(CUSTOM).length === 0);
-check('V2 保留键报错', api.validateUserSelectors({ other: { match: 'a', containers: 'b' } }).some(m => m.includes('other')));
-check('V3 非法键名报错', api.validateUserSelectors({ 'bad key!': { match: 'a', containers: 'b' } }).length === 1);
-check('V4 非法正则报错', api.validateUserSelectors({ e1: { match: '([', containers: '.x' } }).some(m => m.includes('e1')));
-check('V5 缺 containers 报错', api.validateUserSelectors({ e2: { match: 'a' } }).some(m => m.includes('containers')));
-check('V6 缺 match 报错', api.validateUserSelectors({ e3: { containers: '.x' } }).some(m => m.includes('match')));
-check('V7 非法 CSS 报错', api.validateUserSelectors({ e4: { match: 'a', containers: 'div>>>', titles: ['a[['] } }).length === 2);
-check('V8 非对象配置报错', api.validateUserSelectors([1, 2]).length === 1 && api.validateUserSelectors('x').length === 1);
-check('V9 titles 字符串简写合法', api.validateUserSelectors({ e5: { match: 'a', containers: '.x', titles: 'h3', snippets: '.c', links: ['a', '.b'] } }).length === 0);
-check('V10 links 非法类型报错', api.validateUserSelectors({ e6: { match: 'a', containers: '.x', links: 123 } }).length === 1);
-check('V11 containers 伪元素被拒且引号内不误报', api.validateUserSelectors({ e7: { match: 'a', containers: 'div::after' } }).length === 1 && api.validateUserSelectors({ e8: { match: 'a', containers: '[data-x="a::b"]' } }).length === 0);
-check('V12 对象match校验: 非法flags报错且合法通过', api.validateUserSelectors({ e11: { match: { source: 'a', flags: 'q' }, containers: '.x' } }).length === 1 && api.validateUserSelectors({ e12: { match: { source: 'a', flags: 'i' }, containers: '.x' } }).length === 0);
+check('选择器-014: 合法配置通过', api.validateUserSelectors(CUSTOM).length === 0);
+check('选择器-015: 保留键报错', api.validateUserSelectors({ other: { match: 'a', containers: 'b' } }).some(m => m.includes('other')));
+check('选择器-016: 非法键名报错', api.validateUserSelectors({ 'bad key!': { match: 'a', containers: 'b' } }).length === 1);
+check('选择器-017: 非法正则报错', api.validateUserSelectors({ e1: { match: '([', containers: '.x' } }).some(m => m.includes('e1')));
+check('选择器-018: 缺 containers 报错', api.validateUserSelectors({ e2: { match: 'a' } }).some(m => m.includes('containers')));
+check('选择器-019: 缺 match 报错', api.validateUserSelectors({ e3: { containers: '.x' } }).some(m => m.includes('match')));
+check('选择器-020: 非法 CSS 报错', api.validateUserSelectors({ e4: { match: 'a', containers: 'div>>>', titles: ['a[['] } }).length === 2);
+check('选择器-021: 非对象配置报错', api.validateUserSelectors([1, 2]).length === 1 && api.validateUserSelectors('x').length === 1);
+check('选择器-022: titles 字符串简写合法', api.validateUserSelectors({ e5: { match: 'a', containers: '.x', titles: 'h3', snippets: '.c', links: ['a', '.b'] } }).length === 0);
+check('选择器-023: links 非法类型报错', api.validateUserSelectors({ e6: { match: 'a', containers: '.x', links: 123 } }).length === 1);
+check('选择器-024: containers 伪元素被拒且引号内不误报', api.validateUserSelectors({ e7: { match: 'a', containers: 'div::after' } }).length === 1 && api.validateUserSelectors({ e8: { match: 'a', containers: '[data-x="a::b"]' } }).length === 0);
+check('选择器-025: 对象match校验: 非法flags报错且合法通过', api.validateUserSelectors({ e11: { match: { source: 'a', flags: 'q' }, containers: '.x' } }).length === 1 && api.validateUserSelectors({ e12: { match: { source: 'a', flags: 'i' }, containers: '.x' } }).length === 0);
 
 // ---- normalizeSelectorList ----
-check('N1 数组过滤非字符串', JSON.stringify(api.normalizeSelectorList(['a', 1, '', 'b'])) === '["a","b"]');
-check('N2 字符串转单元素数组', JSON.stringify(api.normalizeSelectorList('h3')) === '["h3"]');
-check('N3 空值转空数组', JSON.stringify(api.normalizeSelectorList(null)) === '[]');
+check('选择器-026: 数组过滤非字符串', JSON.stringify(api.normalizeSelectorList(['a', 1, '', 'b'])) === '["a","b"]');
+check('选择器-027: 字符串转单元素数组', JSON.stringify(api.normalizeSelectorList('h3')) === '["h3"]');
+check('选择器-028: 空值转空数组', JSON.stringify(api.normalizeSelectorList(null)) === '[]');
 
 // ---- JS 字面量序列化与解析 ----
 const P1 = api.serializeSelectors();
-check('S1 序列化为JS字面量', /bing:\s*\{/.test(P1) && /match: \//.test(P1) && P1.includes("'li.b_algo, div.b_algo'"));
+check('选择器-029: 序列化为JS字面量', /bing:\s*\{/.test(P1) && /match: \//.test(P1) && P1.includes("'li.b_algo, div.b_algo'"));
 const R1 = api.parseSelectorText(P1);
-check('S2 序列化→解析往返一致', !R1.errors.length && !!R1.config && R1.config.bing.match === api.getSelectors().bing.match.source && R1.config.google.containers === 'div.g, div.MjjYud');
+check('选择器-030: 序列化→解析往返一致', !R1.errors.length && !!R1.config && R1.config.bing.match === api.getSelectors().bing.match.source && R1.config.google.containers === 'div.g, div.MjjYud');
 const R2 = api.parseSelectorText('const SELECTORS = {' + P1 + '};');
-check('S3 支持 const 包裹', !R2.errors.length && !!R2.config && !!R2.config.duckduckgo && R2.config.google.titles.length > 0);
+check('选择器-031: 支持 const 包裹', !R2.errors.length && !!R2.config && !!R2.config.duckduckgo && R2.config.google.titles.length > 0);
 const R3 = api.parseSelectorText('{"e9":{"match":"a","containers":".x"}}');
-check('S4 兼容旧JSON', !R3.errors.length && !!R3.config && R3.config.e9.match === 'a');
+check('选择器-032: 兼容旧JSON', !R3.errors.length && !!R3.config && R3.config.e9.match === 'a');
 const R4 = api.parseSelectorText('e8: { match: /a[/ }');
-check('S5 未闭合正则报错', R4.config === null && R4.errors.length === 1);
+check('选择器-033: 未闭合正则报错', R4.config === null && R4.errors.length === 1);
 const R5 = api.parseSelectorText('e7: { match: /a/q }');
-check('S6 非法flags报错', R5.config === null && R5.errors.length === 1);
+check('选择器-034: 非法flags报错', R5.config === null && R5.errors.length === 1);
 const R6 = api.parseSelectorText('myx: { match: /(?:^|\\.)x\\.com$/, containers: ".r", titles: ["h3", \'a\'] }');
-check('S7 自定义引擎解析并过校验', !R6.errors.length && R6.config.myx.match === '(?:^|\\.)x\\.com$' && api.validateUserSelectors(R6.config).length === 0);
+check('选择器-035: 自定义引擎解析并过校验', !R6.errors.length && R6.config.myx.match === '(?:^|\\.)x\\.com$' && api.validateUserSelectors(R6.config).length === 0);
 const R7 = api.parseSelectorText('other: { match: /a/, containers: "b" }, z9: { match: /c/, containers: "d" }');
-check('S8 other 保留键被解析器丢弃', !R7.errors.length && !!R7.config && !R7.config.other && !!R7.config.z9);
+check('选择器-036: other 保留键被解析器丢弃', !R7.errors.length && !!R7.config && !R7.config.other && !!R7.config.z9);
 api.setStore({ flg: { match: { source: 'a\\/b', flags: 'i' }, containers: '.x', titles: [], snippets: [], links: 'a[href]' } });
 const P2 = api.serializeSelectors();
 const R9 = api.parseSelectorText(P2);
-check('S9 match flags 序列化→解析往返保留并过校验', P2.includes('match: /a\\/b/i') && !R9.errors.length && R9.config.flg.match.source === 'a\\/b' && R9.config.flg.match.flags === 'i' && api.validateUserSelectors(R9.config).length === 0);
+check('选择器-037: match flags 序列化→解析往返保留并过校验', P2.includes('match: /a\\/b/i') && !R9.errors.length && R9.config.flg.match.source === 'a\\/b' && R9.config.flg.match.flags === 'i' && api.validateUserSelectors(R9.config).length === 0);
 api.setStore({ flg2: { match: { source: 'a', flags: 'I' }, containers: '.x', titles: [], snippets: [], links: 'a[href]' } });
 const P2u = api.serializeSelectors();
-check('S17 大写flags序列化归一为小写', P2u.includes('match: /a/i'));
-check('S18 大写flags编译保留i', api.getSelectors().flg2.match.flags === 'i');
+check('选择器-038: 大写flags序列化归一为小写', P2u.includes('match: /a/i'));
+check('选择器-039: 大写flags编译保留i', api.getSelectors().flg2.match.flags === 'i');
 const R9u = api.parseSelectorText('z3: { match: /abc/I, containers: ".x" }');
-check('S19 解析时大写flags归一为小写且校验通过', !R9u.errors.length && R9u.config.z3.match.flags === 'i' && api.validateUserSelectors(R9u.config).length === 0);
+check('选择器-040: 解析时大写flags归一为小写且校验通过', !R9u.errors.length && R9u.config.z3.match.flags === 'i' && api.validateUserSelectors(R9u.config).length === 0);
 
 // ---- 同引擎用户优先(同ID覆盖与新增重叠键均用用户选择器) ----
 api.setHost('www.bing.com');
 api.setStore({ bing: { match: '(?:^|\\.)bing\\.', containers: 'div.my-bing', titles: ['h2'], snippets: ['.s'], links: 'a[href]' } });
-check('U1 同ID覆盖:容器使用用户选择器', api.getContainerSelector('bing') === 'div.my-bing');
-check('U2 同ID覆盖:引擎识别正常', api.getSearchEngine() === 'bing');
-check('U3 同ID覆盖:用户键合并后排在内置之前', Object.keys(api.getSelectors())[0] === 'bing');
+check('选择器-041: 同ID覆盖:容器使用用户选择器', api.getContainerSelector('bing') === 'div.my-bing');
+check('选择器-042: 同ID覆盖:引擎识别正常', api.getSearchEngine() === 'bing');
+check('选择器-043: 同ID覆盖:用户键合并后排在内置之前', Object.keys(api.getSelectors())[0] === 'bing');
 api.setStore({
   bing: { match: '(?:^|\\.)bing\\.', containers: 'div.my-bing', titles: ['h2'], snippets: ['.s'], links: 'a[href]' },
   mybrave: { match: '^search\\.brave\\.com$', containers: '.r' }
 });
 api.setHost('search.brave.com');
-check('U4 新增键与内置主机重叠时用户优先', api.getSearchEngine() === 'mybrave');
-check('U5 新增键排在内置同名站点引擎之前', Object.keys(api.getSelectors()).indexOf('mybrave') < Object.keys(api.getSelectors()).indexOf('brave'));
+check('选择器-044: 新增键与内置主机重叠时用户优先', api.getSearchEngine() === 'mybrave');
+check('选择器-045: 新增键排在内置同名站点引擎之前', Object.keys(api.getSelectors()).indexOf('mybrave') < Object.keys(api.getSelectors()).indexOf('brave'));
 api.setHost('www.google.com');
-check('U6 未覆盖内置回退正常', api.getSearchEngine() === 'google');
+check('选择器-046: 未覆盖内置回退正常', api.getSearchEngine() === 'google');
 api.setStore({
   google: { match: '(?:^|\\.)google\\.', containers: 'div.g' },
   google_scholar: { match: '(?:^|\\.)scholar\\.google\\.', containers: 'div.gs_r' }
 });
 api.setHost('scholar.google.com');
-check('U7 用户同时配置google和google_scholar时学者优先', api.getSearchEngine() === 'google_scholar');
+check('选择器-047: 用户同时配置google和google_scholar时学者优先', api.getSearchEngine() === 'google_scholar');
 
 // ---- href 回退: 内置与自定义hostname模式不参与, 仅自定义路径/URL模式回退 ----
 api.setStore({});
 api.setHost('www.google.com');
 api.setHref('https://www.google.com/search?q=x.bing.com');
-check('H1 内置引擎不因URL尾部误判(google查询含.bing.com)', api.getSearchEngine() === 'google');
+check('选择器-048: 内置引擎不因URL尾部误判(google查询含.bing.com)', api.getSearchEngine() === 'google');
 api.setHost('example.com');
 api.setHref('https://example.com/?ref=x.bing.com');
-check('H2 普通站URL尾部含引擎域不误判', api.getSearchEngine() === 'other');
+check('选择器-049: 普通站URL尾部含引擎域不误判', api.getSearchEngine() === 'other');
 api.setHost('');
 api.setHref('');
-check('H2b 空href/hostname不误判为引擎站', api.getSearchEngine() === 'other' && api.isEngineSite() === false);
+check('选择器-050: 空href/hostname不误判为引擎站', api.getSearchEngine() === 'other' && api.isEngineSite() === false);
 api.setStore(CUSTOM);
 api.setHost('other.com');
 api.setHref('https://other.com/?u=x.searx.example.com');
-check('H3 自定义hostname正则不因URL尾部误判', api.getSearchEngine() === 'other');
+check('选择器-051: 自定义hostname正则不因URL尾部误判', api.getSearchEngine() === 'other');
 api.setStore({ urlengine: { match: '^https://search\\.example\\.com/web', containers: '.r' } });
 api.setHost('search.example.com');
 api.setHref('https://search.example.com/web?q=1');
-check('H4 自定义URL模式仍回退匹配href', api.getSearchEngine() === 'urlengine');
+check('选择器-052: 自定义URL模式仍回退匹配href', api.getSearchEngine() === 'urlengine');
 api.setHref('https://search.example.com/images?q=1');
-check('H5 自定义URL模式未命中href则回退other', api.getSearchEngine() === 'other');
+check('选择器-053: 自定义URL模式未命中href则回退other', api.getSearchEngine() === 'other');
 
 // ---- diffUserSelectors 保存diff(不固化未改动的内置) ----
 api.setStore({});
@@ -257,105 +264,106 @@ for (const k of ['bing', 'google', 'duckduckgo', 'yandex', 'brave', 'yahoo']) {
   allBuiltins[k] = { match: m.match.source, containers: m.containers, titles: m.titles.slice(), snippets: m.snippets.slice(), links: m.links };
 }
 const bingCopy = allBuiltins.bing;
-check('W1 与内置完全相同的键被丢弃', !('bing' in api.diffUserSelectors(allBuiltins)));
-check('W2 改动过的键保留', 'bing' in api.diffUserSelectors(Object.assign({}, allBuiltins, { bing: Object.assign({}, bingCopy, { containers: '.x' }) })));
-check('W3 新增自定义键保留', 'myx' in api.diffUserSelectors(Object.assign({}, allBuiltins, { myx: { match: 'a', containers: '.x' } })));
-check('W4 other始终丢弃', !('other' in api.diffUserSelectors(Object.assign({}, allBuiltins, { other: { match: 'a', containers: '.x' } }))));
-check('W4b 缺失内置键视为未改动(删除=恢复跟随内置)', !('yahoo' in api.diffUserSelectors({ bing: bingCopy })));
+check('选择器-054: 与内置完全相同的键被丢弃', !('bing' in api.diffUserSelectors(allBuiltins)));
+check('选择器-055: 改动过的键保留', 'bing' in api.diffUserSelectors(Object.assign({}, allBuiltins, { bing: Object.assign({}, bingCopy, { containers: '.x' }) })));
+check('选择器-056: 新增自定义键保留', 'myx' in api.diffUserSelectors(Object.assign({}, allBuiltins, { myx: { match: 'a', containers: '.x' } })));
+check('选择器-057: other始终丢弃', !('other' in api.diffUserSelectors(Object.assign({}, allBuiltins, { other: { match: 'a', containers: '.x' } }))));
+check('选择器-058: 缺失内置键视为未改动(删除=恢复跟随内置)', !('yahoo' in api.diffUserSelectors({ bing: bingCopy })));
 const w4b2 = api.diffUserSelectors(Object.assign({}, allBuiltins, { yahoo: Object.assign({}, allBuiltins.yahoo, { disabled: true }) }));
-check('W4b2 显式 disabled 标记被保留', w4b2.yahoo && w4b2.yahoo.disabled === true);
-check('W4b3 空配置(重置)不产生任何disabled', Object.keys(api.diffUserSelectors({})).length === 0);
-check('W4b4 仅含自定义引擎的片段不禁用内置', Object.keys(api.diffUserSelectors({ mysearx: CUSTOM.mysearx })).join(',') === 'mysearx');
+check('选择器-059: 显式 disabled 标记被保留', w4b2.yahoo && w4b2.yahoo.disabled === true);
+check('选择器-060: 空配置(重置)不产生任何disabled', Object.keys(api.diffUserSelectors({})).length === 0);
+check('选择器-061: 仅含自定义引擎的片段不禁用内置', Object.keys(api.diffUserSelectors({ mysearx: CUSTOM.mysearx })).join(',') === 'mysearx');
 api.setStore({ yahoo: { disabled: true } });
-check('W4c disabled 的内置引擎不被加载', api.getSelectors().yahoo && api.getSelectors().yahoo.disabled === true);
+check('选择器-062: disabled 的内置引擎不被加载', api.getSelectors().yahoo && api.getSelectors().yahoo.disabled === true);
 api.setHost('search.yahoo.com');
-check('W4d disabled 的内置引擎不匹配站点', api.getSearchEngine() === 'other');
+check('选择器-063: disabled 的内置引擎不匹配站点', api.getSearchEngine() === 'other');
 
 // ---- disabled 引擎编辑器往返 ----
 const P3 = api.serializeSelectors();
-check('S10 disabled 引擎序列化保留内置定义与标记', /yahoo:\s*\{/.test(P3) && P3.includes('disabled: true') && P3.includes("'.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo'"));
+check('选择器-064: disabled 引擎序列化保留内置定义与标记', /yahoo:\s*\{/.test(P3) && P3.includes('disabled: true') && P3.includes("'.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo'"));
 const R10 = api.parseSelectorText(P3);
-check('S11 disabled 往返解析无误且校验通过', !R10.errors.length && !!R10.config && R10.config.yahoo.disabled === true && api.validateUserSelectors(R10.config).length === 0);
-check('S12 disabled 往返后 diff 仍保留标记', api.diffUserSelectors(R10.config).yahoo && api.diffUserSelectors(R10.config).yahoo.disabled === true);
+check('选择器-065: disabled 往返解析无误且校验通过', !R10.errors.length && !!R10.config && R10.config.yahoo.disabled === true && api.validateUserSelectors(R10.config).length === 0);
+check('选择器-066: disabled 往返后 diff 仍保留标记', api.diffUserSelectors(R10.config).yahoo && api.diffUserSelectors(R10.config).yahoo.disabled === true);
 const R11 = api.parseSelectorText('z1: { disabled: true }');
-check('S13 自定义禁用块解析且校验通过', !R11.errors.length && !!R11.config && R11.config.z1.disabled === true && api.validateUserSelectors(R11.config).length === 0);
-check('S14 disabled:false 单独为显式恢复不报错, 完整定义仍按普通校验', api.validateUserSelectors({ z2: { disabled: false } }).length === 0 && api.validateUserSelectors({ z6: { disabled: false, containers: '.x' } }).some(m => m.includes('match')));
+check('选择器-067: 自定义禁用块解析且校验通过', !R11.errors.length && !!R11.config && R11.config.z1.disabled === true && api.validateUserSelectors(R11.config).length === 0);
+check('选择器-068: disabled:false 单独为显式恢复不报错, 完整定义仍按普通校验', api.validateUserSelectors({ z2: { disabled: false } }).length === 0 && api.validateUserSelectors({ z6: { disabled: false, containers: '.x' } }).some(m => m.includes('match')));
 api.setStore({});
-check('W5 sameSelectorDef 兼容字符串/RegExp/对象形态且flags参与比较',
+check('选择器-069: sameSelectorDef 兼容字符串/RegExp/对象形态且flags参与比较',
   api.sameSelectorDef({ match: 'a.b', containers: '.x', titles: [], snippets: [], links: 'a[href]' }, { match: /a.b/, containers: '.x', titles: [], snippets: [], links: 'a[href]' }) &&
   api.sameSelectorDef({ match: { source: 'a.b', flags: '' }, containers: '.x', titles: [], snippets: [], links: 'a[href]' }, { match: /a.b/, containers: '.x', titles: [], snippets: [], links: 'a[href]' }) &&
   !api.sameSelectorDef({ match: { source: 'a.b', flags: 'i' }, containers: '.x', titles: [], snippets: [], links: 'a[href]' }, { match: /a.b/, containers: '.x', titles: [], snippets: [], links: 'a[href]' }));
 
 // ---- disable 别名字段 ----
-check('DIS-D1 disable:true 别名校验通过', api.validateUserSelectors({ z4: { disable: true } }).length === 0);
-check('DIS-D2 disable:false 单独视为显式恢复', api.validateUserSelectors({ z5: { disable: false } }).length === 0);
+check('选择器-070: disable:true 别名校验通过', api.validateUserSelectors({ z4: { disable: true } }).length === 0);
+check('选择器-071: disable:false 单独视为显式恢复', api.validateUserSelectors({ z5: { disable: false } }).length === 0);
 {
   const out = api.diffUserSelectors({ bing: { disable: true } });
-  check('DIS-D3 diff disable:true 归一为 disabled:true', out.bing && out.bing.disabled === true && out.bing.disable === undefined);
+  check('选择器-072: diff disable:true 归一为 disabled:true', out.bing && out.bing.disabled === true && out.bing.disable === undefined);
 }
-check('DIS-D4 diff disable:false 单独被丢弃', Object.keys(api.diffUserSelectors({ bing: { disable: false } })).length === 0);
-check('DIS-D5 diff disabled:false 单独被丢弃(恢复内置)', Object.keys(api.diffUserSelectors({ bing: { disabled: false } })).length === 0);
-check('DIS-D6 diff 完整定义+disable:false 与内置相同被丢弃', !('bing' in api.diffUserSelectors({ bing: Object.assign({ disable: false }, bingCopy) })));
+check('选择器-073: diff disable:false 单独被丢弃', Object.keys(api.diffUserSelectors({ bing: { disable: false } })).length === 0);
+check('选择器-074: diff disabled:false 单独被丢弃(恢复内置)', Object.keys(api.diffUserSelectors({ bing: { disabled: false } })).length === 0);
+check('选择器-075: diff 完整定义+disable:false 与内置相同被丢弃', !('bing' in api.diffUserSelectors({ bing: Object.assign({ disable: false }, bingCopy) })));
 {
   const out = api.diffUserSelectors({ bing: Object.assign({ disable: false }, bingCopy, { containers: '.x' }) });
-  check('DIS-D7 diff 完整定义+disable:false 改动被保留且别名剥离', out.bing && out.bing.containers === '.x' && out.bing.disable === undefined);
+  check('选择器-076: diff 完整定义+disable:false 改动被保留且别名剥离', out.bing && out.bing.containers === '.x' && out.bing.disable === undefined);
 }
 api.setStore({ bing: { disable: true } });
 api.setHost('www.bing.com');
-check('DIS-D8 disable:true 引擎被停用', api.getSearchEngine() === 'other');
+check('选择器-077: disable:true 引擎被停用', api.getSearchEngine() === 'other');
 api.setStore({ bing: { disable: false } });
 api.setHost('www.bing.com');
-check('DIS-D9 disable:false 空覆盖不破坏内置引擎', api.getSearchEngine() === 'bing' && api.getContainerSelector('bing') === 'li.b_algo, div.b_algo');
+check('选择器-078: disable:false 空覆盖不破坏内置引擎', api.getSearchEngine() === 'bing' && api.getContainerSelector('bing') === 'li.b_algo, div.b_algo');
 api.setStore({});
 api.setHost('www.bing.com');
-check('DIS-D10 清空后恢复', api.getSearchEngine() === 'bing');
+check('选择器-079: 清空后恢复', api.getSearchEngine() === 'bing');
 {
   const R12 = api.parseSelectorText('z7: { disable: true }');
-  check('DIS-D11 解析器接受 disable 别名', !R12.errors.length && !!R12.config && R12.config.z7.disable === true && api.validateUserSelectors(R12.config).length === 0);
+  check('选择器-080: 解析器接受 disable 别名', !R12.errors.length && !!R12.config && R12.config.z7.disable === true && api.validateUserSelectors(R12.config).length === 0);
 }
 
 // ---- pruneUserSelectors 清理旧版固化的内置副本 ----
 storeRef.current = { bing: JSON.parse(JSON.stringify(bingCopy)), myse: { match: 'a', containers: '.x' } };
 api.resetSelectorCache();
 api.pruneUserSelectors();
-check('W6 旧版固化的内置副本被清理', storeRef.current && !('bing' in storeRef.current) && !!storeRef.current.myse);
+check('选择器-081: 旧版固化的内置副本被清理', storeRef.current && !('bing' in storeRef.current) && !!storeRef.current.myse);
 // extraElements participates in validation, merge, editor round trips and diff.
 const extraDef = { ...CUSTOM.mysearx, extraElements: ['+ .summary', '~ .metadata'] };
 api.setStore({ customExtra: extraDef });
-check('EX1 普通分支保留关联选择器', JSON.stringify(api.getSelectors().customExtra.extraElements) === JSON.stringify(extraDef.extraElements));
-check('EX2 相对CSS配置校验通过', api.validateUserSelectors({ customExtra: extraDef }).length === 0);
+check('选择器-082: 普通分支保留关联选择器', JSON.stringify(api.getSelectors().customExtra.extraElements) === JSON.stringify(extraDef.extraElements));
+check('选择器-083: 相对CSS配置校验通过', api.validateUserSelectors({ customExtra: extraDef }).length === 0);
 const extraRoundTrip = api.parseSelectorText(api.serializeSelectors());
-check('EX3 序列化解析保留关联配置', !extraRoundTrip.errors.length && api.sameSelectorDef(extraRoundTrip.config.customExtra, extraDef));
-for (const value of ['+ tr', null, [1], [''], ['+ tr, body'], ['+ tr::after']]) {
-  check('EX4 非法关联配置被拒 ' + JSON.stringify(value), api.validateUserSelectors({ customExtra: { ...extraDef, extraElements: value } }).some(e => e.includes('extraElements')));
+check('选择器-084: 序列化解析保留关联配置', !extraRoundTrip.errors.length && api.sameSelectorDef(extraRoundTrip.config.customExtra, extraDef));
+for (const [i, value] of ['+ tr', null, [1], [''], ['+ tr, body'], ['+ tr::after']].entries()) {
+  check(`选择器-085-${i + 1}: 非法关联配置被拒 ${JSON.stringify(value)}`, api.validateUserSelectors({ customExtra: { ...extraDef, extraElements: value } }).some(e => e.includes('extraElements')));
 }
-check('EX5 disabled配置仍校验关联CSS', api.validateUserSelectors({ customExtra: { disabled: true, extraElements: ['+ tr, body'] } }).length === 1);
+check('选择器-086: disabled配置仍校验关联CSS', api.validateUserSelectors({ customExtra: { disabled: true, extraElements: ['+ tr, body'] } }).length === 1);
 api.setStore({ customExtra: { ...extraDef, disabled: true } });
-check('EX6 禁用分支保留关联配置', JSON.stringify(api.getSelectors().customExtra.extraElements) === JSON.stringify(extraDef.extraElements));
+check('选择器-087: 禁用分支保留关联配置', JSON.stringify(api.getSelectors().customExtra.extraElements) === JSON.stringify(extraDef.extraElements));
 const disabledExtra = api.parseSelectorText(api.serializeSelectors());
-check('EX7 禁用配置往返保留关联配置', disabledExtra.config.customExtra.disabled && api.sameSelectorDef(disabledExtra.config.customExtra, extraDef));
+check('选择器-088: 禁用配置往返保留关联配置', disabledExtra.config.customExtra.disabled && api.sameSelectorDef(disabledExtra.config.customExtra, extraDef));
 api.setStore({ duckduckgo_lite: { disabled: true } });
 const disabledLite = api.parseSelectorText(api.serializeSelectors());
-check('EX8 禁用内置Lite往返保留关联配置', disabledLite.config.duckduckgo_lite.extraElements.length === 3);
+check('选择器-089: 禁用内置Lite往返保留关联配置', disabledLite.config.duckduckgo_lite.extraElements.length === 3);
 api.setHost('lite.duckduckgo.com');
-check('EX9 禁用Lite不回退普通DDG', api.getSearchEngine() === 'other');
+check('选择器-090: 禁用Lite不回退普通DDG', api.getSearchEngine() === 'other');
 api.setStore({});
 const liteDef = api.getSelectors().duckduckgo_lite;
-check('EX10 未改动Lite不固化', !api.diffUserSelectors({ duckduckgo_lite: liteDef }).duckduckgo_lite);
-check('EX11 清空关联配置属于有效修改', !!api.diffUserSelectors({ duckduckgo_lite: { ...liteDef, extraElements: [] } }).duckduckgo_lite);
-check('EX12 缺省与空关联相等', api.sameSelectorDef(CUSTOM.mysearx, { ...CUSTOM.mysearx, extraElements: [] }));
+check('选择器-091: 未改动Lite不固化', !api.diffUserSelectors({ duckduckgo_lite: liteDef }).duckduckgo_lite);
+check('选择器-092: 清空关联配置属于有效修改', !!api.diffUserSelectors({ duckduckgo_lite: { ...liteDef, extraElements: [] } }).duckduckgo_lite);
+check('选择器-093: 缺省与空关联相等', api.sameSelectorDef(CUSTOM.mysearx, { ...CUSTOM.mysearx, extraElements: [] }));
 api.setStore({ duckduckgo_lite: { ...liteDef, match: liteDef.match.source, extraElements: [] } });
-check('EX13 覆盖可清空内置关联', api.getSelectors().duckduckgo_lite.extraElements.length === 0);
+check('选择器-094: 覆盖可清空内置关联', api.getSelectors().duckduckgo_lite.extraElements.length === 0);
 const parseCondition = new Function(extractFn(src, 'hostLabelToASCII') + extractFn(src, 'toASCIIHostname') + extractFn(src, 'parseConditionPart') + '; return parseConditionPart;')();
-for (const id of ['duckduckgo', 'ddg', 'duckduckgo_lite']) {
-  check('EX14 Lite条件匹配 ' + id, parseCondition('$site=' + id, 'duckduckgo_lite', 'lite.duckduckgo.com').static === true);
+for (const [i, id] of ['duckduckgo', 'ddg', 'duckduckgo_lite'].entries()) {
+  check(`选择器-095-${i + 1}: Lite条件匹配 ${id}`, parseCondition('$site=' + id, 'duckduckgo_lite', 'lite.duckduckgo.com').static === true);
 }
-check('EX15 专有ID不匹配普通DDG', parseCondition('$site=duckduckgo_lite', 'duckduckgo', 'duckduckgo.com').static === false);
+check('选择器-096: 专有ID不匹配普通DDG', parseCondition('$site=duckduckgo_lite', 'duckduckgo', 'duckduckgo.com').static === false);
 })();
 
-// ==== 来源: test-selector-import.cjs ====
+// ==== [选择器-097~114] 选择器导入 (来源: test-selector-import.cjs) ====
 await (async () => {
 const importSelectorsFromFileFn = extractFn(src, 'importSelectorsFromFile');
+const pickTextFileFn = extractFn(src, 'pickTextFile');
 
 
 function createEnv() {
@@ -431,10 +439,15 @@ function createEnv() {
 
   const factory = new Function('document', 'FileReader', 'textarea', 'window', `
     let preventPanelClose = false;
+    const t = (key) => key;
+    const toasts = [];
+    function showToast(msg, type) { toasts.push([msg, type]); }
+    ${pickTextFileFn}
     ${importSelectorsFromFileFn}
     return {
       importSelectorsFromFile,
       isPreventPanelClose: () => preventPanelClose,
+      toasts,
     };
   `);
   const api = factory(documentStub, FakeFileReader, textarea, windowStub);
@@ -445,14 +458,14 @@ function createEnv() {
 {
   const { env, api, fakeInput, textarea } = createEnv();
   api.importSelectorsFromFile(textarea, () => env.events.push('loaded:' + textarea.value));
-  assert('I1 打开文件选择后锁定面板关闭', api.isPreventPanelClose() === true);
-  assert('I2 input 已加入 DOM', env.bodyChildren.includes(fakeInput));
+  assert('选择器-097: 打开文件选择后锁定面板关闭', api.isPreventPanelClose() === true);
+  assert('选择器-098: input 已加入 DOM', env.bodyChildren.includes(fakeInput));
   fakeInput.files = [{ _content: 'myx: {}' }];
   fakeInput.onchange({ target: fakeInput });
-  assert('I3 文件内容写入编辑区', textarea.value === 'myx: {}');
-  assert('I4 导入回调在写入后触发', env.events.join('|') === 'value|loaded:myx: {}');
-  assert('I5 读取完成后解锁', api.isPreventPanelClose() === false);
-  assert('I6 读取完成后移除 input', !env.bodyChildren.includes(fakeInput));
+  assert('选择器-099: 文件内容写入编辑区', textarea.value === 'myx: {}');
+  assert('选择器-100: 导入回调在写入后触发', env.events.join('|') === 'value|loaded:myx: {}');
+  assert('选择器-101: 读取完成后解锁', api.isPreventPanelClose() === false);
+  assert('选择器-102: 读取完成后移除 input', !env.bodyChildren.includes(fakeInput));
 }
 
 // 2. 取消选择
@@ -460,8 +473,8 @@ function createEnv() {
   const { env, api, fakeInput, textarea } = createEnv();
   api.importSelectorsFromFile(textarea, () => env.events.push('loaded'));
   fakeInput.listeners.cancel[0]();
-  assert('I7 cancel 后解锁并移除 input', api.isPreventPanelClose() === false && !env.bodyChildren.includes(fakeInput));
-  assert('I8 cancel 不触发导入回调', env.events.length === 0);
+  assert('选择器-103: cancel 后解锁并移除 input', api.isPreventPanelClose() === false && !env.bodyChildren.includes(fakeInput));
+  assert('选择器-104: cancel 不触发导入回调', env.events.length === 0);
 }
 
 // 3. onchange 但未选中文件
@@ -469,8 +482,8 @@ function createEnv() {
   const { env, api, fakeInput, textarea } = createEnv();
   api.importSelectorsFromFile(textarea, () => env.events.push('loaded'));
   fakeInput.onchange({ target: { files: [] } });
-  assert('I9 未选择文件时解锁并移除 input', api.isPreventPanelClose() === false && !env.bodyChildren.includes(fakeInput));
-  assert('I10 未选择文件不触发导入回调', env.events.length === 0);
+  assert('选择器-105: 未选择文件时解锁并移除 input', api.isPreventPanelClose() === false && !env.bodyChildren.includes(fakeInput));
+  assert('选择器-106: 未选择文件不触发导入回调', env.events.length === 0);
 }
 
 // 4. 读取失败
@@ -479,8 +492,9 @@ function createEnv() {
   api.importSelectorsFromFile(textarea, () => env.events.push('loaded'));
   fakeInput.files = [{ _error: true }];
   fakeInput.onchange({ target: fakeInput });
-  assert('I11 读取失败时解锁并移除 input', api.isPreventPanelClose() === false && !env.bodyChildren.includes(fakeInput));
-  assert('I12 读取失败不触发导入回调', env.events.length === 0);
+  assert('选择器-107: 读取失败时解锁并移除 input', api.isPreventPanelClose() === false && !env.bodyChildren.includes(fakeInput));
+  assert('选择器-108: 读取失败不触发导入回调', env.events.length === 0);
+  assert('选择器-109: 读取失败弹出导入失败通知', api.toasts.length === 1 && api.toasts[0][0] === 'subImportFailed' && api.toasts[0][1] === 'error');
 }
 
 // 5. 未传回调
@@ -489,25 +503,25 @@ function createEnv() {
   api.importSelectorsFromFile(textarea);
   fakeInput.files = [{ _content: 'x: {}' }];
   fakeInput.onchange({ target: fakeInput });
-  assert('I13 未传回调时仍写入并解锁', textarea.value === 'x: {}' && api.isPreventPanelClose() === false);
+  assert('选择器-110: 未传回调时仍写入并解锁', textarea.value === 'x: {}' && api.isPreventPanelClose() === false);
 }
 
 // 6. 不支持 cancel 事件的浏览器: 焦点回落且未选择文件时兜底解锁
 {
   const { env, api, fakeInput, textarea, window } = createEnv();
   api.importSelectorsFromFile(textarea, () => env.events.push('loaded'));
-  assert('I14 焦点兜底监听已注册', window.listeners.focus && window.listeners.focus.length === 1);
+  assert('选择器-111: 焦点兜底监听已注册', window.listeners.focus && window.listeners.focus.length === 1);
   window.listeners.focus.forEach((fn) => fn());
   await new Promise((r) => setTimeout(r, 350));
-  assert('I15 焦点回落无文件时解锁并移除 input', api.isPreventPanelClose() === false && !env.bodyChildren.includes(fakeInput));
-  assert('I16 焦点兜底触发后解绑', window.listeners.focus.length === 0);
+  assert('选择器-112: 焦点回落无文件时解锁并移除 input', api.isPreventPanelClose() === false && !env.bodyChildren.includes(fakeInput));
+  assert('选择器-113: 焦点兜底触发后解绑', window.listeners.focus.length === 0);
 }
 
 // 7. 面板接线: 导入后刷新行号
-assert('I17 面板导入回调刷新行号', /importSelectorsFromFile\(textarea, \(\) => \{\s*showError\(\[\]\);\s*updateSelLineNumbers\(\);/.test(src));
+assert('选择器-114: 面板导入回调刷新行号', /importSelectorsFromFile\(textarea, \(\) => \{\s*showError\(\[\]\);\s*updateSelLineNumbers\(\);/.test(src));
 })();
 
-// ==== 来源: test-dom-scan.cjs ====
+// ==== [选择器-115~133] DOM增量扫描 (来源: test-dom-scan.cjs) ====
 await (async () => {
 function createEnv() {
   const elements = [];
@@ -613,31 +627,31 @@ function createEnv() {
   const b2 = makeEl('div', 'b', false);
 
   api.queryUnobserved('.a, .b');
-  check('Q1 :is 包裹整组选择器', env.queries.includes(':is(.a, .b):not([data-observed])'), env.queries);
-  check('Q2 已观察元素不会重复命中查询', !a1.observeCount && !b1.observeCount);
+  check('选择器-115: :is 包裹整组选择器', env.queries.includes(':is(.a, .b):not([data-observed])'), env.queries);
+  check('选择器-116: 已观察元素不会重复命中查询', !a1.observeCount && !b1.observeCount);
 
   // ---- 初始扫描: 已观察集合按当前选择器保留 ----
   api.scanNewResults();
-  check('SCAN-S1 初始扫描保留匹配的已观察元素', a1.unobserveCount === 0 && b1.unobserveCount === 0);
-  check('SCAN-S2 初始扫描观察新元素', a2.observed && b2.observed && a2.observeCount === 1 && b2.observeCount === 1);
+  check('选择器-117: 初始扫描保留匹配的已观察元素', a1.unobserveCount === 0 && b1.unobserveCount === 0);
+  check('选择器-118: 初始扫描观察新元素', a2.observed && b2.observed && a2.observeCount === 1 && b2.observeCount === 1);
 
   // ---- 选择器收窄: 清理陈旧元素 ----
   api.resetSelectorCache();
   api.setSelector('.a');
   api.scanNewResults();
-  check('SCAN-S3 收窄选择器清理不再匹配元素', b1.observed === false && b1.unobserveCount === 1 && b1.resetCount === 1);
-  check('SCAN-S4 收窄选择器保留仍匹配元素', a1.observed === true && a1.unobserveCount === 0);
-  check('SCAN-S5 清理后已观察集合全部匹配当前选择器', env.elements.filter((e) => e.observed).every((e) => e.matches('.a')));
+  check('选择器-119: 收窄选择器清理不再匹配元素', b1.observed === false && b1.unobserveCount === 1 && b1.resetCount === 1);
+  check('选择器-120: 收窄选择器保留仍匹配元素', a1.observed === true && a1.unobserveCount === 0);
+  check('选择器-121: 清理后已观察集合全部匹配当前选择器', env.elements.filter((e) => e.observed).every((e) => e.matches('.a')));
 
   const before = { a1: a1.unobserveCount, b1: b1.unobserveCount, b2: b2.unobserveCount };
   api.scanNewResults();
-  check('SCAN-S6 选择器未变化不重复清理', a1.unobserveCount === before.a1 && b1.unobserveCount === before.b1 && b2.unobserveCount === before.b2);
+  check('选择器-122: 选择器未变化不重复清理', a1.unobserveCount === before.a1 && b1.unobserveCount === before.b1 && b2.unobserveCount === before.b2);
 
   // ---- 禁用时清空观察集合 ----
   api.setEnabled(false);
   api.scanNewResults();
-  check('SCAN-S7 禁用时清空观察集合并重置记录', env.elements.every((e) => !e.observed) && api.getObservedSelector() === '');
-  check('SCAN-S8 禁用时关闭隐藏结果显示', api.getShowHidden() === false);
+  check('选择器-123: 禁用时清空观察集合并重置记录', env.elements.every((e) => !e.observed) && api.getObservedSelector() === '');
+  check('选择器-124: 禁用时关闭隐藏结果显示', api.getShowHidden() === false);
 }
 
 // ---- clearStaleObserved 细节 ----
@@ -647,12 +661,12 @@ function createEnv() {
   const btn = { removed: 0, remove() { this.removed++; } };
   stale.quickBtn = btn;
   api.clearStaleObserved('.a');
-  check('STALE-C1 清理陈旧元素移除快捷屏蔽按钮', btn.removed === 1 && stale.observed === false && stale.resetCount === 1);
+  check('选择器-125: 清理陈旧元素移除快捷屏蔽按钮', btn.removed === 1 && stale.observed === false && stale.resetCount === 1);
 
   const bad = makeEl('div', 'y', true);
   bad.matches = () => { throw new Error('bad selector'); };
   api.clearStaleObserved('.a');
-  check('STALE-C2 matches 异常按陈旧处理且不崩溃', bad.observed === false && bad.unobserveCount === 1);
+  check('选择器-126: matches 异常按陈旧处理且不崩溃', bad.observed === false && bad.unobserveCount === 1);
 }
 
 // ---- filterNestedContainers: 嵌套容器外层自带链接时保留评估 ----
@@ -672,34 +686,34 @@ function createEnv() {
   const outer = makeNode([sub1, sub2], [ownLink]);
   const plain = makeNode([], []);
   const kept = filterFn([outer, sub1, sub2, plain], 'div.g, div.MjjYud');
-  check('NEST-N1 聚合块外层自带独立链接时保留评估', kept.includes(outer) && kept.includes(sub1) && kept.includes(sub2) && kept.includes(plain));
+  check('选择器-127: 聚合块外层自带独立链接时保留评估', kept.includes(outer) && kept.includes(sub1) && kept.includes(sub2) && kept.includes(plain));
 
   const wrapLink = { id: 'wrap-link' };
   const wsub = makeNode([], [wrapLink]);
   const wrapper = makeNode([wsub], [wrapLink]);
   const kept2 = filterFn([wrapper, wsub], 'div.g');
-  check('NEST-N2 纯包装外层(链接全属内层)仍被丢弃', !kept2.includes(wrapper) && kept2.includes(wsub));
+  check('选择器-128: 纯包装外层(链接全属内层)仍被丢弃', !kept2.includes(wrapper) && kept2.includes(wsub));
 
   const weird = { querySelector() { throw new Error('bad'); }, querySelectorAll() { throw new Error('bad'); }, contains() { return false; } };
-  check('NEST-N3 选择器异常时不崩溃', filterFn([weird], 'div.g').length === 1);
+  check('选择器-129: 选择器异常时不崩溃', filterFn([weird], 'div.g').length === 1);
 
   const obsLink = { id: 'obs-link' };
   const obsInner = makeNode([], [obsLink]);
   const outerOnly = makeNode([obsInner], [makeNode([], []), { id: 'o2' }]);
   const kept3 = filterFn([outerOnly], 'div.g');
-  check('NEST-N4 内层不在批次时外层按自身链接判断', kept3.includes(outerOnly));
+  check('选择器-130: 内层不在批次时外层按自身链接判断', kept3.includes(outerOnly));
 
   // 已观察内层不在增量候选中，但仍属于外层的后代结果。
   wrapper.querySelectorAll = sel => sel === 'a[href]' ? [wrapLink] : [wsub];
   wrapper.querySelector = () => wsub;
-  check('NEST-N5 仅剩外层候选时仍排除纯包装', filterFn([wrapper], 'div.g').length === 0);
-  check('NEST-N6 多候选增量扫描也排除纯包装', !filterFn([wrapper, plain], 'div.g').includes(wrapper));
+  check('选择器-131: 仅剩外层候选时仍排除纯包装', filterFn([wrapper], 'div.g').length === 0);
+  check('选择器-132: 多候选增量扫描也排除纯包装', !filterFn([wrapper, plain], 'div.g').includes(wrapper));
   wrapper.querySelectorAll = sel => sel === 'a[href]' ? [wrapLink, ownLink] : [wsub];
-  check('NEST-N7 增量扫描保留真正独立链接', filterFn([wrapper], 'div.g').includes(wrapper));
+  check('选择器-133: 增量扫描保留真正独立链接', filterFn([wrapper], 'div.g').includes(wrapper));
 }
 })();
 
-// ==== 来源: test-engine-lifecycle.cjs ====
+// ==== [选择器-134~183] 引擎站装配拆卸与跨页同步 (来源: test-engine-lifecycle.cjs) ====
 await (async () => {
 const injectGlobalStylesFn = extractFn(src, 'injectGlobalStyles');
 const removeGlobalStylesFn = extractFn(src, 'removeGlobalStyles');
@@ -732,13 +746,13 @@ function createStyleEnv(returnValue) {
   const styleEl = { removeCalls: 0, remove() { this.removeCalls++; } };
   const env = createStyleEnv(styleEl);
   env.api.injectGlobalStyles();
-  check('G1 首次注入记录样式句柄', env.stats.addStyleCalls === 1 && env.stats.widgetCalls === 1 && env.api.getStyleEl() === styleEl);
+  check('选择器-134: 首次注入记录样式句柄', env.stats.addStyleCalls === 1 && env.stats.widgetCalls === 1 && env.api.getStyleEl() === styleEl);
   env.api.injectGlobalStyles();
-  check('G2 重复注入不重复添加全局样式', env.stats.addStyleCalls === 1 && env.stats.widgetCalls === 2);
+  check('选择器-135: 重复注入不重复添加全局样式', env.stats.addStyleCalls === 1 && env.stats.widgetCalls === 2);
   env.api.removeGlobalStyles();
-  check('G3 移除后释放句柄并调用 remove', styleEl.removeCalls === 1 && env.api.getStyleEl() === null);
+  check('选择器-136: 移除后释放句柄并调用 remove', styleEl.removeCalls === 1 && env.api.getStyleEl() === null);
   env.api.injectGlobalStyles();
-  check('G4 移除后可再次注入', env.stats.addStyleCalls === 2);
+  check('选择器-137: 移除后可再次注入', env.stats.addStyleCalls === 2);
 }
 
 {
@@ -749,7 +763,7 @@ function createStyleEnv(returnValue) {
     api.removeGlobalStyles();
     api.injectGlobalStyles();
   } catch (e) { threw = true; }
-  check('G5 GM_addStyle 无返回值时不崩溃', !threw && stats.addStyleCalls === 2 && api.getStyleEl() === null);
+  check('选择器-138: GM_addStyle 无返回值时不崩溃', !threw && stats.addStyleCalls === 2 && api.getStyleEl() === null);
 }
 
 {
@@ -757,7 +771,7 @@ function createStyleEnv(returnValue) {
   const env = createStyleEnv(styleEl);
   env.api.setEngine('mysearx');
   env.api.injectGlobalStyles();
-  check('G6 自定义引擎不注入布局样式但注入组件样式', env.stats.addStyleCalls === 0 && env.stats.widgetCalls === 1 && env.api.getStyleEl() === null);
+  check('选择器-139: 自定义引擎不注入布局样式但注入组件样式', env.stats.addStyleCalls === 0 && env.stats.widgetCalls === 1 && env.api.getStyleEl() === null);
 }
 
 {
@@ -766,7 +780,7 @@ function createStyleEnv(returnValue) {
   env.api.injectGlobalStyles();
   env.api.setEngine('mysearx');
   env.api.injectGlobalStyles();
-  check('G7 内置切自定义时移除布局样式', env.stats.addStyleCalls === 1 && styleEl.removeCalls === 1 && env.api.getStyleEl() === null);
+  check('选择器-140: 内置切自定义时移除布局样式', env.stats.addStyleCalls === 1 && styleEl.removeCalls === 1 && env.api.getStyleEl() === null);
 }
 
 {
@@ -774,7 +788,7 @@ function createStyleEnv(returnValue) {
   const env = createStyleEnv(styleEl);
   env.api.setEngine('other');
   env.api.injectGlobalStyles();
-  check('G8 other 引擎不注入布局样式', env.stats.addStyleCalls === 0 && env.api.getStyleEl() === null);
+  check('选择器-141: other 引擎不注入布局样式', env.stats.addStyleCalls === 0 && env.api.getStyleEl() === null);
 }
 
 // ---- teardownEngineSite: 移除全局样式并复位状态 ----
@@ -823,13 +837,13 @@ function createTeardownEnv() {
   const { api, counters, statusEl, observer, observed } = createTeardownEnv();
   api.teardownEngineSite();
   const state = api.state();
-  check('T1 teardown 复位装配状态并终止残留批处理', state.setup === false && state.observer === null && observer.disconnectCalls === 1 && state.batchId === 6);
-  check('T2 teardown 清理已观察元素', observed[0].unobserved === 1 && observed[0].removeAttributeCalls === 1 && observed[0].reset === 1);
-  check('T3 teardown 复位显示与选择器记录', state.showHidden === false && state.observedSelector === '');
-  check('T4 teardown 移除悬浮球与全局样式', statusEl.removed === 1 && counters.removeGlobalCalls === 1);
-  check('T6 teardown 不停止全站后台同步', counters.stopSyncCalls === 0);
+  check('选择器-142: teardown 复位装配状态并终止残留批处理', state.setup === false && state.observer === null && observer.disconnectCalls === 1 && state.batchId === 6);
+  check('选择器-143: teardown 清理已观察元素', observed[0].unobserved === 1 && observed[0].removeAttributeCalls === 1 && observed[0].reset === 1);
+  check('选择器-144: teardown 复位显示与选择器记录', state.showHidden === false && state.observedSelector === '');
+  check('选择器-145: teardown 移除悬浮球与全局样式', statusEl.removed === 1 && counters.removeGlobalCalls === 1);
+  check('选择器-146: teardown 不停止全站后台同步', counters.stopSyncCalls === 0);
   api.teardownEngineSite();
-  check('T5 重复 teardown 不重复执行', counters.removeGlobalCalls === 1 && statusEl.removed === 1 && counters.stopSyncCalls === 0);
+  check('选择器-147: 重复 teardown 不重复执行', counters.removeGlobalCalls === 1 && statusEl.removed === 1 && counters.stopSyncCalls === 0);
 }
 
 // ---- 内容快照签名: buildContentSignature / getResultContentSignature ----
@@ -845,21 +859,21 @@ function createTeardownEnv() {
     return { buildContentSignature, getResultContentSignature };
   `)();
 
-  check('SIG-S1 相同 url/title/snippet 生成相同签名', sigApi.buildContentSignature('https://a.com/', 't', 's') === sigApi.buildContentSignature('https://a.com/', 't', 's'));
-  check('SIG-S2 标题变化导致签名变化', sigApi.buildContentSignature('https://a.com/', 't1', 's') !== sigApi.buildContentSignature('https://a.com/', 't2', 's'));
-  check('SIG-S3 URL变化导致签名变化', sigApi.buildContentSignature('https://a.com/1', 't', 's') !== sigApi.buildContentSignature('https://a.com/2', 't', 's'));
-  check('SIG-S4 摘要变化导致签名变化', sigApi.buildContentSignature('u', 't', 's1') !== sigApi.buildContentSignature('u', 't', 's2'));
-  check('SIG-S5 空值部分按空串处理', sigApi.buildContentSignature(null, undefined, '') === sigApi.buildContentSignature('', '', ''));
+  check('选择器-148: 相同 url/title/snippet 生成相同签名', sigApi.buildContentSignature('https://a.com/', 't', 's') === sigApi.buildContentSignature('https://a.com/', 't', 's'));
+  check('选择器-149: 标题变化导致签名变化', sigApi.buildContentSignature('https://a.com/', 't1', 's') !== sigApi.buildContentSignature('https://a.com/', 't2', 's'));
+  check('选择器-150: URL变化导致签名变化', sigApi.buildContentSignature('https://a.com/1', 't', 's') !== sigApi.buildContentSignature('https://a.com/2', 't', 's'));
+  check('选择器-151: 摘要变化导致签名变化', sigApi.buildContentSignature('u', 't', 's1') !== sigApi.buildContentSignature('u', 't', 's2'));
+  check('选择器-152: 空值部分按空串处理', sigApi.buildContentSignature(null, undefined, '') === sigApi.buildContentSignature('', '', ''));
 
   const c = { link: { href: 'https://a.com/x' }, title: '标题', snippet: '摘要' };
   const before = sigApi.getResultContentSignature(c);
-  check('SIG-S6 结果签名包含 url/title/snippet', before === sigApi.buildContentSignature('https://a.com/x', '标题', '摘要'));
+  check('选择器-153: 结果签名包含 url/title/snippet', before === sigApi.buildContentSignature('https://a.com/x', '标题', '摘要'));
   c.title = '广告新标题';
-  check('SIG-S7 容器内容变化后签名不同', sigApi.getResultContentSignature(c) !== before);
+  check('选择器-154: 容器内容变化后签名不同', sigApi.getResultContentSignature(c) !== before);
   c.link = null;
-  check('SIG-S8 链接缺失时签名的 url 段为空且可用', sigApi.getResultContentSignature(c) === sigApi.buildContentSignature('', '广告新标题', '摘要'));
+  check('选择器-155: 链接缺失时签名的 url 段为空且可用', sigApi.getResultContentSignature(c) === sigApi.buildContentSignature('', '广告新标题', '摘要'));
   const bad = { link: { get href() { throw new Error('boom'); } }, title: 't', snippet: 's' };
-  check('SIG-S9 提取异常返回 null 而不崩溃', sigApi.getResultContentSignature(bad) === null);
+  check('选择器-156: 提取异常返回 null 而不崩溃', sigApi.getResultContentSignature(bad) === null);
 }
 
 // ---- reprocessContainer: href/内容变化共用的重处理核心 ----
@@ -895,32 +909,37 @@ function createTeardownEnv() {
     const el = makeContainer();
     el.staleBtn = { removed: 0, remove() { this.removed++; } };
     api.reprocessContainer(el);
-    check('RP1 重处理清理旧按钮并复位后重新判定', el.staleBtn.removed === 1 && calls.reset === 1 && calls.process === 1 && calls.reconcile === 1);
-    check('RP2 重处理成功后不再重新观察', calls.observe === 0 && el.getAttribute('data-observed') === 'true');
+    check('选择器-157: 重处理清理旧按钮并复位后重新判定', el.staleBtn.removed === 1 && calls.reset === 1 && calls.process === 1 && calls.reconcile === 1);
+    check('选择器-158: 重处理成功后不再重新观察', calls.observe === 0 && el.getAttribute('data-observed') === 'true');
   }
   {
     const { calls, api } = makeFactory('return false;');
     const el2 = makeContainer();
     api.reprocessContainer(el2);
-    check('RP3 未标记完成时重新观察结果', calls.observe === 1 && el2.hasAttribute('data-observed') === false);
+    check('选择器-159: 未标记完成时重新观察结果', calls.observe === 1 && el2.hasAttribute('data-observed') === false);
   }
   {
     const { calls, api } = makeFactory("throw new Error('boom');");
     const el = makeContainer();
     api.reprocessContainer(el);
-    check('RP4 重处理异常不标记 data-blocker-processed 且转交观察器重试', el.hasAttribute('data-blocker-processed') === false && calls.observe === 1);
+    check('选择器-160: 重处理异常不标记 data-blocker-processed 且转交观察器重试', el.hasAttribute('data-blocker-processed') === false && calls.observe === 1);
     const gone = makeContainer(false);
     api.reprocessContainer(gone);
-    check('RP5 已脱离文档的容器不触发重处理', calls.process === 1);
+    check('选择器-161: 已脱离文档的容器不触发重处理', calls.process === 1);
   }
 }
+
+// ---- KI: 已知问题固化(修复后应更新断言) ----
+// map_resultExtraElements 为强引用 Map, 引擎直接移除已屏蔽结果节点时无清理路径,
+// 条目(整棵结果子树)滞留至下次 forceReprocessAll/teardown, 内存随会话时长线性增长
+check('选择器-162(已知问题): map_resultExtraElements 为强引用 Map', /const map_resultExtraElements = new Map\(\)/.test(src));
 
 // ---- scheduleResultRetry: 处理异常后的有限次重试 ----
 {
   const retryFn = extractFn(src, 'scheduleResultRetry');
   const limitMatch = src.match(/const RESULT_RETRY_LIMIT = (\d+)/);
-  const delayMatch = src.match(/const RESULT_RETRY_DELAY = (\d+)/);
-  check('RT0 重试常量存在', !!limitMatch && !!delayMatch);
+  const delayMatch = src.match(/RESULT_RETRY_DELAY = (\d+)/);
+  check('选择器-163: 重试常量存在', !!limitMatch && !!delayMatch);
   function makeRetryEnv() {
     const timers = [];
     const api = new Function('resultObserver', 'timers', `
@@ -948,10 +967,10 @@ function createTeardownEnv() {
     const { api, timers } = makeRetryEnv();
     const el = makeRetryEl();
     api.scheduleResultRetry(el);
-    check('RT1 首次异常安排一次延迟重试', timers.length === 1 && timers[0].ms === Number(delayMatch[1]));
+    check('选择器-164: 首次异常安排一次延迟重试', timers.length === 1 && timers[0].ms === Number(delayMatch[1]));
     timers[0].fn();
-    check('RT2 重试触发后重新观察结果', el.observeCount === 1 && el.hasAttribute('data-observed') === false);
-    check('RT3 重试计数保留用于升级', api.hasCount(el));
+    check('选择器-165: 重试触发后重新观察结果', el.observeCount === 1 && el.hasAttribute('data-observed') === false);
+    check('选择器-166: 重试计数保留用于升级', api.hasCount(el));
   }
   {
     const { api, timers } = makeRetryEnv();
@@ -959,7 +978,7 @@ function createTeardownEnv() {
     api.scheduleResultRetry(el);
     el.setAttribute('data-blocker-processed', 'true');
     timers[0].fn();
-    check('RT4 重试前已成功处理则不再重试', el.observeCount === undefined && !api.hasCount(el));
+    check('选择器-167: 重试前已成功处理则不再重试', el.observeCount === undefined && !api.hasCount(el));
   }
   {
     const { api, timers } = makeRetryEnv();
@@ -967,7 +986,7 @@ function createTeardownEnv() {
     el.isConnected = false;
     api.scheduleResultRetry(el);
     timers[0].fn();
-    check('RT5 结果脱离文档后放弃重试', !api.hasCount(el));
+    check('选择器-168: 结果脱离文档后放弃重试', !api.hasCount(el));
   }
   {
     const { api, timers } = makeRetryEnv();
@@ -975,9 +994,9 @@ function createTeardownEnv() {
     api.scheduleResultRetry(el);
     api.scheduleResultRetry(el);
     api.scheduleResultRetry(el);
-    check('RT6 连续异常达到上限前不标记完成', timers.length === 3 && el.hasAttribute('data-blocker-processed') === false);
+    check('选择器-169: 连续异常达到上限前不标记完成', timers.length === 3 && el.hasAttribute('data-blocker-processed') === false);
     api.scheduleResultRetry(el);
-    check('RT7 超过上限停止重试并标记完成', timers.length === 3 && el.hasAttribute('data-blocker-processed') === true && !api.hasCount(el));
+    check('选择器-170: 超过上限停止重试并标记完成', timers.length === 3 && el.hasAttribute('data-blocker-processed') === true && !api.hasCount(el));
   }
 }
 
@@ -1016,14 +1035,14 @@ function createEnsureEnv(engine) {
 {
   const { api, calls } = createEnsureEnv(true);
   api.ensureEngineSiteSetup();
-  check('E7 引擎站装配不再启动全站后台同步', calls.start === 0 && calls.inject === 1 && calls.scan === 1 && api.state().setup === true);
+  check('选择器-171: 引擎站装配不再启动全站后台同步', calls.start === 0 && calls.inject === 1 && calls.scan === 1 && api.state().setup === true);
   api.ensureEngineSiteSetup();
-  check('E8 重复装配不重复启动同步', calls.start === 0);
+  check('选择器-172: 重复装配不重复启动同步', calls.start === 0);
 }
 {
   const { api, calls } = createEnsureEnv(false);
   api.ensureEngineSiteSetup();
-  check('E9 非引擎站不装配也不启动同步', calls.start === 0 && calls.inject === 0 && api.state().setup === false);
+  check('选择器-173: 非引擎站不装配也不启动同步', calls.start === 0 && calls.inject === 0 && api.state().setup === false);
 }
 
 // ---- refreshEngineSite: 按站点身份装配/拆卸 ----
@@ -1045,22 +1064,22 @@ function createRefreshEnv(engine, setup) {
 {
   const { api, calls } = createRefreshEnv(true, false);
   api.refreshEngineSite();
-  check('R1 普通站变引擎站时装配并重扫', calls.ensure === 1 && calls.force === 1 && calls.teardown === 0 && api.getSetup() === true);
+  check('选择器-174: 普通站变引擎站时装配并重扫', calls.ensure === 1 && calls.force === 1 && calls.teardown === 0 && api.getSetup() === true);
 }
 {
   const { api, calls } = createRefreshEnv(true, true);
   api.refreshEngineSite();
-  check('R2 已是引擎站时重扫并重算布局样式', calls.ensure === 0 && calls.force === 1 && calls.teardown === 0 && calls.layout === 1);
+  check('选择器-175: 已是引擎站时重扫并重算布局样式', calls.ensure === 0 && calls.force === 1 && calls.teardown === 0 && calls.layout === 1);
 }
 {
   const { api, calls } = createRefreshEnv(false, true);
   api.refreshEngineSite();
-  check('R3 引擎站变普通站时拆卸', calls.ensure === 0 && calls.force === 0 && calls.teardown === 1 && api.getSetup() === false);
+  check('选择器-176: 引擎站变普通站时拆卸', calls.ensure === 0 && calls.force === 0 && calls.teardown === 1 && api.getSetup() === false);
 }
 {
   const { api, calls } = createRefreshEnv(false, false);
   api.refreshEngineSite();
-  check('R4 普通站保持普通站时无操作', calls.ensure === 0 && calls.force === 0 && calls.teardown === 0);
+  check('选择器-177: 普通站保持普通站时无操作', calls.ensure === 0 && calls.force === 0 && calls.teardown === 0);
 }
 
 // ---- 跨标签页选择器变更检测 ----
@@ -1085,20 +1104,20 @@ function createExternalEnv() {
 
 {
   const { api, state, counters } = createExternalEnv();
-  check('E1 首次调用仅建立基线', api.checkExternalSelectorChange() === false && counters.reset === 0 && counters.refresh === 0);
-  check('E2 存储未变化不重装配', api.checkExternalSelectorChange() === false && counters.reset === 0 && counters.refresh === 0);
+  check('选择器-178: 首次调用仅建立基线', api.checkExternalSelectorChange() === false && counters.reset === 0 && counters.refresh === 0);
+  check('选择器-179: 存储未变化不重装配', api.checkExternalSelectorChange() === false && counters.reset === 0 && counters.refresh === 0);
   state.store = { a: 2 };
-  check('E3 其它标签页修改后重装配', api.checkExternalSelectorChange() === true && counters.reset === 1 && counters.refresh === 1);
-  check('E4 重装配后再次调用不重复', api.checkExternalSelectorChange() === false && counters.reset === 1 && counters.refresh === 1);
+  check('选择器-180: 其它标签页修改后重装配', api.checkExternalSelectorChange() === true && counters.reset === 1 && counters.refresh === 1);
+  check('选择器-181: 重装配后再次调用不重复', api.checkExternalSelectorChange() === false && counters.reset === 1 && counters.refresh === 1);
   state.throwMode = true;
-  check('E5 读取失败不误判为变更', api.checkExternalSelectorChange() === false && counters.reset === 1 && counters.refresh === 1);
+  check('选择器-182: 读取失败不误判为变更', api.checkExternalSelectorChange() === false && counters.reset === 1 && counters.refresh === 1);
   state.throwMode = false;
   state.store = { a: 3 };
-  check('E6 读取恢复后继续检测变更', api.checkExternalSelectorChange() === true && counters.reset === 2 && counters.refresh === 2);
+  check('选择器-183: 读取恢复后继续检测变更', api.checkExternalSelectorChange() === true && counters.reset === 2 && counters.refresh === 2);
 }
 })();
 
-// ==== 来源: test-engine.cjs ====
+// ==== [选择器-184~193] 引擎检测与全站门控 (来源: test-engine.cjs) ====
 await (async () => {
 // 头部 @match(8.0.0 起全站注入)
 const header = src.slice(0, src.indexOf('==/UserScript=='));
@@ -1205,18 +1224,18 @@ const cases = [
   ['www.brave.com', 'other'],
 ];
 
-for (const [host, expected] of cases) {
+for (const [i, [host, expected]] of cases.entries()) {
   const w = { location: { hostname: host } };
   const got = factory(w, selectors).getSearchEngine();
-  assert(`${host} -> ${expected}`, got === expected);
+  assert(`选择器-184-${i + 1}: ${host} -> ${expected}`, got === expected);
 }
 
-assert('SELECTORS键序为引擎检测顺序', JSON.stringify(Object.keys(selectors)) === JSON.stringify(['bing', 'google_scholar', 'google', 'duckduckgo_lite', 'duckduckgo', 'yandex', 'brave', 'yahoo', 'other']));
-assert('缓存:同hostname二次调用返回相同结果', factory({ location: { hostname: 'www.google.com' } }, selectors).getSearchEngine() === 'google');
-assert('内置引擎不因URL尾部误判(google查询含.bing.com)', factory({ location: { hostname: 'www.google.com', href: 'https://www.google.com/search?q=x.bing.com' } }, selectors).getSearchEngine() === 'google');
-assert('内置引擎不因URL尾部误判(普通站查询含.bing.com)', factory({ location: { hostname: 'example.com', href: 'https://example.com/?ref=x.bing.com' } }, selectors).getSearchEngine() === 'other');
-assert('空href/hostname返回other而非缓存哨兵', factory({ location: { hostname: '', href: '' } }, selectors).getSearchEngine() === 'other');
-assert('空href/hostname门控为普通站', gateFactory({ location: { hostname: '', href: '' } }, selectors)() === false);
+assert('选择器-185: SELECTORS键序为引擎检测顺序', JSON.stringify(Object.keys(selectors)) === JSON.stringify(['bing', 'google_scholar', 'google', 'duckduckgo_lite', 'duckduckgo', 'yandex', 'brave', 'yahoo', 'other']));
+assert('选择器-186: 缓存:同hostname二次调用返回相同结果', factory({ location: { hostname: 'www.google.com' } }, selectors).getSearchEngine() === 'google');
+assert('选择器-187: 内置引擎不因URL尾部误判(google查询含.bing.com)', factory({ location: { hostname: 'www.google.com', href: 'https://www.google.com/search?q=x.bing.com' } }, selectors).getSearchEngine() === 'google');
+assert('选择器-188: 内置引擎不因URL尾部误判(普通站查询含.bing.com)', factory({ location: { hostname: 'example.com', href: 'https://example.com/?ref=x.bing.com' } }, selectors).getSearchEngine() === 'other');
+assert('选择器-189: 空href/hostname返回other而非缓存哨兵', factory({ location: { hostname: '', href: '' } }, selectors).getSearchEngine() === 'other');
+assert('选择器-190: 空href/hostname门控为普通站', gateFactory({ location: { hostname: '', href: '' } }, selectors)() === false);
 
 // ---- 搜索分类检测 ----
 const catCases = [
@@ -1232,9 +1251,9 @@ const catCases = [
   [{ hostname: 'search.brave.com', pathname: '/images', search: '?q=x' }, 'images'],
   [{ hostname: 'images.search.yahoo.com', pathname: '/search/images', search: '?p=x' }, 'images'],
 ];
-for (const [loc, expected] of catCases) {
+for (const [i, [loc, expected]] of catCases.entries()) {
   const got = factory({ location: loc }, selectors).getSearchCategory(loc);
-  assert(`category ${loc.hostname}${loc.pathname}${loc.search} -> ${expected}`, got === expected);
+  assert(`选择器-191-${i + 1}: category ${loc.hostname}${loc.pathname}${loc.search} -> ${expected}`, got === expected);
 }
 
 // ---- 全站注入与引擎站门控一致性 ----
@@ -1248,16 +1267,16 @@ const hosts = [
   'mail.google.com', 'mail.yahoo.com', 'brave.com',
 ];
 
-assert('头部包含 @match *://*/* (全站注入)', matchLines.includes('*://*/*'));
+assert('选择器-192: 头部包含 @match *://*/* (全站注入)', matchLines.includes('*://*/*'));
 
-for (const host of hosts) {
+for (const [i, host] of hosts.entries()) {
   const eng = detectEngine(host);
   const gated = gateFactory({ location: { hostname: host } }, selectors)();
-  assert(`${host}: 引擎判定(${eng})与门控(${gated})一致`, gated === (eng !== 'other'));
+  assert(`选择器-193-${i + 1}: ${host}: 引擎判定(${eng})与门控(${gated})一致`, gated === (eng !== 'other'));
 }
 })();
 
-// ==== 跨标签页同步锁 ====
+// ==== [选择器-194~213] 跨标签页同步锁 / 菜单注册 / 结果摘要后备提取 ====
 await (async () => {
 const lockFnNames = ['delay', 'readSyncLock', 'writeSyncLock', 'tryAcquireSyncLock', 'acquireSyncLock', 'renewSyncLock', 'releaseSyncLock', 'runWithSyncLock'];
 const lockFns = lockFnNames.map((n) => {
@@ -1282,18 +1301,18 @@ function createLockEnv(tabId, ttl = 2000) {
 {
   const tab1 = createLockEnv('tab-1');
   const tab2 = createLockEnv('tab-2');
-  check('L1 首次抢占成功', tab1.tryAcquireSyncLock('t') === true && tab1.readSyncLock('t').owner === 'tab-1');
-  check('L2 他页持锁时抢占失败', tab2.tryAcquireSyncLock('t') === false);
-  check('L3 过期锁可被抢占', (() => {
+  check('选择器-194: 首次抢占成功', tab1.tryAcquireSyncLock('t') === true && tab1.readSyncLock('t').owner === 'tab-1');
+  check('选择器-195: 他页持锁时抢占失败', tab2.tryAcquireSyncLock('t') === false);
+  check('选择器-196: 过期锁可被抢占', (() => {
     lockStore.set('test_lock_t', { owner: 'tab-dead', expires: Date.now() - 1 });
     return tab2.tryAcquireSyncLock('t') === true && tab2.readSyncLock('t').owner === 'tab-2';
   })());
-  check('L4 非持锁页续租失败', tab1.renewSyncLock('t') === false);
-  check('L5 持锁页续租成功', tab2.renewSyncLock('t') === true);
+  check('选择器-197: 非持锁页续租失败', tab1.renewSyncLock('t') === false);
+  check('选择器-198: 持锁页续租成功', tab2.renewSyncLock('t') === true);
   tab1.releaseSyncLock('t');
-  check('L6 非持锁页释放无效', tab2.readSyncLock('t').owner === 'tab-2');
+  check('选择器-199: 非持锁页释放无效', tab2.readSyncLock('t').owner === 'tab-2');
   tab2.releaseSyncLock('t');
-  check('L7 持锁页释放清空', tab2.readSyncLock('t') === null);
+  check('选择器-200: 持锁页释放清空', tab2.readSyncLock('t') === null);
 }
 
 // 并发抢占: 后写入者回读校验通过, 先写入者回读失败退出
@@ -1304,11 +1323,11 @@ function createLockEnv(tabId, ttl = 2000) {
   const p1 = tab1.runWithSyncLock('race', async () => { ran1++; await new Promise((r) => setTimeout(r, 30)); });
   const p2 = tab2.runWithSyncLock('race', async () => { ran2++; await new Promise((r) => setTimeout(r, 30)); });
   await Promise.all([p1, p2]);
-  check('L8 并发抢占仅一个执行者', ran1 + ran2 === 1, { ran1, ran2 });
-  check('L9 执行完成后锁释放', tab1.readSyncLock('race') === null && tab2.readSyncLock('race') === null);
+  check('选择器-201: 并发抢占仅一个执行者', ran1 + ran2 === 1, { ran1, ran2 });
+  check('选择器-202: 执行完成后锁释放', tab1.readSyncLock('race') === null && tab2.readSyncLock('race') === null);
   let ran3 = 0;
   await tab1.runWithSyncLock('race', async () => { ran3++; });
-  check('L10 释放后他页可再次执行', ran3 === 1);
+  check('选择器-203: 释放后他页可再次执行', ran3 === 1);
 }
 
 // 任务失败也必须释放锁
@@ -1318,7 +1337,7 @@ function createLockEnv(tabId, ttl = 2000) {
   try {
     await tab.runWithSyncLock('fail', async () => { throw new Error('boom'); });
   } catch (e) { threw = true; }
-  check('L11 任务异常仍释放锁', threw === true && tab.readSyncLock('fail') === null);
+  check('选择器-204: 任务异常仍释放锁', threw === true && tab.readSyncLock('fail') === null);
 }
 
 // ---- 菜单注册测试 (非引擎站仅注册4项) ----
@@ -1346,14 +1365,14 @@ function createLockEnv(tabId, ttl = 2000) {
   }
 
   const nonEngineMenus = runMenuTest(false);
-  check('M1 非引擎站点仅显示4个菜单项', nonEngineMenus.length === 4);
-  check('M2 非引擎站点包含打开面板', nonEngineMenus[0] === 'menuOpenPanel');
-  check('M3 非引擎站点包含自定义选择器', nonEngineMenus[1] === 'menuCustomSelectors');
-  check('M4 非引擎站点包含自定义颜色', nonEngineMenus[2] === 'menuHighlightColor');
-  check('M5 非引擎站点包含语言切换', nonEngineMenus[3].includes('menuLang'));
+  check('选择器-205: 非引擎站点仅显示4个菜单项', nonEngineMenus.length === 4);
+  check('选择器-206: 非引擎站点包含打开面板', nonEngineMenus[0] === 'menuOpenPanel');
+  check('选择器-207: 非引擎站点包含自定义选择器', nonEngineMenus[1] === 'menuCustomSelectors');
+  check('选择器-208: 非引擎站点包含自定义颜色', nonEngineMenus[2] === 'menuHighlightColor');
+  check('选择器-209: 非引擎站点包含语言切换', nonEngineMenus[3].includes('menuLang'));
 
   const engineMenus = runMenuTest(true);
-  check('M6 引擎站点显示全部8个菜单项', engineMenus.length === 8);
+  check('选择器-210: 引擎站点显示全部8个菜单项', engineMenus.length === 8);
 }
 
 // ---- 结果摘要后备提取: 相对选择器(extraElements)不得抛异常中断结果处理 ----
@@ -1389,7 +1408,7 @@ await (async () => {
     querySelectorAll: (sel) => (String(sel).includes(':nth-child(1)') ? [extraRow] : []),
   };
   try { out = getResultSnippet(resultEl, 'duckduckgo_lite'); } catch (e) { threw = true; }
-  check('RS1 相对选择器后备提取不抛异常(旧代码SyntaxError致整结果漏处理)', threw === false && out === '');
+  check('选择器-211: 相对选择器后备提取不抛异常(旧代码SyntaxError致整结果漏处理)', threw === false && out === '');
 
   const selfSnippet = {
     textContent: ' self text ',
@@ -1403,7 +1422,7 @@ await (async () => {
   };
   out = ''; threw = false;
   try { out = getResultSnippet(resultEl, 'duckduckgo_lite'); } catch (e) { threw = true; }
-  check('RS2 后备元素自我命中有效选择器仍返回文本', threw === false && out === 'self text');
+  check('选择器-212: 后备元素自我命中有效选择器仍返回文本', threw === false && out === 'self text');
 
   const primaryEl = { textContent: ' primary ' };
   const resultWithPrimary = {
@@ -1414,10 +1433,10 @@ await (async () => {
   resultWithPrimary.parentElement = { children: [resultWithPrimary], querySelectorAll: () => [] };
   out = ''; threw = false;
   try { out = getResultSnippet(resultWithPrimary, 'duckduckgo_lite'); } catch (e) { threw = true; }
-  check('RS3 主摘要选择器路径不受影响', threw === false && out === 'primary');
+  check('选择器-213: 主摘要选择器路径不受影响', threw === false && out === 'primary');
 })();
 
-// ==== 已知问题复现: 记录当前缺陷行为, 修复对应问题后应反转该断言 ====
+// ==== [选择器-214~215] 已知问题复现: 记录当前缺陷行为, 修复对应问题后应反转该断言 ====
 await (async () => {
   const parseSelectorText = new Function(
     "const SUPPORTED_REGEX_FLAGS = 'imsu';\n" +
@@ -1425,12 +1444,28 @@ await (async () => {
     extractFn(src, 'getInvalidRegexFlags') + '\n' + extractFn(src, 'parseSelectorText') +
     '\nreturn parseSelectorText;'
   )();
-  // KI-N: JSON 风格 \uXXXX / \/ 转义未解码(.json 导入的合法转义串原样保留, 后续CSS校验误报非法)
+  // JSON 风格 \uXXXX / \/ 转义未解码(.json 导入的合法转义串原样保留, 后续CSS校验误报非法)
   const R13 = parseSelectorText('{"e13":{"match":"a","containers":"div\\u002Eresult"}}');
-  check('KI-N1[已知问题] JSON \\uXXXX 转义未解码(containers 含字面反斜杠u序列)', !!R13.config && R13.config.e13.containers !== 'div.result' && R13.config.e13.containers.includes('\\u002E'));
-  // KI-O: __proto__ 键赋值落入原型, 条目静默消失且无任何报错
+  check('选择器-214(已知问题): JSON \\uXXXX 转义未解码(containers 含字面反斜杠u序列)', !!R13.config && R13.config.e13.containers !== 'div.result' && R13.config.e13.containers.includes('\\u002E'));
+  // __proto__ 键赋值落入原型, 条目静默消失且无任何报错
   const R14 = parseSelectorText('__proto__: { match: "a", containers: ".x" }');
-  check('KI-O1[已知问题] __proto__ 键静默丢失(解析成功但配置为空)', !R14.errors.length && !!R14.config && !Object.hasOwn(R14.config, '__proto__') && Object.keys(R14.config).length === 0);
+  check('选择器-215(已知问题): __proto__ 键静默丢失(解析成功但配置为空)', !R14.errors.length && !!R14.config && !Object.hasOwn(R14.config, '__proto__') && Object.keys(R14.config).length === 0);
+})();
+
+// ==== [选择器-216~220] 修复回归: 悬浮球拖拽 touchcancel / 文件读取失败通知 / bubble-number 前缀隔离 ====
+(() => {
+  const bindIdx = src.indexOf("document.addEventListener('touchmove', onDrag");
+  const unbindIdx = src.indexOf("document.removeEventListener('touchmove', onDrag)");
+  check('选择器-216: 拖拽绑定 touchcancel(触摸取消后监听不残留)', bindIdx > -1 && src.slice(bindIdx, bindIdx + 400).includes("document.addEventListener('touchcancel', endDrag)"));
+  check('选择器-217: 拖拽解绑 touchcancel(与绑定对称)', unbindIdx > -1 && src.slice(unbindIdx, unbindIdx + 300).includes("document.removeEventListener('touchcancel', endDrag)"));
+  const pick = extractFn(src, 'pickTextFile');
+  check('选择器-218: 文件读取失败弹出导入失败通知', pick.includes("showToast(t('subImportFailed')") && !/reader\.onerror\s*=\s*cleanup\s*;/.test(pick));
+  check('选择器-219: 悬浮球数字类名已加 serh- 前缀', src.includes('.serh-bubble-number') && src.includes('class="serh-bubble-number"') && !src.includes('class="bubble-number"') && !/(^|[^\w-])\.bubble-number\s*\{/.test(src));
+  const selectorsStart = src.indexOf('const SELECTORS = {');
+  const selectorsOpen = src.indexOf('{', selectorsStart);
+  const selectorsClose = extractObjectLiteral(src, selectorsOpen);
+  const selectorsObj = eval(`(${src.slice(selectorsOpen, selectorsClose + 1)})`);
+  check('选择器-220: Bing links 首选主标题 a[href]', Array.isArray(selectorsObj.bing.links) && selectorsObj.bing.links[0] === 'h2 a[href]');
 })();
 })();
 
