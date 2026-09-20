@@ -4,7 +4,7 @@
       containers: 'li.b_algo, div.b_algo',
       titles: ['h2 a', 'a h2', '.b_title'],
       snippets: ['.b_caption p', '.b_snippet', '.b_paractl p', '.b_lineclamp2'],
-      links: 'a[href]',
+      links: ['h2 a[href]', '.b_title a[href]', '.b_algoheader a[href]', 'h3 a[href]', 'div[role="heading"] a[href]', 'a[href]'],
     },
     google_scholar: {
       match: /^(?:www\.)?scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/,
