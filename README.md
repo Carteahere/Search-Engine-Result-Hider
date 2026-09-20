@@ -38,7 +38,7 @@
 
 1. 自动同步后台运行，根据配置时间戳每1h三方快照合并同步一次，手动上传/下载为强制覆盖
 2. 脚本设置同步和自定义选择器同步开关互相独立
-3. 地址只支持https和完整路径，如坚果云`https://dav.jianguoyun.com/dav/your_folder/`，路径文件夹不存在会自动创建
+3. 地址只支持https和完整路径，如坚果云`https://dav.jianguoyun.com/dav/your_folder/`，路径文件夹不存在会自动创建，文件名如`rules.txt`修改后需手动上传覆盖一次
 
 ### 1.4 关于订阅：
 

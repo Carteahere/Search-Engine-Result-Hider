@@ -38,7 +38,7 @@ Open with a browser that supports script installation to install directly.
 
 1. Auto-sync runs in the background, 3-Way Merge Sync every 1h based on the configured timestamp, manual upload/download is mandatory overwrite.
 2. Script settings sync and custom selector sync toggles are independent of each other.
-3. Address only supports HTTPS and full paths, e.g., Nutstore `https://dav.jianguoyun.com/dav/your_folder/`; the folder is created automatically if it does not exist.
+3. Address only supports HTTPS and full paths, e.g., Nutstore `https://dav.jianguoyun.com/dav/your_folder/`; the folder is created automatically if it does not exist, after changing the file name such as `rules.txt` need to manually upload and overwrite it once.
 
 ### 1.4 About Subscriptions:
 
