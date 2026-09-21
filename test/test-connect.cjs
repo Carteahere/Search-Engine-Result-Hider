@@ -282,6 +282,8 @@ function makeAdoptEnv({ storedConfig, memoryConfig, panelOpen }) {
   let currentConfig = { rules: ['a'], bubbleSize: 30 };
   const persistConfigFn = new Function('store', 'CONFIG_KEY', 'LOCAL_LAST_MODIFIED_KEY', 'currentConfig', `
     const GM_setValue = (k, v) => { store.set(k, v); };
+    const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
+    ${extractFn(src, 'markLocalModifiedTime')}
     ${extractFn(src, 'persistConfig')}
     return persistConfig;
   `)(store, KEYS.CONFIG_KEY, KEYS.LOCAL_LAST_MODIFIED_KEY, currentConfig);
@@ -1037,8 +1039,44 @@ rules:
 assert('同步-138: 声明了 @grant GM_deleteValue(旧键清理可执行)', /@grant\s+GM_deleteValue/.test(header));
 (() => {
   const persist = extractFn(src, 'persistCurrentSubscriptions');
-  assert('同步-139: 订阅面板零变化关闭不推进同步时间戳', persist.includes('subsChanged') && /if\s*\(subsChanged\)\s*\{[^}]*GM_setValue\(LOCAL_LAST_MODIFIED_KEY,\s*Date\.now\(\)\)/.test(persist));
+  assert('同步-139: 订阅面板零变化关闭不推进同步时间戳', persist.includes('subsChanged') && /if\s*\(subsChanged\)\s*\{[^}]*markLocalModifiedTime\(\)/.test(persist));
   assert('同步-140: 订阅签名口径与同步仲裁一致(url/name/enabled)', persist.includes('s.enabled !== false') && persist.includes('.sort((a, b) => a[0] < b[0]'));
+})();
+
+// ==== [同步-141~143] 本地修改时间戳: 单调写+可信时间回正(慢钟设备设置不被云端回滚) ====
+await (async () => {
+  const fakeDate = { now: () => 500 };
+  const store = new Map();
+  store.set(KEYS.LOCAL_LAST_MODIFIED_KEY, 0);
+  const mark = new Function('store', 'LOCAL_LAST_MODIFIED_KEY', 'Date', `
+    const GM_setValue = (k, v) => { store.set(k, v); };
+    const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
+    async function getTrustedNow() { return 900000; }
+    ${extractFn(src, 'markLocalModifiedTime')}
+    return markLocalModifiedTime;
+  `)(store, KEYS.LOCAL_LAST_MODIFIED_KEY, fakeDate);
+  mark();
+  await new Promise((r) => setTimeout(r, 20));
+  assert('同步-141: 慢钟本地时间被可信时间异步回正', store.get(KEYS.LOCAL_LAST_MODIFIED_KEY) === 900000);
+
+  const future = 900000 + 10 * 24 * 3600 * 1000;
+  store.set(KEYS.LOCAL_LAST_MODIFIED_KEY, future);
+  mark();
+  await new Promise((r) => setTimeout(r, 20));
+  assert('同步-142: 快钟/未来时间戳不被本地时间或可信时间回写倒退', store.get(KEYS.LOCAL_LAST_MODIFIED_KEY) === future);
+
+  store.set(KEYS.LOCAL_LAST_MODIFIED_KEY, 0);
+  const markNoNet = new Function('store', 'LOCAL_LAST_MODIFIED_KEY', 'Date', `
+    const GM_setValue = (k, v) => { store.set(k, v); };
+    const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
+    async function getTrustedNow() { throw new Error('network down'); }
+    ${extractFn(src, 'markLocalModifiedTime')}
+    return markLocalModifiedTime;
+  `)(store, KEYS.LOCAL_LAST_MODIFIED_KEY, fakeDate);
+  let threw = false;
+  try { markNoNet(); } catch (e) { threw = true; }
+  await new Promise((r) => setTimeout(r, 20));
+  assert('同步-143: 可信时间获取失败时保留本地时间写入且不抛未捕获异常', !threw && store.get(KEYS.LOCAL_LAST_MODIFIED_KEY) === 500);
 })();
 
 console.log(`\n${pass} passed, ${fail} failed`);

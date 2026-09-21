@@ -881,8 +881,10 @@ await (async () => {
 
 // ==== [规则-176~192] 一键屏蔽规则选项构建(域名/精确/白名单) ====
 await (async () => {
+  const consts = src.match(/const COMMON_HOST_PREFIXES = new Set\(\[[^\]]*\]\);/)[0] + '\n' +
+    src.match(/const PUBLIC_SUFFIX_2LD = new Set\([\s\S]*?\}\)\);/)[0];
   const build = new Function(
-    extractFn(src, 'isPublicSuffixBase') + '\n' + extractFn(src, 'buildBlockRuleOptions') + '\nreturn buildBlockRuleOptions;'
+    consts + '\n' + extractFn(src, 'isPublicSuffixBase') + '\n' + extractFn(src, 'buildBlockRuleOptions') + '\nreturn buildBlockRuleOptions;'
   )();
 
   let o = build('abc.example.com');
@@ -1204,8 +1206,10 @@ await (async () => {
 
 // ==== [规则-245~260] 修复回归: 公共后缀回退 / 墓碑数量上限 / 规则键互异 ====
 await (async () => {
+  const consts = src.match(/const COMMON_HOST_PREFIXES = new Set\(\[[^\]]*\]\);/)[0] + '\n' +
+    src.match(/const PUBLIC_SUFFIX_2LD = new Set\([\s\S]*?\}\)\);/)[0];
   const build = new Function(
-    extractFn(src, 'isPublicSuffixBase') + '\n' + extractFn(src, 'buildBlockRuleOptions') + '\nreturn buildBlockRuleOptions;'
+    consts + '\n' + extractFn(src, 'isPublicSuffixBase') + '\n' + extractFn(src, 'buildBlockRuleOptions') + '\nreturn buildBlockRuleOptions;'
   )();
 
   let o = build('www.co.uk');
@@ -1272,6 +1276,68 @@ await (async () => {
   const compiledRulesDef = src.match(/let\s+compiledRules\s*=\s*\{[\s\S]*?\n\s*\};/);
   assert('规则-271: 顶层 compiledRules 包含白名单条件结构', compiledRulesDef && compiledRulesDef[0].includes('whitelistConditionalDomains: new Map()') && compiledRulesDef[0].includes('whitelistConditionalRules: []'));
 })();
+
+// ==== [规则-272~286] 修复回归: 常见主机前缀剥离 + 轻量后缀表 ====
+await (async () => {
+  const consts = src.match(/const COMMON_HOST_PREFIXES = new Set\(\[[^\]]*\]\);/)[0] + '\n' +
+    src.match(/const PUBLIC_SUFFIX_2LD = new Set\([\s\S]*?\}\)\);/)[0];
+  const api = new Function(
+    consts + '\n' + extractFn(src, 'isPublicSuffixBase') + '\n' + extractFn(src, 'buildBlockRuleOptions') + '\nreturn { buildBlockRuleOptions, isPublicSuffixBase };'
+  )();
+
+  let o = api.buildBlockRuleOptions('m.example.com');
+  assert('规则-272: m前缀回退主域', o.domainRule === '*://*.example.com/*' && o.exactRule === '*://m.example.com/*');
+  o = api.buildBlockRuleOptions('mobile.example.com');
+  assert('规则-273: mobile前缀回退主域', o.domainRule === '*://*.example.com/*');
+  o = api.buildBlockRuleOptions('wap.example.com');
+  assert('规则-274: wap前缀回退主域', o.domainRule === '*://*.example.com/*');
+  o = api.buildBlockRuleOptions('touch.example.com');
+  assert('规则-275: touch前缀回退主域', o.domainRule === '*://*.example.com/*');
+  o = api.buildBlockRuleOptions('www3.example.com');
+  assert('规则-276: wwwN前缀回退主域', o.domainRule === '*://*.example.com/*');
+  o = api.buildBlockRuleOptions('M.Example.com');
+  assert('规则-277: 前缀匹配忽略大小写', o.domainRule === '*://*.Example.com/*');
+
+  o = api.buildBlockRuleOptions('m.news.bbc.co.uk');
+  assert('规则-278: 前缀剥离后保留多级主体', o.domainRule === '*://*.news.bbc.co.uk/*');
+  o = api.buildBlockRuleOptions('m.example.co.uk');
+  assert('规则-279: m+co.uk主体回退注册域', o.domainRule === '*://*.example.co.uk/*' && o.suffixLike === false);
+  o = api.buildBlockRuleOptions('m.co.uk');
+  assert('规则-280: 剥后为裸后缀则回退完整主机', o.domainRule === '*://*.m.co.uk/*' && o.suffixLike === true);
+  o = api.buildBlockRuleOptions('m.www.example.com');
+  assert('规则-281: 连续前缀逐级剥离', o.domainRule === '*://*.example.com/*');
+  o = api.buildBlockRuleOptions('abc.example.com');
+  assert('规则-282: 非常见前缀不剥离', o.domainRule === '*://*.abc.example.com/*');
+  o = api.buildBlockRuleOptions('m.io');
+  assert('规则-283: 剥后为单标签不剥离', o.domainRule === '*://*.m.io/*' && o.suffixLike === true);
+
+  assert('规则-284: sch.uk 识别为公共后缀', api.isPublicSuffixBase('sch.uk') === true);
+  assert('规则-285: co.za/foo.com.au 识别为公共后缀', api.isPublicSuffixBase('co.za') === true && api.isPublicSuffixBase('com.au') === true);
+  assert('规则-286: 裸域注册域与三级主体判定', api.isPublicSuffixBase('example.co.uk') === false && api.isPublicSuffixBase('com.example.co.uk') === false);
+
+  o = api.buildBlockRuleOptions('www.mysite.co.za');
+  assert('规则-287: www+co.za注册域剥离', o.domainRule === '*://*.mysite.co.za/*');
+  o = api.buildBlockRuleOptions('www.x.edu.cn');
+  assert('规则-288: www+edu.cn注册域剥离', o.domainRule === '*://*.x.edu.cn/*');
+  o = api.buildBlockRuleOptions('www.co.ke');
+  assert('规则-289(对照): 非常用后缀不在表内按普通注册域剥离', o.domainRule === '*://*.co.ke/*' && o.suffixLike === false);
+})();
+
+// ==== [规则-290~291] yahoo 传统 /*-http:// 星号解包(修复回归) ====
+{
+  const getCleanUrl = new Function(
+    extractFn(src, 'decodeRedirectTarget') + '\n' +
+    extractFn(src, 'decodeBingCkTarget') + '\n' +
+    extractFn(src, 'unwrapRedirectUrl') + '\n' +
+    extractFn(src, 'getCleanUrl') + '\nreturn getCleanUrl;'
+  )();
+  const yahooDashStar = { href: 'https://r.search.yahoo.com/_ylt=abc;_ylu=xyz/RV=2/RE=1/RO=2/*-http://example.com/a' };
+  assert('规则-290: yahoo 传统 /*-http:// 解包', getCleanUrl(yahooDashStar) === 'http://example.com/a');
+  const yahooStarPlain = { href: 'https://rd.yahoo.co.jp/search/web/result/*https://example.jp/page' };
+  assert('规则-291(对照): 无连字符星号解包不受影响', getCleanUrl(yahooStarPlain) === 'https://example.jp/page');
+  const yahooDashDouble = { href: 'https://tw.search.yahoo.com/r/RK=2/*-https%3A%2F%2Fexample.com%2Fpath%3Fk%3Dv' };
+  assert('规则-292: yahoo /*-https%3A 编码变体解包', getCleanUrl(yahooDashDouble) === 'https://example.com/path?k=v');
+}
 
 })();
 

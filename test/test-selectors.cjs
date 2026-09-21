@@ -1469,6 +1469,31 @@ await (async () => {
 })();
 })();
 
+// ==== [选择器-221] 祖先容器不认领后代自有链接(嵌套结果漏处理修复回归) ====
+{
+  const filterFn = new Function(`${extractFn(src, 'filterNestedContainers')}\nreturn filterNestedContainers;`)();
+  function makeNodeX(children, links) {
+    const node = { children: children || [], links: links || [] };
+    node.querySelectorAll = (sel) => (sel === 'a[href]' ? node.links : node.children);
+    node.querySelector = () => null;
+    node.contains = (other) => other !== node && (node.links.includes(other) || node.children.some((c) => c === other || c.contains(other)));
+    return node;
+  }
+  const gInnerLink = { id: 'g2-link' };
+  const gInner = makeNodeX([], [gInnerLink]);
+  const gOwnLink = { id: 'g-own-link' };
+  const gOuter = makeNodeX([gInner], [gOwnLink]);
+  const mjj = makeNodeX([gOuter], []);
+  const keptX = filterFn([mjj, gOuter, gInner], 'div.g, div.MjjYud');
+  check('选择器-221: 祖先容器不认领后代自有链接(嵌套对保留)', keptX.includes(gOuter) && keptX.includes(gInner) && !keptX.includes(mjj), keptX.length);
+
+  const wSubLink = { id: 'w-sub-link' };
+  const wSub = makeNodeX([], [wSubLink]);
+  const wOwn = makeNodeX([wSub], [wSubLink]);
+  const keptY = filterFn([wOwn, wSub], 'div.g');
+  check('选择器-222: 纯包装外层链接仍被内层认领而丢弃', !keptY.includes(wOwn) && keptY.includes(wSub), keptY.length);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 
