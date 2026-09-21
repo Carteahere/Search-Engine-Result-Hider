@@ -68,13 +68,15 @@ URL通配规则按匹配模式语义从URL开头匹配，`*://`仅匹配`http/ht
 3. 单个 `@if` 内支持逻辑运算：`|` 或、`&` 与、`!` 非，用 `( )` 括号嵌套分组，优先级 `!` > `&` > `|`
 4. `!` 取反的是条件本身。当结果缺少标题等被比较内容时，该条件视为不成立，取反后即为成立，如 `!(title *= "关键词")` 会命中无标题的结果
 5. 属性值支持省略引号，如 `@if($site=google)`、`@if(scheme=https)` 等无空格值可直接裸写
+6. 搜索引擎可写`google`、`google_scholar`、`bing`、`duckduckgo`(`ddg`)、`duckduckgo_lite`、`yandex`、`brave`、`yahoo`(`yahoo-japan`)；对于`duckduckgo`，`$site=duckduckgo` 或 `$site=ddg` 同样匹配 Lite，`$site=duckduckgo_lite` 仅匹配 Lite
+7. 搜索类型可写`web`、`images`、`videos`、`news`
 
 **`@if` 支持条件：**
 
 | 条件类型 | 语法 | 说明 |
 | --- | --- | --- |
-| 搜索引擎 | `$site = "google"` | 仅在指定搜索引擎中生效，可写`google`、`google_scholar`、`bing`、`duckduckgo`(`ddg`)、`duckduckgo_lite`、`yandex`、`brave`、`yahoo`(`yahoo-japan`)，忽略大小写，分隔符可用`=`或`:`，值支持省略引号（如`$site=google`）；`$site=duckduckgo` 或 `$site=ddg` 同样匹配 Lite，`$site=duckduckgo_lite` 仅匹配 Lite |
-| 搜索类型 | `$category = "web"` | 仅在指定搜索类型中生效，可写`web`、`images`、`videos`、`news`，由当前页 URL 推断，网页搜索默认为`web`，值支持省略引号（如`$category=images`） |
+| 搜索引擎 | `$site = "google"` | 仅在指定搜索引擎中生效，忽略大小写，分隔符可用`=`或`:`，值支持省略引号（如`$site=google`） |
+| 搜索类型 | `$category = "web"` | 仅在指定搜索类型中生效，由当前页 URL 推断，网页搜索默认为`web`，值支持省略引号（如`$category=images`） |
 | 搜索站点 | `site = "google.com.hk"` | 仅在指定搜索引擎地区站点中生效，值支持省略引号（如`site=google.com.hk`） |
 | 标题包含 | `title *= "关键词"` | 标题中包含指定字符串`关键词` |
 | 标题精确 | `title = "关键词"` | 标题精确匹配指定字符串`关键词` |
