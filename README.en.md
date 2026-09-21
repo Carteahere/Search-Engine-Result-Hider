@@ -39,13 +39,14 @@ Open with a browser that supports script installation to install directly.
 1. Auto-sync runs in the background, 3-Way Merge Sync every 1h based on the configured timestamp, manual upload/download is mandatory overwrite.
 2. Script settings sync and custom selector sync toggles are independent of each other.
 3. Address only supports HTTPS and full paths, e.g., Nutstore `https://dav.jianguoyun.com/dav/your_folder/`; the folder is created automatically if it does not exist, after changing the file name such as `rules.txt` need to manually upload and overwrite it once.
+4. To ensure timestamp accuracy during synchronization, Ali/Cloudflare/WorldTimeAPI timepoints will be automatically accessed once. If there is a cross-origin request popup, select `Always allow`; if refused, the remote WebDAV date timestamp will be used by default.
 
 ### 1.4 About Subscriptions:
 
 1. Subscription updates also run in the background, fetching once every 12h. Supports plain-text remote links such as `https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Other/rules.txt`; compatible with `.yaml` uBlacklist list format (`name`/`rules`/`blacklist`/`whitelist`/`matches` fields).
 2. Subscription rules are appended after local rules. Due to limited script-allocatable performance, keep the total number of rules under 50k to avoid mobile device performance issues.
 3. Script extensions are limited and do not support `##` DOM element or uBO filter rules; they are filtered out automatically on subscription import.
-4. Both subscriptions and WebDAV rely on cross-origin request permissions; if a permission prompt appears, select `Always allow`.
+4. If the subscription link is not a GitHub source, cross-origin request permission is required; if a permission prompt appears, select `Always allow`.
 
 ### 1.5 Other:
 
