@@ -68,13 +68,15 @@ Note: Only 5 colors, `@N` = `@1`–`@5`; open the custom color panel from the sc
 3. Within a single `@if`: `|` OR, `&` AND, `!` NOT, grouped with `( )`, precedence `!` > `&` > `|`.
 4. `!` negates the condition itself; missing content (e.g. no title) fails the condition, so the negation passes, e.g. `!(title *= "keyword")` matches results without a title.
 5. Quotes can be omitted for space-free values, e.g. `@if($site=google)`, `@if(scheme=https)`
+6. Search Engine ID: `google`, `google_scholar`, `bing`, `duckduckgo`(`ddg`), `duckduckgo_lite`, `yandex`, `brave`, `yahoo`(`yahoo-japan`); for `duckduckgo`, `$site=duckduckgo` or `$site=ddg` also matches Lite, while `$site=duckduckgo_lite` matches only Lite.
+7. Search Type: `web`, `images`, `videos`, `news`
 
 **Conditions supported by `@if`:**
 
 | Condition Type | Syntax | Description |
 | --- | --- | --- |
-| Search Engine | `$site = "google"` | Only takes effect on the specified engine: `google`, `google_scholar`, `bing`, `duckduckgo`(`ddg`), `duckduckgo_lite`, `yandex`, `brave`, `yahoo`(`yahoo-japan`); case-insensitive, `=` or `:`, quotes can be omitted (e.g. `$site=google`); `$site=duckduckgo` or `$site=ddg` also matches Lite, while `$site=duckduckgo_lite` matches only Lite |
-| Search Type | `$category = "web"` | Only takes effect on the specified search type: `web`, `images`, `videos`, `news`; inferred from the page URL, defaults to `web`, quotes can be omitted (e.g. `$category=images`) |
+| Search Engine | `$site = "google"` | Only takes effect on the specified engine; case-insensitive, `=` or `:`, quotes can be omitted (e.g. `$site=google`) |
+| Search Type | `$category = "web"` | Only takes effect on the specified search type; inferred from the page URL, defaults to `web`, quotes can be omitted (e.g. `$category=images`) |
 | Search Site | `site = "google.com.hk"` | Only takes effect on the specified regional site, quotes can be omitted (e.g. `site=google.com.hk`) |
 | Title Contains | `title *= "keyword"` | Title contains `keyword` |
 | Title Exact | `title = "keyword"` | Title equals `keyword` |
