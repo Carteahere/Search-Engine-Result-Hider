@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/SadYuyuko
-// @version      8.4.0
+// @version      8.4.1
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -271,7 +271,7 @@
       const def = defs[name];
       if (!def || def.disabled || !def.match) continue;
       if (def.match.test(hostname)) return (_engineCacheResult = name);
-      if (def !== SELECTORS[name] && href && def.match.source.includes('/') && def.match.test(href)) {
+      if (def !== SELECTORS[name] && href && /:(?:\\?\/){2}/i.test(def.match.source) && def.match.test(href)) {
         return (_engineCacheResult = name);
       }
     }
@@ -711,9 +711,26 @@
       leaf = '';
     };
     const pushChar = (ch) => { leaf += ch; };
-    const canStartRegex = () => {
+    const canStartRegex = (pos) => {
       const s = leaf.trim();
-      return s === '' || /(?:=~|~|=|:)$/.test(s) || /^(url|title|host|path|scheme)$/i.test(s);
+      if (s === '' || /(?:=~|~)$/.test(s)) return true;
+      if (/(?:=|\^=|\$=|\*=|:)$/.test(s) || /^(url|title|host|path|scheme)$/i.test(s)) {
+        let j = pos + 1, inC = false;
+        while (j < n) {
+          const c = str[j];
+          if (c === '\\') { j += 2; continue; }
+          if (inC) { if (c === ']') inC = false; j++; continue; }
+          if (c === '[') { inC = true; j++; continue; }
+          if (c === '/') {
+            let k = j + 1;
+            while (k < n && /[a-z]/i.test(str[k])) k++;
+            if (k >= n || /[\s)&|]/.test(str[k])) return true;
+          }
+          j++;
+        }
+        return false;
+      }
+      return false;
     };
 
     while (i < n) {
@@ -752,7 +769,7 @@
       if (ch === '"') { inDQ = true; pushChar(ch); i++; continue; }
       if (ch === '\\') { pushChar(ch); if (i + 1 < n) pushChar(str[i + 1]); i += 2; continue; }
       if (ch === '/') {
-        if (canStartRegex()) { inRE = true; pushChar(ch); i++; continue; }
+        if (canStartRegex(i)) { inRE = true; pushChar(ch); i++; continue; }
         pushChar(ch); i++; continue;
       }
 
@@ -1051,7 +1068,7 @@
       const rawVal = (strMatch[3] !== undefined ? strMatch[3] : (strMatch[4] !== undefined ? strMatch[4] : strMatch[5]));
       let val = rawVal.replace(/\\(["'])/g, '$1').toLowerCase();
       const condType = strMatch[1].toLowerCase();
-      if (condType === 'host') val = toASCIIHostname(val);
+      if (condType === 'host') val = val.startsWith('/') ? val : toASCIIHostname(val);
       return { matched: true, dynamic: { type: condType, op, val } };
     }
 
@@ -1270,7 +1287,8 @@
 
   function looksLikeCondExpr(str) {
     if (!isCondExprCore(str)) return false;
-    if (/^\s*!\s+(?:title|url|site|description|version|expires|homepage)\s*:\s*\S/i.test(str)) return false;
+    if (/^\s*!\s+(?:[A-Z][a-zA-Z0-9_-]*)\s*:\s*\S/.test(str)) return false;
+    if (/^\s*!\s+(?:title|url|description|version|expires|homepage)\s*:\s*\S/i.test(str)) return false;
     if (!/^\s*(?:!|\(|\$site\b|\$category\b|engine\b|category\b|(?:site|title|url|host|path|scheme)\s*(?:=~|\^=|\$=|\*=|=|:|\/))/i.test(str)) return false;
     return /(?:^|[\s(&|!])(?:\$site|\$category|engine|category|site|title|url|host|path|scheme)\s*(?:(?:=~|\^=|\$=|\*=|=|:)\s*\S|\/)/i.test(str)
       || /^\s*!\s*(?:(?:\$site|\$category|engine|category|site|title|url|host|path|scheme)\b|\()/i.test(str);
@@ -1573,18 +1591,24 @@
 
   function wildcardToRegex(pattern) {
     function splitHostAndPort(part) {
+      let auth = '';
+      const atIdx = part.lastIndexOf('@');
+      if (atIdx !== -1) {
+        auth = part.slice(0, atIdx + 1);
+        part = part.slice(atIdx + 1);
+      }
       if (part.startsWith('[')) {
         const bracketEnd = part.indexOf(']');
         if (bracketEnd !== -1 && part.charCodeAt(bracketEnd + 1) === 58) {
-          return { host: part.slice(0, bracketEnd + 1), port: part.slice(bracketEnd + 1), hasPort: true };
+          return { host: auth + part.slice(0, bracketEnd + 1), port: part.slice(bracketEnd + 1), hasPort: true };
         }
-        return { host: part, port: '', hasPort: false };
+        return { host: auth + part, port: '', hasPort: false };
       }
       const lastColon = part.lastIndexOf(':');
       if (lastColon !== -1) {
-        return { host: part.slice(0, lastColon), port: part.slice(lastColon), hasPort: true };
+        return { host: auth + part.slice(0, lastColon), port: part.slice(lastColon), hasPort: true };
       }
-      return { host: part, port: '', hasPort: false };
+      return { host: auth + part, port: '', hasPort: false };
     }
 
     function escapeHostPart(part) {
@@ -1614,17 +1638,17 @@
     let prefix = '^';
     let hostIsFirst = false;
     if (pattern.startsWith('*://')) {
-      prefix += 'https?:\\/\\/';
+      prefix += 'https?:\\/\\/(?:[^\\/@:]+(?::[^\\/@:]*)?@)?';
       pattern = pattern.substring(4);
       hostIsFirst = true;
     } else {
       const schemeMatch = pattern.match(/^([a-z][a-z0-9+.-]*):\/\//i);
       if (schemeMatch) {
-        prefix += escapeWildcardPart(schemeMatch[1], false) + ':\\/\\/';
+        prefix += escapeWildcardPart(schemeMatch[1], false) + ':\\/\\/(?:[^\\/@:]+(?::[^\\/@:]*)?@)?';
         pattern = pattern.substring(schemeMatch[0].length);
         hostIsFirst = true;
       } else {
-        prefix += '(?:https?:\\/\\/)?';
+        prefix += '(?:https?:\\/\\/(?:[^\\/@:]+(?::[^\\/@:]*)?@)?)?';
         hostIsFirst = true;
       }
     }
@@ -2300,7 +2324,7 @@
     return [...elements];
   }
 
-  const map_resultExtraElements = new Map();
+  const map_resultExtraElements = new WeakMap();
 
   function setResultExtraElementsVisible(result, visible) {
     let rows = map_resultExtraElements.get(result);
@@ -2313,15 +2337,12 @@
   }
 
   function restoreResultExtraElements(result) {
-    const restore = (rows, owner) => {
-      rows.forEach((display, row) => { row.style.display = display; });
-      map_resultExtraElements.delete(owner);
-    };
     if (result) {
       const rows = map_resultExtraElements.get(result);
-      if (rows) restore(rows, result);
-    } else {
-      map_resultExtraElements.forEach(restore);
+      if (rows) {
+        rows.forEach((display, row) => { row.style.display = display; });
+        map_resultExtraElements.delete(result);
+      }
     }
   }
 
@@ -2518,6 +2539,14 @@
         if (radio) radio.checked = true;
       });
       inp.addEventListener('click', (e) => e.stopPropagation());
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation();
+          const okBtn = panel.querySelector('#sfb-confirm-ok');
+          if (okBtn) okBtn.click();
+        }
+      });
     });
 
     panel.querySelector('#sfb-confirm-cancel').onclick = (e) => {
@@ -4021,6 +4050,11 @@
         status.style.cursor = 'grab';
         status.style.transition = 'opacity 0.2s, text-shadow 0.2s, transform 0.2s, left 0.3s ease, right 0.3s ease, top 0.3s ease, color 0.2s';
 
+        if (e.type === 'touchcancel') {
+          applyBubbleStatePosition(status);
+          return;
+        }
+
         if (isDragging) {
           const rect = status.getBoundingClientRect();
           const centerX = rect.left + rect.width / 2;
@@ -5447,6 +5481,45 @@
     const fail = () => ({ config: null, errors: [t('selectorJsonError')] });
     let s = String(text == null ? '' : text).trim();
     if (!s) return fail();
+    if (s.charCodeAt(0) === 123 && !/^const\s+SELECTORS\s*=/i.test(s)) {
+      try {
+        const parsedJson = JSON.parse(s);
+        if (parsedJson && typeof parsedJson === 'object' && !Array.isArray(parsedJson)) {
+          const cfg = {};
+          for (const k of Object.keys(parsedJson)) {
+            if (k === 'other' || k === '__proto__') continue;
+            const def = parsedJson[k];
+            if (def && typeof def === 'object' && !Array.isArray(def)) {
+              const cleanDef = {};
+              for (const field of Object.keys(def)) {
+                if (field === '__proto__') continue;
+                let val = def[field];
+                if (field === 'match') {
+                  if (typeof val === 'string') {
+                    const m = val.match(/^\/(.*)\/([a-z]*)$/i);
+                    if (m) {
+                      if (m[2] && getInvalidRegexFlags(m[2])) return { config: null, errors: [t('invalidRegexFlags', { flags: m[2] })] };
+                      cleanDef[field] = m[2] ? { source: m[1], flags: m[2].toLowerCase() } : m[1];
+                    } else {
+                      cleanDef[field] = val;
+                    }
+                  } else if (val && typeof val === 'object' && typeof val.source === 'string') {
+                    if (val.flags && getInvalidRegexFlags(val.flags)) return { config: null, errors: [t('invalidRegexFlags', { flags: val.flags })] };
+                    cleanDef[field] = val.flags ? { source: val.source, flags: String(val.flags).toLowerCase() } : val.source;
+                  } else {
+                    cleanDef[field] = val;
+                  }
+                } else {
+                  cleanDef[field] = val;
+                }
+              }
+              cfg[k] = cleanDef;
+            }
+          }
+          return { config: cfg, errors: [] };
+        }
+      } catch (eJson) {}
+    }
     s = s.replace(/^const\s+SELECTORS\s*=\s*/i, '').replace(/;\s*$/, '').trim();
     if (s.startsWith('{') && s.endsWith('}')) s = s.slice(1, -1);
     const n = s.length;
@@ -5464,6 +5537,16 @@
           if (nx === 'n') { val += '\n'; j += 2; continue; }
           if (nx === 'r') { val += '\r'; j += 2; continue; }
           if (nx === 't') { val += '\t'; j += 2; continue; }
+          if (nx === 'u' && /^[0-9a-fA-F]{4}/.test(s.slice(j + 2, j + 6))) {
+            val += String.fromCharCode(parseInt(s.slice(j + 2, j + 6), 16));
+            j += 6;
+            continue;
+          }
+          if (nx === 'x' && /^[0-9a-fA-F]{2}/.test(s.slice(j + 2, j + 4))) {
+            val += String.fromCharCode(parseInt(s.slice(j + 2, j + 4), 16));
+            j += 4;
+            continue;
+          }
           val += ch + (nx || ''); j += 2; continue;
         }
         if (ch === quote) { i = j + 1; return val; }
@@ -5548,7 +5631,7 @@
           i += 5;
         } else return fail();
       }
-      if (key === 'other') continue;
+      if (key === 'other' || key === '__proto__') continue;
       config[key] = def;
     }
     return { config, errors: [] };
@@ -6016,7 +6099,16 @@
   }
 
   function selectorsEqual(a, b) {
-    return JSON.stringify(a) === JSON.stringify(b);
+    const canon = (v) => {
+      if (Array.isArray(v)) return v.map(canon);
+      if (v && typeof v === 'object') {
+        const out = {};
+        for (const k of Object.keys(v).sort()) out[k] = canon(v[k]);
+        return out;
+      }
+      return v;
+    };
+    return JSON.stringify(canon(a)) === JSON.stringify(canon(b));
   }
 
   function mergeSelectors3Way(baseSelectors, localSelectors, cloudSelectors) {
@@ -6366,7 +6458,7 @@
 
       if (/^-\s+/.test(s)) {
         let rawItem = s.replace(/^-\s+/, '').trim();
-        if (/^[a-zA-Z0-9_]+\s*:(?!\/\/)/.test(rawItem)) {
+        if (/^[a-zA-Z0-9_]+\s*:(?!\/\/)/.test(rawItem) && !looksLikeCondExpr(rawItem)) {
           continue;
         }
         try {
@@ -6410,6 +6502,7 @@
   function parseRulesetContent(content) {
     let lines = String(content || '').replace(/^\uFEFF/, '').split('\n');
     let meta = {};
+    let isYaml = false;
     if (lines.length > 0 && lines[0].trim() === '---') {
       const endIndex = lines.findIndex((l, i) => i > 0 && l.trim() === '---');
       if (endIndex !== -1) {
@@ -6421,12 +6514,24 @@
           meta.name = quoted ? raw.slice(1, -1) : raw;
         }
         lines = lines.slice(endIndex + 1);
+      } else {
+        isYaml = true;
       }
     }
-    const yaml = extractYamlRuleItems(lines);
-    if (yaml) {
-      if (meta.name === undefined && yaml.name) meta.name = yaml.name;
-      return { lines: yaml.items, meta };
+    if (!isYaml) {
+      for (const line of lines) {
+        const s = line.trim();
+        if (!s || s.startsWith('#')) continue;
+        isYaml = /^(?:name|rules|blacklist|whitelist|matches|title|url)\s*:/i.test(s);
+        break;
+      }
+    }
+    if (isYaml) {
+      const yaml = extractYamlRuleItems(lines);
+      if (yaml) {
+        if (meta.name === undefined && yaml.name) meta.name = yaml.name;
+        return { lines: yaml.items, meta };
+      }
     }
     return { lines, meta };
   }
@@ -6435,7 +6540,7 @@ function collectSubscriptionRules(lines) {
   const validRules = [];
   for (let line of lines) {
     if (line.length === 0) continue;
-    if (/^!\s*(?:site|title|url|description|version|expires|homepage)\s*[:=]/i.test(line)) continue;
+    if (/^!\s*(?:[A-Z][a-zA-Z0-9_-]*)\s*[:=]/.test(line) || /^!\s*(?:site|title|url|description|version|expires|homepage)\s*[:=]/i.test(line)) continue;
     if (line.startsWith('!') && !looksLikeCondExpr(line)) continue;
     if (line.startsWith('[') && line.endsWith(']')) continue;
     if (line.startsWith('@@')) continue;
@@ -6756,6 +6861,70 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     return { url, username, password, filename: values.filename.trim() || 'rules.txt' };
   }
 
+  function webdavRandomBytes(len) {
+    const bytes = new Uint8Array(len);
+    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+      crypto.getRandomValues(bytes);
+    } else {
+      for (let i = 0; i < len; i++) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    return bytes;
+  }
+
+  function webdavBytesToB64(bytes) {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  }
+
+  function webdavB64ToBytes(b64) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  function webdavXorBytes(data, key) {
+    const out = new Uint8Array(data.length);
+    for (let i = 0; i < data.length; i++) out[i] = data[i] ^ key[i % key.length];
+    return out;
+  }
+
+  function obfuscateWebDAVPassword(plain) {
+    const text = String(plain || '');
+    if (!text) return '';
+    try {
+      const key = webdavRandomBytes(32);
+      const data = new TextEncoder().encode(text);
+      return 'serhx1:' + webdavBytesToB64(key) + ':' + webdavBytesToB64(webdavXorBytes(data, key));
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function deobfuscateWebDAVPassword(value) {
+    const text = String(value || '');
+    if (text.indexOf('serhx1:') !== 0) return text;
+    try {
+      const parts = text.substring('serhx1:'.length).split(':');
+      if (parts.length !== 2 || !parts[0] || !parts[1]) return '';
+      const key = webdavB64ToBytes(parts[0]);
+      return new TextDecoder().decode(webdavXorBytes(webdavB64ToBytes(parts[1]), key));
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function loadWebDAVConfig() {
+    const saved = GM_getValue(WEBDAV_KEY);
+    if (!saved || typeof saved !== 'object') return saved || {};
+    let password = saved.password;
+    if (password) {
+      try { password = deobfuscateWebDAVPassword(password); } catch (e) { password = ''; }
+    }
+    return { ...saved, password };
+  }
+
   function showWebDAVPanel() {
     hideStatsPanel();
     const existing = document.getElementById('serh-webdav-panel');
@@ -6767,12 +6936,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       return;
     }
 
-    const webdavConfig = GM_getValue(WEBDAV_KEY, {
-      url: '',
-      username: '',
-      password: '',
-      filename: 'rules.txt'
-    });
+    const webdavConfig = loadWebDAVConfig();
 
     const panel = createPanel('serh-webdav-panel', '320px', '20px');
 
@@ -6839,7 +7003,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
 
     function updateWebDAVPasswordState() {
-      const saved = GM_getValue(WEBDAV_KEY, {}) || {};
+      const saved = loadWebDAVConfig();
       passwordInput.placeholder = hasMatchingWebDAVCredentials(saved, urlInput.value, usernameInput.value)
         ? t('webdavPasswordSaved') : '';
       togglePasswordBtn.style.display = passwordInput.value ? 'flex' : 'none';
@@ -6850,7 +7014,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
 
     function saveSuccessfulWebDAVConfig(config) {
-      GM_setValue(WEBDAV_KEY, config);
+      const toStore = { ...config };
+      if (toStore.password) toStore.password = obfuscateWebDAVPassword(toStore.password);
+      GM_setValue(WEBDAV_KEY, toStore);
       passwordInput.value = '';
       updateWebDAVPasswordState();
     }
@@ -6871,7 +7037,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         showToast(t('webdavHttpsRequired'), 'error');
         return null;
       }
-      const config = resolveWebDAVPanelConfig(GM_getValue(WEBDAV_KEY, {}) || {}, {
+      const config = resolveWebDAVPanelConfig(loadWebDAVConfig(), {
         url,
         username: usernameInput.value,
         password: passwordInput.value,
@@ -6923,7 +7089,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
             remoteConfig = parsed.config;
           }
           const serverTime = parseHttpDateHeader(resp.responseHeaders);
-          const trustedNow = serverTime > 0 ? serverTime : await getTrustedNow();
+          const netOffset = await getNetworkTimeOffset();
+          const trustedNow = netOffset !== null ? Date.now() + netOffset : (serverTime > 0 ? serverTime : Date.now());
           const validRemoteTimes = extractValidCloudTimes(remoteConfig, trustedNow);
           const remoteSyncedAt = validRemoteTimes.length > 0 ? Math.max(...validRemoteTimes) : 0;
           const uploadedTime = Math.max(remoteSyncedAt + 1000, trustedNow);
@@ -7226,7 +7393,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         }
       }
       const selectorsChanged = !!mergedSelectors && !selectorsEqual(mergedSelectors, cloudSelectors);
-      const contentChanged = mergedContent !== cloudContent;
+      const contentChanged = mergedRules.slice().sort().join('\n') !== cloudRules.slice().sort().join('\n');
       const localNewer = localTime > cloudTime;
       const subscriptionSignature = subs => JSON.stringify((Array.isArray(subs) ? subs : [])
         .filter(s => s && s.url)
@@ -7305,7 +7472,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   let _webdavSyncDelayedTimer = null;
   function triggerWebDAVSyncDelayed(delayMs = 5000) {
     if (!GM_getValue(WEBDAV_AUTO_SYNC_KEY, false)) return;
-    const config = GM_getValue(WEBDAV_KEY);
+    const config = loadWebDAVConfig();
     if (!config || !config.url || !isHttpsUrl(config.url)) return;
 
     if (_webdavSyncDelayedTimer) clearTimeout(_webdavSyncDelayedTimer);
@@ -7323,7 +7490,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   async function checkAutoWebDAV() {
     if (!GM_getValue(WEBDAV_AUTO_SYNC_KEY, false)) return;
-    const config = GM_getValue(WEBDAV_KEY);
+    const config = loadWebDAVConfig();
     if (!config || !config.url) return;
     if (!isHttpsUrl(config.url)) return;
     const now = await getTrustedNow();
