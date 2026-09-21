@@ -461,6 +461,8 @@ rules:
 - regular.com
 `;
   const parsed = new Function(`
+    ${extractFn(src, 'isCondExprCore')}
+    ${extractFn(src, 'looksLikeCondExpr')}
     ${extractFn(src, 'extractYamlRuleItems')}
     ${extractFn(src, 'parseRulesetContent')}
     return parseRulesetContent;
@@ -791,7 +793,7 @@ rules:
   assert('同步-095: 正常更新保留禁用状态', subs[0].enabled === false);
 }
 
-// WebDAV 保存密码不得进入 DOM，复用必须同时匹配地址与用户名。
+// WebDAV 保存密码不得进入 DOM，复用必须同时匹配地址与用户名，存储须混淆。
 {
   const saved = { url: 'https://dav.example/a/', username: 'alice', password: 'secret', filename: 'rules.txt' };
   const api = new Function(`
@@ -814,10 +816,17 @@ rules:
   const ui = new Function('passwordInput', 'togglePasswordBtn', 'urlInput', 'usernameInput', 'GM_getValue', 'GM_setValue', `
     const WEBDAV_KEY = 'webdav';
     const t = k => k === 'webdavPasswordSaved' ? '已保存密码，输入以更换' : k;
+    ${extractFn(src, 'webdavRandomBytes')}
+    ${extractFn(src, 'webdavBytesToB64')}
+    ${extractFn(src, 'webdavB64ToBytes')}
+    ${extractFn(src, 'webdavXorBytes')}
+    ${extractFn(src, 'obfuscateWebDAVPassword')}
+    ${extractFn(src, 'deobfuscateWebDAVPassword')}
+    ${extractFn(src, 'loadWebDAVConfig')}
     ${extractFn(src, 'hasMatchingWebDAVCredentials')}
     ${extractFn(src, 'updateWebDAVPasswordState')}
     ${extractFn(src, 'saveSuccessfulWebDAVConfig')}
-    return { update: updateWebDAVPasswordState, save: saveSuccessfulWebDAVConfig };
+    return { update: updateWebDAVPasswordState, save: saveSuccessfulWebDAVConfig, load: loadWebDAVConfig, obf: obfuscateWebDAVPassword, deobf: deobfuscateWebDAVPassword };
   `)(passwordInput, togglePasswordBtn, urlInput, usernameInput, () => stored, (key, value) => { stored = value; });
   ui.update();
   assert('同步-102: 已保存密码仅显示占位提示', passwordInput.value === '' && passwordInput.placeholder === '已保存密码，输入以更换');
@@ -827,11 +836,22 @@ rules:
   assert('同步-104: 输入后显示显隐按钮', togglePasswordBtn.style.display === 'flex');
   passwordInput.type = 'text';
   ui.save({ ...saved, password: 'replacement' });
-  assert('同步-105: 成功保存并清空输入', stored.password === 'replacement' && passwordInput.value === '');
+  assert('同步-105: 成功保存并清空输入', stored.password !== 'replacement' && passwordInput.value === '');
+  assert('同步-108: 密码以混淆形式存储', typeof stored.password === 'string' && stored.password.indexOf('serhx1:') === 0);
+  assert('同步-109: 混淆值可还原为明文', ui.deobf(stored.password) === 'replacement');
+  assert('同步-110: 读取配置自动还原密码', ui.load().password === 'replacement');
   assert('同步-106: 保存后重置显隐状态', passwordInput.type === 'password' && togglePasswordBtn.style.display === 'none');
   usernameInput.value = 'bob';
   ui.update();
   assert('同步-107: 切换账号移除已保存提示', passwordInput.placeholder === '');
+  const firstObf = stored.password;
+  ui.save({ ...saved, password: 'replacement' });
+  assert('同步-111: 随机密钥每次混淆结果不同', stored.password !== firstObf && ui.deobf(stored.password) === 'replacement');
+  stored.password = 'legacy-plain';
+  assert('同步-112: 兼容未混淆的旧明文', ui.load().password === 'legacy-plain');
+  assert('同步-113: 空密码混淆为空', ui.obf('') === '' && ui.deobf('') === '');
+  const unicode = ui.obf('密碼pass🔐');
+  assert('同步-114: 非ASCII密码往返一致', ui.deobf(unicode) === '密碼pass🔐');
 }
 
 // 白名单/高亮前缀变体与同主体黑名单规则互不冲突

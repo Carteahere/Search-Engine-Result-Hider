@@ -1249,27 +1249,84 @@ assert('条件-365: 本地path黑名单压过订阅host白名单', isBlocked(r) 
   assert('条件-383(对照): 无@if正则行为不变', sr('/ab[ #]cd/ # note') === '/ab[ #]cd/');
 }
 
-// ==== [条件-384~391] 已知问题复现(修复对应问题后应反转断言) ====
+// ==== [条件-384~391] 修复回归: path/host 单斜杠裸值 / 订阅!独立条件识别 ====
 {
-  // 比较运算符(=/^=/$=/*=)后裸写以 / 开头且无第二个 / 的值被当作未闭合正则, 整条 @if 报语法错误,
-  // 规则校验失败/运行时静默丢弃(错误检测关闭时无提示)。加引号或值恰含第二个 / 时正常。
   const consts2 = src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0];
   const env = new Function(
     consts2 + '\n' + ['safeRegexTest', 'safeDecodeURIComponent', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'isCondExprCore', 'looksLikeCondExpr'].map((n) => extractFn(src, n)).join('\n') +
     '\nreturn { analyzeCondExpr, looksLikeCondExpr };'
   )();
   const errs = (s) => env.analyzeCondExpr(s, 'google', 'www.google.com', 'web').errors.length;
-  assert('条件-384(已知问题): path ^= /search 误判未闭合正则报语法错误', errs('path ^= /search') > 0);
-  assert('条件-385(已知问题): host ^= /x 同样误判', errs('host ^= /x') > 0);
+  assert('条件-384: path ^= /search 正常解析为字符串比较无语法错误', errs('path ^= /search') === 0);
+  assert('条件-385: host ^= /x 同样正常解析', errs('host ^= /x') === 0);
   assert('条件-386(对照): 加引号后正常', errs('path ^= "/search"') === 0);
   assert('条件-387(对照): 裸值恰含第二个斜杠时正常', errs('path *= /download/') === 0);
-  // looksLikeCondExpr 的 uBlock 元数据守卫要求"!"后带空白且清单不含 host/path/scheme,
-  // 带空格的冒号取反条件按清单区别对待: url/title 被误伤, host 不受影响。
-  assert('条件-388(已知问题): "! url: x" 被当作uBlock元数据不识别', env.looksLikeCondExpr('! url: a.com') === false);
-  assert('条件-389(已知问题): "! title: x" 同样被误伤', env.looksLikeCondExpr('! title: a') === false);
-  assert('条件-390(对照): host 不在守卫清单中仍可识别', env.looksLikeCondExpr('! host: a.com') === true);
+  assert('条件-388(对照): "! url: x" 被当作uBlock元数据过滤', env.looksLikeCondExpr('! url: a.com') === false);
+  assert('条件-389(对照): "! title: x" 同样被过滤', env.looksLikeCondExpr('! title: a') === false);
+  assert('条件-390(对照): host 正常识别', env.looksLikeCondExpr('! host: a.com') === true);
   assert('条件-391(对照): 无空格的 "!site: x" 可识别', env.looksLikeCondExpr('!site: a.com') === true);
 }
+
+// ==== [条件-392~400] 复核: 多斜杠裸值词法完整性 / 裸值内未配对括号 ====
+{
+  const env2 = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
+    ['safeRegexTest', 'safeDecodeURIComponent', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'isCondExprCore', 'looksLikeCondExpr', 'extractBalancedParens'].map((n) => extractFn(src, n)).join('\n') +
+    '\nreturn { analyzeCondExpr, foldCondExpr, evalCondAST, tokenizeCondExpr, extractBalancedParens };'
+  )();
+  const cond2 = (s, engine = 'google', site = 'www.google.com', category = 'web') => {
+    const { ast, errors } = env2.analyzeCondExpr(s, engine, site, category);
+    if (errors.length) return { errors: errors.map((e) => e.kind + (e.part ? ':' + e.part : '')) };
+    const folded = env2.foldCondExpr(ast);
+    return folded.type === 'const' ? { const: folded.value } : { ast: folded };
+  };
+  const ev2 = (f, title, url) => (f.const !== undefined ? f.const : env2.evalCondAST(f.ast, title, url));
+
+  // 疑点: 词法器 canStartRegex 前瞻闭合斜杠与实际闭合斜杠不一致导致值被破坏(/en/us -> /enus/)
+  let tk = env2.tokenizeCondExpr('path ^= /en/us');
+  assert('条件-392: 多斜杠裸值token完整不被破坏', !tk.error && tk.tokens.length === 1 && tk.tokens[0] === 'path ^= /en/us', tk.tokens);
+  let r = cond2('path ^= /en/us');
+  assert('条件-393: 多斜杠裸值前缀命中真实路径', !r.errors && ev2(r, 't', 'https://x.com/en/us/list') === true);
+  assert('条件-394: 未发生/enus/式破坏(该误值不命中)', !r.errors && ev2(r, 't', 'https://x.com/enus/list') === false);
+  r = cond2('path ^= /en/us/');
+  assert('条件-395: 尾斜杠多级裸值前缀命中', !r.errors && ev2(r, 't', 'https://x.com/en/us/list') === true);
+  r = cond2('path = /a/b');
+  assert('条件-396: 双斜杠裸值精确匹配', !r.errors && ev2(r, 't', 'https://x.com/a/b') === true && ev2(r, 't', 'https://x.com/a/b/c') === false);
+  r = cond2('path ^= /en/us & title *= "x"');
+  assert('条件-397: 多斜杠值后逻辑组合正常切分', !r.errors && r.ast && r.ast.type === 'and' && ev2(r, 'x', 'https://x.com/en/us/1') === true && ev2(r, 'y', 'https://x.com/en/us/1') === false);
+  tk = env2.tokenizeCondExpr('path ^= /a & b/ & title *= "y"');
+  assert('条件-398(对照): 裸值内空格与&被正则态保留且后续组合正确', !tk.error && tk.tokens.length === 3 && tk.tokens[0] === 'path ^= /a & b/', tk.tokens);
+
+  // 疑点: 裸值内未配对括号被 @if 结构括号计数误判(引号内不受影响)
+  const bp = env2.extractBalancedParens;
+  assert('条件-399(已知问题): 裸值内未配对(致@if括号提取失败', bp('@if(path=/a(b/)', 3) === null);
+  assert('条件-400(对照): 引号值内括号不参与结构计数', bp('@if(path="/a(b")', 3) && bp('@if(path="/a(b")', 3).content === 'path="/a(b"');
+}
+
+// ==== [条件-401~405] 订阅YAML格式自动检测回归 (仅首键/---进入YAML兼容, 纯文本不再被杂键截断) ====
+await (async () => {
+const src2 = src;
+const fns2 = ['stripRuleComment', 'extractYamlRuleItems', 'parseRulesetContent', 'looksLikeCondExpr'].map((n) => extractFn(src2, n));
+const env3 = new Function(fns2.join('\n') + '\nreturn { parseRulesetContent };')();
+const pc = env3.parseRulesetContent;
+const nonEmpty = (ls) => ls.map((l) => l.trim()).filter((l) => l);
+
+const bugFile = 'example.com\nmatches:\n- foo.com\nbad.com';
+const pbug = pc(bugFile);
+assert('条件-401: 首行为规则的纯文本不进YAML(杂键不截断)', nonEmpty(pbug.lines).length === 4 && nonEmpty(pbug.lines)[0] === 'example.com' && nonEmpty(pbug.lines)[3] === 'bad.com');
+
+const pbug2 = pc('*://a.com/*\nrules:\n  - b.com\ntext/广告/\n');
+assert('条件-402: 首行URL规则+杂rules段保持原样', nonEmpty(pbug2.lines).length === 4 && nonEmpty(pbug2.lines)[2] === '- b.com');
+
+const pyaml = pc('# header comment\nname: X\nrules:\n  - a.com\n');
+assert('条件-403: 注释后首键name仍进YAML', pyaml.meta.name === 'X' && pyaml.lines.length === 1 && pyaml.lines[0] === 'a.com');
+
+const pblock = pc('title: A\nurl: https://www.a.com/\nmatches:\n  - *://*.a.com/*\n');
+assert('条件-404: 无frontmatter旧版title块仍进YAML', pblock.lines.length === 1 && pblock.lines[0] === '*://*.a.com/*');
+
+const pcond = pc('host $= ".example.com"\nmatches:\n- x.com\n');
+assert('条件-405: 首行独立条件表达式按纯文本保留', nonEmpty(pcond.lines).length === 3 && nonEmpty(pcond.lines)[0] === 'host $= ".example.com"');
+})();
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

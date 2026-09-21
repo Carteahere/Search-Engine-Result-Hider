@@ -929,10 +929,8 @@ function createTeardownEnv() {
   }
 }
 
-// ---- KI: 已知问题固化(修复后应更新断言) ----
-// map_resultExtraElements 为强引用 Map, 引擎直接移除已屏蔽结果节点时无清理路径,
-// 条目(整棵结果子树)滞留至下次 forceReprocessAll/teardown, 内存随会话时长线性增长
-check('选择器-162(已知问题): map_resultExtraElements 为强引用 Map', /const map_resultExtraElements = new Map\(\)/.test(src));
+// ---- KI: 已知问题修复验证 ----
+check('选择器-162: map_resultExtraElements 为 WeakMap', /const map_resultExtraElements = new WeakMap\(\)/.test(src));
 
 // ---- scheduleResultRetry: 处理异常后的有限次重试 ----
 {
@@ -1436,7 +1434,7 @@ await (async () => {
   check('选择器-213: 主摘要选择器路径不受影响', threw === false && out === 'primary');
 })();
 
-// ==== [选择器-214~215] 已知问题复现: 记录当前缺陷行为, 修复对应问题后应反转该断言 ====
+// ==== [选择器-214~215] 修复回归: JSON 自动检测与 \uXXXX 转义解码 / __proto__ 键处理 ====
 await (async () => {
   const parseSelectorText = new Function(
     "const SUPPORTED_REGEX_FLAGS = 'imsu';\n" +
@@ -1444,12 +1442,12 @@ await (async () => {
     extractFn(src, 'getInvalidRegexFlags') + '\n' + extractFn(src, 'parseSelectorText') +
     '\nreturn parseSelectorText;'
   )();
-  // JSON 风格 \uXXXX / \/ 转义未解码(.json 导入的合法转义串原样保留, 后续CSS校验误报非法)
+  // JSON 风格 \uXXXX 转义正常解码
   const R13 = parseSelectorText('{"e13":{"match":"a","containers":"div\\u002Eresult"}}');
-  check('选择器-214(已知问题): JSON \\uXXXX 转义未解码(containers 含字面反斜杠u序列)', !!R13.config && R13.config.e13.containers !== 'div.result' && R13.config.e13.containers.includes('\\u002E'));
-  // __proto__ 键赋值落入原型, 条目静默消失且无任何报错
+  check('选择器-214: JSON \\uXXXX 转义正常解码为字面字符', !!R13.config && R13.config.e13.containers === 'div.result');
+  // __proto__ 键安全跳过不污染原型
   const R14 = parseSelectorText('__proto__: { match: "a", containers: ".x" }');
-  check('选择器-215(已知问题): __proto__ 键静默丢失(解析成功但配置为空)', !R14.errors.length && !!R14.config && !Object.hasOwn(R14.config, '__proto__') && Object.keys(R14.config).length === 0);
+  check('选择器-215: __proto__ 键安全过滤且不污染对象', !R14.errors.length && !!R14.config && !Object.hasOwn(R14.config, '__proto__') && Object.keys(R14.config).length === 0);
 })();
 
 // ==== [选择器-216~220] 修复回归: 悬浮球拖拽 touchcancel / 文件读取失败通知 / bubble-number 前缀隔离 ====

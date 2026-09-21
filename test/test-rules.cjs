@@ -333,6 +333,9 @@ const yWl = api.parseRulesetContent('name: Mix\nblacklist:\n  - ads.com\nrules:\
 const yWlCollected = api.collectSubscriptionRules(yWl.lines.map((l) => l.trim()));
 assert('规则-104: YAML多段+whitelist加@', JSON.stringify(yWlCollected) === JSON.stringify(['ads.com', 'extra.com', '@good.com', '@*://ok.com/*']));
 assert('规则-105: 无引号中文@if可订阅', api.collectSubscriptionRules(['*://*.example.com/* @if(title *= 广告)']).length === 1);
+const yCondParsed = api.parseRulesetContent('name: Cond List\nrules:\n  - title: /广告/\n  - host: bad.com\n  - category: news\n  - !host $= ".spam.com"\n  - title *= "推广"\n');
+const yCondCollected = api.collectSubscriptionRules(yCondParsed.lines.map((l) => l.trim()));
+assert('规则-105-2: YAML无引号条件与独立取反规则均保留', JSON.stringify(yCondCollected) === JSON.stringify(['title: /广告/', 'host: bad.com', 'category: news', '!host $= ".spam.com"', 'title *= "推广"']));
 })();
 
 // ==== [规则-106~127] 规则来源标记 (来源: test-rule-source.cjs) ====
@@ -1022,7 +1025,7 @@ await (async () => {
     check('规则-212(已知问题): 嵌套量词正则 (a+)+$ 通过校验(热路径存在卡死风险)', analyzeRule('/(a+)+$/').valid === true);
   }
 
-  // 含 userinfo 的 URL 漏匹配(host 通配正则不识别 user@ 前缀)
+  // 含 userinfo 的 URL 正常匹配(host 通配正则识别 user@ 前缀)
   {
     const api = new Function(
       ['hostLabelToASCII', 'toASCIIHostname', 'escapeWildcardPart', 'wildcardToRegex', 'parsePrefixedRegexRule', 'ruleToRegex', 'compileRuleRegex', 'safeRegexTest']
@@ -1030,7 +1033,9 @@ await (async () => {
       '\nreturn { compileRuleRegex, safeRegexTest };'
     )();
     const match = (rule, url) => { const c = api.compileRuleRegex(rule); return api.safeRegexTest(c.regex, url); };
-    check('规则-213(已知问题): *://*.example.com/* 不匹配 https://user@example.com/', match('*://*.example.com/*', 'https://user@example.com/') === false);
+    check('规则-213: *://*.example.com/* 正常匹配 https://user@example.com/', match('*://*.example.com/*', 'https://user@example.com/') === true);
+    check('规则-213-2: *://user:pass@example.com/* 规则正常编译与匹配', match('*://user:pass@example.com/*', 'https://user:pass@example.com/page') === true);
+    check('规则-213-3: *://user:pass@example.com:8080/* 规则正常编译与匹配', match('*://user:pass@example.com:8080/*', 'https://user:pass@example.com:8080/page') === true);
   }
 
   // YAML 双引号项含非标准转义时单行错误毒化整份订阅
