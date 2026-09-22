@@ -54,11 +54,44 @@ const fns = [
   'evalCondAST',
   'isCondExprCore',
   'looksLikeCondExpr',
+  // validateRule依赖闭包 (parseRulesetContent YAML探测的"合法规则行"停扫判定)
+  'punycodeDecodeLabel',
+  'toUnicodeHostname',
+  'parsePrefixedRegexRule',
+  'validateUrlWildcard',
+  'ruleToRegex',
+  'escapeWildcardPart',
+  'splitHostAndPort',
+  'escapeHostPart',
+  'wildcardToRegex',
+  'matchWildcardDomainPattern',
+  'extractSimpleWhitelistDomain',
+  'matchSimpleDomain',
+  'compileRuleRegex',
+  'extractBalancedParens',
+  'findIfOccurrences',
+  'stripIfConditions',
+  'evaluateCondition',
+  'absorbStandaloneExpr',
+  'parseRuleWithConditions',
+  'validateCondition',
+  'analyzeRule',
+  'validateRule',
 ].map((n) => extractFn(src, n));
 
   const consts = src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0];
+  const langTexts = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
 const factory = new Function(
-  consts + '\n' + fns.join('\n') + `\nreturn { safeRegexTest, getInvalidRegexFlags, parseConditionPart, tokenizeCondExpr, parseCondExprTokens, analyzeCondExpr, foldCondExpr, evalDynamicLeaf, evalCondAST, stripRuleComment, parseRulesetContent, isCondExprCore, looksLikeCondExpr };`,
+  consts + '\n' + langTexts + '\n' + fns.join('\n') + `
+const window = { location: { hostname: 'www.google.com', pathname: '/search', search: '?q=x', href: 'https://www.google.com/search?q=x' } };
+function getSearchEngine() { return 'google'; }
+function getSearchCategory() { return 'web'; }
+function t(key, params = {}) { return key; }
+const currentConfig = { rules: [], debug: false };
+let compiledRules;
+const validationCache = new Map();
+const subdomainCache = new Map();
+` + `\nreturn { safeRegexTest, getInvalidRegexFlags, parseConditionPart, tokenizeCondExpr, parseCondExprTokens, analyzeCondExpr, foldCondExpr, evalDynamicLeaf, evalCondAST, stripRuleComment, parseRulesetContent, isCondExprCore, looksLikeCondExpr, validateRule };`,
 );
 const m = factory();
 
@@ -520,9 +553,9 @@ assert('条件-199: whitelist段导入并自动加@', pc13.meta.name === 'WL' &&
 const pc14 = m.parseRulesetContent('blacklist:\n  - a.com\nrules:\n  - b.com\n');
 assert('条件-200: 连续两个list键均提取', pc14.lines.length === 2 && pc14.lines[0] === 'a.com' && pc14.lines[1] === 'b.com');
 const pc15 = m.parseRulesetContent('---\nname: Block Sample\nhomepage: https://x\n---\ntitle: A\nurl: https://www.a.com/\nmatches:\n  - *://*.a.com/*\n\ntitle: B\nmatches:\n  - /re\\.com/\n');
-assert('条件-201: uBlacklist matches段提取', pc15.meta.name === 'Block Sample' && pc15.lines.length === 2 && pc15.lines[0] === '*://*.a.com/*' && pc15.lines[1] === '/re\\.com/');
+assert('条件-201: uBlacklist matches段丢弃(仅元数据返回)', pc15.meta.name === 'Block Sample' && pc15.lines.length === 0);
 const pc16 = m.parseRulesetContent('title: A\nmatches:\n  - *://*.b.com/*\n');
-assert('条件-202: matches段不残留垃圾行', pc16.lines.length === 1 && pc16.lines[0] === '*://*.b.com/*');
+assert('条件-202: matches段不残留垃圾行', pc16.lines.length === 0);
 
 r = condExpr('title *= "KW" i', 'google');
 assert('条件-203: title包含+i修饰', !r.errors && ev(r, 'contains kw', 'https://x/') === true && ev(r, 'nothing', 'https://x/') === false);
@@ -1303,11 +1336,23 @@ assert('条件-365: 本地path黑名单压过订阅host白名单', isBlocked(r) 
   assert('条件-400(对照): 引号值内括号不参与结构计数', bp('@if(path="/a(b")', 3) && bp('@if(path="/a(b")', 3).content === 'path="/a(b"');
 }
 
-// ==== [条件-401~405] 订阅YAML格式自动检测回归 (仅首键/---进入YAML兼容, 纯文本不再被杂键截断) ====
+// ==== [条件-401~405] 订阅YAML格式自动检测回归 (段键优先进入YAML; 首个合法规则行判定为纯文本并停止扫描; 纯文本不被杂键截断) ====
 await (async () => {
 const src2 = src;
-const fns2 = ['stripRuleComment', 'extractYamlRuleItems', 'parseRulesetContent', 'looksLikeCondExpr'].map((n) => extractFn(src2, n));
-const env3 = new Function(fns2.join('\n') + '\nreturn { parseRulesetContent };')();
+const fns2 = ['hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'splitHostAndPort', 'escapeHostPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'checkDynamicConditions', 'getSubdomainLevels', 'matchDomainEntryType', 'extractYamlRuleItems', 'parseRulesetContent', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule'].map((n) => extractFn(src2, n));
+const consts3 = src2.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0];
+const lang3 = src2.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
+const env3 = new Function(consts3 + '\n' + lang3 + '\n' + fns2.join('\n') + `
+const window = { location: { hostname: 'www.google.com' } };
+function getSearchEngine() { return 'google'; }
+function getSearchCategory() { return 'web'; }
+function t(key) { return key; }
+const currentConfig = { rules: [], debug: false };
+const validationCache = new Map();
+const subdomainCache = new Map();
+let compiledRules;
+return { parseRulesetContent };
+`)();
 const pc = env3.parseRulesetContent;
 const nonEmpty = (ls) => ls.map((l) => l.trim()).filter((l) => l);
 
@@ -1322,11 +1367,27 @@ const pyaml = pc('# header comment\nname: X\nrules:\n  - a.com\n');
 assert('条件-403: 注释后首键name仍进YAML', pyaml.meta.name === 'X' && pyaml.lines.length === 1 && pyaml.lines[0] === 'a.com');
 
 const pblock = pc('title: A\nurl: https://www.a.com/\nmatches:\n  - *://*.a.com/*\n');
-assert('条件-404: 无frontmatter旧版title块仍进YAML', pblock.lines.length === 1 && pblock.lines[0] === '*://*.a.com/*');
+assert('条件-404: 无frontmatter旧版title块进YAML但matches项不导入', pblock.lines.length === 0);
 
 const pcond = pc('host $= ".example.com"\nmatches:\n- x.com\n');
 assert('条件-405: 首行独立条件表达式按纯文本保留', nonEmpty(pcond.lines).length === 3 && nonEmpty(pcond.lines)[0] === 'host $= ".example.com"');
 })();
+
+// ==== [审查A] 已知问题留档: 小写"!字段:"元数据行被当作取反独立条件 (条件-390设计取舍的碰撞风险, 仅断言当前行为) ====
+{
+  const envA = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
+    ['hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions'].map((n) => extractFn(src, n)).join('\n') +
+    '\nconst window = { location: { hostname: "www.google.com" } };' +
+    '\nfunction getSearchEngine() { return "google"; }' +
+    '\nfunction getSearchCategory() { return "web"; }' +
+    '\nreturn { parseRuleWithConditions, evalCondAST };'
+  )();
+  const pa = envA.parseRuleWithConditions('! host: example.com');
+  assert('审查A-4(已知问题): 小写"! host:"元数据行解析为取反独立条件', pa.dynamicConditions.length === 1 && pa.staticPass === true);
+  assert('审查A-5(对照): 该取反条件对其他主机成立(若进入订阅将大面积误屏蔽)', envA.evalCondAST(pa.dynamicConditions[0], 't', 'https://evil.com/x') === true);
+  assert('审查A-6(对照): 条件内主机本身不命中', envA.evalCondAST(pa.dynamicConditions[0], 't', 'https://example.com/x') === false);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -335,7 +335,7 @@ assert('规则-104: YAML多段+whitelist加@', JSON.stringify(yWlCollected) === 
 assert('规则-105: 无引号中文@if可订阅', api.collectSubscriptionRules(['*://*.example.com/* @if(title *= 广告)']).length === 1);
 const yCondParsed = api.parseRulesetContent('name: Cond List\nrules:\n  - title: /广告/\n  - host: bad.com\n  - category: news\n  - !host $= ".spam.com"\n  - title *= "推广"\n');
 const yCondCollected = api.collectSubscriptionRules(yCondParsed.lines.map((l) => l.trim()));
-assert('规则-105-2: YAML无引号条件与独立取反规则均保留', JSON.stringify(yCondCollected) === JSON.stringify(['title: /广告/', 'host: bad.com', 'category: news', '!host $= ".spam.com"', 'title *= "推广"']));
+assert('规则-105-2: YAML映射形项丢弃、操作符条件保留', JSON.stringify(yCondCollected) === JSON.stringify(['!host $= ".spam.com"', 'title *= "推广"']));
 })();
 
 // ==== [规则-106~127] 规则来源标记 (来源: test-rule-source.cjs) ====
@@ -997,6 +997,8 @@ await (async () => {
   assert('规则-208: yahoo 双重编码解码', getCleanUrl(yahooDoubleEnc) === 'https://example.com/path?k=v');
   assert('规则-209: yahoo japan 星号与参数解包', getCleanUrl(yahooJpStar) === 'https://example.jp/page' && getCleanUrl(yahooJpParam) === 'https://store.yahoo.co.jp/item');
   assert('规则-210: yahoo query ru= 参数解包', getCleanUrl(yahooQueryRu) === 'https://example.org/wiki');
+  const yahooRdsig = { href: 'https://rdsig.yahoo.co.jp/RU=https%3A%2F%2Fexample.jp%2Fpage/RK=2' };
+  assert('规则-210b: yahoo japan rdsig RU= 解包', getCleanUrl(yahooRdsig) === 'https://example.jp/page');
   const customEngineLink = { href: 'https://scholar.google.com/scholar_url?url=https%3A%2F%2Fpapers.example.com%2Fx' };
   assert('规则-211: 不依赖引擎ID仍解包', getCleanUrl(customEngineLink) === 'https://papers.example.com/x');
 })();
@@ -1342,6 +1344,109 @@ await (async () => {
   assert('规则-291(对照): 无连字符星号解包不受影响', getCleanUrl(yahooStarPlain) === 'https://example.jp/page');
   const yahooDashDouble = { href: 'https://tw.search.yahoo.com/r/RK=2/*-https%3A%2F%2Fexample.com%2Fpath%3Fk%3Dv' };
   assert('规则-292: yahoo /*-https%3A 编码变体解包', getCleanUrl(yahooDashDouble) === 'https://example.com/path?k=v');
+  const yahooNested = { href: 'https://r.search.yahoo.com/_ylt=A/RV=1/RU=https%3A%2F%2Fr.search.yahoo.com%2FRV%3D2%2FRU%3Dhttps%253A%252F%252Fexample.com%252Fpage%2FRK%3D2/RK=2/RS=x' };
+  assert('规则-293: yahoo 套 yahoo 解到最终结果', getCleanUrl(yahooNested) === 'https://example.com/page');
+  const ddgGoogle = { href: 'https://duckduckgo.com/l/?uddg=' + encodeURIComponent('https://www.google.com/url?q=' + encodeURIComponent('https://example.com/page')) };
+  assert('规则-294: ddg 套 google /url 解到最终结果', getCleanUrl(ddgGoogle) === 'https://example.com/page');
+  const bingYahoo = { href: 'https://www.bing.com/ck/a?!&&u=a1' + Buffer.from('https://r.search.yahoo.com/_ylt=A/RU=https%3A%2F%2Fexample.com%2Fpage/RK=2/RS=x').toString('base64url') };
+  assert('规则-295: bing ck 套 yahoo RU= 解到最终结果', getCleanUrl(bingYahoo) === 'https://example.com/page');
+  const plain = { href: 'https://example.com/page?ru=https%3A%2F%2Fother.example%2Fx' };
+  assert('规则-296(对照): 非跳转域查询参数不解包', getCleanUrl(plain) === plain.href);
+}
+
+// ==== [修复A] 非ASCII路径通配规则命中百分号编码URL (修复后行为) ====
+{
+  const wcApi = new Function(
+    ['hostLabelToASCII', 'toASCIIHostname', 'escapeWildcardPart', 'wildcardToRegex', 'parsePrefixedRegexRule', 'ruleToRegex', 'compileRuleRegex', 'safeRegexTest'].map((n) => extractFn(src, n)).join('\n') +
+    '\nreturn { compileRuleRegex, safeRegexTest };'
+  )();
+  const wcm = (rule, url) => { const c = wcApi.compileRuleRegex(rule); return wcApi.safeRegexTest(c.regex, url); };
+  assert('修复A-1: 中文路径通配规则命中百分号编码URL', wcm('*://example.com/中文/*', 'https://example.com/%E4%B8%AD%E6%96%87/x') === true);
+  assert('修复A-2: 中文查询串通配规则命中百分号编码URL', wcm('*://example.com/*q=中文*', 'https://example.com/search?q=%E4%B8%AD%E6%96%87') === true);
+  assert('修复A-3: 中文主机通配仍命中punycode主机(ASCII路径不受影响)', wcm('*://*.例子.com/path/*', 'https://xn--fsqu00a.com/path/x') === true);
+  assert('修复A-4: 通配符与中文混合路径命中', wcm('*://example.com/中*/*', 'https://example.com/%E4%B8%AD%E6%96%87abc/x') === true);
+  assert('修复A-5(对照): 规则编译后为百分号编码形式, 直接对原样UnicodeURL不再命中(subject侧由resolveUrlDomain归一兜底)', wcm('*://example.com/中文/*', 'https://example.com/中文/x') === false);
+  assert('修复A-6(对照): 纯ASCII路径规则行为不变', wcm('*://example.com/path/*', 'https://example.com/path/x') === true && wcm('*://example.com/path/*', 'https://example.com/other/x') === false);
+  assert('修复A-7: title规则不受百分号编码影响', wcm('title/中文/', '中文标题') === true);
+  assert('修复A-8: text规则不受百分号编码影响', wcm('text/中文/', '摘要含中文内容') === true);
+}
+
+// ==== [修复A] resolveUrlDomain 对残留非ASCII的URL做百分号编码归一 ====
+{
+  const rudApi = new Function(
+    ['decodeRedirectTarget', 'decodeBingCkTarget', 'unwrapRedirectUrl', 'getCleanUrl', 'toASCIIUrl', 'resolveUrlDomain'].map((n) => extractFn(src, n)).join('\n') +
+    '\nconst toASCIIHostname = (h) => h;\nreturn { resolveUrlDomain };'
+  )();
+  const viaRedirect = rudApi.resolveUrlDomain({ href: 'https://www.google.com/url?q=https%3A%2F%2Fexample.com%2F%E4%B8%AD%E6%96%87%2Fx' });
+  assert('修复A-9: 重定向解包后URL路径归一为百分号编码', viaRedirect.url === 'https://example.com/%E4%B8%AD%E6%96%87/x' && viaRedirect.domain === 'example.com');
+  const nativeEncoded = rudApi.resolveUrlDomain({ href: 'https://example.com/%E4%B8%AD%E6%96%87/x' });
+  assert('修复A-10: 原生百分号编码href保持不变', nativeEncoded.url === 'https://example.com/%E4%B8%AD%E6%96%87/x');
+  const asciiUrl = rudApi.resolveUrlDomain({ href: 'https://example.com/path/x' });
+  assert('修复A-11: 纯ASCII URL不受归一化影响', asciiUrl.url === 'https://example.com/path/x');
+}
+
+// ==== [修复H1/M1/L3/L4] 订阅YAML: matches段丢弃 / 识别机制(description等元数据键开头、frontmatter前导空行、单行flow序列) / 映射形列表项丢弃 / 无空格冒号键形标量保留 ====
+{
+  const yamlFns = ['hostLabelToASCII', 'toASCIIHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'checkDynamicConditions', 'matchDomainEntryType', 'buildRuleIndex', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule', 'checkRuleMatchOptimized', 'extractYamlRuleItems', 'parseRulesetContent', 'collectSubscriptionRules', 'isElementRuleLine', 'isScriptRuleLine', 'filterValidRuleLines'].map((n) => extractFn(src, n));
+  const consts2 = src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0];
+  const lang2 = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
+  const yApi = new Function(consts2 + '\n' + lang2 + `
+let compiledRules;
+const validationCache = new Map();
+const subdomainCache = new Map();
+let currentEngine = 'google', currentSite = 'www.google.com', currentCategory = 'web';
+const window = { location: { get hostname() { return currentSite; } } };
+function getSearchEngine() { return currentEngine; }
+function getSearchCategory() { return currentCategory; }
+function t(key) { return key; }
+const currentConfig = { rules: [], debug: false };
+let subscriptions = [];
+function getSubscriptions() { return subscriptions; }
+function getAllSubscriptionRules() { const r = []; subscriptions.filter((s) => s.enabled).forEach((s) => { if (s.rules && Array.isArray(s.rules)) r.push(...s.rules); }); return r; }
+${yamlFns.join('\n')}
+return { buildRuleIndex, checkRuleMatchOptimized, parseRulesetContent, collectSubscriptionRules, setState: (rules, subs) => { currentConfig.rules = rules; subscriptions = subs; } };
+`)();
+
+  const collect = (content) => {
+    const parsed = yApi.parseRulesetContent(content);
+    return { meta: parsed.meta, rules: yApi.collectSubscriptionRules(parsed.lines.map((l) => l.trim())) };
+  };
+
+  const h1 = collect('name: Test\nmatches:\n  - https://www.google.com/search?*\n  - https://www.bing.com/search?*\nrules:\n  - example.com\n');
+  assert('修复H1-1: matches段整段丢弃、rules段保留', JSON.stringify(h1.rules) === JSON.stringify(['example.com']));
+  yApi.setState([], [{ url: 's1', enabled: true, name: 'S1', rules: h1.rules }]);
+  yApi.buildRuleIndex();
+  const h1b = yApi.checkRuleMatchOptimized('https://www.google.com/search?q=t', 'www.google.com', 'T', null, ['www.google.com']);
+  assert('修复H1-2: 搜索页URL不再被matches规则屏蔽', !(h1b && h1b.blocked));
+  const h1c = yApi.checkRuleMatchOptimized('https://example.com/x', 'example.com', 'T', null, ['example.com']);
+  assert('修复H1-3(对照): 正常规则仍生效', !!(h1c && h1c.blocked));
+  const h1d = collect('matches: [https://www.google.com/search?*]\nrules:\n  - flow.com\n');
+  assert('修复H1-4: matches flow序列同样丢弃', JSON.stringify(h1d.rules) === JSON.stringify(['flow.com']));
+  const h1e = collect('title: A\nmatches:\n  - *://*.b.com/*\n');
+  assert('修复H1-5: 仅matches段的文件导入为空', h1e.rules.length === 0);
+
+  const m1 = collect('description: Some list\nname: Some list\nrules:\n  - example.com\n');
+  assert('修复M1-1: description开头文件正常进YAML', JSON.stringify(m1.rules) === JSON.stringify(['example.com']) && m1.meta.name === 'Some list');
+  const m1b = collect('\n\n---\nname: My List\n---\nrules:\n  - a.com\n');
+  assert('修复M1-2: frontmatter前导空行容忍', m1b.meta.name === 'My List' && JSON.stringify(m1b.rules) === JSON.stringify(['a.com']));
+  const m1c = collect('homepage: https://x\nversion: 2\nrules:\n  - meta-first.com\n');
+  assert('修复M1-3: 任意元数据键开头均可识别', JSON.stringify(m1c.rules) === JSON.stringify(['meta-first.com']));
+  const m1d = collect('name: Flow\nrules: [a.com, b.com]\n');
+  assert('修复M1-4: 单行flow序列解析', JSON.stringify(m1d.rules) === JSON.stringify(['a.com', 'b.com']));
+  const m1e = yApi.parseRulesetContent("rules: ['x.com/a{2,3}', \"y.com\", z.com]");
+  assert('修复M1-5: flow引号项含逗号/花括号不被拆坏', JSON.stringify(m1e.lines) === JSON.stringify(['x.com/a{2,3}', 'y.com', 'z.com']));
+  const m1f = collect('whitelist: [keep.com, ok.com]\n');
+  assert('修复M1-6: flow whitelist自动加@', JSON.stringify(m1f.rules) === JSON.stringify(['@keep.com', '@ok.com']));
+
+  const l3 = collect('rules:\n  - localhost:8080/*\n  - user:pass@host/page\n');
+  assert('修复L3: 无空格冒号键形标量保留', JSON.stringify(l3.rules) === JSON.stringify(['localhost:8080/*', 'user:pass@host/page']));
+
+  const l4 = collect('blacklist:\n  - url: https://example.com\n  - real.com\n');
+  assert('修复L4-1: 映射形项不再导入为激活规则', JSON.stringify(l4.rules) === JSON.stringify(['real.com']));
+  yApi.setState([], [{ url: 's2', enabled: true, name: 'S2', rules: l4.rules }]);
+  yApi.buildRuleIndex();
+  const l4b = yApi.checkRuleMatchOptimized('https://example.com', 'example.com', 'T', null, ['example.com']);
+  assert('修复L4-2: 映射形项不产生实际屏蔽', !(l4b && l4b.blocked));
 }
 
 })();

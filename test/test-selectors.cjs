@@ -1492,6 +1492,144 @@ await (async () => {
   check('选择器-222: 纯包装外层链接仍被内层认领而丢弃', !keptY.includes(wOwn) && keptY.includes(wSub), keptY.length);
 }
 
+// ==== [审查B-1~12] 回归: 父容器隐藏/恢复状态机 + bing cite 回退 ====
+{
+  function matchesSel(el, sel) {
+    return String(sel).split(',').some((s) => {
+      s = s.trim(); let m;
+      if ((m = s.match(/^([a-zA-Z][\w-]*)\.([\w-]+)$/))) return el.tag === m[1] && el.cls === m[2];
+      if ((m = s.match(/^\.([\w-]+)$/))) return el.cls === m[1];
+      if ((m = s.match(/^\[([\w-]+)\]$/))) return el.attrs[m[1]] !== undefined;
+      if ((m = s.match(/^\[([\w-]+)="([^"]*)"\]$/))) return el.attrs[m[1]] === m[2];
+      return /^[a-zA-Z][\w-]*$/.test(s) && el.tag === s;
+    });
+  }
+  function makeTreeEl(tag, cls, parent) {
+    const el = {
+      tag, cls: cls || '', attrs: {}, style: { display: '', outline: '', outlineOffset: '' },
+      classes: new Set(), children: [], parentElement: parent || null,
+      setAttribute(k, v) { this.attrs[k] = String(v); },
+      getAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null; },
+      hasAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k); },
+      removeAttribute(k) { delete this.attrs[k]; },
+      matches(sel) { return matchesSel(this, sel); },
+      closest(sel) { let cur = this; while (cur) { if (matchesSel(cur, sel)) return cur; cur = cur.parentElement; } return null; },
+      walk() { const out = []; const rec = (n) => n.children.forEach((c) => { out.push(c); rec(c); }); rec(this); return out; },
+      querySelector(sel) { return this.querySelectorAll(sel)[0] || null; },
+      querySelectorAll(sel) { return this.walk().filter((e) => matchesSel(e, sel)); },
+    };
+    el.classList = { add: (c) => el.classes.add(c), remove: (c) => el.classes.delete(c), contains: (c) => el.classes.has(c) };
+    Object.defineProperty(el, 'dataset', { get() {
+      const ds = {};
+      for (const k of Object.keys(this.attrs)) {
+        const m = k.match(/^data-([a-z-]+)$/);
+        if (m) ds[m[1].replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = this.attrs[k];
+      }
+      return ds;
+    } });
+    if (parent) parent.children.push(el);
+    return el;
+  }
+  function makeParentEnv(showHidden) {
+    const root = makeTreeEl('body', '');
+    const fns = new Function('doc', `
+      let showHiddenResults = ${!!showHidden};
+      const _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap();
+      const map_resultExtraElements = new WeakMap();
+      function getResultExtraElements() { return []; }
+      ${extractFn(src, 'saveOriginalDisplay')}
+      ${extractFn(src, 'hideParentIfNoVisibleSiblings')}
+      ${extractFn(src, 'resetResultStyles')}
+      ${extractFn(src, 'restoreParentDisplay')}
+      ${extractFn(src, 'restoreAllHiddenParents')}
+      ${extractFn(src, 'reconcileHiddenParents')}
+      ${extractFn(src, 'clearMatchedData')}
+      ${extractFn(src, 'removeMatchedRuleLabel')}
+      ${extractFn(src, 'restoreResultExtraElements')}
+      const document = { querySelectorAll: (s) => doc.querySelectorAll(s) };
+      return { saveOriginalDisplay, hideParentIfNoVisibleSiblings, resetResultStyles, restoreParentDisplay, restoreAllHiddenParents, reconcileHiddenParents };
+    `)(root);
+    return { root, fns };
+  }
+  const blockEl = (fns, el) => { fns.saveOriginalDisplay(el); el.style.display = 'none'; el.setAttribute('data-is-blocked', 'true'); };
+
+  {
+    const { root, fns } = makeParentEnv(false);
+    const P = makeTreeEl('div', 'MjjYud', root);
+    const g1 = makeTreeEl('div', 'g', P);
+    const g2 = makeTreeEl('div', 'g', P);
+    blockEl(fns, g1);
+    fns.hideParentIfNoVisibleSiblings(P, P.querySelectorAll('div.g'), 'data-blocker-google-parent');
+    check('审查B-1: 部分子项屏蔽时父容器不隐藏', P.style.display === '' && !P.hasAttribute('data-blocker-google-parent'));
+    blockEl(fns, g2);
+    fns.hideParentIfNoVisibleSiblings(P, P.querySelectorAll('div.g'), 'data-blocker-google-parent');
+    check('审查B-2: 全部屏蔽后父隐藏且保存原display', P.style.display === 'none' && P.getAttribute('data-blocker-google-parent') === 'true' && P.getAttribute('data-serh-orig-display') === '');
+    fns.resetResultStyles(g1);
+    check('审查B-3: 解除其一后父保持隐藏(其余仍屏蔽)', P.style.display === 'none' && P.hasAttribute('data-blocker-google-parent') && g1.style.display === '' && g1.getAttribute('data-is-blocked') === null);
+    fns.reconcileHiddenParents();
+    check('审查B-4: reconcile恢复存在可见未屏蔽子项的父容器', P.style.display === '' && !P.hasAttribute('data-blocker-google-parent') && !P.hasAttribute('data-serh-orig-display'));
+  }
+  {
+    const { root, fns } = makeParentEnv(false);
+    const li = makeTreeEl('li', '', root);
+    li.style.display = 'block';
+    const o1 = makeTreeEl('div', 'Organic', li);
+    const o2 = makeTreeEl('div', 'Organic', li);
+    blockEl(fns, o1); blockEl(fns, o2);
+    fns.hideParentIfNoVisibleSiblings(li, li.children, 'data-blocker-yandex-parent');
+    check('审查B-5: yandex父隐藏并保存原display', li.style.display === 'none' && li.getAttribute('data-serh-orig-display') === 'block');
+    fns.resetResultStyles(o1);
+    check('审查B-6: reset后父保持隐藏(另一子项仍屏蔽隐藏)', li.style.display === 'none' && li.hasAttribute('data-blocker-yandex-parent'));
+    fns.resetResultStyles(o2);
+    check('审查B-7: 最后一个子项reset后父恢复原display', li.style.display === 'block' && !li.hasAttribute('data-blocker-yandex-parent') && !li.hasAttribute('data-serh-orig-display'));
+  }
+  {
+    const { root, fns } = makeParentEnv(true);
+    const P = makeTreeEl('div', 'MjjYud', root);
+    const g1 = makeTreeEl('div', 'g', P);
+    const g2 = makeTreeEl('div', 'g', P);
+    fns.saveOriginalDisplay(g1); g1.setAttribute('data-is-blocked', 'true');
+    fns.saveOriginalDisplay(g2); g2.setAttribute('data-is-blocked', 'true');
+    fns.hideParentIfNoVisibleSiblings(P, P.querySelectorAll('div.g'), 'data-blocker-google-parent');
+    check('审查B-8: 展开模式下父容器标记但display置空', P.style.display === '' && P.getAttribute('data-blocker-google-parent') === 'true');
+    fns.resetResultStyles(g1);
+    check('审查B-9: 展开模式解除任一子项父立即恢复', !P.hasAttribute('data-blocker-google-parent') && !P.hasAttribute('data-serh-orig-display'));
+  }
+  {
+    const sStart = src.indexOf('const SELECTORS = {');
+    const sOpen = src.indexOf('{', sStart);
+    const sClose = extractObjectLiteral(src, sOpen);
+    const selectorsObj = eval(`(${src.slice(sOpen, sClose + 1)})`);
+    const linkApi = new Function('SELECTORS', `
+      function toASCIIHostname(h) { return h; }
+      function toASCIIUrl(u) { return u; }
+      function getSelectors() { return SELECTORS; }
+      ${extractFn(src, 'decodeRedirectTarget')}
+      ${extractFn(src, 'decodeBingCkTarget')}
+      ${extractFn(src, 'unwrapRedirectUrl')}
+      ${extractFn(src, 'getResultLink')}
+      return { getResultLink };
+    `)(selectorsObj);
+    function anchorEl(href) { return { href }; }
+    function bingResult(href, citeText) {
+      return {
+        querySelector(sel) {
+          if (sel === '.b_attribution, .b_algoheader cite, cite') return citeText ? { textContent: citeText } : null;
+          return sel === 'h2 a[href]' ? anchorEl(href) : null;
+        },
+      };
+    }
+    const badCk = 'https://www.bing.com/ck/a?!&u=a1!!!!';
+    const l1 = linkApi.getResultLink(bingResult(badCk, 'www.example.com'), 'bing');
+    check('审查B-10: bing解码失败回退cite裸域', !!l1 && l1.href === 'https://www.example.com/', l1 && l1.href);
+    const l2 = linkApi.getResultLink(bingResult(badCk, 'www.bing.com'), 'bing');
+    check('审查B-11: cite为bing自身域名不回退', !!l2 && l2.href === badCk, l2 && l2.href);
+    const goodCk = 'https://www.bing.com/ck/a?!&u=a1' + Buffer.from('https://example.org/page').toString('base64');
+    const l3 = linkApi.getResultLink(bingResult(goodCk, 'https://nope.example'), 'bing');
+    check('审查B-12: 解码成功的bing跳转链接不触发cite回退', !!l3 && l3.href === goodCk, l3 && l3.href);
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 

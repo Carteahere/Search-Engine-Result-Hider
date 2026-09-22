@@ -125,7 +125,7 @@ function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], local
     function getSubscriptions() { return store.get('subs') || []; }
     function saveSubscriptions(subs) { store.set('subs', subs); }
     function checkAutoSubscription() {}
-    function getUserSelectors() { return {}; }
+    function getUserSelectors() { return GM_getValue(SELECTORS_KEY, {}) || {}; }
     function getSelectorStoreSignature() { return null; }
     function resetSelectorCache() {}
     function refreshEngineSite() {}
@@ -909,8 +909,8 @@ rules:
       const WEBDAV_SYNC_SELECTORS_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_SELECTORS_KEY)};
       const SELECTORS_KEY = ${JSON.stringify(KEYS.SELECTORS_KEY)};
       const LOCAL_LAST_MODIFIED_KEY = ${JSON.stringify(KEYS.LOCAL_LAST_MODIFIED_KEY)};
-      const WEBDAV_LAST_SYNC_KEY = ${JSON.stringify(KEYS.WEBDAV_LAST_SYNC_KEY)};
-      const WEBDAV_SYNC_SNAPSHOT_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_SNAPSHOT_KEY)};
+    const WEBDAV_LAST_SYNC_KEY = ${JSON.stringify(KEYS.WEBDAV_LAST_SYNC_KEY)};
+    const WEBDAV_SYNC_SNAPSHOT_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_SNAPSHOT_KEY)};
       const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
       const GM_setValue = (k, v) => { store.set(k, v); };
       async function gmRequest() {
@@ -1098,6 +1098,239 @@ await (async () => {
   await new Promise((r) => setTimeout(r, 20));
   assert('同步-143: 可信时间获取失败时保留本地时间写入且不抛未捕获异常', !threw && store.get(KEYS.LOCAL_LAST_MODIFIED_KEY) === 500);
 })();
+
+// ==== [审查D-1~15] 授时回退 / 选择器三方合并 / 同步头构造 / 订阅拉取容错 ====
+// 审查D-1: 授时端点全部失败时 getTrustedNow 回退本地时间且不抛错
+{
+  const api = new Function(`
+    ${netTimePrelude}
+    async function gmRequest() { throw new Error('network down'); }
+    ${extractFn(src, 'firstSuccess')}
+    ${extractFn(src, 'queryNetworkTimeEndpoint')}
+    ${extractFn(src, 'getNetworkTimeOffset')}
+    ${extractFn(src, 'getTrustedNow')}
+    return getTrustedNow;
+  `)();
+  const before = Date.now();
+  const v = await api();
+  assert('审查D-1: 授时全失败时回退本地时间不抛错', typeof v === 'number' && v >= before - 100 && v <= Date.now() + 100);
+}
+
+// 审查D-2/3: firstSuccess 首个成功值优先, 全部失败才拒绝
+{
+  const firstSuccess = new Function(`
+    ${extractFn(src, 'firstSuccess')}
+    return firstSuccess;
+  `)();
+  const v = await firstSuccess([
+    Promise.reject(new Error('a')),
+    new Promise((r) => setTimeout(() => r(12345), 10)),
+    Promise.reject(new Error('b')),
+  ]);
+  assert('审查D-2: firstSuccess 取首个成功值', v === 12345);
+  let rejected = false;
+  try { await firstSuccess([Promise.reject(new Error('a')), Promise.reject(new Error('b'))]); } catch (_) { rejected = true; }
+  assert('审查D-3: firstSuccess 全部失败时拒绝', rejected);
+}
+
+// 审查D-4~6: mergeSelectors3Way 三方合并(双方修改本地优先/双方独有保留/删除传播)
+{
+  const merge = new Function(`
+    ${extractFn(src, 'mergeSelectors3Way')}
+    return mergeSelectors3Way;
+  `)();
+  const base = { bing: { containers: '.old', titles: ['h2 a'] }, yahoo: { containers: '.y' } };
+  const local = { bing: { containers: '.new-local', titles: ['h2 a'] }, yahoo: { containers: '.y' }, localOnly: { containers: '.l' } };
+  const cloud = { bing: { containers: '.new-cloud', titles: ['h2 a'] }, yahoo: { containers: '.y' }, cloudOnly: { containers: '.c' } };
+  const r1 = merge(base, local, cloud);
+  assert('审查D-4: 双方都修改时本地优先', r1.bing.containers === '.new-local');
+  assert('审查D-5: 双方独有选择器都保留', !!r1.localOnly && !!r1.cloudOnly);
+  const r2 = merge(base, local, { bing: cloud.bing, cloudOnly: cloud.cloudOnly });
+  assert('审查D-6: 云端删除的选择器传播删除', !r2.yahoo);
+}
+
+// 审查D-17: 云端头没有选择器字段时不三方合并, 保留本地并上传
+{
+  const localSelectors = { bing: { containers: 'li.b_algo' } };
+  const cloud = { enabled: true, syncedAt: 500 };
+  const cloudText = '# ScriptConfig:' + JSON.stringify(cloud) + '\n*://same.example.com/*';
+  const env = makeSyncEnv({
+    cloudText,
+    localRules: ['*://same.example.com/*'],
+    localTime: 1000,
+    storedConfig: { rules: ['*://same.example.com/*'], enabled: true }
+  });
+  env.store.set(KEYS.WEBDAV_SYNC_SELECTORS_KEY, true);
+  env.store.set(KEYS.SELECTORS_KEY, localSelectors);
+  env.store.set(KEYS.WEBDAV_LAST_SYNC_SELECTORS_KEY, localSelectors);
+  env.store.set(KEYS.WEBDAV_SYNC_SNAPSHOT_KEY, ['*://same.example.com/*']);
+  env.setCurrent({ rules: ['*://same.example.com/*'], enabled: true });
+  await env.run(syncCfg);
+  const put = env.calls.find((c) => c.method === 'PUT');
+  assert('审查D-17: 缺选择器字段时不把本地选择器当成云端全删', JSON.stringify(env.store.get(KEYS.SELECTORS_KEY)) === JSON.stringify(localSelectors));
+  assert('审查D-18: 缺选择器字段时仍上传本地选择器', !!put && put.data.includes('# Selectors:') && put.data.includes('li.b_algo'));
+}
+
+// 审查D-7/8: selectorsEqual 与键序无关
+{
+  const eq = new Function(`
+    ${extractFn(src, 'selectorsEqual')}
+    return selectorsEqual;
+  `)();
+  assert('审查D-7: 键序不同视为相等', eq({ a: 1, b: { x: 1, y: 2 } }, { b: { y: 2, x: 1 }, a: 1 }));
+  assert('审查D-8: 内容不同不相等', !eq({ a: 1 }, { a: 2 }));
+}
+
+// 审查D-9~11: buildSyncPayload 排除本地态字段并携带订阅摘要与时间戳
+{
+  const store = new Map();
+  store.set(KEYS.CONFIG_KEY, { rules: ['*://r/*'], bubbleState: { top: '1' }, bubbleSize: 42, selectors: { bing: {} }, enabled: true, language: 'en' });
+  const build = new Function('store', `
+    const CONFIG_KEY = ${JSON.stringify(KEYS.CONFIG_KEY)};
+    const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
+    function getSubscriptions() { return [{ url: 'https://s/x', name: 'X', enabled: false, rules: ['r1'], lastUpdate: 9 }]; }
+    ${extractFn(src, 'buildSyncPayload')}
+    return buildSyncPayload;
+  `)(store);
+  const p = build(7777);
+  assert('审查D-9: 同步头排除规则与气泡本地态', p.rules === undefined && p.bubbleState === undefined && p.bubbleSize === undefined && p.selectors === undefined);
+  assert('审查D-10: 同步头保留设置并附订阅摘要(不含规则)', p.enabled === true && p.language === 'en' && Array.isArray(p.subscriptions) && p.subscriptions[0].url === 'https://s/x' && p.subscriptions[0].rules === undefined);
+  assert('审查D-11: syncedAt 采用传入时间', p.syncedAt === 7777);
+}
+
+// 审查D-12: getWebDAVRequest 文件名子路径按段编码且凭据为 Basic 头
+{
+  const getReq = new Function(`
+    ${extractFn(src, 'isHttpsUrl')}
+    ${extractFn(src, 'safeBase64Encode')}
+    function t(k) { return k; }
+    ${extractFn(src, 'getWebDAVRequest')}
+    return getWebDAVRequest;
+  `)();
+  const r = getReq({ url: 'https://dav.example.com/dav/', username: 'u', password: 'p', filename: 'sub dir/my rules.txt' });
+  assert('审查D-12: 子路径与文件名分别编码', r.fullUrl === 'https://dav.example.com/dav/sub%20dir/my%20rules.txt' && r.folderUrl === 'https://dav.example.com/dav/sub%20dir/');
+}
+
+// 审查D-13/14: 订阅拉取解析为空规则集时抛错且不覆盖既有规则
+{
+  let saved = null;
+  const subs = [{ url: 'https://sub/x', enabled: true, rules: ['old.example'], lastUpdate: 5 }];
+  const api = new Function('getSubscriptions', 'saveSubscriptions', 'gmRequest', `
+    const parseRulesetContent = (c) => ({ lines: String(c).split('\\n'), meta: {} });
+    const collectSubscriptionRules = () => [];
+    const isHtmlResponse = () => false;
+    const t = (k) => k;
+    ${extractFn(src, 'performSubscriptionForUrl')}
+    return performSubscriptionForUrl;
+  `)(
+    () => subs.map((s) => ({ ...s })),
+    (v) => { saved = v; },
+    async () => ({ responseText: '# 只有注释\n' })
+  );
+  let threw = false;
+  try { await api('https://sub/x', false); } catch (_) { threw = true; }
+  assert('审查D-13: 空规则集拉取按失败处理', threw);
+  assert('审查D-14: 失败时不覆盖既有订阅规则', saved === null && subs[0].rules[0] === 'old.example' && subs[0].lastUpdate === 5);
+}
+
+// 审查D-15: 三方快照下云端删除的订阅传播到本地, 本地规则保留且启用状态按云端仲裁
+{
+  let subs = [
+    { url: 'https://keep/x', enabled: true, rules: ['k1'], lastUpdate: 3, name: 'K' },
+    { url: 'https://cloud-deleted/x', enabled: true, rules: ['d1'], lastUpdate: 4 }
+  ];
+  const baseSubs = [
+    { url: 'https://keep/x', name: 'K', enabled: true },
+    { url: 'https://cloud-deleted/x', name: 'D', enabled: true }
+  ];
+  const cloudSubs = [{ url: 'https://keep/x', name: 'K', enabled: false }];
+  const api = new Function('getSubscriptions', 'saveSubscriptions', 'getSubscriptionSyncSnapshot', 'checkAutoSubscription', `
+    const SUBSCRIPTION_SYNC_SNAPSHOT_KEY = 'snap';
+    ${extractFn(src, 'applyCloudSubscriptions')}
+    return applyCloudSubscriptions;
+  `)(
+    () => subs.map((s) => ({ ...s })),
+    (v) => { subs = v; },
+    () => baseSubs,
+    () => {}
+  );
+  const out = api(cloudSubs, false);
+  assert('审查D-15: 云端删除的订阅传播到本地', Array.isArray(out) && !out.some((s) => s.url === 'https://cloud-deleted/x') && subs.length === 1);
+  assert('审查D-16: 本地规则保留且启用状态按云端仲裁', out[0].rules[0] === 'k1' && out[0].enabled === false);
+}
+
+// ==== [修复D] 订阅自动更新开关变更推进本地时间戳并触发防抖同步 ====
+{
+  const m = src.match(/autoUpdateSwitch\.addEventListener\('change'[\s\S]{0,300}?}\);/);
+  const handlerSrc = m ? m[0] : '';
+  assert('修复D-1: 开关变更使用persistConfig(true)', /persistConfig\(\s*true\s*\)/.test(handlerSrc));
+  assert('修复D-2: 开关变更不再使用persistConfig(false)', handlerSrc !== '' && !/persistConfig\(\s*false\s*\)/.test(handlerSrc));
+}
+
+// ==== [修复M3] 悬浮球持久化位置应用时按当前视口夹紧(窗口变矮/手机转屏后不再永久移出屏幕) ====
+{
+  const posFn = extractFn(src, 'applyBubbleStatePosition');
+  const sizeFn = extractFn(src, 'getBubbleSize');
+  const run = (bubbleState, innerHeight, offsetHeight) => {
+    const el = { offsetHeight, style: {} };
+    new Function('window', 'currentConfig', 'el',
+      sizeFn + '\n' + posFn + '\napplyBubbleStatePosition(el);\nreturn el.style;'
+    )({ innerHeight }, { bubbleState, bubbleSize: 30 }, el);
+    return el.style;
+  };
+  assert('修复M3-1: 视口变矮后top夹紧到innerHeight-h-5', run({ top: '2000px', left: '5px' }, 600, 30).top === '565px');
+  assert('修复M3-2: top过小夹紧到最小5px', run({ top: '3px', left: '5px' }, 600, 30).top === '5px');
+  assert('修复M3-3(对照): 视口内位置不改动', run({ top: '100px', left: '5px' }, 600, 30).top === '100px');
+  assert('修复M3-4: 极小视口夹紧到不小于0', run({ top: '1000px', left: '5px' }, 20, 30).top === '0px');
+  const st = run({ top: 'auto', left: 'auto', right: '5px' }, 600, 30);
+  assert('修复M3-5(对照): 非px的top与left/right/bottom/transform行为不变', st.top === 'auto' && st.right === '5px' && st.bottom === 'auto' && st.transform === 'none');
+  assert('修复M3-6(对照): 无bubbleState为空操作', !run(null, 600, 30).top);
+}
+
+// ==== [修复H1/M1/M2] 手动上传快照一致性 / 授时失败回退WebDAV Date头 / 保存合并保留注释行 ====
+// 修复H1: 上传锁外冻结content, PUT后快照必须取自该content而非实时数组, 否则窗口期内的本地编辑
+//         会因"快照含它但云端不含它"被下一轮三方合并判定为云端删除而回滚并传播
+{
+  const upStart = src.indexOf("getElementById('serh-webdav-upload')");
+  const upEnd = src.indexOf("getElementById('serh-webdav-auto-sync')");
+  const upSrc = upStart >= 0 && upEnd > upStart ? src.slice(upStart, upEnd) : '';
+  assert('修复H1-1: 上传快照以实际上传内容content为准', upSrc.includes('setRuleSyncSnapshot(content.split'));
+  assert('修复H1-2: 上传快照不再读取实时currentConfig.rules', upSrc !== '' && !upSrc.includes('setRuleSyncSnapshot(currentConfig.rules)'));
+}
+// 修复M1: 自动同步授时失败时按文档回退远程WebDAV Date头, 时钟偏差>5min且授时点全挂时不再退化为恒"本地新"
+{
+  const gtn = new Function(`
+    ${netTimePrelude}
+    async function gmRequest() { throw new Error('network down'); }
+    ${extractFn(src, 'firstSuccess')}
+    ${extractFn(src, 'queryNetworkTimeEndpoint')}
+    ${extractFn(src, 'getNetworkTimeOffset')}
+    ${extractFn(src, 'getTrustedNow')}
+    return getTrustedNow;
+  `)();
+  const v = await gtn(1234567890123);
+  assert('修复M1-1: 授时失败时回退传入的服务器Date时间', v === 1234567890123);
+  const before = Date.now();
+  const v2 = await gtn();
+  assert('修复M1-2(对照): 无参调用仍回退本地时间', typeof v2 === 'number' && v2 >= before - 100 && v2 <= Date.now() + 100);
+  const offset = await new Function(`
+    ${netTimePrelude}
+    async function gmRequest() { throw new Error('network down'); }
+    ${extractFn(src, 'firstSuccess')}
+    ${extractFn(src, 'queryNetworkTimeEndpoint')}
+    ${extractFn(src, 'getNetworkTimeOffset')}
+    return getNetworkTimeOffset;
+  `)()();
+  assert('修复M1-3(对照): 授时全失败时优先级仍为偏移量>Date头>本地', offset === null && typeof v === 'number');
+  const autoSrc = extractFn(src, 'performAutoWebDAVSync');
+  assert('修复M1-4: 自动同步方向仲裁传入Date头作可信时间回退', autoSrc.includes('getTrustedNow(parseHttpDateHeader(resp.responseHeaders))'));
+}
+// 修复M2: 面板打开期间后台同步写入的注释行此前在保存时被排除丢弃, 并经下轮同步上传后永久丢失
+{
+  const sc = extractFn(src, 'saveConfig');
+  assert('修复M2-1: 保存合并不再排除#注释行', sc !== '' && !sc.includes("startsWith('#')"));
+  assert('修复M2-2(对照): 合并仍按initialKeySet/userKeySet去重', sc.includes('initialKeySet.has(k)') && sc.includes('userKeySet.has(k)'));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
