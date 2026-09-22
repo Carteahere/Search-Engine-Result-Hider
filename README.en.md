@@ -37,10 +37,9 @@ Open with a browser that supports script installation to install directly.
 ### 1.3 About WebDAV:
 
 1. Auto-sync runs in the background, 3-Way Merge Sync every 1h based on the configured timestamp, manual upload/download is mandatory overwrite.
-2. Script settings sync and custom selector sync toggles are independent of each other.
-3. Address only supports **https** and full paths, e.g., Nutstore `https://dav.jianguoyun.com/dav/your_folder/`; the folder is created automatically if it does not exist, after changing the file name such as `rules.txt` need to manually upload and overwrite it once.
-4. Tampermonkey lacks a secure storage API, so passwords can only be saved using local obfuscation; for security reasons, you must use a dedicated application password.
-5. To ensure timestamp accuracy during synchronization, Ali/Cloudflare/WorldTimeAPI timepoints will be automatically accessed once. If there is a cross-origin request popup, select `Always allow`; if refused, the remote WebDAV date timestamp will be used by default.
+2. Address only supports **https** and full paths, e.g., Nutstore `https://dav.jianguoyun.com/dav/your_folder/`; the folder is created automatically if it does not exist, after changing the file name such as `rules.txt` need to manually upload and overwrite it once.
+3. Tampermonkey lacks a secure storage API, so passwords can only be saved using local obfuscation; for security reasons, you must use a dedicated application password.
+4. To ensure timestamp accuracy during synchronization, Ali/Cloudflare/WorldTimeAPI timepoints will be automatically accessed once. If there is a cross-origin request popup, select `Always allow`; if refused, the remote WebDAV date timestamp will be used by default.
 
 ### 1.4 About Subscriptions:
 
