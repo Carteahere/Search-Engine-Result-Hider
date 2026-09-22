@@ -58,7 +58,7 @@ Plain regex uses browser-supported JavaScript `RegExp` flags: `i`, `m`, `s`, `u`
 | `@N title/.*example.*/` | Adds a colored border to results whose title contains `example` |
 
 Priority: Highlight > whitelist, but Blacklist > Highlight  
-Note: Only 5 colors, `@N` = `@1`–`@5`; open the custom color panel from the script menu.
+Note: `@N` is separated from the rule by a space. Only 5 colors, `@N` = `@1`–`@5`; open the custom color panel from the script menu.
 
 ### 2.7 Composite Rules:
 
