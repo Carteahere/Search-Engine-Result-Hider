@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/SadYuyuko
-// @version      8.4.1
+// @version      8.4.2
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -1559,6 +1559,9 @@
         return hostLabelToASCII(label);
       }).join('.');
     }
+    if (!isHost && part && /[^\x00-\x7F]/.test(part)) {
+      part = part.replace(/[^\x00-\x7F]/g, ch => encodeURIComponent(ch));
+    }
     let out = '';
     let i = 0;
     if (isHost && part.startsWith('*.')) {
@@ -2152,7 +2155,7 @@
   function decodeBingCkTarget(u) {
     if (!u) return '';
     let rawEncoded = u;
-    if (rawEncoded.startsWith('a1') || rawEncoded.startsWith('a0')) rawEncoded = rawEncoded.slice(2);
+    if (/^a[01]/i.test(rawEncoded)) rawEncoded = rawEncoded.slice(2);
     let base64 = rawEncoded.replace(/-/g, '+').replace(/_/g, '/');
     const rem = base64.length % 4;
     if (rem === 1) return '';
@@ -2172,68 +2175,76 @@
       }
     } catch (_) { return ''; }
 
-    try {
-      if (!/^https?:\/\//i.test(realUrl) && realUrl.includes('%')) {
+    for (let i = 0; i < 2; i++) {
+      if (/^https?:\/\//i.test(realUrl)) break;
+      try {
         const decoded = decodeURIComponent(realUrl);
-        if (/^https?:\/\//i.test(decoded)) return decoded;
-      }
-    } catch (_) {}
+        if (decoded === realUrl) break;
+        realUrl = decoded;
+      } catch (_) { break; }
+    }
 
     return /^https?:\/\//i.test(realUrl) ? realUrl : '';
   }
 
   // 去除重定向
   function unwrapRedirectUrl(url) {
-    if (!url) return '';
-    try {
-      const urlObj = new URL(url);
-      const host = urlObj.hostname;
-      const path = urlObj.pathname;
-      if (/(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) && path.startsWith('/ck/a')) {
-        const uParam = urlObj.searchParams.get('u');
-        let realUrl = decodeBingCkTarget(uParam);
-        if (!realUrl && uParam) {
-          realUrl = decodeRedirectTarget(uParam);
-        }
-        if (realUrl) return realUrl;
-      }
-      if (/(?:^|\.)scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) && /\/scholar_url\/?$/i.test(path)) {
-        const realUrl = decodeRedirectTarget(urlObj.searchParams.get('url'));
-        if (realUrl) return realUrl;
-      }
-      if (/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) && path === '/url') {
-        const realUrl = decodeRedirectTarget(urlObj.searchParams.get('q') || urlObj.searchParams.get('url'));
-        if (realUrl) return realUrl;
-      }
-      if (/(?:^|\.)(?:duckduckgo\.com|ddg\.gg)$/i.test(host) && /^\/l\/?$/i.test(path)) {
-        const realUrl = decodeRedirectTarget(urlObj.searchParams.get('uddg'));
-        if (realUrl) return realUrl;
-      }
-      if (/(?:^|\.)(?:[a-z]{2,6}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) || /(?:^|\.)(?:search|rd|rds|ard)\.yahoo\.co\.jp$/i.test(host)) {
-        if (path.includes('RU=')) {
-          const ruMatch = path.match(/(?:^|\/)RU=([\s\S]*?)(?=(?:\/(?:RK|RS|RO|RV|CR|_ylt|_ylu)=|\/$|$))/i);
-          if (ruMatch && ruMatch[1]) {
-            const realUrl = decodeRedirectTarget(ruMatch[1]);
-            if (realUrl) return realUrl;
+    const isRedirectHost = (host) => {
+      host = String(host || '').replace(/\.$/, '');
+      return (
+      /(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) ||
+      /(?:^|\.)scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) ||
+      /(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) ||
+      /(?:^|\.)(?:duckduckgo\.com|ddg\.gg)$/i.test(host) ||
+      /(?:^|\.)(?:[a-z]{2,6}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) ||
+      /(?:^|\.)(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i.test(host)
+      );
+    };
+    const seen = new Set();
+    for (let depth = 0; depth < 5 && url && !seen.has(url); depth++) {
+      seen.add(url);
+      let next = '';
+      try {
+        const urlObj = new URL(url);
+        const host = urlObj.hostname.replace(/\.$/, '');
+        const path = urlObj.pathname;
+        if (/(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) && path.startsWith('/ck/a')) {
+          const uParam = urlObj.searchParams.get('u');
+          next = decodeBingCkTarget(uParam);
+          if (!next && uParam) next = decodeRedirectTarget(uParam);
+        } else if (/(?:^|\.)scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) && /\/scholar_url\/?$/i.test(path)) {
+          next = decodeRedirectTarget(urlObj.searchParams.get('url'));
+        } else if (/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) && /^\/url\/?$/i.test(path)) {
+          next = decodeRedirectTarget(urlObj.searchParams.get('q') || urlObj.searchParams.get('url'));
+        } else if (/(?:^|\.)(?:duckduckgo\.com|ddg\.gg)$/i.test(host) && /^\/l\/?$/i.test(path)) {
+          next = decodeRedirectTarget(urlObj.searchParams.get('uddg'));
+        } else if (/(?:^|\.)(?:[a-z]{2,6}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) || /(?:^|\.)(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i.test(host)) {
+          if (/ru=/i.test(path)) {
+            const ruMatch = path.match(/(?:^|\/)RU=([\s\S]*?)(?=(?:\/(?:[a-z]{2}|_ylt|_ylu)=|\/$|$))/i);
+            if (ruMatch && ruMatch[1]) next = decodeRedirectTarget(ruMatch[1]);
+          }
+          if (!next && url.includes('/*')) {
+            const starMatch = url.match(/\/\*-?(https?(?::|%3A)[\s\S]*)$/i);
+            if (starMatch && starMatch[1]) next = decodeRedirectTarget(starMatch[1]);
+          }
+          if (!next) {
+            const candidateParams = ['ru', 'u', 'url', 'target', 'dest', 'dst', 'r'];
+            for (const param of candidateParams) {
+              const val = urlObj.searchParams.get(param);
+              if (val) {
+                next = decodeRedirectTarget(val);
+                if (next) break;
+              }
+            }
           }
         }
-        if (path.includes('/*')) {
-          const starMatch = path.match(/\/\*-?(https?(?::|%3A)[\s\S]*)$/i);
-          if (starMatch && starMatch[1]) {
-            const realUrl = decodeRedirectTarget(starMatch[1]);
-            if (realUrl) return realUrl;
-          }
-        }
-        const candidateParams = ['ru', 'u', 'url', 'target', 'dest', 'dst', 'r'];
-        for (const param of candidateParams) {
-          const val = urlObj.searchParams.get(param);
-          if (val) {
-            const realUrl = decodeRedirectTarget(val);
-            if (realUrl) return realUrl;
-          }
-        }
-      }
-    } catch (_) {}
+      } catch (_) {}
+      if (!next || next === url) return url;
+      let nextHost = '';
+      try { nextHost = new URL(next).hostname; } catch (_) { return next; }
+      if (!isRedirectHost(nextHost)) return next;
+      url = next;
+    }
     return url;
   }
 
@@ -2244,7 +2255,8 @@
 
   function resolveUrlDomain(link) {
     const rawUrl = getCleanUrl(link);
-    const url = toASCIIUrl(rawUrl) || rawUrl;
+    let url = toASCIIUrl(rawUrl) || rawUrl;
+    if (/[^\x00-\x7F]/.test(url)) url = url.replace(/[^\x00-\x7F]/g, ch => encodeURIComponent(ch));
     let domain = '';
     try {
       domain = toASCIIHostname(new URL(url).hostname);
@@ -3936,7 +3948,14 @@
     if (!isEngineSite()) return;
     function applyBubbleStatePosition(el) {
       if (!currentConfig.bubbleState) return;
-      el.style.top = currentConfig.bubbleState.top || 'auto';
+      let top = String(currentConfig.bubbleState.top || 'auto');
+      if (/^\d+(?:\.\d+)?px$/i.test(top)) {
+        const h = el.offsetHeight || getBubbleSize() + 10;
+        let maxTop = window.innerHeight - h - 5;
+        if (maxTop < 0) maxTop = 0;
+        top = Math.min(Math.max(5, parseFloat(top)), maxTop) + 'px';
+      }
+      el.style.top = top;
       el.style.left = currentConfig.bubbleState.left || 'auto';
       el.style.right = currentConfig.bubbleState.right || 'auto';
       el.style.bottom = 'auto';
@@ -4985,7 +5004,7 @@
 
     const backgroundNewRules = (Array.isArray(currentConfig.rules) ? currentConfig.rules : []).filter(r => {
       const k = getRuleKey(r);
-      return k && !k.startsWith('#') && !initialKeySet.has(k) && !userKeySet.has(k);
+      return k && !initialKeySet.has(k) && !userKeySet.has(k);
     });
     const finalRules = backgroundNewRules.length > 0 ? [...userRules, ...backgroundNewRules] : userRules;
 
@@ -6073,9 +6092,11 @@
     return _netTimeQuerying;
   }
 
-  async function getTrustedNow() {
+  async function getTrustedNow(serverTime = 0) {
     const offset = await getNetworkTimeOffset();
-    return offset !== null ? Date.now() + offset : Date.now();
+    if (offset !== null) return Date.now() + offset;
+    if (serverTime > 0) return serverTime;
+    return Date.now();
   }
 
   function getRuleSyncSnapshot() {
@@ -6397,6 +6418,7 @@
     let sectionKind = '';
     let sectionIndent = -1;
     let name;
+    let matchesItemCount = 0;
     const items = [];
     const stripQ = (raw) => {
       const s = raw.trim();
@@ -6426,8 +6448,59 @@
       const m = line.match(/^(\s*)(rules|blacklist|whitelist|matches)\s*:\s*(?:#.*)?$/i);
       return m ? { key: m[2].toLowerCase(), indent: m[1].length } : null;
     };
+    const flowKeyOf = (line) => {
+      const m = line.match(/^(\s*)(rules|blacklist|whitelist|matches)\s*:\s*\[(.*)\]\s*(?:#.*)?$/i);
+      return m ? { key: m[2].toLowerCase(), payload: m[3] } : null;
+    };
+    const splitFlowItems = (payload) => {
+      const parts = [];
+      let cur = '';
+      let quote = null;
+      for (let i = 0; i < payload.length; i++) {
+        const ch = payload[i];
+        if (quote === "'") {
+          cur += ch;
+          if (ch === "'") {
+            if (payload[i + 1] === "'") { cur += "'"; i++; }
+            else quote = null;
+          }
+          continue;
+        }
+        if (quote === '"') {
+          cur += ch;
+          if (ch === '\\') { cur += payload[i + 1] || ''; i++; }
+          else if (ch === '"') quote = null;
+          continue;
+        }
+        if (ch === "'" || ch === '"') { quote = ch; cur += ch; continue; }
+        if (ch === ',') { parts.push(cur.trim()); cur = ''; continue; }
+        cur += ch;
+      }
+      parts.push(cur.trim());
+      return parts.filter(Boolean);
+    };
     for (let idx = 0; idx < lines.length; idx++) {
       const line = lines[idx];
+      const flow = flowKeyOf(line);
+      if (flow) {
+        hasSection = true;
+        if (flow.key !== 'matches') {
+          for (const part of splitFlowItems(flow.payload)) {
+            let item;
+            try {
+              item = stripQ(part).trim();
+            } catch (e) {
+              if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[订阅] YAML列表项已跳过:', part, e);
+              continue;
+            }
+            if (flow.key === 'whitelist' && item && !item.startsWith('@')) item = '@' + item;
+            if (item) items.push(item);
+          }
+        } else if (flow.payload.trim()) {
+          matchesItemCount++;
+        }
+        continue;
+      }
       const match = listKeyOf(line);
       if (match) {
         hasSection = true;
@@ -6456,9 +6529,14 @@
         continue;
       }
 
+      if (sectionKind === 'matches') {
+        if (isListItem) matchesItemCount++;
+        continue;
+      }
+
       if (/^-\s+/.test(s)) {
         let rawItem = s.replace(/^-\s+/, '').trim();
-        if (/^[a-zA-Z0-9_]+\s*:(?!\/\/)/.test(rawItem) && !looksLikeCondExpr(rawItem)) {
+        if (/^[a-zA-Z0-9_]+\s*:(?:\s|$)/.test(rawItem)) {
           continue;
         }
         try {
@@ -6479,7 +6557,7 @@
           const nextLine = lines[nextIdx];
           const nextIndent = nextLine.search(/\S/);
           const nextValue = nextLine.trim();
-          if (nextIndent > sectionIndent && nextValue && !nextValue.startsWith('-') && !/^[a-zA-Z0-9_]+\s*:(?!\/\/)/.test(nextValue)) {
+          if (nextIndent > sectionIndent && nextValue && !nextValue.startsWith('-') && !/^[a-zA-Z0-9_]+\s*:(?:\s|$)/.test(nextValue)) {
             let item;
             try {
               item = stripQ(nextValue).trim();
@@ -6495,18 +6573,21 @@
         }
       }
     }
-    if (!hasSection || !items.length) return null;
-    return { items, name };
+    if (!hasSection) return null;
+    if (items.length) return { items, name };
+    if (matchesItemCount > 0) return { items: [], name };
+    return null;
   }
 
   function parseRulesetContent(content) {
     let lines = String(content || '').replace(/^\uFEFF/, '').split('\n');
     let meta = {};
     let isYaml = false;
-    if (lines.length > 0 && lines[0].trim() === '---') {
-      const endIndex = lines.findIndex((l, i) => i > 0 && l.trim() === '---');
+    const firstContentIdx = lines.findIndex((l) => l.trim() !== '');
+    if (firstContentIdx !== -1 && lines[firstContentIdx].trim() === '---') {
+      const endIndex = lines.findIndex((l, i) => i > firstContentIdx && l.trim() === '---');
       if (endIndex !== -1) {
-        const head = lines.slice(1, endIndex).join('\n');
+        const head = lines.slice(firstContentIdx + 1, endIndex).join('\n');
         const nameMatch = head.match(/^name\s*:\s*(.+?)\s*$/m);
         if (nameMatch) {
           const raw = nameMatch[1].trim();
@@ -6522,8 +6603,11 @@
       for (const line of lines) {
         const s = line.trim();
         if (!s || s.startsWith('#')) continue;
-        isYaml = /^(?:name|rules|blacklist|whitelist|matches|title|url)\s*:/i.test(s);
-        break;
+        if (/^(?:name|rules|blacklist|whitelist|matches|title|url)\s*:/i.test(s)) {
+          isYaml = true;
+          break;
+        }
+        if (validateRule(s)) break;
       }
     }
     if (isYaml) {
@@ -6659,7 +6743,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       autoUpdateSwitch.addEventListener('change', function() {
         adoptStoredConfigBeforeWrite();
         currentConfig.subscriptionAutoUpdate = this.checked;
-        persistConfig(false);
+        persistConfig(true);
       });
     }
 
@@ -7106,7 +7190,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           }, folderUrl, headers);
           GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime);
           GM_setValue(WEBDAV_LAST_SYNC_KEY, uploadedTime);
-          setRuleSyncSnapshot(currentConfig.rules);
+          setRuleSyncSnapshot(content.split('\n'));
           if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
             setSubscriptionSyncSnapshot(getSubscriptions());
           }
@@ -7254,9 +7338,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   async function performAutoWebDAVSync(config, depth = 0) {
     adoptStoredConfigIfNewer();
     const { folderUrl, fullUrl, headers } = getWebDAVRequest(config);
-    const trustedNow = await getTrustedNow();
 
     const resp = await gmRequest('GET', fullUrl, { headers, allow404: true });
+    const trustedNow = await getTrustedNow(parseHttpDateHeader(resp.responseHeaders));
 
     let cloudRules = [];
     let cloudConfig = null;
@@ -7381,7 +7465,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
       const syncConfig = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false);
       const syncSelectors = GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false);
-      const cloudSelectors = (cloudConfig && cloudConfig.selectors && typeof cloudConfig.selectors === 'object' && !Array.isArray(cloudConfig.selectors)) ? cloudConfig.selectors : null;
+      const cloudSelectors = (cloudConfig && Object.prototype.hasOwnProperty.call(cloudConfig, 'selectors') && cloudConfig.selectors && typeof cloudConfig.selectors === 'object' && !Array.isArray(cloudConfig.selectors)) ? cloudConfig.selectors : null;
       let mergedSelectors = null;
       if (syncSelectors && cloudSelectors) {
         mergedSelectors = mergeSelectors3Way(getSelectorSyncSnapshot(), getUserSelectors(), cloudSelectors);
