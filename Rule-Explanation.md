@@ -125,7 +125,7 @@ URL通配规则按匹配模式语义从URL开头匹配，`*://`仅匹配`http/ht
 | `match` | regex | 必填，hostname 匹配正则字面量 |
 | `containers` | string | 必填，结果容器的 CSS 选择器（不支持伪元素，如 `::after`） |
 | `links` | string \| string\[\] | 可选，链接选择器，默认 `a[href]` |
-| `titles` | string \| string\[\] | 可选，标题选择器列表 |
+| `titles` | string \| string\[\] | 可选，标题选择器列表，一键屏蔽按钮依赖标题选择器定位，置空则无按钮 |
 | `snippets` | string \| string\[\] | 可选，摘要选择器列表 |
 | `extraElements` | string\[\] | 可选，CSS 相对选择器数组，以每个结果容器为起点选出关联元素；这些元素随结果同步隐藏、展开和恢复，也用于摘要后备提取；自定义引擎同样可用 |
 | `disabled` | boolean | 可选，`true` 停用该引擎，内置引擎同样适用；别名 `disable`，单独写 `disabled: false`（或 `disable: false`）恢复内置 |

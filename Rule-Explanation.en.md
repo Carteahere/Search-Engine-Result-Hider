@@ -125,7 +125,7 @@ Open the edit panel via script manager menu `🖋️ Custom Selectors` (JS forma
 | `match` | regex | Required, hostname regex literal |
 | `containers` | string | Required, CSS selector for result containers (pseudo-elements like `::after` unsupported) |
 | `links` | string \| string\[\] | Optional, link selector, defaults to `a[href]` |
-| `titles` | string \| string\[\] | Optional, title selector list |
+| `titles` | string \| string\[\] | Optional, title selector list. One-click button rely on the title selector for positioning, there is no button if left empty. |
 | `snippets` | string \| string\[\] | Optional, snippet selector list |
 | `extraElements` | string\[\] | Optional, array of relative CSS selectors anchored at each result container to select associated elements; these elements are hidden, expanded, and restored together with the result and are also used for fallback snippet extraction; available to custom engines as well |
 | `disabled` | boolean | Optional, `true` disables the engine (built-ins included); alias `disable`; writing `disabled: false` (or `disable: false`) alone restores the built-in |
