@@ -1630,6 +1630,23 @@ await (async () => {
   }
 }
 
+// ==== [选择器-223] 已知问题留档: sameSelectorDef 不比较 disabled, prune 会剔除「内置全量副本+disabled:true」致禁用状态丢失 (仅断言当前行为) ====
+{
+  const sStartE = src.indexOf('const SELECTORS = {');
+  const sOpenE = src.indexOf('{', sStartE);
+  const sCloseE = extractObjectLiteral(src, sOpenE);
+  const selectorsObjE = eval(`(${src.slice(sOpenE, sCloseE + 1)})`);
+  const pruneProbe = new Function('SELECTORS', `
+    ${extractFn(src, 'normalizeSelectorList')}
+    ${extractFn(src, 'matchDefToParts')}
+    ${extractFn(src, 'sameSelectorDef')}
+    return { sameSelectorDef };
+  `)(selectorsObjE);
+  const builtinBing = selectorsObjE.bing;
+  const fullDisabledBing = Object.assign({}, builtinBing, { disabled: true });
+  check('选择器-223(已知问题): 全量内置副本仅多disabled:true时仍被判为与内置相同(prune将误删)', pruneProbe.sameSelectorDef(fullDisabledBing, builtinBing) === true);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 

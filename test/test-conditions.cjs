@@ -1389,6 +1389,26 @@ assert('条件-405: 首行独立条件表达式按纯文本保留', nonEmpty(pco
   assert('审查A-6(对照): 条件内主机本身不命中', envA.evalCondAST(pa.dynamicConditions[0], 't', 'https://example.com/x') === false);
 }
 
+// ==== [条件-406~410] host $= 端口条件点号边界回归 / 已知问题留档: 独立表达式不识别site(...) / *= 正则裸值遭行内注释截断 (仅断言当前行为) ====
+{
+  const envC = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
+    ['hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'stripRuleComment'].map((n) => extractFn(src, n)).join('\n') +
+    '\nconst window = { location: { hostname: "www.google.com" } };' +
+    '\nfunction getSearchEngine() { return "google"; }' +
+    '\nfunction getSearchCategory() { return "web"; }' +
+    '\nreturn { parseRuleWithConditions, evalCondAST, looksLikeCondExpr, stripRuleComment };'
+  )();
+  const portCond = envC.parseRuleWithConditions('host $= "example.com:8080"');
+  assert('条件-406-1: host $= "example.com:8080" 保持点号边界(badexample.com:8080 不命中)', envC.evalCondAST(portCond.dynamicConditions[0], 't', 'http://badexample.com:8080/') === false);
+  assert('条件-406-2(对照): host $= "example.com:8080" 仍命中裸域与子域', envC.evalCondAST(portCond.dynamicConditions[0], 't', 'http://example.com:8080/') === true && envC.evalCondAST(portCond.dynamicConditions[0], 't', 'http://sub.example.com:8080/') === true);
+  assert('条件-406-3(对照): host $= ":8080" 纯端口条件仍命中任意带端口URL', envC.evalCondAST(envC.parseRuleWithConditions('host $= ":8080"').dynamicConditions[0], 't', 'http://badexample.com:8080/') === true);
+  assert('条件-407(对照): 无端口时点号边界正常(badexample.com 不命中 example.com)', envC.evalCondAST(envC.parseRuleWithConditions('host $= "example.com"').dynamicConditions[0], 't', 'http://badexample.com/') === false);
+  assert('条件-408(已知问题): 独立表达式不识别site(...)括号形式(与@if内行为不一致)', envC.looksLikeCondExpr('site("google.com.hk") & path *= "/download/"') === false);
+  assert('条件-409(已知问题): 独立条件*=正则裸值遇" # "被行内注释截断且截断后静默合法', envC.stripRuleComment('url *= /a # b/') === 'url *= /a');
+  assert('条件-410(对照): =~形式正则裸值受保护不被注释截断', envC.stripRuleComment('url =~ /a # b/') === 'url =~ /a # b/');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 
