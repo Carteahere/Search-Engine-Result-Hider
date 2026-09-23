@@ -6,8 +6,7 @@
 
 在**仅支持安装脚本**的浏览器上实现复杂规则屏蔽搜索结果功能  
 支持包括ublacklist基础规则在内的URL匹配、正则匹配、标题匹配、白名单匹配、高亮目标结果以及结果摘要(snippet)匹配  
-当前支持的搜索引擎：Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Yahoo(&Japan)  
-自动去除重定向引擎：Bing、Google、Google Scholar、DuckDuckGo、Yahoo
+当前支持搜索引擎：Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Yahoo(&Japan)  
 
 安装源 [Github](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [Greasy Fork](https://greasyfork.org/zh-CN/scripts/552394)
 
@@ -43,18 +42,16 @@
 
 ### 1.4 关于订阅：
 
-1. 订阅更新同样后台运行，每12h拉取一次，支持UTF-8编码的纯文本远程链接如`https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Other/rules.txt`；兼容`.yaml`uBlacklist列表格式（`name`/`rules`/`blacklist`/`whitelist`/`matches`项）
+1. 订阅更新同样后台运行，每12h拉取一次，支持UTF-8编码的纯文本远程链接如`https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt`；兼容`.yaml`uBlacklist列表格式（`name`/`rules`/`blacklist`/`whitelist`/`matches`项）
 2. 订阅规则在本地规则后追加应用，由于脚本可分配性能有限，规则总数建议不超过5w条避免手机爆炸🤳💥
 3. 脚本扩展有限不支持`##`DOM元素和uBO过滤等规则，通过订阅导入会自动过滤
 4. 订阅链接非github源时需要跨域请求权限，若有权限申请弹窗选`总是允许`
 
 ### 1.5 其他：
 
-1. 一键屏蔽逻辑：  
-开启二次确认时弹出面板可选屏蔽或添加白名单，关闭时按屏蔽域名开关添加`*://example.com/*`或`*://*.example.com/*`；  
-取消屏蔽在开启二次确认时弹出面板可选删除本地源规则或添加白名单；关闭时默认删除本地源规则，命中订阅规则时显示选择面板添加白名单。
+1. 自动去除重定向的引擎：Bing、Google、Google Scholar、DuckDuckGo、Yahoo
 2. 规则优先级：本地白名单 > 本地黑名单 > 订阅白名单 > 订阅黑名单
-3. 脚本通过`@match *://*/*`全站运行，悬浮球与屏蔽过滤仅在搜索引擎生效
+3. 脚本全站运行，悬浮球与屏蔽过滤仅在搜索引擎生效，非引擎站点只显示部分菜单选项
 4. 注释行格式`#+空格+内容`，⬆️/⬇️功能为移动到上一个/下一个注释行，在第一行或第一个注释行时⬆️会跳到最后一行
 5. 为避免跨页数据冲突，请勿在多个标签页同时打开面板编辑规则
 

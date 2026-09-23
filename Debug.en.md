@@ -2,7 +2,7 @@
 
 ### 3.1 Environment Requirements
 
-- Node.js 14+ 
+- Node.js 15+ 
 - No extra dependencies
 
 ### 3.2 Running Tests

@@ -7,7 +7,6 @@
 Implements complex-rule search result blocking on browsers that **only support user script installation**.  
 Supports URL matching including uBlacklist basic rules, regex matching, title matching, whitelist matching, target result highlighting, and result snippet matching.  
 Currently supported search engines: Bing, Google, Google Scholar, DuckDuckGo(&lite), Yandex, Brave, Yahoo(&Japan)  
-Automatic redirect removal engines: Bing, Google, Google Scholar, DuckDuckGo, Yahoo
 
 Install sources [Github](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [Greasy Fork](https://greasyfork.org/zh-CN/scripts/552394)
 
@@ -43,18 +42,16 @@ Open with a browser that supports script installation to install directly.
 
 ### 1.4 About Subscriptions:
 
-1. Subscription updates also run in the background, fetching once every 12h. Supports UTF-8 encoding for plain text remote links such as `https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Other/rules.txt`; compatible with `.yaml` uBlacklist list format (`name`/`rules`/`blacklist`/`whitelist`/`matches` fields).
+1. Subscription updates also run in the background, fetching once every 12h. Supports UTF-8 encoding for plain text remote links such as `https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt`; compatible with `.yaml` uBlacklist list format (`name`/`rules`/`blacklist`/`whitelist`/`matches` fields).
 2. Subscription rules are appended after local rules. Due to limited script-allocatable performance, keep the total number of rules under 50k to avoid mobile device performance issues.
 3. Script extensions are limited and do not support `##` DOM element or uBO filter rules; they are filtered out automatically on subscription import.
 4. If the subscription link is not a GitHub source, cross-origin request permission is required; if a permission prompt appears, select `Always allow`.
 
 ### 1.5 Other:
 
-1. One-click blocking logic:  
-When secondary confirmation is enabled, a panel pops up offering options to block or add to whitelist; when disabled, adds `*://example.com/*` or `*://*.example.com/*` depending on the block-domain switch.  
-Unblock: When enabling secondary confirmation, a panel pops up where you can choose to delete local source rules or add to whitelist; When closed, the local source rule is deleted by default; when the subscription rule is hit, the selection panel is displayed to add whitelist.
+1. Automatic redirect removal engines: Bing, Google, Google Scholar, DuckDuckGo, Yahoo
 2. Rule priority: Local whitelist > Local blacklist > Subscription whitelist > Subscription blacklist
-3. The script is injected site-wide via `@match *://*/*`; the floating bubble and blocking filters only take effect on search engines.
+3. Script runs on all websites, the floating bubble and blocking filter only take effect on search engines. Non engine sites only display some menu options.
 4. Comment line format: `# + space + content`. ⬆️/⬇️ jump to the previous/next comment line; when on the first line or first comment line, ⬆️ jumps to the last line.
 5. To avoid cross-page data conflicts, do not open panel editing rules on multiple tabs at the same time.
 
