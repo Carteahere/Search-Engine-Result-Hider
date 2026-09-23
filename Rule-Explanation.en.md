@@ -54,7 +54,7 @@ Plain regex uses browser-supported JavaScript `RegExp` flags: `i`, `m`, `s`, `u`
 
 | Rule | Description |
 | --- | --- |
-| `@N *://*.example.com/*` | Adds a colored border to results from `example.com` and its subdomains |
+| `@N*://*.example.com/*` | Adds a colored border to results from `example.com` and its subdomains |
 | `@N title/.*example.*/` | Adds a colored border to results whose title contains `example` |
 
 Priority: Highlight > whitelist, but Blacklist > Highlight  
