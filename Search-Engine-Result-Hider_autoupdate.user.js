@@ -3,19 +3,22 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.4.2
+// @version      8.4.3
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjQgNCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMmM1MjgyIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIgc3R5bGU9Im92ZXJmbG93OnZpc2libGUhaW1wb3J0YW50OyI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iNyI+PC9jaXJjbGU+PGxpbmUgeDE9IjcuNDUiIHkxPSI3LjQ1IiB4Mj0iMTYuNTUiIHkyPSIxNi41NSI+PC9saW5lPjwvc3ZnPg==
 // @author       南雪莲
 // @homepageURL  https://greasyfork.org/zh-CN/scripts/552394
-// @homepageURL  https://github.com/SadYuyuko/Search-Engine-Result-Hider
+// @homepageURL  https://github.com/Carteahere/Search-Engine-Result-Hider
 // @license       GPL-3.0
 // @match        *://*/*
 // @connect      *
 // @connect      raw.githubusercontent.com
 // @connect      dav.jianguoyun.com
+// @connect      acs.m.taobao.com
+// @connect      worldtimeapi.org
+// @connect      cloudflare.com
 // @noframes
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -24,8 +27,8 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_deleteValue
 // @run-at       document-idle
-// @downloadURL  https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js
-// @updateURL    https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js
+// @downloadURL  https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js
+// @updateURL    https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js
 // ==/UserScript==
 
 (function() {
@@ -83,7 +86,7 @@
   currentConfig.rules = currentConfig.rules.filter(rule => typeof rule === 'string');
 
   // 兼容旧配置
-  const CFG_DEFAULTS = { showBlockBtn: false, blockDomain: false, blockConfirm: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', language: 'zh-CN' };
+  const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', language: 'zh-CN' };
   for (const k in CFG_DEFAULTS) if (currentConfig[k] === undefined) currentConfig[k] = CFG_DEFAULTS[k];
   const DEFAULT_HIGHLIGHT_COLORS = {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'};
   if (!currentConfig.highlightColors || typeof currentConfig.highlightColors !== 'object') {
@@ -488,6 +491,12 @@
   function toASCIIHostname(host) {
     const raw = String(host || '').replace(/\.$/, '').trim().toLowerCase();
     if (!raw) return '';
+    const colonIdx = raw.indexOf(':');
+    if (colonIdx !== -1) {
+      const h = raw.slice(0, colonIdx);
+      const p = raw.slice(colonIdx);
+      return (h ? toASCIIHostname(h) : '') + p;
+    }
     if (/^[\x00-\x7F]*$/.test(raw)) return raw;
     return raw.split('.').map(label => label ? hostLabelToASCII(label) : label).join('.');
   }
@@ -970,11 +979,12 @@
       } catch (e) {
         return false;
       }
-      const raw = cond.type === 'host' ? toASCIIHostname(u.hostname)
+      const cmpVal = cond.type === 'host' ? toASCIIHostname(cond.val) : cond.val;
+      const hasPortInCond = cond.type === 'host' && cmpVal.includes(':');
+      const raw = cond.type === 'host' ? (hasPortInCond ? toASCIIHostname(u.host || u.hostname) : toASCIIHostname(u.hostname))
         : cond.type === 'path' ? (u.pathname + u.search)
         : u.protocol.slice(0, -1);
       const value = raw.toLowerCase();
-      const cmpVal = cond.type === 'host' ? toASCIIHostname(cond.val) : cond.val;
       let altValue = value;
       let altCmpVal = cmpVal;
       if (cond.type === 'path') {
@@ -986,6 +996,7 @@
       if (cond.op === '$=') {
         if (cond.type === 'host') {
           const target = cmpVal.replace(/^\.+|\.+$/g, '');
+          if (target.startsWith(':')) return value.endsWith(target);
           return value === target || value.endsWith(`.${target}`);
         }
         return value.endsWith(cmpVal) || altValue.endsWith(altCmpVal);
@@ -1091,6 +1102,10 @@
     if (!rule || /[<>"']/.test(rule) || /\s/.test(rule)) return false;
     if (rule.startsWith('|') || rule.startsWith('@@')) return false;
     if (rule.includes('^')) return false;
+    if (rule.includes('://')) {
+      const scheme = rule.split('://')[0];
+      if (scheme !== '*' && !/^[a-z][a-z0-9+.-]*$/.test(scheme.toLowerCase())) return false;
+    }
     const hostPart = rule.includes('://') ? (rule.split('/')[2] || '') : rule.split('/')[0];
     if (/[$~]/.test(hostPart)) return false;
     if (/^\*:\/\/\*\*+/.test(rule) || /^\*{2,}:\//.test(rule) || /\*{3,}/.test(rule)) return false;
@@ -1384,7 +1399,7 @@
     const warnings = [];
 
     let hlN = null;
-    const hlValMatch = ruleToCheck.match(/^@(\d+)(?=\s|$)/);
+    const hlValMatch = ruleToCheck.match(/^@(\d+)(?=\s|$|\*:\/\/)/);
     if (hlValMatch) {
       const N = parseInt(hlValMatch[1]);
       if (N < 1 || N > 5) {
@@ -1472,7 +1487,7 @@
           errors.push(t('invalidRegexFlags', { flags: invalidFlags }));
           return { valid: false, errors, warnings };
         }
-        if (flagsCandidate && /^[a-z]+$/i.test(flagsCandidate) && /[gy]/i.test(flagsCandidate)) {
+        if (flagsCandidate && (/^[gy]+$/i.test(flagsCandidate) || (flagsCandidate.length <= 2 && /^[gyimsu]+$/i.test(flagsCandidate) && /[gy]/i.test(flagsCandidate)))) {
           errors.push(t('invalidRegexFlags', { flags: getInvalidRegexFlags(flagsCandidate) }));
           return { valid: false, errors, warnings };
         }
@@ -1496,6 +1511,10 @@
   }
 
   function parsePrefixedRegexRule(rawRule, prefixLen) {
+    let memo = parsePrefixedRegexRule._memo;
+    if (!memo) memo = parsePrefixedRegexRule._memo = new Map();
+    const memoKey = prefixLen + '\u0000' + rawRule;
+    if (memo.has(memoKey)) return memo.get(memoKey);
     let remaining = rawRule.substring(prefixLen);
     let pattern, flags = '';
     let flagsCandidate = '';
@@ -1548,14 +1567,16 @@
         pattern = pattern.substring(oldFlagMatch[0].length);
       }
     }
-    return { pattern, flags: String(flags || '').toLowerCase(), flagsCandidate };
+    const parsed = { pattern, flags: String(flags || '').toLowerCase(), flagsCandidate };
+    memo.set(memoKey, parsed);
+    return parsed;
   }
 
   function escapeWildcardPart(part, isHost) {
     const starPattern = isHost ? '[^/]*' : '.*';
     if (isHost && part && !/^[\x00-\x7F]*$/.test(part)) {
       part = part.split('.').map(label => {
-        if (!label || label === '*' || label.includes('*') || label.includes('\\') || /^[\x00-\x7F]*$/.test(label)) return label;
+        if (!label || label === '*' || label.includes('\\') || /^[\x00-\x7F]*$/.test(label)) return label;
         return hostLabelToASCII(label);
       }).join('.');
     }
@@ -1670,6 +1691,10 @@
   }
 
   function ruleToRegex(rule) {
+    let memo = ruleToRegex._memo;
+    if (!memo) memo = ruleToRegex._memo = new Map();
+    if (memo.has(rule)) return memo.get(rule);
+    let out;
     if (rule.startsWith('.')) rule = '*' + rule;
     if (!rule.startsWith('/') && !rule.startsWith('title/') && !rule.startsWith('text/') &&
       !rule.includes('*') && !rule.includes('://') && !rule.startsWith('.')) {
@@ -1687,24 +1712,29 @@
       const lastSlash = rule.lastIndexOf('/');
       const pattern = rule.slice(1, lastSlash);
       const flags = rule.slice(lastSlash + 1).toLowerCase();
-      return {
-        pattern,
-        flags
-      };
+      out = { pattern, flags };
+      memo.set(rule, out);
+      return out;
     }
 
     if (rule.startsWith('title/')) {
-      return parsePrefixedRegexRule(rule, 6);
+      out = parsePrefixedRegexRule(rule, 6);
+      memo.set(rule, out);
+      return out;
     }
 
     if (rule.startsWith('text/')) {
-      return parsePrefixedRegexRule(rule, 5);
+      out = parsePrefixedRegexRule(rule, 5);
+      memo.set(rule, out);
+      return out;
     }
 
-    return {
+    out = {
       pattern: wildcardToRegex(rule),
       flags: 'i'
     };
+    memo.set(rule, out);
+    return out;
   }
 
   // 域名检查
@@ -1741,6 +1771,9 @@
   }
 
   function compileRuleRegex(coreRule) {
+    let memo = compileRuleRegex._memo;
+    if (!memo) memo = compileRuleRegex._memo = new Map();
+    if (memo.has(coreRule)) return memo.get(coreRule);
     let type = 'url';
     let pattern = '';
     let flags = '';
@@ -1774,7 +1807,9 @@
     const sanitizedFlags = Array.from(new Set(String(flags || '').toLowerCase().split('')))
       .filter(f => 'imsu'.includes(f))
       .join('');
-    return { type, regex: new RegExp(pattern, sanitizedFlags) };
+    const compiled = { type, regex: new RegExp(pattern, sanitizedFlags) };
+    memo.set(coreRule, compiled);
+    return compiled;
   }
 
   function isLocalEntry(entry) {
@@ -1785,8 +1820,18 @@
 
   // 规则预编译
   function buildRuleIndex() {
+    const subscriptionRules = getAllSubscriptionRules();
+    let pageContext = '';
+    try {
+      pageContext = getSearchEngine() + '|' + getSearchCategory() + '|' + String(window.location.hostname || '');
+    } catch (e) {}
+    const signature = JSON.stringify([currentConfig.rules, subscriptionRules, currentConfig.language, pageContext]);
+    if (compiledRules && compiledRules.indexSignature === signature) return;
     validationCache.clear();
     subdomainCache.clear();
+    if (ruleToRegex._memo) ruleToRegex._memo.clear();
+    if (parsePrefixedRegexRule._memo) parsePrefixedRegexRule._memo.clear();
+    if (compileRuleRegex._memo) compileRuleRegex._memo.clear();
     compiledRules = {
       domains: new Map(),
       urls: [],
@@ -1807,7 +1852,7 @@
       highlightConditionalRules: [],
       highlightConditionalDomains: new Map()
     };
-    const subscriptionRules = getAllSubscriptionRules();
+    compiledRules.indexSignature = signature;
     const allRules = currentConfig.rules.concat(subscriptionRules);
     const subscriptions = getSubscriptions();
     const localRuleCount = currentConfig.rules.length;
@@ -1834,7 +1879,7 @@
         return;
       }
 
-      const hlMatch = rule.match(/^@(\d+)(?=\s|$)/);
+      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/)/);
       if (hlMatch) {
         const N = parseInt(hlMatch[1]);
         if (N < 1 || N > 5) return;
@@ -2220,7 +2265,7 @@
           next = decodeRedirectTarget(urlObj.searchParams.get('uddg'));
         } else if (/(?:^|\.)(?:[a-z]{2,6}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) || /(?:^|\.)(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i.test(host)) {
           if (/ru=/i.test(path)) {
-            const ruMatch = path.match(/(?:^|\/)RU=([\s\S]*?)(?=(?:\/(?:[a-z]{2}|_ylt|_ylu)=|\/$|$))/i);
+            const ruMatch = path.match(/(?:^|\/)RU=([\s\S]*?)(?=(?:\/(?:rk|rs|rv|ro|re|rh|rt|_ylt|_ylu)=|\/$|$))/i);
             if (ruMatch && ruMatch[1]) next = decodeRedirectTarget(ruMatch[1]);
           }
           if (!next && url.includes('/*')) {
@@ -4475,7 +4520,7 @@
     const whitelistRules = [];
     const highlightRules = [];
     activeRules.forEach(rule => {
-      const hlMatch = rule.match(/^@(\d+)(?=\s|$)/);
+      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/)/);
       if (hlMatch) {
         const N = parseInt(hlMatch[1]);
         const hlBody = rule.substring(hlMatch[0].length).trim();
@@ -6050,6 +6095,7 @@
     return serverTime - Math.round((t0 + t1) / 2);
   }
 
+  // 联网授时
   async function getNetworkTimeOffset() {
     const now = Date.now();
     const ttl = _netTimeOffset === null ? NET_TIME_FAIL_TTL : NET_TIME_CACHE_TTL;
