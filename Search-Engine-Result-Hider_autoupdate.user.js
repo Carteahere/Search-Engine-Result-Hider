@@ -2,7 +2,7 @@
 // @name         搜索引擎结果屏蔽器
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
-// @namespace    https://github.com/SadYuyuko
+// @namespace    https://github.com/Carteahere
 // @version      8.4.2
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
@@ -24,8 +24,8 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_deleteValue
 // @run-at       document-idle
-// @downloadURL  https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js
-// @updateURL    https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js
+// @downloadURL  https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js
+// @updateURL    https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js
 // ==/UserScript==
 
 (function() {
