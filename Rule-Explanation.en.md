@@ -20,7 +20,7 @@ URL wildcard rules match from the start of the URL per match-pattern semantics: 
 | `title/pattern/flags` | Matches title using regex, e.g. `title/.*block.*/i` |
 | `text/pattern/flags` | Matches snippet content using regex, e.g. `text/.*ad.*/i` |
 
-Plain regex uses browser-supported JavaScript `RegExp` flags: `i`, `m`, `s`, `u` (`s` = native dotAll, dot matches newline); `g`/`y` are not supported, as rules only test for a match without global extraction.
+Plain regex uses browser-supported JavaScript `RegExp` flags: `i`, `m`, `s`, `u` (`s` = native dotAll, dot matches newline); `g`/`y` are not supported, as rules only test for a match without global extraction; when flags ≤ 2 characters, automatically detects `g`/`y` errors.
 
 ### 2.3 Title Matching:
 

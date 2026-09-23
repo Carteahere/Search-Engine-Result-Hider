@@ -20,7 +20,7 @@ URL通配规则按匹配模式语义从URL开头匹配，`*://`仅匹配`http/ht
 | `title/pattern/flags` | 使用正则表达式匹配标题，如`title/.*屏蔽.*/i` |
 | `text/pattern/flags` | 使用正则表达式匹配摘要内容，如`text/.*广告.*/i` |
 
-正则使用浏览器支持的 JavaScript `RegExp` flags，支持`i`、`m`、`s`、`u`，其中 `s` 使用原生 dotAll 匹配(点号匹配换行)；不支持`g`、`y`，脚本规则只判断是否匹配不执行全局提取
+正则使用浏览器支持的 JavaScript `RegExp` flags，支持`i`、`m`、`s`、`u`，其中 `s` 使用原生 dotAll 匹配(点号匹配换行)；不支持`g`/`y`，脚本规则只判断是否匹配不执行全局提取，flags ≤ 2字符时自动检测`g`/`y`报错
 
 ### 2.3 标题匹配：
 
