@@ -2,7 +2,7 @@
 // @name         搜索引擎结果屏蔽器
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
-// @namespace    https://github.com/SadYuyuko
+// @namespace    https://github.com/Carteahere
 // @version      5.6
 // @description        支持uBlacklist规则的Bing/Google/DuckDuckGo搜索结果屏蔽工具
 // @description:zh-CN  支持uBlacklist规则的Bing/Google/DuckDuckGo搜索结果屏蔽工具

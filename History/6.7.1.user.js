@@ -2,7 +2,7 @@
 // @name         搜索引擎结果屏蔽器
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
-// @namespace    https://github.com/SadYuyuko
+// @namespace    https://github.com/Carteahere
 // @version      6.7.1
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。

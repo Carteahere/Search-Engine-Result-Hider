@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Bing/Google搜索结果屏蔽器
-// @namespace    http://example.com
+// @namespace    https://github.com/Carteahere
 // @version      3.0
 // @description  基于uBlacklist规则的Bing/Google搜索结果屏蔽工具
 // @author       南雪莲

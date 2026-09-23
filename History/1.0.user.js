@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Bing屏蔽搜索结果
-// @namespace    http://example.com
+// @namespace    https://github.com/Carteahere
 // @version      1.0
 // @description  适用于Bing移动端，在搜索结果中移除屏蔽网站，支持正则表达式
 // @author       南雪莲
