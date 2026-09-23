@@ -43,7 +43,7 @@ Open with a browser that supports script installation to install directly.
 
 ### 1.4 About Subscriptions:
 
-1. Subscription updates also run in the background, fetching once every 12h. Supports plain-text remote links such as `https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Other/rules.txt`; compatible with `.yaml` uBlacklist list format (`name`/`rules`/`blacklist`/`whitelist`/`matches` fields).
+1. Subscription updates also run in the background, fetching once every 12h. Supports UTF-8 encoding for plain text remote links such as `https://raw.githubusercontent.com/SadYuyuko/Search-Engine-Result-Hider/main/Other/rules.txt`; compatible with `.yaml` uBlacklist list format (`name`/`rules`/`blacklist`/`whitelist`/`matches` fields).
 2. Subscription rules are appended after local rules. Due to limited script-allocatable performance, keep the total number of rules under 50k to avoid mobile device performance issues.
 3. Script extensions are limited and do not support `##` DOM element or uBO filter rules; they are filtered out automatically on subscription import.
 4. If the subscription link is not a GitHub source, cross-origin request permission is required; if a permission prompt appears, select `Always allow`.
@@ -56,6 +56,7 @@ Unblock: When enabling secondary confirmation, a panel pops up where you can cho
 2. Rule priority: Local whitelist > Local blacklist > Subscription whitelist > Subscription blacklist
 3. The script is injected site-wide via `@match *://*/*`; the floating bubble and blocking filters only take effect on search engines.
 4. Comment line format: `# + space + content`. ⬆️/⬇️ jump to the previous/next comment line; when on the first line or first comment line, ⬆️ jumps to the last line.
+5. To avoid cross-page data conflicts, do not open panel editing rules on multiple tabs at the same time.
 
 ## Docs
 
