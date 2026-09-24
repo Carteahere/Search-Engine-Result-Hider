@@ -1731,6 +1731,41 @@ return { compileRuleRegex, safeRegexTest };
   const reB = wcApi.compileRuleRegex('*://example.com/file\\*');
   assert('规则-317(已知问题): 行尾转义星号\\*丢失右边界(file*abc 误命中规则 file\\*)', wcApi.safeRegexTest(reB.regex, 'https://example.com/file*abc') === true);
 }
+// ==== [规则-318~321] 本轮子代理审查新增已知问题留档: 主机点前星号跨界 / IDN部分标签通配失效 / 条件关键字形URL规则被静默吸收 (仅断言当前行为) ====
+{
+  const wcApi2 = new Function(`
+${extractFn(src, 'hostLabelToASCII')}
+${extractFn(src, 'toASCIIHostname')}
+${extractFn(src, 'escapeWildcardPart')}
+${extractFn(src, 'wildcardToRegex')}
+${extractFn(src, 'parsePrefixedRegexRule')}
+${extractFn(src, 'ruleToRegex')}
+${extractFn(src, 'compileRuleRegex')}
+${extractFn(src, 'safeRegexTest')}
+return { compileRuleRegex, safeRegexTest };
+`)();
+  const reF = wcApi2.compileRuleRegex('*://*example.com/*');
+  assert('规则-318(已知问题): 主机点前星号跨点且可后缀劫持(*example.com 误命中 badexample.com)', wcApi2.safeRegexTest(reF.regex, 'https://badexample.com/') === true);
+  const reG = wcApi2.compileRuleRegex('*://ex*mple.com/*');
+  assert('规则-319(已知问题): 主机中部星号跨点(ex*mple.com 误命中 exa.mple.com, 与 www.*.com 不跨点语义不一致)', wcApi2.safeRegexTest(reG.regex, 'https://exa.mple.com/') === true);
+  const reH = wcApi2.compileRuleRegex('*://例*.com/*');
+  assert('规则-320(已知问题): IDN部分标签通配编译产物无法命中punycode主机且校验仍valid(例*.com 静默漏屏蔽)', !wcApi2.safeRegexTest(reH.regex, 'https://xn--fsqu00a.com/'));
+}
+{
+  const condConsts = `
+const HL_STATS_REGEX = /^@(\\d+)/;
+function t(k, p) { return k; }
+const DEFAULT_SELECTORS = {};
+function isLocalEntry(e) { return e && e.source !== 'sub'; }
+function getSearchEngine() { return 'other'; }
+function getSearchCategory() { return 'web'; }
+const window = { location: { hostname: 'www.google.com', href: 'https://www.google.com/search?q=x' } };
+`;
+  const condNames = ['hostLabelToASCII', 'toASCIIHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'validateUrlWildcard', 'evaluateCondition', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'isCondExprCore', 'looksLikeCondExpr', 'isScriptRuleLine', 'isElementRuleLine', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'ruleToRegex', 'compileRuleRegex', 'validateRule', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'filterValidRuleLines', 'getRuleKey'].map(n => extractFn(src, n));
+  const condApi = new Function(condConsts + '\n' + condNames.join('\n') + '\nreturn { parseRuleWithConditions, analyzeRule };')();
+  const absorbed = condApi.parseRuleWithConditions('host:8080');
+  assert('规则-321(已知问题): 条件关键字形URL规则被静默吸收为永假条件且校验valid(host:8080 无报错且永不屏蔽)', absorbed.coreRule === '' && absorbed.standaloneExpr === true && absorbed.dynamicConditions.length === 1 && condApi.analyzeRule('host:8080').valid === true);
+}
 })();
 
 console.log(`\n${pass} passed, ${fail} failed`);

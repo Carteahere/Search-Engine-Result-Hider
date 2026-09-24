@@ -1647,6 +1647,73 @@ await (async () => {
   check('选择器-223(已知问题): 全量内置副本仅多disabled:true时仍被判为与内置相同(prune将误删)', pruneProbe.sameSelectorDef(fullDisabledBing, builtinBing) === true);
 }
 
+// ==== [选择器-224~226] 本轮子代理审查新增已知问题留档: JSON非对象def静默丢弃 / diff键粒度固化内置全量副本 / other保留键解析层静默丢弃 (仅断言当前行为) ====
+{
+  const selStart = src.indexOf('const SELECTORS = {');
+  const selOpen = src.indexOf('{', selStart);
+  const selClose = extractObjectLiteral(src, selOpen);
+  const selectorsText = src.slice(selOpen, selClose + 1);
+  const builtinSelectorOfLine2 = src.match(/const builtinSelectorOf = .+?;/)[0];
+  const selStore = { current: undefined };
+  const gmGet = (key, defaultValue) => (key === 'searchfilter_selectors' ? (selStore.current === undefined ? defaultValue : selStore.current) : defaultValue);
+  const selFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'parseSelectorText', 'sameSelectorDef', 'diffUserSelectors'].map(n => extractFn(src, n));
+  const selApi = new Function('GM_getValue', 'storeRef', `
+const SELECTORS_KEY = 'searchfilter_selectors';
+const SUPPORTED_REGEX_FLAGS = 'imsu';
+const SELECTORS = ${selectorsText};
+let activeSelectors = null;
+let _engineCacheHost = null;
+${builtinSelectorOfLine2}
+let _engineCacheResult = 'other';
+const window = { location: { hostname: 'www.google.com', href: 'https://www.google.com/' } };
+function t(key) { return key; }
+${selFns.join('\n')}
+return { getSelectors, parseSelectorText, diffUserSelectors };
+`)(gmGet, selStore);
+  const jsRes = selApi.parseSelectorText('{"bing": true}');
+  check('选择器-224(已知问题): JSON路径非对象def静默丢弃({"bing": true} 无报错、保存成功但不生效)', !!jsRes.config && !jsRes.errors.length && !('bing' in jsRes.config));
+  const otherRes = selApi.parseSelectorText('other: {containers: ".x", match: /x/}');
+  check('选择器-226(已知问题): 保留键other在两条解析路径均被静默丢弃(validate的保留键报错不可达)', !!otherRes.config && !otherRes.errors.length && !('other' in otherRes.config));
+  // 面板文本=serializeSelectors全量序列化; 保存时diffUserSelectors按整键比较 → 仅改一个字段会以旧内置值全量副本入库, 脚本升级内置后对该用户永不生效
+  const mergedAll = selApi.getSelectors();
+  const editedBing = Object.assign({}, mergedAll.bing, { containers: 'div.custom' });
+  const diff = selApi.diffUserSelectors(Object.assign({}, mergedAll, { bing: editedBing }));
+  const pinningFields = ['match', 'titles', 'snippets', 'links'].filter(k => k in (diff.bing || {}));
+  check('选择器-225(已知问题): 仅改一个字段时diff保留该引擎全部内置字段(升级内置后被旧副本钉死)', 'bing' in diff && pinningFields.length === 4, pinningFields.join(','));
+}
+
+// ==== [选择器-227~228] 修复回归: 悬浮球深色模式适配(图标浅蓝偏白/数字白色) ====
+(() => {
+  const darkBubble = src.match(/@media \(prefers-color-scheme: dark\)\s*\{\s*#serh-status\s*\{[^}]*\}\s*\.serh-bubble-number\s*\{[^}]*\}\s*\}/);
+  check('选择器-227: 深色模式悬浮球图标变浅蓝偏白(!important覆盖内联#2c5282)', !!darkBubble && /color:\s*#a8c7fa\s*!important/i.test(darkBubble[0]));
+  check('选择器-228: 深色模式悬浮球数字为白色', !!darkBubble && /color:\s*#ffffff\s*!important/i.test(darkBubble[0]));
+})();
+
+// ==== [选择器-229~230] 修复回归: 屏蔽按钮改为按容器注入(不再依赖标题选择器) ====
+(() => {
+  const injFn = extractFn(src, 'injectBlockButton');
+  check('选择器-229: 注入函数不再调用getResultTitle门控, 且标题提取仍保留用于规则匹配', !/getResultTitle/.test(injFn) && /function getResultTitle/.test(src));
+  let appended = null;
+  const fakeBtn = { className: '', innerHTML: '', style: {}, addEventListener() {}, onclick: null };
+  const api = new Function('document', 'window', `
+${extractFn(src, 'ensurePositioned')}
+${injFn}
+return { injectBlockButton };
+`)(
+    { createElement: () => fakeBtn },
+    { getComputedStyle: () => ({ position: 'relative' }) }
+  );
+  const container = {
+    classList: { contains: () => false },
+    closest: () => null,
+    querySelector: () => null,
+    getAttribute: () => null,
+    appendChild(el) { appended = el; }
+  };
+  api.injectBlockButton(container, 'other', 'https://example.com/page', 'example.com');
+  check('选择器-230: 无标题元素容器仍注入屏蔽按钮且锚定容器', !!appended && appended.className === 'serh-quick-block');
+})();
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 

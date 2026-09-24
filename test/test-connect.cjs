@@ -748,6 +748,77 @@ rules:
   assert('同步-086: 显式删除仅移除目标订阅', emptyCollect(latest, [a]).newSubs.map(s => s.url).join() === b);
 }
 
+// 订阅重命名撞上已占用URL时，被跳过的行也必须清掉自己的原URL，避免幽灵订阅残留并随同步扩散。
+{
+  const mkCollect = (rows) => new Function('container', 'subscriptions', 't', `
+    ${extractFn(src, 'collectSubscriptionsFromRows')}
+    return collectSubscriptionsFromRows;
+  `)({ querySelectorAll: () => rows }, [], k => k);
+  const makeRow = (url, origUrl) => ({
+    dataset: { originalUrl: origUrl },
+    querySelector: sel => sel === '.serh-subscription-url' ? { value: url } :
+      sel === '.serh-subscription-enable-toggle' ? { checked: true } : {}
+  });
+  const A = 'https://a/rules';
+  const B = 'https://b/rules';
+  const C = 'https://c/rules';
+  const subsAB = [
+    { url: A, enabled: true, lastUpdate: 1, rules: ['a.example'] },
+    { url: B, enabled: true, lastUpdate: 2, rules: ['b.example'] }
+  ];
+  let out = mkCollect([makeRow(B, B), makeRow(B, A)])(subsAB).newSubs;
+  assert('同步-147: 重命名撞已占用URL时旧订阅不残留', out.length === 1 && out[0].url === B && out[0].rules[0] === 'b.example');
+  out = mkCollect([makeRow(B, A), makeRow(B, B)])(subsAB).newSubs;
+  assert('同步-148: 重命名在前时正常替换不重复', out.length === 1 && out[0].url === B);
+  out = mkCollect([makeRow(C, C), makeRow(C, '')])([{ url: C, enabled: true, rules: ['c.example'] }]).newSubs;
+  assert('同步-149: 重复URL的新增行不误删原有订阅', out.length === 1 && out[0].rules[0] === 'c.example');
+  out = mkCollect([makeRow(C, A), makeRow(C, B)])(subsAB).newSubs;
+  assert('同步-150: 多行改名为同一URL仅保留一份且旧条目清除', out.length === 1 && out[0].url === C);
+}
+
+// 面板外点击关闭：按下起点在面板内时（如textarea拖选、取色拖拽），拖出面板松开产生的合成click不应误关面板。
+{
+  const docListeners = {};
+  const doc = {
+    addEventListener: (type, fn) => { (docListeners[type] = docListeners[type] || []).push(fn); },
+    removeEventListener: (type, fn) => { docListeners[type] = (docListeners[type] || []).filter(f => f !== fn); },
+    fire: (type, e) => { (docListeners[type] || []).slice().forEach(fn => fn(e)); }
+  };
+  const inside = { id: 'inside' };
+  const outside = { id: 'outside' };
+  const makePanel = () => {
+    const state = { removed: false, beforeClose: false };
+    const p = {
+      isConnected: true,
+      classList: { remove: () => {} },
+      addEventListener: () => {},
+      remove: () => { state.removed = true; },
+      contains: (el) => el === inside,
+      _cleanupClick: null
+    };
+    return { p, state };
+  };
+  const factory = new Function('document', 'panel', 'preventPanelClose', 'setTimeout', `
+    ${extractFn(src, 'fadeOutAndRemovePanel')}
+    ${extractFn(src, 'bindOutsideClickClose')}
+    return bindOutsideClickClose;
+  `);
+  const first = makePanel();
+  factory(doc, first.p, false, (fn) => fn())(first.p, () => { first.state.beforeClose = true; });
+  doc.fire('pointerdown', { target: inside });
+  doc.fire('mousedown', { target: inside });
+  doc.fire('click', { target: outside });
+  assert('面板-001: 面板内按下拖出面板松开不误关面板', !first.state.removed && !first.state.beforeClose);
+  doc.fire('pointerdown', { target: outside });
+  doc.fire('click', { target: outside });
+  assert('面板-002: 面板外按下点击外部仍正常关闭', first.state.removed && first.state.beforeClose);
+  assert('面板-003: 关闭后外部监听全部移除', (docListeners.click || []).length === 0 && (docListeners.pointerdown || []).length === 0 && (docListeners.mousedown || []).length === 0 && first.p._cleanupClick === null);
+  const second = makePanel();
+  factory(doc, second.p, false, (fn) => fn())(second.p, () => { second.state.beforeClose = true; });
+  doc.fire('click', { target: outside });
+  assert('面板-004: 无按下记录时外部点击仍关闭', second.state.removed);
+}
+
 // 正则/条件内部的 # 不能当作行尾注释参与去重。
 {
   const key = new Function(`${extractFn(src, 'stripRuleComment')}\n${extractFn(src, 'getRuleKey')}\nreturn getRuleKey;`)();
@@ -1116,6 +1187,60 @@ await (async () => {
   assert('审查D-1: 授时全失败时回退本地时间不抛错', typeof v === 'number' && v >= before - 100 && v <= Date.now() + 100);
 }
 
+// ==== [授时源N1~N3] timeapi.io/akamai 高精度解析与竞速回退 ====
+{
+  const fixedMs = Date.UTC(2026, 8, 23, 17, 46, 48, 888);
+  const body = JSON.stringify({ dateTime: '2026-09-23T17:46:48.888298', milliSeconds: 888 });
+  const getOffset = new Function(`
+    ${netTimePrelude}
+    async function gmRequest(method, url) {
+      if (url.startsWith('https://timeapi.io/')) return { responseText: ${JSON.stringify(body)} };
+      throw new Error('endpoint down');
+    }
+    ${extractFn(src, 'firstSuccess')}
+    ${extractFn(src, 'queryNetworkTimeEndpoint')}
+    ${extractFn(src, 'getNetworkTimeOffset')}
+    return getNetworkTimeOffset;
+  `)();
+  const offset = await getOffset();
+  const expect = fixedMs - Date.now();
+  assert('授时N1: timeapi.io dateTime 无时区后缀按UTC解析且保留毫秒', typeof offset === 'number' && offset !== null && Math.abs(offset - expect) < 1000);
+}
+{
+  const sec = Math.floor(Date.now() / 1000) + 3;
+  const getOffset = new Function(`
+    ${netTimePrelude}
+    async function gmRequest(method, url) {
+      if (url.startsWith('https://time.akamai.com/')) return { responseText: ${JSON.stringify(String(sec) + '.856')} };
+      throw new Error('endpoint down');
+    }
+    ${extractFn(src, 'firstSuccess')}
+    ${extractFn(src, 'queryNetworkTimeEndpoint')}
+    ${extractFn(src, 'getNetworkTimeOffset')}
+    return getNetworkTimeOffset;
+  `)();
+  const offset = await getOffset();
+  const expect = sec * 1000 + 856 - Date.now();
+  assert('授时N2: akamai ?ms 浮点秒解析为毫秒时间戳', typeof offset === 'number' && offset !== null && Math.abs(offset - expect) < 1000);
+}
+{
+  const getOffset = new Function(`
+    ${netTimePrelude}
+    async function gmRequest(method, url) {
+      if (url.startsWith('https://timeapi.io/') || url.startsWith('https://time.akamai.com/')) throw new Error('down');
+      if (url.startsWith('https://cloudflare.com/')) return { responseText: 'fl=x\\nts=1790185623.000\\nloc=CN' };
+      throw new Error('unexpected ' + url);
+    }
+    ${extractFn(src, 'firstSuccess')}
+    ${extractFn(src, 'queryNetworkTimeEndpoint')}
+    ${extractFn(src, 'getNetworkTimeOffset')}
+    return getNetworkTimeOffset;
+  `)();
+  const offset = await getOffset();
+  const expect = 1790185623000 - Date.now();
+  assert('授时N3: 前两源失败时回退cloudflare ts解析', typeof offset === 'number' && offset !== null && Math.abs(offset - expect) < 1000);
+}
+
 // 审查D-2/3: firstSuccess 首个成功值优先, 全部失败才拒绝
 {
   const firstSuccess = new Function(`
@@ -1330,6 +1455,15 @@ await (async () => {
   const sc = extractFn(src, 'saveConfig');
   assert('修复M2-1: 保存合并不再排除#注释行', sc !== '' && !sc.includes("startsWith('#')"));
   assert('修复M2-2(对照): 合并仍按initialKeySet/userKeySet去重', sc.includes('initialKeySet.has(k)') && sc.includes('userKeySet.has(k)'));
+}
+
+// ==== [同步-145/146] 导出文件名包含年份 / 云端合并路径强制拉取订阅绕过自动更新开关 ====
+{
+  const tfn = new Function(`${extractFn(src, 'timestampFilename')}\nreturn timestampFilename;`)();
+  const name = tfn('rules', 'txt');
+  assert('同步-145: 导出文件名包含年份(rules-YYYY-MM-DD-HHMMSS.txt)', /^rules-\d{4}-\d{2}-\d{2}-\d{6}\.txt$/.test(name), name);
+  const cas = extractFn(src, 'checkAutoSubscription');
+  assert('同步-146(已知问题): force路径绕过订阅自动更新开关且空rules订阅恒为到期(死链订阅每小时自动同步时被强制重拉)', cas.includes('!force && !currentConfig.subscriptionAutoUpdate') && cas.includes('s.rules.length === 0'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
