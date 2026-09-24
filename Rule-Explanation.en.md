@@ -135,9 +135,9 @@ Open the edit panel via script manager menu `🖋️ Custom Selectors` (JS forma
 | Field | Type | Description |
 | --- | --- | --- |
 | `match` | regex | Required, hostname matching regex literal |
-| `containers` | string | Required, CSS selector for result containers (pseudo-elements like `::after` unsupported) |
+| `containers` | string | Required, CSS selector for result containers (pseudo-elements like `::after` unsupported), ; the **one-click block** button relies on it |
 | `links` | string \| string\[\] | Optional, link selector, defaults to `a[href]` |
-| `titles` | string \| string\[\] | Optional, title selector list; the **one-click block** button relies on the title selector for positioning, no button if left empty |
+| `titles` | string \| string\[\] | Optional, title selector list the title selector for positioning |
 | `snippets` | string \| string\[\] | Optional, snippet selector list |
 | `extraElements` | string\[\] | Optional, array of relative CSS selectors starting from each result container to pick associated elements; these elements are hidden, expanded, and restored together with the result, and are also used for fallback snippet extraction; also available to custom engines |
 | `disabled` | boolean | Optional, `true` disables the engine (built-ins included); alias `disable`; writing `disabled: false` (or `disable: false`) alone restores the built-in |
