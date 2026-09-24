@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.4.3
+// @version      8.4.4
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -16,9 +16,9 @@
 // @connect      *
 // @connect      raw.githubusercontent.com
 // @connect      dav.jianguoyun.com
-// @connect      acs.m.taobao.com
-// @connect      worldtimeapi.org
 // @connect      cloudflare.com
+// @connect      akamai.com
+// @connect      timeapi.io
 // @noframes
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -330,7 +330,7 @@
       menuLang: 'Language: 中文', menuLangEn: 'Language: English',
       subscriptionSuccess: '订阅成功！已更新 {count} 条规则。',
       saved: '已保存', uploadSuccess: '上传成功！',
-      downloadSuccess: '下载成功！规则已加载到编辑区，保存生效',
+      downloadSuccess: '下载成功！规则已保存',
       noRulesExport: '没有规则可导出',
       bcDomain: '域名', bcExact: '精确', bcWhitelist: '白名单',
       bcDelete: '删除', bcDeleteSub: '订阅规则无法删除', bcConfirm: '确认',
@@ -348,7 +348,7 @@
       webdavHttpsRequired: '安全起见，WebDAV地址必须使用https',
       networkError: '网络错误', requestTimeout: '请求超时',
       subLinkInvalid: '链接错误', importing: '导入中',
-      autoSync: '自动同步', syncScriptConfig: '同步配置', syncCustomSelectors: '云同步',
+      autoSync: '自动同步', syncScriptConfig: '同步配置',
       webdavUrlEmpty: 'WebDAV地址为空',
       highlightRules: '高亮规则', menuHighlightColor: '🎨 高亮颜色设置',
       hlColorTitle: '高亮颜色设置', hlColorReset: '重置',
@@ -394,7 +394,7 @@
       menuLang: 'Language: 中文', menuLangEn: 'Language: English',
       subscriptionSuccess: 'Subscription successful! Updated {count} rules.',
       saved: 'Saved', uploadSuccess: 'Upload successful!',
-      downloadSuccess: 'Download successful! Rules loaded into editor, save to apply.',
+      downloadSuccess: 'Download successful! Rules saved.',
       noRulesExport: 'No rules to export',
       bcDomain: 'Domain', bcExact: 'Exact', bcWhitelist: 'Whitelist',
       bcDelete: 'Delete', bcDeleteSub: 'Subscription rules cannot be deleted', bcConfirm: 'Confirm',
@@ -412,7 +412,7 @@
       webdavHttpsRequired: 'For security, WebDAV server must use HTTPS',
       networkError: 'Network error', requestTimeout: 'Request timeout',
       subLinkInvalid: 'Invalid URL', importing: 'Importing',
-      autoSync: 'Auto Sync', syncScriptConfig: 'Sync Config', syncCustomSelectors: 'Cloud Sync',
+      autoSync: 'Auto Sync', syncScriptConfig: 'Sync Config',
       webdavUrlEmpty: 'WebDAV URL is empty',
       highlightRules: 'Highlight Rules', menuHighlightColor: '🎨 Highlight Colors',
       hlColorTitle: 'Highlight Color Settings', hlColorReset: 'Reset',
@@ -2641,8 +2641,6 @@
     if (engine === 'yandex') {
       if (!result.closest('.main__content, .content, [class*="z6OLDwO9"]')) return;
     }
-    const title = getResultTitle(result, engine);
-    if (!title) return;
     if (result.querySelector('.serh-quick-block')) return;
 
     const isBlocked = result.getAttribute('data-is-blocked') === 'true';
@@ -3769,6 +3767,15 @@
             color: #000000 !important;
         }
 
+        @media (prefers-color-scheme: dark) {
+            #serh-status {
+                color: #a8c7fa !important;
+            }
+            .serh-bubble-number {
+                color: #ffffff !important;
+            }
+        }
+
         .serh-matched-rule {
             position: absolute; top: 2px; left: 50%; transform: translateX(-50%);
             max-width: calc(100% - 70px); background: rgba(0, 0, 0, 0.2); color: #000000;
@@ -4724,8 +4731,16 @@
   }
 
   function bindOutsideClickClose(panel, onBeforeClose) {
+    let pressStartedInside = false;
+    const pressHandler = (e) => {
+      pressStartedInside = panel.contains(e.target);
+    };
     const closeHandler = (e) => {
       if (preventPanelClose) return;
+      if (pressStartedInside) {
+        pressStartedInside = false;
+        return;
+      }
       if (!panel.contains(e.target)) closePanel();
     };
     const closePanel = () => {
@@ -4735,14 +4750,22 @@
         console.error('[面板] 关闭前回调失败:', err);
       }
       document.removeEventListener('click', closeHandler);
+      document.removeEventListener('pointerdown', pressHandler);
+      document.removeEventListener('mousedown', pressHandler);
       panel._cleanupClick = null;
       fadeOutAndRemovePanel(panel);
     };
     panel._cleanupClick = () => {
       document.removeEventListener('click', closeHandler);
+      document.removeEventListener('pointerdown', pressHandler);
+      document.removeEventListener('mousedown', pressHandler);
     };
     setTimeout(() => {
-      if (panel.isConnected) document.addEventListener('click', closeHandler);
+      if (panel.isConnected) {
+        document.addEventListener('pointerdown', pressHandler);
+        document.addEventListener('mousedown', pressHandler);
+        document.addEventListener('click', closeHandler);
+      }
     }, 200);
     return closePanel;
   }
@@ -5776,7 +5799,7 @@
                             <input type="checkbox" id="serh-selector-sync" ${syncSelectorsEnabled ? 'checked' : ''}>
                             <span class="serh-slider"></span>
                         </span>
-                        <span style="line-height:1;">${t('syncCustomSelectors')}</span>
+                        <span style="line-height:1;">${t('sync')}</span>
                     </label>
                     <button id="serh-selector-import" class="serh-button serh-button-secondary" style="padding: 3px 8px; border: 1px solid transparent;">${t('import')}</button>
                     <button id="serh-selector-export" class="serh-button serh-button-success" style="padding: 3px 8px; border: 1px solid transparent;">${t('export')}</button>
@@ -6102,27 +6125,25 @@
     if (_netTimeCheckedAt > 0 && now - _netTimeCheckedAt < ttl) return _netTimeOffset;
     if (_netTimeQuerying) return _netTimeQuerying;
     _netTimeQuerying = firstSuccess([
+      queryNetworkTimeEndpoint('https://timeapi.io/api/Time/current/zone?timeZone=UTC', (resp) => {
+        try {
+          const data = JSON.parse(String(resp.responseText || ''));
+          const s = typeof data.dateTime === 'string' ? data.dateTime : '';
+          if (!s) return 0;
+          const ms = Date.parse(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s) ? s : s + 'Z');
+          return ms > 0 ? ms : 0;
+        } catch (_) {
+          return 0;
+        }
+      }),
+      queryNetworkTimeEndpoint('https://time.akamai.com/?ms', (resp) => {
+        const sec = parseFloat(String(resp.responseText || '').trim());
+        return sec > 0 ? Math.round(sec * 1000) : 0;
+      }),
       queryNetworkTimeEndpoint('https://cloudflare.com/cdn-cgi/trace', (resp) => {
         const m = /(?:^|\n)ts=([0-9.]+)(?:\n|$)/.exec(String(resp.responseText || ''));
         const sec = m ? parseFloat(m[1]) : 0;
         return sec > 0 ? Math.round(sec * 1000) : 0;
-      }),
-      queryNetworkTimeEndpoint('https://acs.m.taobao.com/gw/mtop.common.getTimestamp/', (resp) => {
-        try {
-          const data = JSON.parse(String(resp.responseText || ''));
-          const t = data && data.data && typeof data.data.t === 'string' ? parseInt(data.data.t, 10) : 0;
-          return t > 0 ? t : 0;
-        } catch (_) {
-          return 0;
-        }
-      }),
-      queryNetworkTimeEndpoint('https://worldtimeapi.org/api/timezone/Etc/UTC', (resp) => {
-        try {
-          const data = JSON.parse(String(resp.responseText || ''));
-          return typeof data.unixtime === 'number' && data.unixtime > 0 ? data.unixtime * 1000 : 0;
-        } catch (_) {
-          return 0;
-        }
       })
     ]).then(offset => {
       _netTimeOffset = offset;
@@ -6833,6 +6854,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           return;
         }
         if (seenUrls.has(url)) {
+          if (origUrl && origUrl !== url) {
+            const ghostIndex = newSubs.findIndex(s => s.url === origUrl);
+            if (ghostIndex >= 0) newSubs.splice(ghostIndex, 1);
+          }
           return;
         }
         seenUrls.add(url);
@@ -7639,7 +7664,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   function timestampFilename(prefix, ext) {
     const d = new Date(), pad = (n) => String(n).padStart(2, '0');
-    return `${prefix}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.${ext}`;
+    return `${prefix}-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.${ext}`;
   }
 
   function downloadTextFile(filename, content, mime) {
