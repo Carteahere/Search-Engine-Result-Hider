@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.4.4
+// @version      8.4.5
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -38,7 +38,7 @@
   if (window.top !== window.self) return;
   let preventPanelClose = false, _engineSiteSetup = false, _domObserver = null, _observedSelector = '';
   let _searchForm = null, _searchFormHandler = null, _urlChangeHandler = null;
-  let _syncIntervalIds = [], _syncInitialTimeout = null;
+  let _syncIntervalIds = [];
   let _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap();
   const _hrefChangedContainers = new Set(), _contentChangedContainers = new Set();
 
@@ -2671,11 +2671,13 @@
       e.preventDefault();
       e.stopPropagation();
 
-      const currentHost = String(window.location.hostname || '').toLowerCase();
-      const targetDomain = String(domain || '').toLowerCase();
-      if (targetDomain && (currentHost === targetDomain || currentHost.endsWith('.' + targetDomain) || targetDomain.endsWith('.' + currentHost))) {
-        showToast(t('cannotBlockCurrentSite', { domain: targetDomain }), 'error');
-        return;
+      if (!isBlocked) {
+        const currentHost = String(window.location.hostname || '').toLowerCase();
+        const targetDomain = String(domain || '').toLowerCase();
+        if (targetDomain && (currentHost === targetDomain || currentHost.endsWith('.' + targetDomain) || targetDomain.endsWith('.' + currentHost))) {
+          showToast(t('cannotBlockCurrentSite', { domain: targetDomain }), 'error');
+          return;
+        }
       }
 
       if (isBlocked) {
@@ -3278,16 +3280,6 @@
         .serh-option-label {
             font-size: 12px; color: #4a5568; white-space: nowrap; margin-bottom: 4px;
         }
-        .serh-option-buttons {
-            display: flex; gap: 4px; flex-wrap: wrap;
-        }
-        .serh-option-button {
-            padding: 3px 8px; font-size: 11px; background: #f7fafc; border: 1px solid #e2e8f0;
-            border-radius: 4px; cursor: pointer; color: #4a5568; box-sizing: border-box;
-        }
-        .serh-option-button.active {
-            background: #2c5282; color: white; border-color: #2c5282;
-        }
         .serh-compact-row {
             display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
         }
@@ -3646,9 +3638,6 @@
             #serh-hlcolor-sv-canvas, #serh-hlcolor-hue-canvas {
                 border-color: #4b5563 !important;
             }
-            #serh-hlcolor-panel .serh-hlcolor-current-code {
-                background: #374151 !important; border-color: #4b5563 !important; color: #f3f4f6 !important;
-            }
         }
 
         /* 渐变动画 */
@@ -3818,11 +3807,6 @@
         }
         #serh-hlcolor-sv-canvas, #serh-hlcolor-hue-canvas {
             cursor: crosshair !important; border-radius: 3px !important; border: 1px solid #e2e8f0 !important;
-        }
-        #serh-hlcolor-panel .serh-hlcolor-current-code {
-            font-size: 12px !important; font-family: 'Consolas', monospace !important; padding: 2px 4px !important;
-            user-select: text !important; text-align: center !important; background: #f7fafc !important;
-            border-radius: 3px !important; border: 1px solid #e2e8f0 !important; margin-bottom: 2px !important;
         }
         #serh-hlcolor-current-preview {
             flex-shrink: 0 !important;
@@ -4725,6 +4709,10 @@
       done = true;
       panel.remove();
       if (onClosed) onClosed();
+      if (!isSerhPanelOpen()) {
+        checkAutoSubscription();
+        checkAutoWebDAV();
+      }
     };
     panel.addEventListener('transitionend', finish, { once: true });
     setTimeout(finish, 350);
@@ -4781,6 +4769,11 @@
       if (window._panelCloseHandler) {
         document.removeEventListener('click', window._panelCloseHandler);
         window._panelCloseHandler = null;
+      }
+      if (window._panelPressHandler) {
+        document.removeEventListener('pointerdown', window._panelPressHandler);
+        document.removeEventListener('mousedown', window._panelPressHandler);
+        window._panelPressHandler = null;
       }
     };
     const existingPanel = document.getElementById('serh-panel');
@@ -5033,17 +5026,30 @@
       }
     });
 
+    const closeZoneSelector = '#serh-status, #serh-webdav-panel, #serh-subscription-panel, #serh-hlcolor-panel, #serh-hlcolor-popup, #serh-selector-panel, #serh-block-confirm-dialog';
+    const isPanelZone = (target) => panel.contains(target) || !!(target.closest && target.closest(closeZoneSelector));
+    let pressStartedInside = false;
+    const pressHandler = (e) => {
+      if (e.isTrusted === false) return;
+      pressStartedInside = isPanelZone(e.target);
+    };
     const closeHandler = (e) => {
       if (preventPanelClose) return;
-      if (!panel.contains(e.target) && !e.target.closest('#serh-status') && !e.target.closest('#serh-webdav-panel') && !e.target.closest('#serh-subscription-panel') && !e.target.closest('#serh-hlcolor-panel') && !e.target.closest('#serh-hlcolor-popup') && !e.target.closest('#serh-selector-panel') && !e.target.closest('#serh-block-confirm-dialog')) {
-        closePanel();
+      if (e.isTrusted === false) return;
+      if (pressStartedInside) {
+        pressStartedInside = false;
+        return;
       }
+      if (!isPanelZone(e.target)) closePanel();
     };
     window._panelCloseHandler = closeHandler;
+    window._panelPressHandler = pressHandler;
     if (window._panelCloseTimer) clearTimeout(window._panelCloseTimer);
     window._panelCloseTimer = setTimeout(() => {
       window._panelCloseTimer = null;
       if (panel.isConnected && window._panelCloseHandler === closeHandler) {
+        document.addEventListener('pointerdown', pressHandler);
+        document.addEventListener('mousedown', pressHandler);
         document.addEventListener('click', closeHandler);
       }
     }, 200);
@@ -5520,6 +5526,26 @@
     return true;
   }
 
+  function diffSelectorDefFields(def, builtin) {
+    const diff = {};
+    if (!def || typeof def !== 'object') return diff;
+    if (!builtin) {
+      for (const k of Object.keys(def)) diff[k] = def[k];
+      return diff;
+    }
+    if (def.match !== undefined) {
+      const aM = matchDefToParts(def.match);
+      const bM = matchDefToParts(builtin.match);
+      if (aM.source !== bM.source || aM.flags !== bM.flags) diff.match = def.match;
+    }
+    if (def.containers !== undefined && (def.containers || '') !== (builtin.containers || '')) diff.containers = def.containers;
+    const norm = (v) => JSON.stringify(normalizeSelectorList(v));
+    for (const k of ['titles', 'snippets', 'extraElements', 'links']) {
+      if (def[k] !== undefined && norm(def[k]) !== norm(builtin[k])) diff[k] = def[k];
+    }
+    return diff;
+  }
+
   function diffUserSelectors(config) {
     const out = {};
     if (!config || typeof config !== 'object' || Array.isArray(config)) return out;
@@ -5527,23 +5553,22 @@
       if (key === 'other') continue;
       const def = config[key];
       if (!def || typeof def !== 'object' || Array.isArray(def)) continue;
-      if (def.disabled === true || def.disable === true) {
-        const rest = { ...def };
-        delete rest.disable;
-        rest.disabled = true;
-        const builtin = SELECTORS[key];
-        out[key] = (builtin && sameSelectorDef(rest, builtin)) ? { disabled: true } : rest;
-        continue;
-      }
+      const builtin = SELECTORS[key];
       const rest = { ...def };
       if (rest.disable !== undefined) {
         if (rest.disabled === undefined) rest.disabled = rest.disable;
         delete rest.disable;
       }
+      if (rest.disabled === true) {
+        const diff = diffSelectorDefFields(rest, builtin);
+        diff.disabled = true;
+        out[key] = diff;
+        continue;
+      }
       if (rest.disabled === false && Object.keys(rest).every(k => k === 'disabled')) continue;
-      const builtin = SELECTORS[key];
       if (!builtin) { out[key] = rest; continue; }
-      if (!sameSelectorDef(rest, builtin)) out[key] = rest;
+      const diff = diffSelectorDefFields(rest, builtin);
+      if (Object.keys(diff).length > 0) out[key] = diff;
     }
     return out;
   }
@@ -6249,23 +6274,124 @@
     const localDeleted = new Set([...baseKeys].filter(k => !localKeys.has(k)));
     const cloudDeleted = new Set([...baseKeys].filter(k => !cloudKeys.has(k)));
 
-    const result = [];
-    const seen = new Set();
+    const lineKey = (r) => getRuleKey((r || '').trim());
+    const rowsOf = (rules) => {
+      const rows = [];
+      for (const raw of rules) {
+        const trimmed = (raw || '').trim();
+        const key = lineKey(trimmed);
+        if (key) rows.push({ key, line: trimmed });
+      }
+      return rows;
+    };
+    const baseRows = rowsOf(baseRules);
+    const localRows = rowsOf(localRules);
+    const cloudRows = rowsOf(cloudRules);
+    const baseIndex = new Map();
+    baseRows.forEach((row, i) => { if (!baseIndex.has(row.key)) baseIndex.set(row.key, i); });
 
-    const addIfActive = (r) => {
-      const trimmed = (r || '').trim();
-      if (!trimmed) return;
-      const key = getRuleKey(trimmed);
-      if (!key) return;
-      if (seen.has(key)) return;
-      if (localDeleted.has(key) || cloudDeleted.has(key)) return;
-      seen.add(key);
-      result.push(trimmed);
+    const sideMeta = (rows) => {
+      const index = new Map();
+      const line = new Map();
+      rows.forEach((row, i) => {
+        if (!index.has(row.key)) index.set(row.key, i);
+        if (!line.has(row.key)) line.set(row.key, row.line);
+      });
+      return { index, line };
+    };
+    const localMeta = sideMeta(localRows);
+    const cloudMeta = sideMeta(cloudRows);
+    const deleted = (key) => localDeleted.has(key) || cloudDeleted.has(key);
+
+    const moved = (rows) => {
+      let prev = -1;
+      for (const row of rows) {
+        if (!baseIndex.has(row.key) || deleted(row.key)) continue;
+        const at = baseIndex.get(row.key);
+        if (at < prev) return true;
+        prev = at;
+      }
+      return false;
+    };
+    const localMoved = moved(localRows);
+    const cloudMoved = moved(cloudRows);
+    const orderSide = localMoved !== cloudMoved
+      ? (localMoved ? localMeta : cloudMeta)
+      : (localMoved ? localMeta : null);
+
+    const pickLine = (key) => {
+      const inBase = baseIndex.has(key);
+      const inLocal = localMeta.line.has(key);
+      const inCloud = cloudMeta.line.has(key);
+      if (!inLocal && !inCloud) return '';
+      if (inLocal && !inCloud) return deleted(key) ? '' : localMeta.line.get(key);
+      if (inCloud && !inLocal) return deleted(key) ? '' : cloudMeta.line.get(key);
+      if (deleted(key)) return '';
+      if (!inBase) return localMeta.line.get(key);
+      const baseLine = baseRows[baseIndex.get(key)].line;
+      const localLine = localMeta.line.get(key);
+      const cloudLine = cloudMeta.line.get(key);
+      if (localLine !== baseLine && cloudLine === baseLine) return localLine;
+      if (cloudLine !== baseLine && localLine === baseLine) return cloudLine;
+      return localLine;
     };
 
-    localRules.forEach(addIfActive);
-    cloudRules.forEach(addIfActive);
+    const anchorBefore = (rows, at) => {
+      for (let i = at - 1; i >= 0; i--) {
+        if (baseIndex.has(rows[i].key) && !deleted(rows[i].key)) return rows[i].key;
+      }
+      return null;
+    };
+    const anchorAfter = (rows, at) => {
+      for (let i = at + 1; i < rows.length; i++) {
+        if (baseIndex.has(rows[i].key) && !deleted(rows[i].key)) return rows[i].key;
+      }
+      return null;
+    };
+    const END = {};
+    const place = new Map();
+    const noteInsert = (key, anchor) => {
+      if (!place.has(key)) place.set(key, anchor);
+    };
+    const orderedRows = orderSide === cloudMeta ? cloudRows : localRows;
+    const otherRows = orderSide === cloudMeta ? localRows : cloudRows;
+    orderedRows.forEach((row, i) => {
+      if (baseIndex.has(row.key) || deleted(row.key)) return;
+      noteInsert(row.key, anchorBefore(orderedRows, i));
+    });
+    otherRows.forEach((row, i) => {
+      if (baseIndex.has(row.key) || deleted(row.key) || place.has(row.key)) return;
+      const before = anchorBefore(otherRows, i);
+      const after = anchorAfter(otherRows, i);
+      if (before !== null && after === null) noteInsert(row.key, END);
+      else noteInsert(row.key, before);
+    });
 
+    const result = [];
+    const seen = new Set();
+    const emit = (key) => {
+      if (!key || seen.has(key) || deleted(key)) return;
+      const line = pickLine(key);
+      if (!line) return;
+      seen.add(key);
+      result.push(line);
+    };
+    const emitPending = (anchor) => {
+      for (const [key, before] of place) {
+        if (before === anchor) emit(key);
+      }
+    };
+
+    emitPending(null);
+    const skeleton = orderSide
+      ? (orderSide === localMeta ? localRows : cloudRows).filter(row => baseIndex.has(row.key) && !deleted(row.key))
+      : baseRows.filter(row => !deleted(row.key));
+    skeleton.forEach(row => {
+      emit(row.key);
+      emitPending(row.key);
+    });
+    emitPending(END);
+    for (const key of place.keys()) emit(key);
     return result;
   }
 
@@ -6321,6 +6447,7 @@
 
     for (let i = 0; i < Math.min(lines.length, 50); i++) {
       const line = lines[i];
+      if (!line.trim()) continue;
       if (line.startsWith('# ScriptConfig:')) {
         rawScriptConfig = line;
         try {
@@ -6350,6 +6477,14 @@
 
     const restLines = lines.filter((_, idx) => !headerLineIndexes.has(idx));
     return { config, rawScriptConfig, rawSelectors, restLines };
+  }
+
+  function isNonRuleTextResponse(restLines) {
+    const lines = (Array.isArray(restLines) ? restLines : [])
+      .map((l) => String(l || '').trim())
+      .filter((l) => l.length > 0);
+    if (lines.length === 0) return false;
+    return !lines.some((l) => l.startsWith('#') || validateRule(l));
   }
 
   function safeBase64Encode(str) {
@@ -6835,6 +6970,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       const newSubs = latestSubs.filter(s => !removed.has(s.url));
       let hasError = false;
       const seenUrls = new Set();
+      const producedUrls = new Set();
       container.querySelectorAll('.serh-subscription-row').forEach(row => {
         const input = row.querySelector('.serh-subscription-url');
         const url = input.value.trim();
@@ -6854,7 +6990,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           return;
         }
         if (seenUrls.has(url)) {
-          if (origUrl && origUrl !== url) {
+          if (origUrl && origUrl !== url && !producedUrls.has(origUrl)) {
             const ghostIndex = newSubs.findIndex(s => s.url === origUrl);
             if (ghostIndex >= 0) newSubs.splice(ghostIndex, 1);
           }
@@ -6874,13 +7010,14 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           rules: existingSub && Array.isArray(existingSub.rules) ? existingSub.rules : [],
           name: existingSub ? existingSub.name : undefined
         };
-        if (origUrl && origUrl !== url) {
+        if (origUrl && origUrl !== url && !producedUrls.has(origUrl)) {
           const oldIndex = newSubs.findIndex(s => s.url === origUrl);
           if (oldIndex >= 0) newSubs.splice(oldIndex, 1);
         }
         const index = newSubs.findIndex(s => s.url === url);
         if (index >= 0) newSubs[index] = subData;
         else newSubs.push(subData);
+        producedUrls.add(url);
       });
       return { newSubs, hasError };
     }
@@ -6918,12 +7055,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         btn.onclick = (e) => {
           e.stopPropagation();
           const row = btn.closest('.serh-subscription-row');
-          const input = row.querySelector('.serh-subscription-url');
           const origUrl = (row.dataset.originalUrl || '').trim();
-          const inputVal = input ? input.value.trim() : '';
-          const deletedUrl = origUrl || inputVal;
-          if (deletedUrl) {
-            deletedUrls.add(deletedUrl);
+          if (origUrl) {
+            deletedUrls.add(origUrl);
           }
           row.remove();
           reindexRows();
@@ -7335,6 +7469,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     const content = resp.responseText;
     if (isInvalidSyncResponse(content, resp.responseHeaders)) throw new Error(t('subImportFailed'));
     const parsedHeader = parseSyncHeader(content);
+    if (isNonRuleTextResponse(parsedHeader.restLines)) throw new Error(t('subImportFailed'));
     const newRules = filterValidRuleLines(parsedHeader.restLines);
     if (parsedHeader.config) {
       const {
@@ -7416,6 +7551,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     let cloudRules = [];
     let cloudConfig = null;
     let cloudTime = 0;
+    let cloudSettingsTime = 0;
     let cloudETag = '';
     let cloudLastMod = '';
     let parsedHeader = null;
@@ -7427,6 +7563,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       }
       parsedHeader = parseSyncHeader(content);
       cloudConfig = parsedHeader.config;
+      if (isNonRuleTextResponse(parsedHeader.restLines)) {
+        console.warn('[自动 WebDAV] 云端返回非规则文本，已跳过');
+        return;
+      }
       cloudRules = parsedHeader.restLines.map(r => r.trim()).filter(r => r);
       const validHeaderTimes = extractValidCloudTimes(parsedHeader.config, trustedNow);
       let lastModTime = 0;
@@ -7446,6 +7586,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       } else {
         cloudTime = lastModTime;
         if (isNaN(cloudTime) || cloudTime > trustedNow + WEBDAV_TIME_TOLERANCE) cloudTime = 0;
+      }
+      if (cloudConfig && typeof cloudConfig === 'object' && !Array.isArray(cloudConfig) && typeof cloudConfig.syncedAt === 'number' && Number.isFinite(cloudConfig.syncedAt) && cloudConfig.syncedAt > 0 && cloudConfig.syncedAt <= trustedNow + WEBDAV_TIME_TOLERANCE) {
+        cloudSettingsTime = cloudConfig.syncedAt;
       }
     }
 
@@ -7510,15 +7653,13 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       }
 
       const mergedContent = mergedRules.join('\n');
-      const localContent = localRules.join('\n');
-      const cloudContent = cloudRules.join('\n');
 
       let mergedSubs = null;
       if (cloudConfig && Array.isArray(cloudConfig.subscriptions) && GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
-        mergedSubs = applyCloudSubscriptions(cloudConfig.subscriptions, localTime >= cloudTime);
+        mergedSubs = applyCloudSubscriptions(cloudConfig.subscriptions, localTime >= cloudSettingsTime);
       }
 
-      if (cloudTime > localTime && cloudConfig) {
+      if (cloudSettingsTime > localTime && cloudConfig) {
         const {
           syncedAt, rulesSyncedAt, subscriptions,
           bubbleState, bubbleSize, selectors, ...settings
@@ -7548,15 +7689,16 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         }
       }
       const selectorsChanged = !!mergedSelectors && !selectorsEqual(mergedSelectors, cloudSelectors);
-      const contentChanged = mergedRules.slice().sort().join('\n') !== cloudRules.slice().sort().join('\n');
+      const contentChanged = mergedRules.join('\n') !== cloudRules.join('\n');
       const localNewer = localTime > cloudTime;
+      const localSettingsNewer = localTime > cloudSettingsTime;
       const subscriptionSignature = subs => JSON.stringify((Array.isArray(subs) ? subs : [])
         .filter(s => s && s.url)
         .map(s => [s.url, s.name || '', s.enabled !== false])
         .sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
       const subscriptionsChanged = syncConfig && (
         subscriptionSignature(mergedSubs || getSubscriptions()) !== subscriptionSignature(cloudConfig && cloudConfig.subscriptions));
-      const shouldUpload = contentChanged || subscriptionsChanged || selectorsChanged || (localNewer && (syncConfig || syncSelectors));
+      const shouldUpload = contentChanged || subscriptionsChanged || selectorsChanged || (syncConfig && localSettingsNewer) || (syncSelectors && localNewer);
 
       if (shouldUpload) {
         console.log('[自动 WebDAV] 规则合并或配置更新完成，上传至云端...');
@@ -7624,6 +7766,14 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     GM_setValue(WEBDAV_LAST_SYNC_KEY, trustedNow);
   }
 
+  function isSerhPanelOpen() {
+    return !!(document.getElementById('serh-panel') ||
+      document.getElementById('serh-subscription-panel') ||
+      document.getElementById('serh-webdav-panel') ||
+      document.getElementById('serh-selector-panel') ||
+      document.getElementById('serh-hlcolor-panel'));
+  }
+
   let _webdavSyncDelayedTimer = null;
   function triggerWebDAVSyncDelayed(delayMs = 5000) {
     if (!GM_getValue(WEBDAV_AUTO_SYNC_KEY, false)) return;
@@ -7633,7 +7783,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     if (_webdavSyncDelayedTimer) clearTimeout(_webdavSyncDelayedTimer);
     _webdavSyncDelayedTimer = setTimeout(() => {
       _webdavSyncDelayedTimer = null;
-      if (document.getElementById('serh-panel')) {
+      if (isSerhPanelOpen()) {
         triggerWebDAVSyncDelayed(3000);
         return;
       }
@@ -7652,7 +7802,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     let lastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0);
     if (lastSync > now + WEBDAV_TIME_TOLERANCE) lastSync = 0;
     if (lastSync > 0 && now - lastSync < WEBDAV_AUTO_SYNC_INTERVAL) return;
-    if (document.getElementById('serh-panel')) return;
+    if (isSerhPanelOpen()) return;
     runWithSyncLock('webdav', async () => {
       const trustedNow = await getTrustedNow();
       let currentLastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0);
@@ -7802,6 +7952,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   function checkAutoSubscription(force = false) {
     if (!force && !currentConfig.subscriptionAutoUpdate) return;
+    if (!force && isSerhPanelOpen()) return;
     const subs = getSubscriptions();
     if (!subs || subs.length === 0) return;
     const now = Date.now();
@@ -7829,8 +7980,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       setInterval(checkAutoSubscription, 60 * 60 * 1000),
       setInterval(checkAutoWebDAV, 60 * 60 * 1000)
     ];
-    _syncInitialTimeout = setTimeout(() => {
-      _syncInitialTimeout = null;
+    setTimeout(() => {
       checkAutoSubscription();
       checkAutoWebDAV();
     }, 5000 + Math.floor(Math.random() * 5000));
