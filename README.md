@@ -6,7 +6,7 @@
 
 在**仅支持安装脚本**的浏览器上实现复杂规则屏蔽搜索结果功能  
 支持包括ublacklist基础规则在内的URL匹配、正则匹配、标题匹配、白名单匹配、高亮目标结果以及结果摘要(snippet)匹配  
-当前支持搜索引擎：Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Yahoo(&Japan)  
+当前支持搜索引擎：Bing、Google、Google Scholar、DuckDuckGo(ddg/lite)、Yandex、Brave、Yahoo(&Japan)  
 
 安装源 [Github](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [Greasy Fork](https://greasyfork.org/zh-CN/scripts/552394)
 
@@ -35,10 +35,10 @@
 
 ### 1.3 关于Webdav：
 
-1. 自动同步后台运行，根据配置时间戳每1h三方快照合并同步一次，手动上传/下载为强制覆盖
+1. 自动同步后台运行，使用三方快照合并同步，手动上传/下载为强制覆盖
 2. 地址只支持**https**和完整路径，如坚果云`https://dav.jianguoyun.com/dav/your_folder/`，路径文件夹不存在时会自动创建，文件名如`rules.txt`修改后需手动上传覆盖一次
 3. 油猴无安全存储API，密码只能本地混淆处理，安全起见必须使用单独应用密码
-4. 同步时为确保时间戳准确，会自动访问一次timeapi/akamai/cloudflare授时点，若有跨域请求权限申请弹窗选`总是允许`，拒绝则默认使用远程webdav的date时间戳
+4. 同步时为确保时间戳准确，会自动访问一次timeapi/akamai/cloudflare授时点，若有跨域请求权限弹窗选`总是允许`，拒绝则默认使用webdav的date时间戳
 
 ### 1.4 关于订阅：
 
@@ -53,7 +53,7 @@
 2. 规则优先级：本地白名单 > 本地黑名单 > 订阅白名单 > 订阅黑名单
 3. 脚本全站运行，悬浮球与屏蔽过滤仅在搜索引擎生效，非引擎站点只显示部分菜单选项
 4. 注释行格式`#+空格+内容`，⬆️/⬇️功能为移动到上一个/下一个注释行，在第一行或第一个注释行时⬆️会跳到最后一行
-5. 为避免跨页数据冲突，请勿在多个标签页同时打开面板编辑规则
+5. 为避免跨页数据冲突，请勿在多个标签页同时打开面板编辑规则，打开面板时暂停同步
 
 ## 文档
 

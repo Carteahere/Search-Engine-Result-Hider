@@ -6,7 +6,7 @@
 
 Implements complex-rule search result blocking on browsers that **only support user script installation**.  
 Supports URL matching including uBlacklist basic rules, regex matching, title matching, whitelist matching, target result highlighting, and result snippet matching.  
-Currently supported search engines: Bing, Google, Google Scholar, DuckDuckGo(&lite), Yandex, Brave, Yahoo(&Japan)  
+Currently supported search engines: Bing, Google, Google Scholar, DuckDuckGo(ddg/lite), Yandex, Brave, Yahoo(&Japan)  
 
 Install sources [Github](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [Greasy Fork](https://greasyfork.org/zh-CN/scripts/552394)
 
@@ -35,7 +35,7 @@ Open with a browser that supports script installation to install directly.
 
 ### 1.3 About WebDAV:
 
-1. Auto-sync runs in the background, 3-Way Merge Sync every 1h based on the configured timestamp, manual upload/download is mandatory overwrite.
+1. Auto-sync runs in the background, use 3-Way Merge Sync, manual upload/download is mandatory overwrite.
 2. Address only supports **https** and full paths, e.g., Nutstore `https://dav.jianguoyun.com/dav/your_folder/`; the folder is created automatically if it does not exist, after changing the file name such as `rules.txt` need to manually upload and overwrite it once.
 3. Tampermonkey lacks a secure storage API, so passwords can only be saved using local obfuscation; for security reasons, you must use a dedicated application password.
 4. To ensure the accuracy of the timestamp during synchronization, the timeapi/akamai/cloudflare timing point will be automatically accessed once. If there is a cross domain request permission application pop-up, select `Always allow`. If rejected, the remote webdav date timestamp will be used by default.
@@ -53,7 +53,7 @@ Open with a browser that supports script installation to install directly.
 2. Rule priority: Local whitelist > Local blacklist > Subscription whitelist > Subscription blacklist
 3. Script runs on all websites, the floating bubble and blocking filter only take effect on search engines. Non engine sites only display some menu options.
 4. Comment line format: `# + space + content`. ⬆️/⬇️ jump to the previous/next comment line; when on the first line or first comment line, ⬆️ jumps to the last line.
-5. To avoid cross-page data conflicts, do not open panel editing rules on multiple tabs at the same time.
+5. To avoid cross-page data conflicts, do not open panel editing rules on multiple tabs at the same time, and pause synchronization when opening the panel.
 
 ## Docs
 

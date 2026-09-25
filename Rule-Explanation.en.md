@@ -84,7 +84,7 @@ Notes:
 3. `!` negates the condition itself, e.g. `!(title *= "keyword")` matches results without a title.
 4. Condition expressions can be used standalone, e.g. `host $= ".example.com"`, `path *= "/download/"`, applying to all search results.
 5. Quotes can be omitted for attribute values; space-free values such as `@if($site=google)`, `@if(scheme=https)` can be written bare.
-6. Search engine IDs are the same as in Custom Selectors (see 2.9).
+6. Search engine IDs are the same as in **2.9 Custom Selectors**.
 
 **Conditions supported by `@if`:**
 
@@ -157,8 +157,8 @@ bing: {disabled: true},
 
 **Description:**
 
-1. Priority: Custom selectors > Built-in selectors. Changing an override back to the built-in value or using Reset restores following script updates.
+1. Built-in engine IDs: `google`, `google_scholar`, `bing`, `duckduckgo_lite`, `duckduckgo`, `yandex`, `brave`, `yahoo` (`ddg` and `yahoo-japan` are shorthand aliases only for `@if($site=)` condition rules; Lite uses the separate ID `duckduckgo_lite`)
 2. Custom engines support the `$site = "Engine ID"` condition as well as block/highlight/whitelist rules; `titles`/`snippets` can be omitted.
 3. Engine IDs allow only letters/digits/`_`/`-`; `other` is a reserved key and cannot be used. The same ID as a built-in engine, or an overlapping site, overrides the built-in selectors, e.g. matching `cn.bing.com` takes priority over built-in `bing`.
-4. Built-in engine standard IDs: `google`, `google_scholar`, `bing`, `duckduckgo_lite`, `duckduckgo`, `yandex`, `brave`, `yahoo` (Note: `ddg` and `yahoo-japan` are shorthand aliases only for `@if($site=)` condition rules; Lite uses the separate ID `duckduckgo_lite`)
+4. Priority: Custom selectors > Built-in selectors. Changing an override back to the built-in value or using Reset restores following script updates.
 5. On save, only keys that differ from the built-ins are stored; unmodified built-ins are not written to storage. When no selector matches, it falls back to `other` (empty) by default.

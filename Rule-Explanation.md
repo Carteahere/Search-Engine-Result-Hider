@@ -84,7 +84,7 @@ URL通配规则按匹配模式语义从URL开头匹配，主机通配`*`不跨�
 3. `!` 取反的是条件本身，如 `!(title *= "关键词")` 会命中无标题的结果
 4. 条件表达式可单独使用，如 `host $= ".example.com"`、`path *= "/download/"`，对所有搜索结果生效
 5. 属性值支持省略引号，如 `@if($site=google)`、`@if(scheme=https)` 等无空格值可直接裸写 
-6. 搜索引擎ID同2.9自定义选择器
+6. 搜索引擎ID同**2.9 自定义选择器**
 
 **`@if` 支持条件：**
 
@@ -157,8 +157,8 @@ bing: {disabled: true},
 
 **说明：**
 
-1. 优先级：自定义选择器 > 内置选择器，改回内置值或重置可恢复跟随脚本更新
+1. 内置引擎ID：`google`、`google_scholar`、`bing`、`duckduckgo_lite`、`duckduckgo`、`yandex`、`brave`、`yahoo`（`ddg` 与 `yahoo-japan` 仅作为 `@if($site=)` 条件规则简写别名，lite 使用独立 ID `duckduckgo_lite` ）
 2. 自定义引擎支持 `$site = "引擎ID"` 条件以及屏蔽/高亮/白名单规则，`titles`/`snippets` 可省略
 3. 引擎ID仅允许字母/数字/`_`/`-`，`other` 为保留键不可写，与内置引擎同ID或站点重叠时会覆盖内置选择器，如匹配 `cn.bing.com` 时将优先于内置 `bing` 命中
-4. 内置引擎标准ID：`google`、`google_scholar`、`bing`、`duckduckgo_lite`、`duckduckgo`、`yandex`、`brave`、`yahoo`（注：`ddg` 与 `yahoo-japan` 仅作为 `@if($site=)` 条件规则简写别名，lite 使用独立 ID `duckduckgo_lite` ）
+4. 优先级：自定义选择器 > 内置选择器，改回内置值或重置可恢复跟随脚本更新
 5. 保存时仅存储与内置有差异的键，未改动的内置不会写入存储，选择器未匹配到时默认退回`other`（置空）
