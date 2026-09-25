@@ -1407,6 +1407,26 @@ assert('条件-405: 首行独立条件表达式按纯文本保留', nonEmpty(pco
   assert('条件-408(已知问题): 独立表达式不识别site(...)括号形式(与@if内行为不一致)', envC.looksLikeCondExpr('site("google.com.hk") & path *= "/download/"') === false);
   assert('条件-409(已知问题): 独立条件*=正则裸值遇" # "被行内注释截断且截断后静默合法', envC.stripRuleComment('url *= /a # b/') === 'url *= /a');
   assert('条件-410(对照): =~形式正则裸值受保护不被注释截断', envC.stripRuleComment('url =~ /a # b/') === 'url =~ /a # b/');
+  assert('条件-411(已知问题): host =~ /:8080$/ 正则不感知端口(与字符串op不一致)', envC.evalCondAST(envC.parseRuleWithConditions('host =~ /:8080$/').dynamicConditions[0], 't', 'http://sub.example.com:8080/') === false);
+  assert('条件-412(已知问题): 空字符串 url *= "" 命中所有URL(与正则空模式被拒不一致)', envC.evalCondAST(envC.parseRuleWithConditions('url *= ""').dynamicConditions[0], 't', 'https://example.com/') === true);
+}
+
+// ==== [复审C-*] 第二轮审查新发现留档 (仅断言当前行为) ====
+{
+  const envD = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
+    ['hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions'].map((n) => extractFn(src, n)).join('\n') +
+    '\nconst window = { location: { hostname: "lite.duckduckgo.com" } };' +
+    '\nfunction getSearchEngine() { return "duckduckgo_lite"; }' +
+    '\nfunction getSearchCategory() { return "web"; }' +
+    '\nreturn { parseRuleWithConditions, evalCondAST };'
+  )();
+  const liteRule = envD.parseRuleWithConditions('*://*.example.com/* @if($site = "duckduckgo")');
+  assert('复审C-1(新发现): $site = "duckduckgo"在duckduckgo_lite站点静态命中(与"lite使用独立ID"文档相悖, 无法表达仅主站)', liteRule.staticPass === true && liteRule.dynamicConditions.length === 0);
+  const urlCond = envD.parseRuleWithConditions('url *= "例子.com"').dynamicConditions[0];
+  const hostCond = envD.parseRuleWithConditions('host $= ".例子.com"').dynamicConditions[0];
+  assert('复审C-2(新发现): url条件不做IDN/punycode归一, 中文域名字面条件对punycode URL静默漏命中', envD.evalCondAST(urlCond, 't', 'https://xn--fsqu00a.com/') === false);
+  assert('复审C-2(对照): host条件对同一URL命中(README 2.2 IDN视为同一主机)', envD.evalCondAST(hostCond, 't', 'https://xn--fsqu00a.com/') === true);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

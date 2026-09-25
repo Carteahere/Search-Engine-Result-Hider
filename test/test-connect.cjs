@@ -60,17 +60,28 @@ const KEYS = {
   WEBDAV_LAST_SYNC_SELECTORS_KEY: 'searchfilter_webdav_last_sync_selectors'
 };
 
-const syncFns = [
+const baseSyncFns = [
   'getRuleKey', 'filterValidRuleLines', 'getSubscriptionSyncSnapshot', 'setSubscriptionSyncSnapshot',
   'getRuleSyncSnapshot', 'setRuleSyncSnapshot', 'mergeRules3Way',
-  'stripRuleComment', 'isHttpsUrl', 'getWebDAVRequest', 'ensureWebDAVFolder', 'isHtmlResponse', 'isInvalidSyncResponse', 'parseSyncHeader',
+  'stripRuleComment', 'isHttpsUrl', 'getWebDAVRequest', 'ensureWebDAVFolder', 'isHtmlResponse', 'isInvalidSyncResponse', 'parseSyncHeader', 'isNonRuleTextResponse',
   'buildUploadContent', 'gmPutWebDAV',
   'getSelectorSyncSnapshot', 'setSelectorSyncSnapshot', 'selectorsEqual', 'mergeSelectors3Way',
   'firstSuccess', 'parseHttpDateHeader', 'queryNetworkTimeEndpoint', 'getNetworkTimeOffset', 'getTrustedNow',
   'extractValidCloudTimes', 'applyConfigToMainPanel',
   'buildSyncPayload', 'applyCloudSubscriptions', 'adoptStoredConfigIfNewer', 'getDefaultConfig',
   'checkExternalConfigChange', 'triggerWebDAVSyncDelayed', 'performAutoWebDAVSync', 'performWebDAVDownload',
-].map((n) => extractFn(src, n));
+];
+const ruleValidateFns = [
+  'hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent',
+  'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr',
+  'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition',
+  'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions',
+  'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex',
+  'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex',
+  'validateCondition', 'analyzeRule', 'validateRule',
+];
+const syncFns = [...new Set(baseSyncFns.concat(ruleValidateFns))].map((n) => extractFn(src, n));
+const langTextsSrc = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
 
 const netTimePrelude = `
     const WEBDAV_LAST_SYNC_SELECTORS_KEY = ${JSON.stringify(KEYS.WEBDAV_LAST_SYNC_SELECTORS_KEY)};
@@ -131,9 +142,16 @@ function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], local
     function refreshEngineSite() {}
     let currentConfig;
     const document = { getElementById: () => null };
+    const SUPPORTED_REGEX_FLAGS = 'imsu';
+    const window = { location: { hostname: 'www.google.com' } };
+    function getSearchEngine() { return 'google'; }
+    function getSearchCategory() { return 'web'; }
+    const validationCache = new Map();
+    const subdomainCache = new Map();
 
     ${netTimePrelude}
     ${syncFns.join('\n')}
+    ${langTextsSrc}
     return {
       run: (cfg) => performAutoWebDAVSync(cfg),
       download: (cfg) => performWebDAVDownload(cfg, false),
@@ -477,7 +495,6 @@ rules:
   const env = makeSyncEnv({ cloudStatus: 200, cloudText: '*://remote.example.com/*', localRules: ['*://fail.example.com/*'], localTime: 1000, storedConfig: localConfig });
   env.setCurrent({ ...localConfig });
   // Mock gmRequest PUT 抛出网络错误
-  const oldRun = env.run;
   let customCalls = [];
   const failingEnvFactory = new Function('store', 'calls', 'state', `
     const console = { log: () => {}, warn: () => {} };
@@ -592,6 +609,42 @@ rules:
     const cloud2 = ['*://r2.com/*'];
     const res2 = merge3(base2, local2, cloud2);
     assert('同步-054: 3-way云端删除生效且本地新增保留', !res2.includes('*://r1.com/*') && res2.includes('*://r2.com/*') && res2.includes('*://r4.com/*'));
+
+    const base3 = ['# 注释1', '规则1', '# 注释2', '规则2'];
+    const local3 = ['# 注释1', '规则1', '规则3', '# 注释2', '规则2'];
+    const cloud3 = ['# 注释1', '规则1', '# 注释2', '规则2'];
+    const res3 = merge3(base3, local3, cloud3);
+    assert('同步-054b: 分组内新增保持原位置', JSON.stringify(res3) === JSON.stringify(['# 注释1', '规则1', '规则3', '# 注释2', '规则2']));
+
+    const base4 = ['# 注释1', '规则1 # 旧', '# 注释2', '规则2'];
+    const local4 = ['# 注释2', '规则2', '# 注释1', '规则1 # 新备注'];
+    const cloud4 = ['# 注释1', '规则1 # 旧', '# 注释2', '规则2'];
+    const res4 = merge3(base4, local4, cloud4);
+    assert('同步-054c: 仅重排与改注释时保留本地顺序和注释', JSON.stringify(res4) === JSON.stringify(['# 注释2', '规则2', '# 注释1', '规则1 # 新备注']));
+
+    const base5 = ['# 广告', 'ad.com', '# 购物', 'shop.com'];
+    const local5 = ['# 购物', 'shop.com', '# 广告', 'ad.com'];
+    const cloud5 = ['# 广告', 'ad.com', '# 购物', 'shop.com', 'new.com'];
+    const res5 = merge3(base5, local5, cloud5);
+    assert('同步-054d: 本地重排后云端新增仍落在原锚点之后', JSON.stringify(res5) === JSON.stringify(['# 购物', 'shop.com', '# 广告', 'ad.com', 'new.com']));
+
+    const base6 = ['# 注释1', '规则1', '# 注释2', '规则2'];
+    const local6 = ['# 注释1', '规则1', '规则3', '# 注释2', '规则2'];
+    const cloud6 = ['# 注释1', '规则1', '# 注释2', '规则2', '规则4'];
+    const res6 = merge3(base6, local6, cloud6);
+    assert('同步-054e: 双方在不同锚点新增互不挤位', JSON.stringify(res6) === JSON.stringify(['# 注释1', '规则1', '规则3', '# 注释2', '规则2', '规则4']));
+
+    const base7 = ['# 注释1', '规则1', '# 注释2', '规则2'];
+    const local7 = ['# 注释1', '规则1 # 新', '# 注释2', '规则2'];
+    const cloud7 = ['# 注释1', '规则1 # 旧', '# 注释2', '规则2'];
+    const res7 = merge3(base7, local7, cloud7);
+    assert('同步-054f: 仅改注释且顺序未变时保留本地注释', JSON.stringify(res7) === JSON.stringify(local7));
+
+    const base8 = ['# 注释1', '规则1', '# 注释2', '规则2'];
+    const local8 = ['# 注释1', '规则1', '# 注释2', '规则2'];
+    const cloud8 = ['# 注释1', '规则1', '规则5', '# 注释2', '规则2'];
+    const res8 = merge3(base8, local8, cloud8);
+    assert('同步-054g: 云端在分组内新增时本地未改也保持该位置', JSON.stringify(res8) === JSON.stringify(cloud8));
   }
 }
 
@@ -774,6 +827,41 @@ rules:
   assert('同步-149: 重复URL的新增行不误删原有订阅', out.length === 1 && out[0].rules[0] === 'c.example');
   out = mkCollect([makeRow(C, A), makeRow(C, B)])(subsAB).newSubs;
   assert('同步-150: 多行改名为同一URL仅保留一份且旧条目清除', out.length === 1 && out[0].url === C);
+  // P1-2 修复回归: 两行互换URL(各自改名为对方原URL)时必须两条订阅都保留, 不得因幽灵删除丢失一方(连同其已抓取规则)。
+  out = mkCollect([makeRow(B, A), makeRow(A, B)])(subsAB).newSubs;
+  assert('同步-153: 两行互换URL时两条订阅均保留', out.length === 2 && out.some(s => s.url === A && s.rules[0] === 'a.example') && out.some(s => s.url === B && s.rules[0] === 'b.example'));
+}
+
+// ❌删除按钮: 未持久化的新增行(原URL为空)不得把输入值记为已删URL, 否则同URL真实订阅被静默删除。
+{
+  const realUrl = 'https://x/rules';
+  const makeRow = (inputVal, origUrl) => {
+    const row = {
+      dataset: { originalUrl: origUrl },
+      input: { value: inputVal },
+      removed: false,
+      closest: () => row,
+      querySelector: (sel) => sel === '.serh-subscription-url' ? row.input : null,
+      remove: () => { row.removed = true; }
+    };
+    return row;
+  };
+  const deleteRow = (row) => {
+    const deletedUrls = new Set();
+    const btn = { onclick: null, closest: () => row };
+    const container = { querySelectorAll: () => [btn] };
+    const bind = new Function('container', 'deletedUrls', 'reindexRows', 'persistCurrentSubscriptions', 'showToast', 'forceReprocessAll', 't', `
+      ${extractFn(src, 'bindDeleteEvents')}
+      return bindDeleteEvents;
+    `)(container, deletedUrls, () => {}, () => true, () => {}, () => {}, (k) => k);
+    bind();
+    btn.onclick({ stopPropagation() {} });
+    return { deletedUrls, row };
+  };
+  const r1 = deleteRow(makeRow(realUrl, ''));
+  assert('同步-151: 删除未持久化新增行不记录已删URL', r1.row.removed && r1.deletedUrls.size === 0);
+  const r2 = deleteRow(makeRow('https://edited/rules', realUrl));
+  assert('同步-152: 删除已存在行按原URL记录且不含改后的输入值', r2.deletedUrls.size === 1 && r2.deletedUrls.has(realUrl));
 }
 
 // 面板外点击关闭：按下起点在面板内时（如textarea拖选、取色拖拽），拖出面板松开产生的合成click不应误关面板。
@@ -798,13 +886,15 @@ rules:
     };
     return { p, state };
   };
-  const factory = new Function('document', 'panel', 'preventPanelClose', 'setTimeout', `
+  const calls = { sub: 0, dav: 0 };
+  const factory = new Function('document', 'panel', 'preventPanelClose', 'setTimeout', 'isSerhPanelOpen', 'checkAutoSubscription', 'checkAutoWebDAV', `
     ${extractFn(src, 'fadeOutAndRemovePanel')}
     ${extractFn(src, 'bindOutsideClickClose')}
     return bindOutsideClickClose;
   `);
+  const deps = [() => false, () => { calls.sub++; }, () => { calls.dav++; }];
   const first = makePanel();
-  factory(doc, first.p, false, (fn) => fn())(first.p, () => { first.state.beforeClose = true; });
+  factory(doc, first.p, false, (fn) => fn(), ...deps)(first.p, () => { first.state.beforeClose = true; });
   doc.fire('pointerdown', { target: inside });
   doc.fire('mousedown', { target: inside });
   doc.fire('click', { target: outside });
@@ -812,12 +902,27 @@ rules:
   doc.fire('pointerdown', { target: outside });
   doc.fire('click', { target: outside });
   assert('面板-002: 面板外按下点击外部仍正常关闭', first.state.removed && first.state.beforeClose);
+  assert('面板-005: 面板关闭后恢复后台同步检查', calls.sub === 1 && calls.dav === 1);
   assert('面板-003: 关闭后外部监听全部移除', (docListeners.click || []).length === 0 && (docListeners.pointerdown || []).length === 0 && (docListeners.mousedown || []).length === 0 && first.p._cleanupClick === null);
   const second = makePanel();
-  factory(doc, second.p, false, (fn) => fn())(second.p, () => { second.state.beforeClose = true; });
+  factory(doc, second.p, false, (fn) => fn(), ...deps)(second.p, () => { second.state.beforeClose = true; });
   doc.fire('click', { target: outside });
   assert('面板-004: 无按下记录时外部点击仍关闭', second.state.removed);
+  const openDeps = [() => true, () => { calls.sub++; }, () => { calls.dav++; }];
+  const subBefore = calls.sub, davBefore = calls.dav;
+  const third = makePanel();
+  factory(doc, third.p, false, (fn) => fn(), ...openDeps)(third.p, () => { third.state.beforeClose = true; });
+  doc.fire('click', { target: outside });
+  assert('面板-006: 其他面板仍打开时不恢复同步', third.state.removed && calls.sub === subBefore && calls.dav === davBefore);
 }
+
+// P1-1 修复回归: 主面板外点关闭过滤合成事件(永页机等自动翻页脚本拼接页面派发的合成click不再误关面板),
+// 并记录按下起点(面板内拖选文本/拖滑块到面板外松开不再误关, 未保存编辑不丢失)。
+assert('面板-007: 主面板closeHandler与pressHandler均过滤合成事件(isTrusted===false)', (src.match(/e\.isTrusted === false/g) || []).length === 2);
+assert('面板-008: 主面板外点关闭带按下起点防护且关闭时同步移除监听', src.includes('const closeZoneSelector') && src.includes('window._panelPressHandler') && src.includes("removeEventListener('pointerdown', window._panelPressHandler)"));
+
+// P2-3 修复回归: 引擎自身域名守卫仅拦截新建屏蔽, 被屏蔽结果的删除规则/白名单入口不再被拦截。
+assert('面板-009: 屏蔽按钮的引擎域名守卫位于!isBlocked分支内', /if \(!isBlocked\) \{\s*const currentHost = String\(window\.location\.hostname/.test(src));
 
 // 正则/条件内部的 # 不能当作行尾注释参与去重。
 {
@@ -1334,6 +1439,20 @@ await (async () => {
   `)();
   const r = getReq({ url: 'https://dav.example.com/dav/', username: 'u', password: 'p', filename: 'sub dir/my rules.txt' });
   assert('审查D-12: 子路径与文件名分别编码', r.fullUrl === 'https://dav.example.com/dav/sub%20dir/my%20rules.txt' && r.folderUrl === 'https://dav.example.com/dav/sub%20dir/');
+  const trav = getReq({ url: 'https://dav.example.com/dav/', username: 'u', password: 'p', filename: '../rules.txt' });
+  assert('审查D-12b(已知问题): 文件名含../段未过滤可逃逸配置目录', trav.fullUrl === 'https://dav.example.com/dav/../rules.txt' && trav.folderUrl === 'https://dav.example.com/dav/../');
+}
+
+// 头部扫描跳过空白行: 首行为空白行时头仍可解析且头行从 restLines 剔除
+{
+  const parse = new Function(
+    extractFn(src, 'parseSyncHeader') + '\nreturn parseSyncHeader;'
+  )();
+  const blank = parse('\n# ScriptConfig: {"syncedAt":7777}\n*://a.com/*');
+  assert('同步-072b: 首行空行时 ScriptConfig 头仍解析', blank.config && blank.config.syncedAt === 7777);
+  assert('同步-072c: 首行空行时头行从 restLines 剔除', !blank.restLines.some((l) => l.indexOf('# ScriptConfig:') === 0) && blank.restLines.join('\n') === '\n*://a.com/*');
+  const midBlank = parse('# ScriptConfig: {"syncedAt":8888}\n\n# Selectors: {"a":1}\n*://b.com/*');
+  assert('同步-072d: 头部间空行不打断后续头解析', midBlank.config && midBlank.config.syncedAt === 8888 && !!midBlank.config.selectors);
 }
 
 // 审查D-13/14: 订阅拉取解析为空规则集时抛错且不覆盖既有规则
@@ -1464,6 +1583,108 @@ await (async () => {
   assert('同步-145: 导出文件名包含年份(rules-YYYY-MM-DD-HHMMSS.txt)', /^rules-\d{4}-\d{2}-\d{2}-\d{6}\.txt$/.test(name), name);
   const cas = extractFn(src, 'checkAutoSubscription');
   assert('同步-146(已知问题): force路径绕过订阅自动更新开关且空rules订阅恒为到期(死链订阅每小时自动同步时被强制重拉)', cas.includes('!force && !currentConfig.subscriptionAutoUpdate') && cas.includes('s.rules.length === 0'));
+}
+
+// ==== [复审W-*/UI-*] 第二轮审查留档 (W-1/W-3/W-4 已修复, 断言转为修复后契约; 其余仍为当前行为对照) ====
+// 修复W-1: 设置方向仲裁与订阅preferLocal改用独立设置时钟cloudSettingsTime(仅取syncedAt), 规则-only上传推进的rulesSyncedAt不再参与;
+// 本地设置较新且开启配置同步时触发设置维度上传
+{
+  const cloud = { enabled: false, language: 'en', syncedAt: 1000, rulesSyncedAt: 9000 };
+  const cloudText = '# ScriptConfig:' + JSON.stringify(cloud) + '\n*://same.example.com/*';
+  const env = makeSyncEnv({ cloudText, localRules: ['*://same.example.com/*'], localTime: 5000, syncConfig: true, initialSnapshot: ['*://same.example.com/*'] });
+  env.setCurrent({ rules: ['*://same.example.com/*'], enabled: true, language: 'zh-CN' });
+  await env.run(syncCfg);
+  const cur = env.getCurrent();
+  assert('修复W1-1: rulesSyncedAt(9000)>localTime(5000)但设置syncedAt(1000)更旧时, 云端旧设置不再被采纳(enabled/language保持本地)', cur.enabled === true && cur.language === 'zh-CN');
+  const put = env.calls.find((c) => c.method === 'PUT');
+  assert('修复W1-2: 本地设置较新时触发设置维度上传, 上传头携带本地较新设置', !!put && put.data.includes('"enabled":true'));
+  const env2 = makeSyncEnv({ cloudText: '# ScriptConfig:' + JSON.stringify({ enabled: false, language: 'en', syncedAt: 9000, rulesSyncedAt: 9000 }) + '\n*://same.example.com/*', localRules: ['*://same.example.com/*'], localTime: 5000, syncConfig: true, initialSnapshot: ['*://same.example.com/*'] });
+  env2.setCurrent({ rules: ['*://same.example.com/*'], enabled: true, language: 'zh-CN' });
+  await env2.run(syncCfg);
+  assert('修复W1-3(对照): 设置syncedAt(9000)确实较新时云端设置仍被正常采纳', env2.getCurrent().enabled === false && env2.getCurrent().language === 'en');
+}
+// 复审W-2: 自动同步把 200+空云端文件按三方合并判为"云端全删", 本地既有规则被清空且快照基线前移为空
+{
+  const env = makeSyncEnv({ cloudText: '', localRules: ['*://a.example.com/*', '*://b.example.com/*'], localTime: 0, syncConfig: false, initialSnapshot: ['*://a.example.com/*', '*://b.example.com/*'] });
+  env.setCurrent({ rules: ['*://a.example.com/*', '*://b.example.com/*'], enabled: true });
+  await env.run(syncCfg);
+  const cur = env.getCurrent();
+  assert('复审W-2(新发现): 云端空文件(非404)时自动合并清空本地全部既有规则', Array.isArray(cur.rules) && cur.rules.length === 0);
+}
+// 修复W-3: 内容变更判定改为顺序敏感(纯重排视为有效变更触发一次上传), 基线与云端随之对齐, 不再奇偶震荡;
+// 同名注释行在合并输出中按行键去重坍缩为一组(复审W-6 留档, 未修复)
+{
+  const merge3 = new Function(
+    extractFn(src, 'stripRuleComment') + '\n' + extractFn(src, 'getRuleKey') + '\n' + extractFn(src, 'mergeRules3Way') + '\nreturn mergeRules3Way;'
+  )();
+  const A = '*://a.example.com/*', B = '*://b.example.com/*';
+  const round1 = merge3([A, B], [B, A], [A, B]);
+  assert('修复W3-0(对照): 三方合并仍保留本地移动顺序(合并器语义不变)', JSON.stringify(round1) === JSON.stringify([B, A]));
+  const env = makeSyncEnv({ cloudText: '# ScriptConfig:{"syncedAt":1000}\n' + A + '\n' + B, localRules: [B, A], localTime: 2000, syncConfig: false, initialSnapshot: [A, B] });
+  env.setCurrent({ rules: [B, A], enabled: true });
+  await env.run(syncCfg);
+  const put = env.calls.find((c) => c.method === 'PUT');
+  const putRules = put ? put.data.split('\n').filter((l) => l && l.indexOf('#') !== 0).join('|') : '';
+  assert('修复W3-1: 纯重排在规则-only同步下触发一次上传且上传内容保持本地顺序', !!put && putRules === [B, A].join('|'));
+  const round2LocalTime = env.store.get(KEYS.LOCAL_LAST_MODIFIED_KEY);
+  const env2 = makeSyncEnv({ cloudText: put.data, localRules: [B, A], localTime: round2LocalTime, syncConfig: false, initialSnapshot: [B, A] });
+  env2.setCurrent({ rules: [B, A], enabled: true });
+  await env2.run(syncCfg);
+  assert('修复W3-2: 上传对齐后下一轮无重复上传且本地顺序保持(奇偶震荡消除)', env2.calls.filter((c) => c.method === 'PUT').length === 0 && JSON.stringify(env2.getCurrent().rules) === JSON.stringify([B, A]));
+  const dup = ['# g', A, '# g', B];
+  const mergedDup = merge3(dup, dup.slice(), dup.slice());
+  assert('复审W-6(新发现): 同名注释行三方合并后坍缩为一组(第二个分组标题丢失)', mergedDup.filter((l) => l === '# g').length === 1 && mergedDup.length === 3);
+}
+// 修复W-4: 自动同步/手动下载增加整体拒绝兜底——非空正文若不含任何合法规则行或注释行, 视为错误文本整体拒绝(不并入不回传);
+// 词表白名单本身未扩(复审W-4 留档: "Too Many Requests"等不在isInvalidSyncResponse词表内, 拒绝由下游兜底承担)
+{
+  const isInvalid = new Function(
+    extractFn(src, 'isHtmlResponse') + '\n' + extractFn(src, 'isInvalidSyncResponse') + '\nreturn isInvalidSyncResponse;'
+  )();
+  assert('复审W-4(留档): "Too Many Requests"等词表外错误体不在isInvalidSyncResponse词表内', isInvalid('Too Many Requests') === false);
+  assert('复审W-4(对照): 词表内错误体仍被拒绝', isInvalid('Not Found') === true);
+  const env = makeSyncEnv({ cloudText: 'Too Many Requests', localRules: ['*://keep.example.com/*'], localTime: 1000, syncConfig: false });
+  env.setCurrent({ rules: ['*://keep.example.com/*'], enabled: true });
+  await env.run(syncCfg);
+  assert('修复W4-1: 自动同步对不含任何合法规则行的非空正文整体拒绝(不并入规则库也不回传)', JSON.stringify(env.getCurrent().rules) === JSON.stringify(['*://keep.example.com/*']) && env.calls.filter((c) => c.method === 'PUT').length === 0);
+  const mixed = makeSyncEnv({ cloudText: 'Too Many Requests\n*://cloud.example.com/*', localRules: ['*://keep.example.com/*'], localTime: 1000, syncConfig: false, initialSnapshot: ['*://keep.example.com/*'] });
+  mixed.setCurrent({ rules: ['*://keep.example.com/*'], enabled: true });
+  await mixed.run(syncCfg);
+  assert('修复W4-2(对照): 含至少一条合法规则行的混合正文仍正常合并云端规则', mixed.getCurrent().rules.includes('*://cloud.example.com/*') === true);
+  const dl = makeSyncEnv({ cloudText: 'Too Many Requests', localRules: ['*://keep.example.com/*'], localTime: 1000, syncConfig: false });
+  dl.setCurrent({ rules: ['*://keep.example.com/*'], enabled: true });
+  let threw = false;
+  try { await dl.download(syncCfg); } catch (_) { threw = true; }
+  assert('修复W4-3: 手动下载对非规则文本整体拒绝(抛错且不落地覆盖本地)', threw === true && JSON.stringify(dl.getCurrent().rules) === JSON.stringify(['*://keep.example.com/*']));
+}
+// 复审W-5: 合法JSON但非对象(数组)的ScriptConfig头被当作真值config, 解构后数字键可污染设置并随buildSyncPayload回传
+{
+  const parse = new Function(extractFn(src, 'parseSyncHeader') + '\nreturn parseSyncHeader;')();
+  const p = parse('# ScriptConfig:[1,2]\n*://a.example.com/*');
+  assert('复审W-5(新发现): 数组形ScriptConfig头解析为真值config(Array)且头行被剥离', Array.isArray(p.config) === true);
+  const ok = parse('# ScriptConfig: {"enabled":true}\nr');
+  assert('复审W-5(对照): 正常对象头仍解析为对象', !!ok.config && !Array.isArray(ok.config) && ok.config.enabled === true);
+}
+// 复审W-7: 文件名/子路径无条件encodeURIComponent, 已编码名被二次编码(%20→%2520)指向不存在的文件
+{
+  const getReq = new Function(`
+    ${extractFn(src, 'isHttpsUrl')}
+    ${extractFn(src, 'safeBase64Encode')}
+    function t(k) { return k; }
+    ${extractFn(src, 'getWebDAVRequest')}
+    return getWebDAVRequest;
+  `)();
+  const r = getReq({ url: 'https://dav.example.com/dav/', username: 'u', password: 'p', filename: 'My%20Rules.txt' });
+  assert('复审W-7(新发现): 已编码文件名被二次编码指向错误路径(404后触发初始上传, 旧文件脱离同步)', r.fullUrl.includes('My%2520Rules.txt'));
+}
+// 复审UI-1/UI-2: bindOutsideClickClose 不豁免屏蔽确认弹窗 / 面板淡出未过滤 transitionend 事件来源
+// (复审UI-1已随P1-1修复更新: 主面板closeHandler改用closeZoneSelector统一豁免子面板与确认弹窗)
+{
+  const biSrc = extractFn(src, 'bindOutsideClickClose');
+  const mainPanelExemptsConfirmDialog = /const closeZoneSelector = '[^']*#serh-block-confirm-dialog/.test(src);
+  assert('复审UI-1(已更新): bindOutsideClickClose未豁免#serh-block-confirm-dialog(仅主面板closeHandler经closeZoneSelector豁免, 弹窗内点单选会关闭其他未保存面板)', !biSrc.includes('serh-block-confirm-dialog') && mainPanelExemptsConfirmDialog);
+  const foSrc = extractFn(src, 'fadeOutAndRemovePanel');
+  assert('复审UI-2(新发现): 面板transitionend未过滤事件来源(子元素过渡冒泡会提前截断淡出动画)', foSrc.includes('transitionend') && !foSrc.includes('e.target'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

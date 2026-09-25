@@ -178,6 +178,10 @@ assert('规则-075: 编译过滤保留合法flags去除非法', (() => {
   const flags = api.compileRuleRegex('/foo/gyi').regex.flags;
   return flags.includes('i') && !flags.includes('g') && !flags.includes('y');
 })());
+assert('规则-075b(已知问题): 大写Title//TEXT/前缀大小写敏感被当作URL主机规则(小写title/才按标题处理)', (() => {
+  const c = api.compileRuleRegex('Title/广告/');
+  return c.type === 'url' && api.ruleToRegex('Title/广告/').pattern.indexOf('^') === 0;
+})());
 assert('规则-076: 未闭合正则 /foo 编译报错(与校验口径一致)', (() => {
   try { api.compileRuleRegex('/foo'); return false; } catch (e) { return true; }
 })());
@@ -1766,7 +1770,61 @@ const window = { location: { hostname: 'www.google.com', href: 'https://www.goog
   const absorbed = condApi.parseRuleWithConditions('host:8080');
   assert('规则-321(已知问题): 条件关键字形URL规则被静默吸收为永假条件且校验valid(host:8080 无报错且永不屏蔽)', absorbed.coreRule === '' && absorbed.standaloneExpr === true && absorbed.dynamicConditions.length === 1 && condApi.analyzeRule('host:8080').valid === true);
 }
+{
+  const condConsts = `
+const HL_STATS_REGEX = /^@(\\d+)/;
+function t(k, p) { return k; }
+const DEFAULT_SELECTORS = {};
+function isLocalEntry(e) { return e && e.source !== 'sub'; }
+function getSearchEngine() { return 'other'; }
+function getSearchCategory() { return 'web'; }
+const currentConfig = { debug: false };
+const window = { location: { hostname: 'www.google.com', href: 'https://www.google.com/search?q=x' } };
+`;
+  const condNames = ['hostLabelToASCII', 'toASCIIHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'validateUrlWildcard', 'evaluateCondition', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'isCondExprCore', 'looksLikeCondExpr', 'isScriptRuleLine', 'isElementRuleLine', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'ruleToRegex', 'compileRuleRegex', 'validateRule', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'filterValidRuleLines', 'getRuleKey'].map(n => extractFn(src, n));
+  const collectFn = extractFn(src, 'collectSubscriptionRules');
+  const api = new Function(condConsts + '\n' + condNames.join('\n') + '\n' + collectFn + '\nreturn { parseRuleWithConditions, analyzeRule, isScriptRuleLine, isElementRuleLine, collectSubscriptionRules };')();
+  const severed = api.parseRuleWithConditions('@if(url=/a)b/)example.com');
+  assert('审查E-1(新发现): @if裸值斜杠形式含未配对)时extractBalancedParens提前闭合致条件腰斩且校验valid(@if(url=/a)b/)example.com 静默失效)', severed.coreRule === 'b/)example.com' && api.analyzeRule('@if(url=/a)b/)example.com').valid === true);
+  assert('审查E-2(新发现): title/前缀规则重复flags(ii)静默并入pattern为字面量, 与//形式报错口径不一致(title/foo/ii valid而/foo/ii invalid)', api.analyzeRule('title/foo/ii').valid === true && api.analyzeRule('/foo/ii').valid === false);
+  const elemHybrid = '@if(title *= "x")##div.ads';
+  assert('审查E-3(新发现): @if+##组合被isScriptRuleLine判为脚本行绕过订阅元素规则过滤, 生成永不命中死规则(collectSubscriptionRules保留)', api.isScriptRuleLine(elemHybrid) === true && api.isElementRuleLine(elemHybrid) === false && api.collectSubscriptionRules([elemHybrid]).length === 1);
+  assert('审查E-4(新发现): 核心规则含撇号+@if时单引号态吞掉@if扫描致合法规则被误判invalidUrlWildcard(it\'s与@if组合)', api.analyzeRule("*://example.com/it's/* @if(title *= \"k\")").valid === false);
+}
 })();
+
+// ==== [复审R-*] 第二轮审查新发现留档 (仅断言当前行为) ====
+{
+  const langMatch = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
+  const consts = src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0];
+  const fns = ['hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateCondition', 'analyzeRule'].map((n) => extractFn(src, n));
+  const api = new Function(
+    consts + '\n' + langMatch + '\n' +
+    `function t(key, params = {}) {
+      const texts = LANG_TEXTS['zh-CN'] || {};
+      let text = texts[key] || key;
+      for (const [k, v] of Object.entries(params)) text = text.replaceAll('{' + k + '}', v);
+      return text;
+    }
+    const window = { location: { hostname: 'www.google.com' } };
+    function getSearchEngine() { return 'google'; }
+    function getSearchCategory() { return 'web'; }
+    const currentConfig = { rules: [], debug: false };
+    const validationCache = new Map();
+    const subdomainCache = new Map();
+    ` + fns.join('\n') + '\nreturn { analyzeRule, findIfOccurrences };'
+  )();
+  assert('复审R-1(新发现): 紧贴核心无空格的@if(...)提取不到条件且整规则仍valid(按字面量编译为死规则; @N前缀时变全站无条件高亮)', api.findIfOccurrences('*://x.com/*@if(title*=a)').length === 0 && api.analyzeRule('*://x.com/*@if(title*=a)').valid === true);
+  assert('复审R-1(对照): 空格分隔的@if正常提取条件', api.findIfOccurrences('*://x.com/* @if(title *= "a")').length === 1);
+}
+{
+  const pc = new Function(
+    extractFn(src, 'extractYamlRuleItems') + '\n' + extractFn(src, 'parseRulesetContent') + '\nreturn parseRulesetContent;'
+  )();
+  let threw = false;
+  try { pc('name: "My list\nrules:\n  - *://a.com/*\n'); } catch (_) { threw = true; }
+  assert('复审R-2(新发现): YAML name行引号不配对时stripQ抛错未被捕获, 整个订阅导入/更新失败(列表项同类错误仅跳过单行)', threw === true);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

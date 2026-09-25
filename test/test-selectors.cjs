@@ -85,7 +85,7 @@ global.document = {
   }
 };
 
-const fns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'isEngineSite', 'getContainerSelector', 'isValidCssSelector', 'hasPseudoElement', 'validateUserSelectors', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'parseSelectorText', 'sameSelectorDef', 'diffUserSelectors', 'pruneUserSelectors'].map((n) => extractFn(src, n));
+const fns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'isEngineSite', 'getContainerSelector', 'isValidCssSelector', 'hasPseudoElement', 'validateUserSelectors', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'parseSelectorText', 'sameSelectorDef', 'diffSelectorDefFields', 'diffUserSelectors', 'pruneUserSelectors'].map((n) => extractFn(src, n));
 
 // builtinSelectorOf 为 const 箭头函数, extractFn 提取不到, 按行原样提取以跟随源码
 const builtinSelectorOfLine = src.match(/const builtinSelectorOf = .+?;/);
@@ -1647,7 +1647,8 @@ await (async () => {
   check('选择器-223(已知问题): 全量内置副本仅多disabled:true时仍被判为与内置相同(prune将误删)', pruneProbe.sameSelectorDef(fullDisabledBing, builtinBing) === true);
 }
 
-// ==== [选择器-224~226] 本轮子代理审查新增已知问题留档: JSON非对象def静默丢弃 / diff键粒度固化内置全量副本 / other保留键解析层静默丢弃 (仅断言当前行为) ====
+// ==== [选择器-224/226] 已知问题留档: JSON非对象def静默丢弃 / other保留键解析层静默丢弃 (仅断言当前行为) ====
+// ==== [选择器-225] 已修复(原已知问题: diff按整键比较固化内置全量副本), 现为字段级diff修复回归 ====
 {
   const selStart = src.indexOf('const SELECTORS = {');
   const selOpen = src.indexOf('{', selStart);
@@ -1656,7 +1657,7 @@ await (async () => {
   const builtinSelectorOfLine2 = src.match(/const builtinSelectorOf = .+?;/)[0];
   const selStore = { current: undefined };
   const gmGet = (key, defaultValue) => (key === 'searchfilter_selectors' ? (selStore.current === undefined ? defaultValue : selStore.current) : defaultValue);
-  const selFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'parseSelectorText', 'sameSelectorDef', 'diffUserSelectors'].map(n => extractFn(src, n));
+  const selFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'parseSelectorText', 'sameSelectorDef', 'diffSelectorDefFields', 'diffUserSelectors'].map(n => extractFn(src, n));
   const selApi = new Function('GM_getValue', 'storeRef', `
 const SELECTORS_KEY = 'searchfilter_selectors';
 const SUPPORTED_REGEX_FLAGS = 'imsu';
@@ -1674,12 +1675,12 @@ return { getSelectors, parseSelectorText, diffUserSelectors };
   check('选择器-224(已知问题): JSON路径非对象def静默丢弃({"bing": true} 无报错、保存成功但不生效)', !!jsRes.config && !jsRes.errors.length && !('bing' in jsRes.config));
   const otherRes = selApi.parseSelectorText('other: {containers: ".x", match: /x/}');
   check('选择器-226(已知问题): 保留键other在两条解析路径均被静默丢弃(validate的保留键报错不可达)', !!otherRes.config && !otherRes.errors.length && !('other' in otherRes.config));
-  // 面板文本=serializeSelectors全量序列化; 保存时diffUserSelectors按整键比较 → 仅改一个字段会以旧内置值全量副本入库, 脚本升级内置后对该用户永不生效
+  // 面板文本=serializeSelectors全量序列化; 保存时diffUserSelectors按字段级提取差异 → 仅存改动字段, 其余跟随内置(文档2.9: 升级内置后未改动字段可跟随更新)
   const mergedAll = selApi.getSelectors();
   const editedBing = Object.assign({}, mergedAll.bing, { containers: 'div.custom' });
   const diff = selApi.diffUserSelectors(Object.assign({}, mergedAll, { bing: editedBing }));
   const pinningFields = ['match', 'titles', 'snippets', 'links'].filter(k => k in (diff.bing || {}));
-  check('选择器-225(已知问题): 仅改一个字段时diff保留该引擎全部内置字段(升级内置后被旧副本钉死)', 'bing' in diff && pinningFields.length === 4, pinningFields.join(','));
+  check('选择器-225: 仅改一个字段时diff只保留该字段(未改动内置不再固化, 升级内置可跟随)', 'bing' in diff && pinningFields.length === 0 && diff.bing.containers === 'div.custom' && diff.bing.match === undefined, pinningFields.join(','));
 }
 
 // ==== [选择器-227~228] 修复回归: 悬浮球深色模式适配(图标浅蓝偏白/数字白色) ====
@@ -1713,6 +1714,12 @@ return { injectBlockButton };
   api.injectBlockButton(container, 'other', 'https://example.com/page', 'example.com');
   check('选择器-230: 无标题元素容器仍注入屏蔽按钮且锚定容器', !!appended && appended.className === 'serh-quick-block');
 })();
+
+// ==== [复审S-*] 第二轮审查新发现留档 (仅断言当前行为) ====
+{
+  const upSrc = extractFn(src, 'updatePickedColor');
+  check('复审S-1(新发现): 画布取色updatePickedColor只写展示元素(code-text/current-preview), 从不写hlcolor行输入, 保存仅读文本框(取色对配置零影响却提示已保存)', upSrc.includes('serh-hlcolor-code-text') && upSrc.includes('serh-hlcolor-current-preview') && !upSrc.includes('hlcolor-input'));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
