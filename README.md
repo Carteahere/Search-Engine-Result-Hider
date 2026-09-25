@@ -2,15 +2,15 @@
 
 ### 1.1 简介
 
-[中文](README.md) | [English](README.en.md) | 交流群 [TG](https://t.me/+qBqMTqjc4Xk5M2Jh)
+[中文](README.md) | [English](README.en.md)
 
 在**仅支持安装脚本**的浏览器上实现复杂规则屏蔽搜索结果功能  
 支持包括ublacklist基础规则在内的URL匹配、正则匹配、标题匹配、白名单匹配、高亮目标结果以及结果摘要(snippet)匹配  
 当前支持搜索引擎：Bing、Google、Google Scholar、DuckDuckGo(ddg/lite)、Yandex、Brave、Yahoo(&Japan)  
 
-安装源 [Github](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [Greasy Fork](https://update.greasyfork.org/scripts/552394/%E6%90%9C%E7%B4%A2%E5%BC%95%E6%93%8E%E7%BB%93%E6%9E%9C%E5%B1%8F%E8%94%BD%E5%99%A8.user.js)
-
-使用支持安装脚本的浏览器打开直接安装
+安装源 [Github](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [Greasy Fork](https://update.greasyfork.org/scripts/552394/%E6%90%9C%E7%B4%A2%E5%BC%95%E6%93%8E%E7%BB%93%E6%9E%9C%E5%B1%8F%E8%94%BD%E5%99%A8.user.js)  
+浏览器打开直接安装  
+交流群 [TG](https://t.me/+qBqMTqjc4Xk5M2Jh)
 
 ### 1.2 当前功能：
 
