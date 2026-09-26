@@ -61,5 +61,6 @@ For debug mode and troubleshooting, see [Debug](Debug.en.md)
 
 ## Screenshots
 
-
+<img width="400" height="250" alt="01" src="https://github.com/user-attachments/assets/a8297817-1856-434e-a329-b98adbfbad91" />
 <br/>
+<img width="250" height="123" alt="02" src="https://github.com/user-attachments/assets/4f7927c2-9340-4276-b253-b8a6e2523eb1" />
