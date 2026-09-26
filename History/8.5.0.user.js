@@ -281,7 +281,7 @@
       urlRule: 'URL规则', titleRule: '标题规则', textRule: '正文规则',
       regexRule: '正则规则', statsCompound: '复合规则', noMatch: '无匹配项',
       whitelistRules: '白名单规则',
-      menuOpenPanel: '⚙️ 打开配置面板', menuErrorDetection: '错误检测',
+      menuOpenPanel: '⚙️ 打开配置面板', menuErrorDetection: '规则自检',
       menuCenter: '面板居中', menuBubble: '显示悬浮球', menuBubbleAction: '悬浮球功能',
       menuLang: 'Language: 中文', menuLangEn: 'Language: English',
       subscriptionSuccess: '订阅成功！已更新 {count} 条规则。',
