@@ -283,7 +283,7 @@
       urlRule: 'URL规则', titleRule: '标题规则', textRule: '正文规则',
       regexRule: '正则规则', statsCompound: '复合规则', noMatch: '无匹配项',
       whitelistRules: '白名单规则',
-      menuOpenPanel: '⚙️ 打开配置面板', menuErrorDetection: '规则自检',
+      menuOpenPanel: '⚙️ 打开配置面板', menuRulesDetection: '规则自检',
       menuCenter: '面板居中', menuBubble: '显示悬浮球', menuBubbleAction: '悬浮球功能',
       menuLang: 'Language: 中文', menuLangEn: 'Language: English',
       subscriptionSuccess: '订阅成功！已更新 {count} 条规则。',
@@ -350,7 +350,7 @@
       urlRule: 'URL Rule', titleRule: 'Title Rule', textRule: 'Text Rule',
       regexRule: 'Regex Rule', statsCompound: 'Compound Rule', noMatch: 'No matches',
       whitelistRules: 'Whitelist Rules',
-      menuOpenPanel: '⚙️ Open Panel', menuErrorDetection: 'Error Detection',
+      menuOpenPanel: '⚙️ Open Panel', menuRulesDetection: 'Rules Detection',
       menuCenter: 'Center Panel', menuBubble: 'Show Bubble', menuBubbleAction: 'Bubble Action',
       menuLang: 'Language: 中文', menuLangEn: 'Language: English',
       subscriptionSuccess: 'Subscription successful! Updated {count} rules.',
@@ -4178,7 +4178,7 @@
               { id: 'serh-set-debug', labelKey: 'debugMode', checked: currentConfig.debug === true }
             ])}
             ${settingsRow([
-              { id: 'serh-set-error-detection', labelKey: 'menuErrorDetection', checked: currentConfig.errorDetection !== false },
+              { id: 'serh-set-error-detection', labelKey: 'menuRulesDetection', checked: currentConfig.errorDetection !== false },
               { id: 'serh-set-export-config', labelKey: 'exportConfig', checked: currentConfig.exportConfig === true }
             ])}
         `;
