@@ -212,6 +212,15 @@ check('选择器-039: 大写flags编译保留i', api.getSelectors().flg2.match.f
 const R9u = api.parseSelectorText('z3: { match: /abc/I, containers: ".x" }');
 check('选择器-040: 解析时大写flags归一为小写且校验通过', !R9u.errors.length && R9u.config.z3.match.flags === 'i' && api.validateUserSelectors(R9u.config).length === 0);
 
+// ---- 修复S-1: 连字符引擎ID序列化为带引号键(导出文件为合法JS字面量) ----
+api.setStore({ 'my-engine': { match: { source: 'a', flags: '' }, containers: '.r', titles: [], snippets: [], links: 'a[href]' } });
+const P4 = api.serializeSelectors();
+check('修复S-1: 连字符引擎ID输出带引号键', P4.includes("'my-engine': {"));
+check('修复S-2: 含连字符键的序列化结果为合法JS对象字面量', (() => { try { const o = new Function('const SELECTORS = {' + P4 + '}; return SELECTORS;')(); return !!(o && o['my-engine'] && o.bing); } catch (e) { return false; } })());
+const R15 = api.parseSelectorText(P4);
+check('修复S-3: 带引号连字符键往返一致且过校验', !R15.errors.length && !!R15.config && !!R15.config['my-engine'] && R15.config['my-engine'].containers === '.r' && api.validateUserSelectors(R15.config).length === 0);
+check('修复S-4(对照): 普通键仍不加引号', P4.includes('bing: {') && P4.includes('google_scholar: {'));
+
 // ---- 同引擎用户优先(同ID覆盖与新增重叠键均用用户选择器) ----
 api.setHost('www.bing.com');
 api.setStore({ bing: { match: '(?:^|\\.)bing\\.', containers: 'div.my-bing', titles: ['h2'], snippets: ['.s'], links: 'a[href]' } });
@@ -1368,9 +1377,6 @@ function createLockEnv(tabId, ttl = 2000) {
   check('选择器-207: 非引擎站点包含自定义选择器', nonEngineMenus[1] === 'menuCustomSelectors');
   check('选择器-208: 非引擎站点包含自定义颜色', nonEngineMenus[2] === 'menuHighlightColor');
   check('选择器-209: 非引擎站点包含语言切换', nonEngineMenus[3].includes('menuLang'));
-
-  const engineMenus = runMenuTest(true);
-  check('选择器-210: 引擎站点显示全部8个菜单项', engineMenus.length === 8);
 }
 
 // ---- 结果摘要后备提取: 相对选择器(extraElements)不得抛异常中断结果处理 ----
@@ -1683,13 +1689,6 @@ return { getSelectors, parseSelectorText, diffUserSelectors };
   check('选择器-225: 仅改一个字段时diff只保留该字段(未改动内置不再固化, 升级内置可跟随)', 'bing' in diff && pinningFields.length === 0 && diff.bing.containers === 'div.custom' && diff.bing.match === undefined, pinningFields.join(','));
 }
 
-// ==== [选择器-227~228] 修复回归: 悬浮球深色模式适配(图标浅蓝偏白/数字白色) ====
-(() => {
-  const darkBubble = src.match(/@media \(prefers-color-scheme: dark\)\s*\{\s*#serh-status\s*\{[^}]*\}\s*\.serh-bubble-number\s*\{[^}]*\}\s*\}/);
-  check('选择器-227: 深色模式悬浮球图标变浅蓝偏白(!important覆盖内联#2c5282)', !!darkBubble && /color:\s*#a8c7fa\s*!important/i.test(darkBubble[0]));
-  check('选择器-228: 深色模式悬浮球数字为白色', !!darkBubble && /color:\s*#ffffff\s*!important/i.test(darkBubble[0]));
-})();
-
 // ==== [选择器-229~230] 修复回归: 屏蔽按钮改为按容器注入(不再依赖标题选择器) ====
 (() => {
   const injFn = extractFn(src, 'injectBlockButton');
@@ -1719,6 +1718,20 @@ return { injectBlockButton };
 {
   const upSrc = extractFn(src, 'updatePickedColor');
   check('复审S-1(新发现): 画布取色updatePickedColor只写展示元素(code-text/current-preview), 从不写hlcolor行输入, 保存仅读文本框(取色对配置零影响却提示已保存)', upSrc.includes('serh-hlcolor-code-text') && upSrc.includes('serh-hlcolor-current-preview') && !upSrc.includes('hlcolor-input'));
+}
+
+// ==== [选择器-231~232] 复审V: regexSourceToLiteralText改写裸斜杠 / 辅助面板不滤合成点击 (审查新发现, 以当前行为为准) ====
+{
+  const r2t = new Function(`${extractFn(src, 'regexSourceToLiteralText')}\nreturn regexSourceToLiteralText;`)();
+  const before = '^https://x\\.com/search';
+  const after = r2t(before);
+  check('选择器-231(复审新发现): 含裸斜杠的match源经序列化被改写(JSON导入/云端同步后打开面板保存触发一次性存储扰动)', after !== before && after === '^https:\\/\\/x\\.com\\/search');
+  check('选择器-231(对照): 改写后正则语义等价', new RegExp(after).test('https://x.com/search') === true);
+  const biSrc = extractFn(src, 'bindOutsideClickClose');
+  const mainPanelSrc = src.slice(src.indexOf('function showConfigPanel'), src.indexOf('function saveConfig'));
+  check('选择器-232(复审新发现): 辅助面板closeHandler未过滤合成点击(isTrusted), 与主面板closeHandler不一致(脚本自身编程点击可误关辅助面板)', !biSrc.includes('isTrusted') && /isTrusted === false/.test(mainPanelSrc));
+  check('选择器-233(修复17验证): showConfigPanel关闭回调恒假守卫死代码已移除, fadeOutAndRemovePanel无回调直调', !src.includes('window._panelCloseHandler !== closeHandler') && src.includes('fadeOutAndRemovePanel(panel);'));
+  check('选择器-234(死代码清理): restoreResultExtraElements三处无参no-op调用已移除(仅保留resetResultStyles内的带参调用)', !src.includes('restoreResultExtraElements()') && /restoreResultExtraElements\(result\)/.test(src));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

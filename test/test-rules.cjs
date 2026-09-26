@@ -193,7 +193,7 @@ assert('规则-079: *.example.* 带路径不匹配多段后缀', !match('*://*.e
 assert('规则-080: *.example.* 无路径不匹配多段后缀', !match('*://*.example.*', 'https://example.com.evil.net/'));
 assert('规则-081: example.* 不匹配多段后缀', !match('*://example.*/*', 'https://example.com.evil.net/'));
 assert('规则-082: 中部主机星号不跨点', !match('*://mail.*.com/*', 'https://mail.a.b.com/') && match('*://mail.*.com/*', 'https://mail.a.com/'));
-assert('规则-083: 整体主机星号仍匹配任意主机', match('*://*/x/*', 'https://any.host.com/x/1'));
+assert('规则-083: 整体主机星号匹配单个主机标签', match('*://*/x/*', 'https://any.host.com/x/1') === false && match('*://*/x/*', 'https://host/x/1'));
 assert('规则-084: *example* 宽松语义保留', match('*example*', 'https://any.example.org/x'));
 assert('规则-085: 端口通配不跨越路径', !match('*://example.com:*/y', 'https://example.com:80/x/y'));
 assert('规则-086: 端口通配匹配端口段内容', match('*://example.com:*/y', 'https://example.com:8080/y'));
@@ -1451,6 +1451,13 @@ return { buildRuleIndex, checkRuleMatchOptimized, parseRulesetContent, collectSu
   yApi.buildRuleIndex();
   const l4b = yApi.checkRuleMatchOptimized('https://example.com', 'example.com', 'T', null, ['example.com']);
   assert('修复L4-2: 映射形项不产生实际屏蔽', !(l4b && l4b.blocked));
+
+  const fold = collect('rules:\n  - example.com\n  - >\n    *://folded.example.com/*\n  - kept.com\n');
+  assert('修复2-1: 折叠标量整段保留且后续项不丢', JSON.stringify(fold.rules) === JSON.stringify(['example.com', '*://folded.example.com/*', 'kept.com']), fold.rules);
+  const flowLines = yApi.parseRulesetContent('rules: [\n  a.com,\n  b.com\n]\n');
+  assert('修复2-2: 跨行flow序列不把右括号当规则', JSON.stringify(flowLines.lines) === JSON.stringify(['a.com', 'b.com']));
+  const inline = collect('rules:\n  - { url: "*://skip.com/*" }\n  - real.com\n');
+  assert('修复2-3: 行内映射跳过且不生成恒不匹配规则', JSON.stringify(inline.rules) === JSON.stringify(['real.com']));
 }
 
 // ==== [修复4/修复5] 旧配置 enabled 回填 / 索引签名跳过重建 + 正则编译记忆化 ====
@@ -1683,7 +1690,7 @@ check('规则-314: 紧贴@N越界N仍跳过', cr.highlightUrls.length === 0 && c
 // ==== [修复-问题1/5/6] IDN中文通配符转ASCII / Yahoo重定向RU截断 / host端口条件匹配 ====
 {
   // 问题1: escapeWildcardPart / toASCIIHostname 中文域名通配
-  assert('修复1-1: 中文泛域名带星号通配正确编译为Punycode正则片段', api.escapeWildcardPart('*.例子*.com', true) === '(?:[^/]*\\.)?xn--[^/]*-kb7ap09a\\.com');
+  assert('修复1-1: 中文泛域名带星号通配正确编译为Punycode正则片段', api.escapeWildcardPart('*.例子*.com', true) === '(?:[^/]*\\.)?xn--[^./]*-kb7ap09a\\.com');
   const wcm = (rule, u) => {
     api.setState([rule], []);
     api.buildRuleIndex();
@@ -1749,11 +1756,16 @@ ${extractFn(src, 'safeRegexTest')}
 return { compileRuleRegex, safeRegexTest };
 `)();
   const reF = wcApi2.compileRuleRegex('*://*example.com/*');
-  assert('规则-318(已知问题): 主机点前星号跨点且可后缀劫持(*example.com 误命中 badexample.com)', wcApi2.safeRegexTest(reF.regex, 'https://badexample.com/') === true);
+  assert('修复2-1: 主机星号不跨点(*example.com 不命中 exa.mple.com)', !wcApi2.safeRegexTest(reF.regex, 'https://exa.mple.com/'));
+  assert('修复2-2: 主机星号仍匹配同标签(*example.com 命中 badexample.com 与 wwwexample.com)', wcApi2.safeRegexTest(reF.regex, 'https://badexample.com/') && wcApi2.safeRegexTest(reF.regex, 'https://wwwexample.com/'));
   const reG = wcApi2.compileRuleRegex('*://ex*mple.com/*');
-  assert('规则-319(已知问题): 主机中部星号跨点(ex*mple.com 误命中 exa.mple.com, 与 www.*.com 不跨点语义不一致)', wcApi2.safeRegexTest(reG.regex, 'https://exa.mple.com/') === true);
+  assert('修复2-3: 主机中部星号不跨点(ex*mple.com 不命中 exa.mple.com)', !wcApi2.safeRegexTest(reG.regex, 'https://exa.mple.com/'));
+  assert('修复2-4: 主机中部星号仍匹配同标签(ex*mple.com 命中 example.com)', wcApi2.safeRegexTest(reG.regex, 'https://example.com/'));
   const reH = wcApi2.compileRuleRegex('*://例*.com/*');
-  assert('规则-320(已知问题): IDN部分标签通配编译产物无法命中punycode主机且校验仍valid(例*.com 静默漏屏蔽)', !wcApi2.safeRegexTest(reH.regex, 'https://xn--fsqu00a.com/'));
+  assert('修复6-6: IDN部分标签通配按整标签punycode命中(例*.com 命中 xn--*-kb7a.com)', wcApi2.safeRegexTest(reH.regex, 'https://xn--*-kb7a.com/'));
+  assert('修复6-7: IDN部分标签通配不把星号留在汉字里(例*.com 不再要求URL含「例」)', !/例/.test(reH.regex.source));
+  const reI = wcApi2.compileRuleRegex('*://*.例子*.com/*');
+  assert('修复6-8: 前缀*.与IDN标签内星号同时按punycode命中', wcApi2.safeRegexTest(reI.regex, 'https://a.xn--*-kb7ap09a.com/test') && wcApi2.safeRegexTest(reI.regex, 'https://xn--*-kb7ap09a.com/'));
 }
 {
   const condConsts = `
@@ -1822,8 +1834,38 @@ const window = { location: { hostname: 'www.google.com', href: 'https://www.goog
     extractFn(src, 'extractYamlRuleItems') + '\n' + extractFn(src, 'parseRulesetContent') + '\nreturn parseRulesetContent;'
   )();
   let threw = false;
-  try { pc('name: "My list\nrules:\n  - *://a.com/*\n'); } catch (_) { threw = true; }
-  assert('复审R-2(新发现): YAML name行引号不配对时stripQ抛错未被捕获, 整个订阅导入/更新失败(列表项同类错误仅跳过单行)', threw === true);
+  let res;
+  try { res = pc('name: "My list\nrules:\n  - *://a.com/*\n'); } catch (_) { threw = true; }
+  assert('修复R-2: YAML name行引号不配对时容错提取且不抛错', threw === false && res.meta.name === 'My list' && res.lines.length === 1);
+}
+
+// ==== [规则-322~324] 复审V: 无尾斜杠title/text吞@if / 全站*://*/*单标签 / 带路径规则尾点FQDN (审查新发现, 以当前行为为准) ====
+{
+  const langMatch = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
+  const consts = src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0];
+  const fns = ['hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateCondition', 'analyzeRule'].map((n) => extractFn(src, n));
+  const api = new Function(
+    consts + '\n' + langMatch + '\n' +
+    `function t(key, params = {}) {
+      const texts = LANG_TEXTS['zh-CN'] || {};
+      let text = texts[key] || key;
+      for (const [k, v] of Object.entries(params)) text = text.replaceAll('{' + k + '}', v);
+      return text;
+    }
+    const window = { location: { hostname: 'www.google.com' } };
+    function getSearchEngine() { return 'google'; }
+    function getSearchCategory() { return 'web'; }
+    const currentConfig = { rules: [], debug: false };
+    const validationCache = new Map();
+    const subdomainCache = new Map();
+    ` + fns.join('\n') + '\nreturn { analyzeRule, findIfOccurrences, compileRuleRegex, safeRegexTest, toASCIIHostname, matchSimpleDomain };'
+  )();
+  const match = (rule, url) => { const compiled = api.compileRuleRegex(rule); return api.safeRegexTest(compiled.regex, url); };
+  assert('规则-322(复审新发现): title/前缀正则无尾斜杠时@if被吞入pattern(条件丢失, 规则永不命中且校验通过)', api.findIfOccurrences('title/abc @if(title *= "x")').length === 0 && api.analyzeRule('title/abc @if(title *= "x")').valid === true);
+  assert('规则-322(对照): 带尾斜杠形态正常提取@if', api.findIfOccurrences('title/abc/ @if(title *= "x")').length === 1);
+  assert('规则-323(复审新发现): 全站规则 *://*/* 主机裸*仅匹配无点单标签(uBlacklist全站语义漏匹配带点域名)', match('*://*/*', 'https://example.com/') === false && match('*://*/*', 'http://localhost/') === true);
+  assert('规则-323(对照): *://*.*/* 可匹配带点域名', match('*://*.*/*', 'https://example.com/') === true);
+  assert('规则-324(复审新发现): 带路径通配正则不匹配尾点FQDN(而无路径规则走域名索引会归一剥尾点, 同主机两种规则形态结果不一致)', match('*://*.example.com/path/*', 'https://example.com./path/a') === false && api.toASCIIHostname('example.com.') === 'example.com' && api.matchSimpleDomain('*://*.example.com/*').domain === 'example.com');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

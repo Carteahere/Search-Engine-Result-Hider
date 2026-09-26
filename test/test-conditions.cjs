@@ -1296,7 +1296,7 @@ assert('条件-365: 本地path黑名单压过订阅host白名单', isBlocked(r) 
   assert('条件-387(对照): 裸值恰含第二个斜杠时正常', errs('path *= /download/') === 0);
   assert('条件-388(对照): "! url: x" 被当作uBlock元数据过滤', env.looksLikeCondExpr('! url: a.com') === false);
   assert('条件-389(对照): "! title: x" 同样被过滤', env.looksLikeCondExpr('! title: a') === false);
-  assert('条件-390(对照): host 正常识别', env.looksLikeCondExpr('! host: a.com') === true);
+  assert('条件-390(已修复): "! host: a.com" 元数据行不再误判为条件', env.looksLikeCondExpr('! host: a.com') === false);
   assert('条件-391(对照): 无空格的 "!site: x" 可识别', env.looksLikeCondExpr('!site: a.com') === true);
 }
 
@@ -1384,9 +1384,7 @@ assert('条件-405: 首行独立条件表达式按纯文本保留', nonEmpty(pco
     '\nreturn { parseRuleWithConditions, evalCondAST };'
   )();
   const pa = envA.parseRuleWithConditions('! host: example.com');
-  assert('审查A-4(已知问题): 小写"! host:"元数据行解析为取反独立条件', pa.dynamicConditions.length === 1 && pa.staticPass === true);
-  assert('审查A-5(对照): 该取反条件对其他主机成立(若进入订阅将大面积误屏蔽)', envA.evalCondAST(pa.dynamicConditions[0], 't', 'https://evil.com/x') === true);
-  assert('审查A-6(对照): 条件内主机本身不命中', envA.evalCondAST(pa.dynamicConditions[0], 't', 'https://example.com/x') === false);
+  assert('审查A-4(已修复): 小写"! host:"元数据行不再被解析为取反独立条件', pa.dynamicConditions.length === 0 && pa.standaloneExpr === false);
 }
 
 // ==== [条件-406~410] host $= 端口条件点号边界回归 / 已知问题留档: 独立表达式不识别site(...) / *= 正则裸值遭行内注释截断 (仅断言当前行为) ====
@@ -1427,6 +1425,26 @@ assert('条件-405: 首行独立条件表达式按纯文本保留', nonEmpty(pco
   const hostCond = envD.parseRuleWithConditions('host $= ".例子.com"').dynamicConditions[0];
   assert('复审C-2(新发现): url条件不做IDN/punycode归一, 中文域名字面条件对punycode URL静默漏命中', envD.evalCondAST(urlCond, 't', 'https://xn--fsqu00a.com/') === false);
   assert('复审C-2(对照): host条件对同一URL命中(README 2.2 IDN视为同一主机)', envD.evalCondAST(hostCond, 't', 'https://xn--fsqu00a.com/') === true);
+}
+
+// ==== [条件-413~415] 复审V: host字符串值斜杠开头静默恒假 / site带端口恒假 / punycode非法字符 (审查新发现, 以当前行为为准) ====
+{
+  const consts = src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0];
+  const envV = new Function(
+    consts + '\n' +
+    ['hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions'].map((n) => extractFn(src, n)).join('\n') +
+    '\nconst window = { location: { hostname: "www.bing.com" } };' +
+    '\nfunction getSearchEngine() { return "bing"; }' +
+    '\nfunction getSearchCategory() { return "web"; }' +
+    '\nreturn { parseRuleWithConditions, evalCondAST, toUnicodeHostname };'
+  )();
+  const hostSlash = envV.parseRuleWithConditions('host $= /x');
+  const hostStr = envV.parseRuleWithConditions('host $= "x"');
+  assert('条件-413(复审新发现): host $= /x 被当字符串值静默编译且永不命中(对比 host $= "x" 可命中, 校验无报错)', hostSlash.dynamicConditions.length === 1 && envV.evalCondAST(hostSlash.dynamicConditions[0], 't', 'https://sub.x/') === false && envV.evalCondAST(hostStr.dynamicConditions[0], 't', 'https://sub.x/') === true);
+  const sitePort = envV.parseRuleWithConditions('*://x.com/* @if(site = "bing.com:8080")');
+  const siteNoPort = envV.parseRuleWithConditions('*://x.com/* @if(site = "bing.com")');
+  assert('条件-414(复审新发现): site = "域名:端口" 因hostname不含端口而静态恒假(整条规则被静默丢弃; 对比无端口可命中)', sitePort.staticPass === false && siteNoPort.staticPass === true);
+  assert('条件-415(修复10验证): punycode标签含非法字符(_/+)时回退原文而非错误解码', envV.toUnicodeHostname('xn--a_b') === 'xn--a_b' && envV.toUnicodeHostname('xn--a+b') === 'xn--a+b' && envV.toUnicodeHostname('xn--fsqu00a.com') === '例子.com');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
