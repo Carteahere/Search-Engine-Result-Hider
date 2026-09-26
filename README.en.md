@@ -15,20 +15,17 @@ Group [TG](https://t.me/+qBqMTqjc4Xk5M2Jh)
 ### 1.2 Features:
 
 - Basic/advanced syntax matching results
-- One-click blocking
 - Matched rule statistics and debug output
 - Import/export rules to TXT
 - Rule error detection
 - Rule subscription
+- One-click blocking
 - WebDAV sync
 - Script manager menu  
 ┣ Open panel  
 ┣ Language switching  
 ┣ Custom selectors  
 ┣ Custom highlight colors  
-┣ Toggle error detection  
-┣ Toggle floating bubble display  
-┣ Toggle panel centering: Centered by default; when toggled, displayed in the four screen corners based on floating bubble position.  
 ┗ Toggle floating bubble function:  
 　┗ 🟢 Click to open panel  
 　┗ 🔵 Click to expand blocked results, long press to open panel; clicking the block button on a blocked result again unblocks it.
@@ -38,7 +35,7 @@ Group [TG](https://t.me/+qBqMTqjc4Xk5M2Jh)
 1. Auto-sync runs in the background, use 3-Way Merge Sync, manual upload/download is mandatory overwrite.
 2. Address only supports **https** and full paths, e.g., Nutstore `https://dav.jianguoyun.com/dav/your_folder/`; the folder is created automatically if it does not exist, after changing the file name such as `rules.txt` need to manually upload and overwrite it once.
 3. Tampermonkey lacks a secure storage API, so passwords can only be saved using local obfuscation; for security reasons, you must use a dedicated application password.
-4. To ensure the accuracy of the timestamp during synchronization, the timeapi/akamai/cloudflare timing point will be automatically accessed once. If there is a cross domain request permission application pop-up, select `Always allow`. If rejected, the remote webdav date timestamp will be used by default.
+4. To ensure the accuracy of the timestamp during synchronization, the timeapi/akamai/cloudflare timing point will be automatically accessed once. If the access fails, the webdav date timestamp will be used by default.
 
 ### 1.4 About Subscriptions:
 
@@ -52,8 +49,9 @@ Group [TG](https://t.me/+qBqMTqjc4Xk5M2Jh)
 1. Automatic redirect removal engines: Bing, Google, Google Scholar, DuckDuckGo, Yahoo
 2. Rule priority: Local whitelist > Local blacklist > Subscription whitelist > Subscription blacklist
 3. Script runs on all websites, the floating bubble and blocking filter only take effect on search engines. Non engine sites only display some menu options.
-4. Comment line format: `# + space + content` and cannot be repeated, otherwise the content under the same comment line will be merged during synchronization; ⬆️/⬇️ jump to the previous/next comment line; when on the first line or first comment line, ⬆️ jumps to the last line.
-5. To avoid cross-page data conflicts, do not open panel editing rules on multiple tabs at the same time, and pause synchronization when opening the panel.
+4. The panel is centered and enabled by default. After being turned off, it will be displayed in the four corners of the screen according to the position of the floating bubble.
+5. Comment line format: `# + space + content` and cannot be repeated, otherwise the content under the same comment line will be merged during synchronization; ⬆️/⬇️ jump to the previous/next comment line; when on the first line or first comment line, ⬆️ jumps to the last line.
+6. To avoid cross-page data conflicts, do not open panel editing rules on multiple tabs at the same time, and pause synchronization when opening the panel.
 
 ## Docs
 
@@ -63,6 +61,5 @@ For debug mode and troubleshooting, see [Debug](Debug.en.md)
 
 ## Screenshots
 
-<img width="450" height="288" alt="01" src="https://github.com/user-attachments/assets/8523f109-84d1-4eba-b8d5-678b0a824340" />
+
 <br/>
-<img width="200" height="148" alt="02" src="https://github.com/user-attachments/assets/067323b2-40c0-498e-a0f4-f78ab8a52ad4" />
