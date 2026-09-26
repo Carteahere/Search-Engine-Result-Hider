@@ -135,7 +135,7 @@ Open the edit panel via script manager menu `🖋️ Custom Selectors` (JS forma
 | Field | Type | Description |
 | --- | --- | --- |
 | `match` | regex | Required, hostname matching regex literal |
-| `containers` | string | Required, CSS selector for result containers (pseudo-elements like `::after` unsupported), ; the **one-click block** button relies on it |
+| `containers` | string | Required, CSS selector for result containers,; the **one-click block** button relies on it |
 | `links` | string \| string\[\] | Optional, link selector, defaults to `a[href]` |
 | `titles` | string \| string\[\] | Optional, title selector list the title selector for positioning |
 | `snippets` | string \| string\[\] | Optional, snippet selector list |
@@ -162,3 +162,4 @@ bing: {disabled: true},
 3. Engine IDs allow only letters/digits/`_`/`-`; `other` is a reserved key and cannot be used. The same ID as a built-in engine, or an overlapping site, overrides the built-in selectors, e.g. matching `cn.bing.com` takes priority over built-in `bing`.
 4. Priority: Custom selectors > Built-in selectors. Changing an override back to the built-in value or using Reset restores following script updates.
 5. On save, only keys that differ from the built-ins are stored; unmodified built-ins are not written to storage. When no selector matches, it falls back to `other` (empty) by default.
+6. All fields are unsupported pseudo-elements like `::after`.
