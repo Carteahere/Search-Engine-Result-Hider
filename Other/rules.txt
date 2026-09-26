@@ -1,24 +1,27 @@
-#260912
+#2609
 # ==== 文件 ====
 /^https?:\/\/[^\s"'<>]+\.(?:pdf|xlsx?)$/
 # ==== 标题 ====
-title/.*(?:(?:️威|葳|㣲|幑|薇|嶶|溦|徽)信|(?:️威|葳|㣲|幑|薇|嶶|溦|徽|微)芯).*/
+title/.*(威|葳|㣲|幑|薇|嶶|溦|徽)信./
+title/.*(威|葳|㣲|幑|薇|嶶|溦|徽|微)芯.*/
 title/.*[+加]\s*q{1,2}\s*\d{5,}.*/i
 title/.*pikpak.*优惠码.*/i
 title/.*最新章节在线阅读.*/
 title/.*吧友互助吧.*/
 title/.*笔趣阁.*/
-title/^(?=.*clash)(?=.*(?:官网|官方网站|中文官方|中文站|中文网|中文官网|中文教程|教程网|中文...|免费|免 …)).*/i
+title/^(?=.*clash)(?=.*(?:官网|官方网站|中文官方|中文站|中文网|中文官网|中文教程|教程网|免费|中文...|免 …)).*/i
 title/^(?=.*github)(?=.*(?:在线教程网|中文教程网|中文站|中文网)).*/i
 title/^(?=.*telegram)(?=.*(?:86|短信)).*/i
 title/^(?=.*YSM)(?=.*爱发电).*/i
+title/^(?=.*app)(?=.*体育).*/i
+title/.*来到了没有知识存在的荒原.*/
 # ==== 摘要 ====
 text/.*暂无购买权限.*/
 text/.*来到了没有知识存在的荒原.*/
 text/.*验证码_哔哩哔哩.*/
 # ==== 域名-标题 ====
 *://*.ali213.net/* @if(title *= "视频指南")
-*://*.gamersky.com/* @if(title *= "视频")
+*://*.gamersky.com/* @if(title =~ /视频|修改器/)
 *://*.github.com/* @if(title *= "pikpak")
 *://*.news.qq.com/* @if(title =~ /攻略|一图流/)
 # ==== 社区 ====
@@ -42,6 +45,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.linux.do/*
 *://*.php.cn/*
 *://*.support.huaweicloud.com/*
+*://community.oneplus.com/*
 # ==== 搜索引流 ====
 *://*.3g.ali213.net/down/*
 *://*.acfun.cn/error/*
@@ -147,16 +151,21 @@ text/.*验证码_哔哩哔哩.*/
 *://github.com/wumaoland/*
 # ==== 购物平台 ====
 *://*.1688.com/*
+*://*.aeoncity.com.hk/*
 *://*.amazon.co.jp/*
 *://*.amazon.co.uk/*
 *://*.amazon.com/*
+*://*.autobuy.tw/*
 *://*.baike.baidu.com/tashuo/*
 *://*.balletto.cn/*
 *://*.bestbuy.com/*
 *://*.biggo.com.tw/*
 *://*.blackmilkclothing.com/*
+*://*.broadwaylifestyle.com/*
+*://*.builtinpro.hk/*
 *://*.chinapp.com/*
 *://*.citylink.com.hk/*
+*://*.cosmopolitan.com.hk/*
 *://*.dansgirl.com.cn/*
 *://*.decathlon.com.hk/*
 *://*.diabolikdvd.com/*
@@ -164,14 +173,22 @@ text/.*验证码_哔哩哔哩.*/
 *://*.dvdhub.com.au/*
 *://*.easyhaitao.com/*
 *://*.ebay.com/*
+*://*.echome.com.hk/*
+*://*.elecboy.com.hk/*
+*://*.electrictung.com/*
+*://*.elle.com.hk/*
 *://*.etmall.com.tw/*
 *://*.etsy.com/*
 *://*.feebee.com.tw/*
+*://*.hk.e-panashop.store/*
+*://*.idelonghi.com.hk/*
 *://*.igift.hk/*
 *://*.jchere.com/productdetail/*
 *://*.jd.com/*
+*://*.jhceshop.com/*
 *://*.jolijolie.jp/*
 *://*.landtop.com.tw/*
+*://*.laurastar.hk/*
 *://*.lbj.tw/*
 *://*.m.sunsky-online.com/*
 *://*.maigoo.com/*
@@ -179,23 +196,30 @@ text/.*验证码_哔哩哔哩.*/
 *://*.mall.iopenmall.tw/*
 *://*.mikihouse.co.jp/*
 *://*.mr-bd.com.tw/*
+*://*.panasonic.hk/*
+*://*.philips-da.com.hk/*
 *://*.pinkoi.com/*
 *://*.pxbox.es.pxmart.com.tw/*
 *://*.rakuten.co.jp/*
+*://*.rasonicshop.hk/*
 *://*.revolve.com/*
 *://*.ruten.com.tw/*
 *://*.sansha.com.cn/*
+*://*.search.hksuning.com/*
 *://*.shiraimusic.shop-pro.jp/*
 *://*.shop.chacott.co.jp/*
 *://*.shopee.tw/*
 *://*.shopping.yahoo.co.jp/*
 *://*.smart3c.com.tw/*
+*://*.sogo.com.hk/*
 *://*.suning.com/*
 *://*.t880.com/*
 *://*.taobao.com/*
 *://*.taobao.lc/*
+*://*.tefal-store.com.hk/*
 *://*.temu.com/*
 *://*.tokukai.com/*
+*://*.towngasappliance.com/*
 *://*.tw.coupang.com/*
 *://*.ultrahd.highdefdigest.com/*
 *://*.uniform.klovergroup.net/*
@@ -208,7 +232,6 @@ text/.*验证码_哔哩哔哩.*/
 *://*.103102.com/*
 *://*.123cha.com/*
 *://*.160.com/*
-*://168.76.33.6
 *://*.18183.com/*
 *://*.192-168-1-1.com.cn/*
 *://*.19yxw.com/*
@@ -234,7 +257,6 @@ text/.*验证码_哔哩哔哩.*/
 *://*.58xuexi.com/*
 *://*.5tu.cn/*
 *://*.600game.cn/*
-*://64.110.91.194
 *://*.66law.cn/*
 *://*.6vpi3l5w9n-css-import.prints3d.ch/*
 *://*.7273.com/*
@@ -390,6 +412,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.en.handinglaw.com/*
 *://*.en.pinkoi.com/*
 *://*.epochtimes.com/*
+*://*.erbmarket.com/*
 *://*.ertecho.gr/*
 *://*.eyun.baidu.com/*
 *://*.eyunsou.com/*
@@ -429,6 +452,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.geek-docs.com/*
 *://*.geoz.com.cn/*
 *://*.ghzs.com/*
+*://*.giffgaff.com/*
 *://*.githubdocs.cn/*
 *://*.gk100.com/*
 *://*.gl.ali213.net/*
@@ -439,10 +463,12 @@ text/.*验证码_哔哩哔哩.*/
 *://*.guiyangtax.com/*
 *://*.gxwanfang.com/*
 *://*.gzjtr.com/*
+*://*.h6room.com/*
 *://*.hackhome.com/*
 *://*.hangge.com/*
 *://*.haodou.com/*
 *://*.haozhuangji.com/*
+*://*.hdduck.com/*
 *://*.health.baidu.com/*
 *://*.heishou.org/*
 *://*.hfplg.com/*
@@ -473,7 +499,9 @@ text/.*验证码_哔哩哔哩.*/
 *://*.itsacg.com/*
 *://*.iyanbao.com/*
 *://*.iyf.tv/*
+*://*.j9p.com/*
 *://*.jb51.net/*
+*://*.jdtvv.com/*
 *://*.jhzhang.cc/*
 *://*.jiaoyimao.com/*
 *://*.jichang.checi.cn/*
@@ -553,6 +581,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.manualzz.com/*
 *://*.mayflyyx.com/*
 *://*.mcn7.com/*
+*://*.mcschematic.top/*
 *://*.medium.com/*
 *://*.meishijr.com/*
 *://*.mengtuji.com/*
@@ -565,6 +594,8 @@ text/.*验证码_哔哩哔哩.*/
 *://*.mianfeiclash.cc/*
 *://*.mianfeiwendang.com/*
 *://*.mingding.org/*
+*://*.mini4k.com/*
+*://*.mini4k.net/*
 *://*.mobile.phoneky.com/*
 *://*.mobile.yangkeduo.com/*
 *://*.modernchinastudies.org/*
@@ -575,6 +606,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.mrdsgw.sh.cn/*
 *://*.msn.cn/zh-cn/*
 *://*.msn.com/zh-cn/*
+*://*.my.oschina.net/*
 *://*.mydigit.cn/*
 *://*.myouhua.com/*
 *://*.n0099.com/*
@@ -754,6 +786,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.xn--ogtt23ghrb.cn/*
 *://*.xnnu.com/*
 *://*.xptheme.com.cn/*
+*://*.xrfxw.com/*
 *://*.xuekanba.com/*
 *://*.xuewei.zikaosw.cn/*
 *://*.xzhao.net/*
@@ -796,3 +829,5 @@ text/.*验证码_哔哩哔哩.*/
 *://*.zjgkw.org/*
 *://*.zn50.cc/*
 *://*.zsbaocheng.net/*
+*://168.76.33.6
+*://64.110.91.194
