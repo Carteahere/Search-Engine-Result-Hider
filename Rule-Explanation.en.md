@@ -53,7 +53,7 @@ Regex uses browser-supported JavaScript `RegExp` flags: `i`, `m`, `s`, `u` (`s` 
 | Rule | Description |
 | --- | --- |
 | `text/.*example.*/` | Matches results whose page description (snippet) contains `example` |
-| `text/.*exampleabc.*/i` | Same as above, `i` ignores case |
+| `text/.*example.*/i` | Same as above, `i` ignores case |
 
 ### 2.6 Whitelist Matching:
 
@@ -135,9 +135,9 @@ Open the edit panel via script manager menu `🖋️ Custom Selectors` (JS forma
 | Field | Type | Description |
 | --- | --- | --- |
 | `match` | regex | Required, hostname matching regex literal |
-| `containers` | string | Required, CSS selector for result containers,; the **one-click block** button relies on it |
+| `containers` | string | Required, CSS selector for result containers, the **one-click block** button relies on it |
 | `links` | string \| string\[\] | Optional, link selector, defaults to `a[href]` |
-| `titles` | string \| string\[\] | Optional, title selector list the title selector for positioning |
+| `titles` | string \| string\[\] | Optional, title selector |
 | `snippets` | string \| string\[\] | Optional, snippet selector list |
 | `extraElements` | string\[\] | Optional, array of relative CSS selectors starting from each result container to pick associated elements; these elements are hidden, expanded, and restored together with the result, and are also used for fallback snippet extraction; also available to custom engines |
 | `disabled` | boolean | Optional, `true` disables the engine (built-ins included); alias `disable`; writing `disabled: false` (or `disable: false`) alone restores the built-in |
@@ -162,4 +162,4 @@ bing: {disabled: true},
 3. Engine IDs allow only letters/digits/`_`/`-`; `other` is a reserved key and cannot be used. The same ID as a built-in engine, or an overlapping site, overrides the built-in selectors, e.g. matching `cn.bing.com` takes priority over built-in `bing`.
 4. Priority: Custom selectors > Built-in selectors. Changing an override back to the built-in value or using Reset restores following script updates.
 5. On save, only keys that differ from the built-ins are stored; unmodified built-ins are not written to storage. When no selector matches, it falls back to `other` (empty) by default.
-6. All fields are unsupported pseudo-elements like `::after`.
+6. All selector fields are unsupported pseudo-elements like `::after`.

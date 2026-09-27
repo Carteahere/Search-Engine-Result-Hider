@@ -22,16 +22,17 @@ Open with a browser to install directly.
 - WebDAV sync
 - Script manager menu  
 ┣ Open panel  
-┣ Language switching  
 ┣ Custom selectors  
-┣ Custom highlight colors  
-┗ Toggle floating bubble function:  
-　┗ 🟢 Click to open panel  
-　┗ 🔵 Click to expand blocked results, long press to open panel; clicking the block button on a blocked result again unblocks it.
+┗ Custom highlight colors  
+
+Partial setting instructions:
+1. Panel Center: Enabled by default; when disabled, it displays in the four corners of the screen based on the floating bubble's position.
+2. Export Config: Disabled by default, when enabled, export TXT with ` # ScriptConfig: {...} ` script configuration attached.
+3. Bubble Action: Open the panel by default; after toggling, tap shows/hides blocked results, long press opens the panel, and clicking the block button for blocked results again removes the block.
 
 ### 1.3 About WebDAV:
 
-1. Auto-sync runs in the background, use 3-Way Merge Sync, manual upload/download is mandatory overwrite.
+1. Auto-sync runs in the background, 3-Way Merge Sync once every 1h, manual upload/download is mandatory overwrite, script config/custom selector synchronization switch independent.
 2. Address only supports **https** and full paths, e.g., Nutstore `https://dav.jianguoyun.com/dav/your_folder/`; the folder is created automatically if it does not exist, after changing the file name such as `rules.txt` need to manually upload and overwrite it once.
 3. Tampermonkey lacks a secure storage API, so passwords can only be saved using local obfuscation; for security reasons, you must use a dedicated application password.
 4. To ensure the accuracy of the timestamp during synchronization, the timeapi/akamai/cloudflare timing point will be automatically accessed once. If the access fails, the webdav date timestamp will be used by default.
@@ -47,19 +48,17 @@ Open with a browser to install directly.
 
 1. Automatic redirect removal engines: Bing, Google, Google Scholar, DuckDuckGo, Yahoo
 2. Rule priority: Local whitelist > Local blacklist > Subscription whitelist > Subscription blacklist
-3. Script runs on all websites, the floating bubble and blocking filter only take effect on search engines. Non engine sites only display some menu options.
-4. The panel is centered and enabled by default. After being turned off, it will be displayed in the four corners of the screen according to the position of the floating bubble.
-5. Comment line format: `# + space + content` and cannot be repeated, otherwise the content under the same comment line will be merged during synchronization; ⬆️/⬇️ jump to the previous/next comment line; when on the first line or first comment line, ⬆️ jumps to the last line.
-6. To avoid cross-page data conflicts, do not open panel editing rules on multiple tabs at the same time, and pause synchronization when opening the panel.
+3. Comment line format: `# + space + content` and cannot be repeated, otherwise the content under the same comment line will be merged during synchronization; ⬆️/⬇️ jump to the previous/next comment line; when on the first line or first comment line, ⬆️ jumps to the last line.
+4. To avoid cross-page data conflicts, do not open panel editing rules on multiple tabs at the same time, and pause synchronization when opening the panel.
 
 ## Docs
 
 For custom engine selectors and detailed rule syntax, see [Rule-Explanation](Rule-Explanation.en.md)
 
-For debug mode and troubleshooting, see [Debug](Debug.en.md)
+For debug mode and rules detection error instructions, see [Debug](Debug.en.md)
 
 ## Screenshots
 
 <img width="400" height="250" alt="01" src="https://github.com/user-attachments/assets/a8297817-1856-434e-a329-b98adbfbad91" />
 <br/>
-<img width="250" height="123" alt="02" src="https://github.com/user-attachments/assets/4f7927c2-9340-4276-b253-b8a6e2523eb1" />
+<img width="250" height="83" alt="02" src="https://github.com/user-attachments/assets/e6e60879-f296-492f-aa6a-fa84d1adbed0" />

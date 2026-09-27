@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.5.0
+// @version      8.5.1
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -25,6 +25,7 @@
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
 // @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
 // @grant        GM_deleteValue
 // @run-at       document-idle
 // @downloadURL  https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js
@@ -34,7 +35,6 @@
 (function() {
   'use strict';
 
-  // 顶层运行
   if (window.top !== window.self) return; let preventPanelClose = false, _engineSiteSetup = false, _domObserver = null, _observedSelector = '';
   let _searchForm = null, _searchFormHandler = null, _urlChangeHandler = null; let _syncIntervalIds = [];
   let _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap(); const _hrefChangedContainers = new Set(), _contentChangedContainers = new Set();
@@ -75,18 +75,18 @@
     };
   }
 
-  let currentConfig = GM_getValue(CONFIG_KEY, getDefaultConfig());
-  if (!currentConfig || typeof currentConfig !== 'object' || Array.isArray(currentConfig)) currentConfig = {}; if (!Array.isArray(currentConfig.rules)) currentConfig.rules = [];
-  currentConfig.rules = currentConfig.rules.filter(rule => typeof rule === 'string');
   // 兼容旧配置
   const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', autoDark: true, exportConfig: false, language: 'zh-CN' };
-  for (const k in CFG_DEFAULTS) if (currentConfig[k] === undefined) currentConfig[k] = CFG_DEFAULTS[k];
   const DEFAULT_HIGHLIGHT_COLORS = {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'};
-  if (!currentConfig.highlightColors || typeof currentConfig.highlightColors !== 'object') {
-    currentConfig.highlightColors = {...DEFAULT_HIGHLIGHT_COLORS};
-  } else {
-    currentConfig.highlightColors = Object.assign({}, DEFAULT_HIGHLIGHT_COLORS, currentConfig.highlightColors);
+  function normalizeConfig(cfg) {
+    if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) cfg = {};
+    if (!Array.isArray(cfg.rules)) cfg.rules = []; cfg.rules = cfg.rules.filter(rule => typeof rule === 'string');
+    for (const k in CFG_DEFAULTS) if (cfg[k] === undefined) cfg[k] = CFG_DEFAULTS[k];
+    if (!cfg.highlightColors || typeof cfg.highlightColors !== 'object') cfg.highlightColors = {...DEFAULT_HIGHLIGHT_COLORS};
+    else cfg.highlightColors = Object.assign({}, DEFAULT_HIGHLIGHT_COLORS, cfg.highlightColors);
+    return cfg;
   }
+  let currentConfig = normalizeConfig(GM_getValue(CONFIG_KEY, getDefaultConfig()));
   ['searchfilter_rule_tombstones', 'searchfilter_subscription_tombstones', 'searchfilter_rule_added_times'].forEach(k => {
     if (typeof GM_deleteValue === 'function') GM_deleteValue(k);
   });
@@ -266,12 +266,12 @@
   // 语言
   const LANG_TEXTS = {
     'zh-CN': {
-      disableBlock: '禁用屏蔽', showCount: '显示数量', debugMode: '调试模式',
+      disableBlock: '临时禁用', showCount: '显示数量', debugMode: '调试模式',
       enableFeature: '启用功能', blockDomain: '屏蔽域名', doubleConfirm: '二次确认',
       autoDark: '自动深色', exportConfig: '导出配置',
       settingsBtn: '设置', settingsPanelTitle: '脚本设置',
       settingsSecBlock: '一键屏蔽', settingsSecUI: '界面显示', settingsSecOther: '其他设置',
-      bubbleSize: '悬浮球大小:', blockRules: '屏蔽规则:', sync: '同步',
+      bubbleSize: '悬浮球:', blockRules: '屏蔽规则:', sync: '同步',
       import: '导入', export: '导出', save: '保存',
       stats: '统计', close: '关闭', cancel: '取消',
       placeholder: '每行一个规则', panelTitle: '订阅管理', webdavTitle: 'WebDAV',
@@ -283,9 +283,8 @@
       urlRule: 'URL规则', titleRule: '标题规则', textRule: '正文规则',
       regexRule: '正则规则', statsCompound: '复合规则', noMatch: '无匹配项',
       whitelistRules: '白名单规则',
-      menuOpenPanel: '⚙️ 打开配置面板', menuRulesDetection: '规则自检',
-      menuCenter: '面板居中', menuBubble: '显示悬浮球', menuBubbleAction: '悬浮球功能',
-      menuLang: 'Language: 中文', menuLangEn: 'Language: English',
+      menuOpenPanel: '⚙️ 打开配置面板', menuErrorDetection: '规则自检',
+      menuCenter: '面板居中', menuBubble: '显示悬浮球', menuBubbleAction: '悬浮球功能', menuLanguage: 'Language',
       subscriptionSuccess: '订阅成功！已更新 {count} 条规则。',
       saved: '已保存', uploadSuccess: '上传成功！',
       downloadSuccess: '下载成功！规则已保存',
@@ -296,7 +295,8 @@
       statsErrors: '发现 {count} 个规则错误: ',
       matchedCountLabel: '匹配', matchedCountUnit: '条',
       menuBubbleStateShow: '显示', menuBubbleStateHide: '隐藏',
-      menuBubbleActionOpen: '打开面板', menuBubbleActionToggle: '显示结果',
+      menuBubbleActionOpen: '打开面板', menuBubbleActionToggle: '显隐结果',
+      bubbleToggleHint: '点击显示/隐藏屏蔽结果，长按打开面板',
       stateEnabled: '启用', stateDisabled: '关闭',
       subLinkEmpty: '链接为空', subImportSuccess: '导入成功',
       subImportFailed: '导入失败，请检查链接或网络状态',
@@ -309,7 +309,7 @@
       autoSync: '自动同步', syncScriptConfig: '同步配置',
       webdavUrlEmpty: 'WebDAV地址为空',
       highlightRules: '高亮规则', menuHighlightColor: '🎨 高亮颜色设置',
-      hlColorTitle: '高亮颜色设置', hlColorReset: '重置',
+      hlColorTitle: '高亮颜色设置', hlColorReset: '重置', resetPending: '已重置，保存后生效',
       autoUpdate: '自动更新', errorWord: '错误', warningWord: '警告',
       statsWarnings: '发现 {count} 个规则警告: ',
       duplicateRules: '重复规则', invalidRule: '规则无效',
@@ -338,7 +338,7 @@
       autoDark: 'Auto Dark', exportConfig: 'Export Config',
       settingsBtn: 'Settings', settingsPanelTitle: 'Script Settings',
       settingsSecBlock: 'One-click Block', settingsSecUI: 'Interface', settingsSecOther: 'Other',
-      bubbleSize: 'Bubble Size:', blockRules: 'Block Rules:', sync: 'Sync',
+      bubbleSize: 'Bubble:', blockRules: 'Block Rules:', sync: 'Sync',
       import: 'Import', export: 'Export', save: 'Save',
       stats: 'Stats', close: 'Close', cancel: 'Cancel',
       placeholder: 'One rule per line', panelTitle: 'Subscription Manager', webdavTitle: 'WebDAV',
@@ -350,9 +350,8 @@
       urlRule: 'URL Rule', titleRule: 'Title Rule', textRule: 'Text Rule',
       regexRule: 'Regex Rule', statsCompound: 'Compound Rule', noMatch: 'No matches',
       whitelistRules: 'Whitelist Rules',
-      menuOpenPanel: '⚙️ Open Panel', menuRulesDetection: 'Rules Detection',
-      menuCenter: 'Center Panel', menuBubble: 'Show Bubble', menuBubbleAction: 'Bubble Action',
-      menuLang: 'Language: 中文', menuLangEn: 'Language: English',
+      menuOpenPanel: '⚙️ Open Panel', menuErrorDetection: 'Rules Detection',
+      menuCenter: 'Center Panel', menuBubble: 'Show Bubble', menuBubbleAction: 'Bubble Action', menuLanguage: 'Language',
       subscriptionSuccess: 'Subscription successful! Updated {count} rules.',
       saved: 'Saved', uploadSuccess: 'Upload successful!',
       downloadSuccess: 'Download successful! Rules saved.',
@@ -363,7 +362,8 @@
       statsErrors: 'Found {count} rule errors:',
       matchedCountLabel: 'Hits', matchedCountUnit: 'Rule',
       menuBubbleStateShow: 'Show', menuBubbleStateHide: 'Hide',
-      menuBubbleActionOpen: 'Open Panel', menuBubbleActionToggle: 'Toggle Results',
+      menuBubbleActionOpen: 'Open Panel', menuBubbleActionToggle: 'Show Results',
+      bubbleToggleHint: 'Click to show/hide blocked results, long-press to open panel',
       stateEnabled: 'Enabled', stateDisabled: 'Disabled',
       subLinkEmpty: 'URL is empty', subImportSuccess: 'Import success',
       subImportFailed: 'Import failed, check URL or network',
@@ -376,7 +376,7 @@
       autoSync: 'Auto Sync', syncScriptConfig: 'Sync Config',
       webdavUrlEmpty: 'WebDAV URL is empty',
       highlightRules: 'Highlight Rules', menuHighlightColor: '🎨 Highlight Colors',
-      hlColorTitle: 'Highlight Color Settings', hlColorReset: 'Reset',
+      hlColorTitle: 'Highlight Color Settings', hlColorReset: 'Reset', resetPending: 'Reset, takes effect after saving',
       autoUpdate: 'Auto Update', errorWord: 'Error', warningWord: 'Warning',
       statsWarnings: 'Found {count} rule warnings: ',
       duplicateRules: 'Duplicate Rules', invalidRule: 'Invalid rule',
@@ -496,7 +496,11 @@
   function toASCIIUrl(url) {
     const raw = String(url || ''); if (!raw || /^[\x00-\x7F]*$/.test(raw)) return raw;
     try {
-      const abs = raw.startsWith('//') ? 'http:' + raw : raw; const u = new URL(abs); const asciiHost = toASCIIHostname(u.hostname); if (asciiHost && asciiHost !== u.hostname) u.hostname = asciiHost;
+      const abs = raw.startsWith('//') ? 'http:' + raw : raw; const u = new URL(abs); const want = toASCIIHostname(u.hostname);
+      if (want && want !== u.hostname) {
+        const auth = u.username ? u.username + (u.password ? ':' + u.password : '') + '@' : '';
+        const port = u.port ? ':' + u.port : ''; u.href = u.protocol + '//' + auth + want + port + u.pathname + u.search + u.hash;
+      }
       return raw.startsWith('//') ? u.href.replace(/^https?:/i, '') : u.href;
     } catch (e) {
       return raw;
@@ -760,8 +764,21 @@
       return false;
     }
     if (cond.type === 'url') {
-      if (!url) return false; const lowerUrl = url.toLowerCase(); if (cond.op === '=') return lowerUrl === cond.val; if (cond.op === '^=') return lowerUrl.startsWith(cond.val);
-      if (cond.op === '$=') return lowerUrl.endsWith(cond.val); if (cond.op === '*=') return lowerUrl.includes(cond.val); if (cond.op === '=~') return safeRegexTest(cond.regex, url); return false;
+      if (!url) return false; const lowerUrl = url.toLowerCase();
+      const foldUrl = (value) => {
+        const raw = String(value || ''); if (!raw) return '';
+        const abs = /:\/\//.test(raw) || raw.startsWith('//'); let out = raw;
+        if (abs) out = toASCIIUrl(raw) || raw;
+        else if (/[^\x00-\x7F]/.test(raw) && /^[^/?#\s]+\.[^/?#\s]+/.test(raw)) {
+          const host = raw.split(/[/?#]/)[0]; const ascii = toASCIIHostname(host.replace(/:\d+$/, ''));
+          if (ascii && ascii !== host) out = ascii + raw.slice(host.length);
+        }
+        out = out.replace(/[^\x00-\x7F]/g, ch => encodeURIComponent(ch)); return out.toLowerCase();
+      };
+      const cmpUrl = foldUrl(cond.op === '=~' ? '' : cond.val); const urlHit = (pred) => pred(lowerUrl) || pred(foldUrl(url));
+      if (cond.op === '=') return urlHit(v => v === cmpUrl); if (cond.op === '^=') return urlHit(v => v.startsWith(cmpUrl));
+      if (cond.op === '$=') return urlHit(v => v.endsWith(cmpUrl)); if (cond.op === '*=') return urlHit(v => v.includes(cmpUrl));
+      if (cond.op === '=~') return safeRegexTest(cond.regex, url); return false;
     }
     if (cond.type === 'host' || cond.type === 'path' || cond.type === 'scheme') {
       if (!url) return false; let u;
@@ -849,17 +866,19 @@
       return { matched: true, static: curSite === target || curSite.endsWith(`.${target}`) };
     }
 
-    const reMatch = trimmed.match(/^(title|url|host|path|scheme)\s*(?:=\~\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
-    if (reMatch) {
-      const condType = reMatch[1].toLowerCase(); let flags = String(reMatch[3] || '').toLowerCase(); if (getInvalidRegexFlags(flags)) return { matched: false };
-      if (!String(reMatch[2] || '').trim()) return { matched: false }; return { matched: true, dynamic: { type: condType, op: '=~', regex: new RegExp(reMatch[2], flags) } };
-    }
-
-    const strMatch = trimmed.match(/^(title|url|host|path|scheme)\s*(\^=|\$=|\*=|=|:)\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s"']+))\s*i?\s*$/i);
+    const eqRe = trimmed.match(/^(title|url|host|path|scheme)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
+    const eqReOk = eqRe && !getInvalidRegexFlags(eqRe[3] || '') && String(eqRe[2] || '').trim();
+    const strMatch = eqReOk ? null : trimmed.match(/^(title|url|host|path|scheme)\s*(\^=|\$=|\*=|=|:)\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s"']+))\s*i?\s*$/i);
     if (strMatch) {
       if (strMatch[5] !== undefined && strMatch[5].startsWith('~')) return { matched: false }; const op = strMatch[2] === ':' ? '=' : strMatch[2];
       const rawVal = (strMatch[3] !== undefined ? strMatch[3] : (strMatch[4] !== undefined ? strMatch[4] : strMatch[5])); let val = rawVal.replace(/\\(["'])/g, '$1').toLowerCase();
       const condType = strMatch[1].toLowerCase(); if (condType === 'host') val = val.startsWith('/') ? val : toASCIIHostname(val); return { matched: true, dynamic: { type: condType, op, val } };
+    }
+
+    const reMatch = trimmed.match(/^(title|url|host|path|scheme)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
+    if (reMatch) {
+      const condType = reMatch[1].toLowerCase(); let flags = String(reMatch[3] || '').toLowerCase(); if (getInvalidRegexFlags(flags)) return { matched: false };
+      if (!String(reMatch[2] || '').trim()) return { matched: false }; return { matched: true, dynamic: { type: condType, op: '=~', regex: new RegExp(reMatch[2], flags) } };
     }
 
     return { matched: false };
@@ -1027,10 +1046,10 @@
   }
 
   function looksLikeCondExpr(str) {
-    if (!isCondExprCore(str)) return false; if (/^\s*!\s+(?:[A-Z][a-zA-Z0-9_-]*)\s*:\s*\S/.test(str)) return false;
+    if (!isCondExprCore(str)) return false; if (/^\s*!\s*(?:[A-Z][a-zA-Z0-9_-]*)\s*:\s*\S/.test(str)) return false;
     if (/^\s*!\s+(?:title|url|description|version|expires|homepage|host|site|path|scheme)\s*:\s*\S/i.test(str)) return false;
     if (!/^\s*(?:!|\(|\$site\b|\$category\b|engine\b|category\b|(?:site|title|url|host|path|scheme)\s*(?:=~|\^=|\$=|\*=|=|:|\/))/i.test(str)) return false;
-    return /(?:^|[\s(&|!])(?:\$site|\$category|engine|category|site|title|url|host|path|scheme)\s*(?:(?:=~|\^=|\$=|\*=|=|:)\s*\S|\/)/i.test(str)
+    return /(?:^|[\s(&|!])(?:\$site|\$category|engine|category|site|title|url|host|path|scheme)\s*(?:(?:=~|\^=|\$=|\*=|=|:)\s+\S|(?:=~|\^=|\$=|\*=|=|:)\S|\/)/i.test(str)
       || /^\s*!\s*(?:(?:\$site|\$category|engine|category|site|title|url|host|path|scheme)\b|\()/i.test(str);
   }
 
@@ -1060,8 +1079,9 @@
     if (absorbed) {
       staticPass = staticPass && absorbed.staticPass; coreRule = '';
     }
+    const staticMatchAll = !absorbed && !coreRule && staticPass && !dynamicConditions.length && /@if\s*\(/i.test(ruleStr);
 
-    const standaloneExpr = !!absorbed || (!coreRule && dynamicConditions.length > 0); if (whitelist) coreRule = '@' + coreRule;
+    const standaloneExpr = !!absorbed || staticMatchAll || (!coreRule && dynamicConditions.length > 0); if (whitelist) coreRule = '@' + coreRule;
     return {
       coreRule,
       staticPass,
@@ -1162,7 +1182,10 @@
         }
         new RegExp(pattern, String(flags || '').toLowerCase());
       } else if (ruleToCheck.startsWith('text/') || ruleToCheck.startsWith('title/')) {
-        const prefixLen = ruleToCheck.startsWith('title/') ? 6 : 5; const { pattern, flags, flagsCandidate } = parsePrefixedRegexRule(ruleToCheck, prefixLen);
+        const prefixLen = ruleToCheck.startsWith('title/') ? 6 : 5; const { pattern, flags, flagsCandidate, unclosed } = parsePrefixedRegexRule(ruleToCheck, prefixLen);
+        if (unclosed) {
+          errors.push(t('regexError')); return { valid: false, errors, warnings };
+        }
         if (!pattern.trim()) {
           errors.push(t('emptyPrefixRule')); return { valid: false, errors, warnings };
         }
@@ -1193,7 +1216,7 @@
 
   function parsePrefixedRegexRule(rawRule, prefixLen) {
     let memo = parsePrefixedRegexRule._memo; if (!memo) memo = parsePrefixedRegexRule._memo = new Map(); const memoKey = prefixLen + '\u0000' + rawRule;
-    if (memo.has(memoKey)) return memo.get(memoKey); let remaining = rawRule.substring(prefixLen); let pattern, flags = ''; let flagsCandidate = ''; let lastSlashIndex = -1;
+    if (memo.has(memoKey)) return memo.get(memoKey); let remaining = rawRule.substring(prefixLen); let pattern, flags = ''; let flagsCandidate = ''; let lastSlashIndex = -1; let unclosed = false;
     for (let i = remaining.length - 1; i >= 0; i--) {
       if (remaining[i] === '/') {
         let backslashCount = 0; let j = i - 1;
@@ -1216,7 +1239,7 @@
         pattern = remaining; flagsCandidate = possibleFlags;
       }
     } else {
-      pattern = remaining;
+      pattern = remaining; unclosed = lastSlashIndex === -1;
     }
     if (!flags && remaining.endsWith('/')) {
       let backslashCount = 0; let j = remaining.length - 2;
@@ -1233,7 +1256,7 @@
         flags = oldFlagMatch[1].toLowerCase(); pattern = pattern.substring(oldFlagMatch[0].length);
       }
     }
-    const parsed = { pattern, flags: String(flags || '').toLowerCase(), flagsCandidate }; memo.set(memoKey, parsed); return parsed;
+    const parsed = { pattern, flags: String(flags || '').toLowerCase(), flagsCandidate, unclosed }; memo.set(memoKey, parsed); return parsed;
   }
 
   function escapeWildcardPart(part, isHost) {
@@ -1404,9 +1427,9 @@
     if (coreRule.startsWith('/') && coreRule.lastIndexOf('/') > 0) {
       type = 'regex'; const r = ruleToRegex(coreRule); pattern = r.pattern; flags = r.flags;
     } else if (coreRule.startsWith('title/')) {
-      type = 'title'; const r = ruleToRegex(coreRule); pattern = r.pattern; flags = r.flags;
+      type = 'title'; const r = ruleToRegex(coreRule); if (r.unclosed) throw new Error('Unbalanced regex'); pattern = r.pattern; flags = r.flags;
     } else if (coreRule.startsWith('text/')) {
-      type = 'text'; const r = parsePrefixedRegexRule(coreRule, 5); pattern = r.pattern; flags = r.flags;
+      type = 'text'; const r = parsePrefixedRegexRule(coreRule, 5); if (r.unclosed) throw new Error('Unbalanced regex'); pattern = r.pattern; flags = r.flags;
     } else {
       type = 'url'; const r = ruleToRegex(coreRule); pattern = r.pattern; flags = r.flags;
     }
@@ -2292,7 +2315,7 @@
     ensurePositioned(result); result.appendChild(label);
   }
 
-  // 屏蔽处理
+  // 结果处理
   function processSingleResult(result) {
     if (result.closest('.sys_algo_rs, .AlsoTry_M, [data-yga*="sugg"]')) return false;
 
@@ -2558,7 +2581,7 @@
   function injectWidgetStyles() {
     if (widgetStylesInjected) return; widgetStylesInjected = true;
     GM_addStyle(`
-        /* 隔离样式 */
+        /* 隔离 */
         [id^="serh-"]:not(button) {
             text-align: left !important; letter-spacing: normal !important; word-spacing: normal !important;
             text-transform: none !important; text-indent: 0 !important; text-shadow: none !important;
@@ -2592,19 +2615,19 @@
         }
         .serh-button-primary { background: #2c5282 !important; color: #ffffff !important; }
         .serh-button-primary:hover { background: #1a365d !important; color: #ffffff !important; }
-        .serh-button-primary:active, .serh-button-primary:focus, .serh-button-primary:focus-visible { background: #15294a !important; color: #ffffff !important; }
+        .serh-button-primary:active, .serh-button-primary:focus, .serh-button-primary:focus-visible { background: #1d375d !important; color: #ffffff !important; }
 
         .serh-button-secondary { background: #4a5568 !important; color: #ffffff !important; }
         .serh-button-secondary:hover { background: #2d3748 !important; color: #ffffff !important; }
-        .serh-button-secondary:active, .serh-button-secondary:focus, .serh-button-secondary:focus-visible { background: #1a202c !important; color: #ffffff !important; }
+        .serh-button-secondary:active, .serh-button-secondary:focus, .serh-button-secondary:focus-visible { background: #2a3240 !important; color: #ffffff !important; }
 
         .serh-button-success { background: #276749 !important; color: #ffffff !important; }
         .serh-button-success:hover { background: #22543d !important; color: #ffffff !important; }
-        .serh-button-success:active, .serh-button-success:focus, .serh-button-success:focus-visible { background: #1c4532 !important; color: #ffffff !important; }
+        .serh-button-success:active, .serh-button-success:focus, .serh-button-success:focus-visible { background: #20503a !important; color: #ffffff !important; }
 
         .serh-button-danger { background: #c53030 !important; color: #ffffff !important; }
         .serh-button-danger:hover { background: #9b2c2c !important; color: #ffffff !important; }
-        .serh-button-danger:active, .serh-button-danger:focus, .serh-button-danger:focus-visible { background: #742a2a !important; color: #ffffff !important; }
+        .serh-button-danger:active, .serh-button-danger:focus, .serh-button-danger:focus-visible { background: #8f2c2c !important; color: #ffffff !important; }
 
         .serh-option-row {
             display: flex; align-items: center; justify-content: space-between;
@@ -2950,6 +2973,7 @@
             body.serh-dark-on #serh-webdav-panel input[type="text"],
             body.serh-dark-on #serh-webdav-panel input[type="password"],
             body.serh-dark-on #serh-subscription-panel input[type="text"],
+            body.serh-dark-on #serh-settings-panel select,
             body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row input {
                 background: #374151 !important; border-color: #4b5563 !important; color: #f3f4f6 !important;
             }
@@ -3055,7 +3079,7 @@
             }
         }
 
-        /* 屏蔽结果灰底 */
+        /* 屏蔽灰底 */
         .serh-blocked-visible,
         .g.serh-blocked-visible,
         .MjjYud.serh-blocked-visible {
@@ -3106,7 +3130,7 @@
             }
         }
 
-        /* 高亮边框 */
+        /* 高亮 */
         #serh-hlcolor-panel .serh-hlcolor-row {
             margin-bottom: 2px !important; padding: 0 !important; border: none !important;
             background: transparent !important; display: flex !important; align-items: center !important; gap: 4px !important;
@@ -3188,7 +3212,6 @@
             cursor: pointer; border: none;
         }
 
-        /* 悬浮通知 */
         #serh-toast-container {
             position: fixed; top: 15px; right: 15px; z-index: 2147483647; display: flex;
             flex-direction: column; align-items: stretch; gap: 8px; pointer-events: none;
@@ -3263,7 +3286,7 @@
           const parsed = parseInt(currentConfig.bubbleSize); size = isNaN(parsed) ? 20 : parsed;
       }
     }
-    return Math.max(15, Math.min(50, size));
+    return Math.max(15, Math.min(60, size));
   }
 
   function applyBubbleSize(element) {
@@ -3453,7 +3476,7 @@
     }
   }
 
-  // 行号与语法检查
+  // 行号/语法检查
   let _lineUpdatePending = false; let _lineUpdateDirty = false; let _lineChunkToken = 0; const LINE_NUM_CHUNK = 200;
 
   function updateLineNumbersIncremental() {
@@ -3577,6 +3600,8 @@
         el.checked = currentConfig[key] === true;
       }
     });
+    const bubbleActionSelect = document.getElementById('serh-set-bubble-action');
+    if (bubbleActionSelect) bubbleActionSelect.value = currentConfig.bubbleAction === 'toggleHidden' ? 'toggleHidden' : 'openPanel';
     const textarea = document.getElementById('serh-rules');
     if (textarea && Array.isArray(currentConfig.rules)) {
       textarea.value = currentConfig.rules.join('\n'); updateLineNumbers();
@@ -3634,6 +3659,7 @@
       document.getElementById('serh-subscription-panel') ||
       document.getElementById('serh-hlcolor-panel') ||
       document.getElementById('serh-selector-panel') ||
+      document.getElementById('serh-settings-panel') ||
       document.getElementById('serh-panel');
     if (panel) {
       if (container.parentElement !== panel) {
@@ -3817,7 +3843,7 @@
       resultHTML += `</div>`;
     });
 
-    if (!hasMatches && ruleErrorsArray.length === 0) {
+    if (!hasMatches && ruleErrorsArray.length === 0 && ruleWarningsArray.length === 0) {
       resultHTML = `<div style="color: #38a169; padding: 10px; border-radius: 4px; font-size: 12px; background: #f0fff4; text-align: center;">${t('noMatch')}</div>`;
     }
 
@@ -3936,7 +3962,7 @@
     panel.innerHTML = `
             <div class="serh-option-row" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px;">
                 <span class="serh-option-label" style="margin-bottom: 0;">${t('bubbleSize')} <span id="serh-bubble-size-val">${initialSize}px</span></span>
-                <input type="range" id="serh-bubble-size-slider" min="20" max="50" value="${initialSize}" style="flex: 1; margin-left: 5px; height: 4px; background: #cbd5e0; border-radius: 2px; outline: none; -webkit-appearance: none; cursor: pointer;">
+                <input type="range" id="serh-bubble-size-slider" min="20" max="60" value="${initialSize}" style="flex: 1; margin-left: 5px; height: 4px; background: #cbd5e0; border-radius: 2px; outline: none; -webkit-appearance: none; cursor: pointer;">
             </div>
             
             <div style="margin-bottom: 0px;">
@@ -4143,8 +4169,8 @@
                         <span>${label}</span>
                     </span>
                 </label>`;
-    const settingsRow = items => `
-            <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+    const settingsRow = (items, last) => `
+            <div style="display: flex; gap: 8px; margin-bottom: ${last ? 0 : 10}px;">
                 ${items.map(item => settingsSwitch(item.id, t(item.labelKey), item.checked)).join('\n                ')}
             </div>`;
     const settingsHeader = key => `
@@ -4178,9 +4204,25 @@
               { id: 'serh-set-debug', labelKey: 'debugMode', checked: currentConfig.debug === true }
             ])}
             ${settingsRow([
-              { id: 'serh-set-error-detection', labelKey: 'menuRulesDetection', checked: currentConfig.errorDetection !== false },
+              { id: 'serh-set-error-detection', labelKey: 'menuErrorDetection', checked: currentConfig.errorDetection !== false },
               { id: 'serh-set-export-config', labelKey: 'exportConfig', checked: currentConfig.exportConfig === true }
             ])}
+            <div style="display: flex; gap: 8px; margin-bottom: 0;">
+                <div style="flex: 1; min-width: 0;">
+                    <label for="serh-set-bubble-action" style="display: block; margin-bottom: 4px; cursor: pointer; font-size: 12px; color: #4a5568;">${t('menuBubbleAction')}</label>
+                    <select id="serh-set-bubble-action" style="width: 100%; min-width: 0; font-size: 12px; padding: 3px 4px; border: 1px solid #cbd5e0; border-radius: 4px; background: #fff; color: #2d3748; cursor: pointer; outline: none; font-family: inherit;">
+                        <option value="openPanel" ${currentConfig.bubbleAction !== 'toggleHidden' ? 'selected' : ''}>${t('menuBubbleActionOpen')}</option>
+                        <option value="toggleHidden" ${currentConfig.bubbleAction === 'toggleHidden' ? 'selected' : ''}>${t('menuBubbleActionToggle')}</option>
+                    </select>
+                </div>
+                <div style="flex: 1; min-width: 0;">
+                    <label for="serh-set-language" style="display: block; margin-bottom: 4px; cursor: pointer; font-size: 12px; color: #4a5568;">${t('menuLanguage')}</label>
+                    <select id="serh-set-language" style="width: 100%; min-width: 0; font-size: 12px; padding: 3px 4px; border: 1px solid #cbd5e0; border-radius: 4px; background: #fff; color: #2d3748; cursor: pointer; outline: none; font-family: inherit;">
+                        <option value="zh-CN" ${currentConfig.language !== 'en' ? 'selected' : ''}>中文</option>
+                        <option value="en" ${currentConfig.language === 'en' ? 'selected' : ''}>English</option>
+                    </select>
+                </div>
+            </div>
         `;
 
     const applyPanelPosition = el => {
@@ -4215,6 +4257,24 @@
         });
       }
     });
+
+    const bubbleActionSelect = document.getElementById('serh-set-bubble-action');
+    if (bubbleActionSelect) {
+      bubbleActionSelect.addEventListener('change', function() {
+        adoptStoredConfigBeforeWrite(); currentConfig.bubbleAction = this.value; persistConfig(true);
+        const statusBtn = document.getElementById('serh-status'); if (statusBtn) updateBubbleContent(statusBtn, parseInt(statusBtn.dataset.blockedCount || 0));
+        if (this.value === 'toggleHidden') showToast(t('bubbleToggleHint'), 'info');
+      });
+    }
+
+    const languageSelect = document.getElementById('serh-set-language');
+    if (languageSelect) {
+      languageSelect.addEventListener('change', function() {
+        adoptStoredConfigBeforeWrite(); currentConfig.language = this.value; persistConfig(true); registerMenu();
+        if (typeof panel._cleanupClick === 'function') panel._cleanupClick();
+        panel.remove(); showSettingsPanel();
+      });
+    }
 
     document.getElementById('serh-settings-close').onclick = (e) => {
       e.stopPropagation(); if (typeof panel._cleanupClick === 'function') panel._cleanupClick(); fadeOutAndRemovePanel(panel);
@@ -4391,8 +4451,8 @@
         document.getElementById(`serh-hlcolor-input-${i}`).value = defaults[i];
         document.getElementById(`serh-hlcolor-preview-${i}`).style.background = defaults[i];
       }
-      adoptStoredConfigBeforeWrite(); currentConfig.highlightColors = {...defaults}; persistConfig(true); forceReprocessAll(); const [r, g, b] = hexToRgb('#CE2029');
-      [currentHue, currentSat, currentVal] = rgbToHsv(r, g, b); drawSVCanvas(currentHue); updatePickedColor();
+      const [r, g, b] = hexToRgb('#CE2029');
+      [currentHue, currentSat, currentVal] = rgbToHsv(r, g, b); drawSVCanvas(currentHue); updatePickedColor(); showToast(t('resetPending'), 'success');
     };
 
     const closePanel = bindOutsideClickClose(panel);
@@ -4415,8 +4475,8 @@
     return String(text).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
   }
 
-  function serializeSelectors() {
-    const merged = getSelectors(); const parts = [];
+  function serializeSelectors(base) {
+    const merged = base || getSelectors(); const parts = [];
     const keyToText = (key) => /^[A-Za-z_$][\w$]*$/.test(key) ? key : `'${escapeJsString(key)}'`;
     const defToText = (def, disabled) => {
       const links = Array.isArray(def.links)
@@ -4505,15 +4565,15 @@
           errors.push(t('selectorFieldRequired', { key, field })); continue;
         }
         for (const s of normalizeSelectorList(value)) {
-          if (!isValidCssSelector(s)) errors.push(t('selectorInvalidCss', { key, field, value: s }));
+          if (!isValidCssSelector(s) || hasPseudoElement(s)) errors.push(t('selectorInvalidCss', { key, field, value: s }));
         }
       }
       if (def.links === undefined || def.links === null) continue;
       if (typeof def.links === 'string') {
-        if (def.links && !isValidCssSelector(def.links)) errors.push(t('selectorInvalidCss', { key, field: 'links', value: def.links }));
+        if (def.links && (!isValidCssSelector(def.links) || hasPseudoElement(def.links))) errors.push(t('selectorInvalidCss', { key, field: 'links', value: def.links }));
       } else if (Array.isArray(def.links)) {
         for (const s of normalizeSelectorList(def.links)) {
-          if (!isValidCssSelector(s)) errors.push(t('selectorInvalidCss', { key, field: 'links', value: s }));
+          if (!isValidCssSelector(s) || hasPseudoElement(s)) errors.push(t('selectorInvalidCss', { key, field: 'links', value: s }));
         }
       } else {
         errors.push(t('selectorFieldRequired', { key, field: 'links' }));
@@ -4825,7 +4885,7 @@
     };
 
     document.getElementById('serh-selector-reset').onclick = () => {
-      applyUserSelectors({}); textarea.value = serializeSelectors(); showError([]); updateSelLineNumbers();
+      textarea.value = serializeSelectors(SELECTORS); showError([]); updateSelLineNumbers(); showToast(t('resetPending'), 'success');
     };
 
     document.getElementById('serh-selector-cancel').onclick = (e) => {
@@ -6142,7 +6202,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
     adoptStoredConfigIfNewer(); let localTime = GM_getValue(LOCAL_LAST_MODIFIED_KEY, 0); if (localTime > trustedNow + WEBDAV_TIME_TOLERANCE) localTime = trustedNow;
     const localRules = currentConfig.rules || [];
-    if (resp.status !== 404 && cloudRules.length === 0) {
+    const scriptedEmptyCloud = resp.status !== 404 && cloudRules.length === 0 && !!(parsedHeader && parsedHeader.config && typeof parsedHeader.config.rulesSyncedAt === 'number' && Number.isFinite(parsedHeader.config.rulesSyncedAt) && parsedHeader.config.rulesSyncedAt > 0);
+    if (resp.status !== 404 && cloudRules.length === 0 && !scriptedEmptyCloud) {
       if (localRules.length > 0 && localTime > cloudTime) {
         console.log('[自动 WebDAV] 云端文件为空且本地规则较新，上传本地规则...'); const uploadedTime = Math.max(cloudTime + 1000, localTime + 1, trustedNow);
         const putHeaders = {
@@ -6369,10 +6430,27 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   // TXT导入
   function importRulesFromFile() {
     pickTextFile('.txt,text/plain', (content) => {
+      const parsedHeader = parseSyncHeader(content);
+      const headerConfig = parsedHeader.config;
+      if (headerConfig && typeof headerConfig === 'object' && !Array.isArray(headerConfig)) {
+        const {
+          syncedAt, rulesSyncedAt, subscriptions,
+          bubbleState, bubbleSize, selectors, ...settings
+        } = headerConfig;
+        delete settings.subscriptionTombstones; delete settings.tombstones; delete settings.ruleAddedTimes;
+        if (Object.keys(settings).length > 0) {
+          currentConfig = normalizeConfig(Object.assign(getDefaultConfig(), settings, {
+            rules: currentConfig.rules || [], bubbleState: currentConfig.bubbleState, bubbleSize: currentConfig.bubbleSize
+          }));
+        }
+      }
       const textarea = document.getElementById('serh-rules');
       if (textarea) {
-        textarea.value = parseSyncHeader(content).restLines.join('\n'); updateLineNumbers();
+        textarea.value = parsedHeader.restLines.join('\n'); updateLineNumbers();
       }
+      currentConfig.rules = filterValidRuleLines(parsedHeader.restLines);
+      const panel = document.getElementById('serh-panel'); if (panel) panel._initialRules = [...currentConfig.rules];
+      persistConfig(true); applyConfigToMainPanel(); forceReprocessAll();
     });
   }
 
@@ -6389,24 +6467,12 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   }
 
   // 管理器菜单
-  function registerToggleMenu(labelKey, isOn, onText, offText, markerOn, markerOff, apply) {
-    const on = isOn();
-    GM_registerMenuCommand((on ? markerOn : markerOff) + t(labelKey) + (on ? `: ${t(onText)}` : `: ${t(offText)}`), () => {
-      adoptStoredConfigBeforeWrite(); apply(); persistConfig(true); location.reload();
-    });
-  }
-
+  let _menuCommandIds = [];
   function registerMenu() {
-    GM_registerMenuCommand(t('menuOpenPanel'), () => showConfigPanel()); GM_registerMenuCommand(t('menuCustomSelectors'), showSelectorPanel);
-    GM_registerMenuCommand(t('menuHighlightColor'), () => showHighlightColorPanel()); const langDisplay = currentConfig.language === 'zh-CN' ? t('menuLang') : t('menuLangEn');
-    GM_registerMenuCommand((currentConfig.language === 'zh-CN' ? '🟢 ' : '🔵 ') + langDisplay, () => {
-      adoptStoredConfigBeforeWrite(); currentConfig.language = currentConfig.language === 'zh-CN' ? 'en' : 'zh-CN'; persistConfig(true); location.reload();
-    });
-    if (isEngineSite()) {
-      registerToggleMenu('menuBubbleAction', () => currentConfig.bubbleAction === 'openPanel', 'menuBubbleActionOpen', 'menuBubbleActionToggle', '🟢 ', '🔵 ', () => {
-        currentConfig.bubbleAction = currentConfig.bubbleAction === 'openPanel' ? 'toggleHidden' : 'openPanel';
-      });
-    }
+    _menuCommandIds.forEach(id => { try { GM_unregisterMenuCommand(id); } catch (e) {} }); _menuCommandIds = [];
+    _menuCommandIds.push(GM_registerMenuCommand(t('menuOpenPanel'), () => showConfigPanel()));
+    _menuCommandIds.push(GM_registerMenuCommand(t('menuCustomSelectors'), showSelectorPanel));
+    _menuCommandIds.push(GM_registerMenuCommand(t('menuHighlightColor'), () => showHighlightColorPanel()));
   }
 
   // 跨页锁
@@ -6558,7 +6624,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       _searchForm = searchForm; _searchFormHandler = () => setTimeout(forceReprocessAll, 800); searchForm.addEventListener('submit', _searchFormHandler);
     }
 
-    // 切换感知
     if (!_urlChangeHandler) {
       let lastHref = location.href; let lastCategory = getSearchCategory();
       _urlChangeHandler = () => {
@@ -6626,6 +6691,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   function adoptStoredConfigIfNewer() {
     const stored = GM_getValue(CONFIG_KEY); if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return false;
+    normalizeConfig(stored);
     try {
       if (JSON.stringify(stored) === JSON.stringify(currentConfig)) return false;
     } catch (e) {
