@@ -177,6 +177,7 @@ check('选择器-021: 非对象配置报错', api.validateUserSelectors([1, 2]).
 check('选择器-022: titles 字符串简写合法', api.validateUserSelectors({ e5: { match: 'a', containers: '.x', titles: 'h3', snippets: '.c', links: ['a', '.b'] } }).length === 0);
 check('选择器-023: links 非法类型报错', api.validateUserSelectors({ e6: { match: 'a', containers: '.x', links: 123 } }).length === 1);
 check('选择器-024: containers 伪元素被拒且引号内不误报', api.validateUserSelectors({ e7: { match: 'a', containers: 'div::after' } }).length === 1 && api.validateUserSelectors({ e8: { match: 'a', containers: '[data-x="a::b"]' } }).length === 0);
+check('修复P-1: titles/snippets/links 伪元素被拒且引号内不误报', api.validateUserSelectors({ p1: { match: 'a', containers: '.x', titles: ['h3::after'] } }).length === 1 && api.validateUserSelectors({ p2: { match: 'a', containers: '.x', snippets: ['.c::before'] } }).length === 1 && api.validateUserSelectors({ p3: { match: 'a', containers: '.x', links: 'a::after' } }).length === 1 && api.validateUserSelectors({ p4: { match: 'a', containers: '.x', links: ['a', 'b::after'] } }).length === 1 && api.validateUserSelectors({ p5: { match: 'a', containers: '.x', titles: ['[data-k="a::b"]'] } }).length === 0);
 check('选择器-025: 对象match校验: 非法flags报错且合法通过', api.validateUserSelectors({ e11: { match: { source: 'a', flags: 'q' }, containers: '.x' } }).length === 1 && api.validateUserSelectors({ e12: { match: { source: 'a', flags: 'i' }, containers: '.x' } }).length === 0);
 
 // ---- normalizeSelectorList ----
@@ -1238,7 +1239,15 @@ for (const [i, [host, expected]] of cases.entries()) {
 }
 
 assert('选择器-185: SELECTORS键序为引擎检测顺序', JSON.stringify(Object.keys(selectors)) === JSON.stringify(['bing', 'google_scholar', 'google', 'duckduckgo_lite', 'duckduckgo', 'yandex', 'brave', 'yahoo', 'other']));
-assert('选择器-186: 缓存:同hostname二次调用返回相同结果', factory({ location: { hostname: 'www.google.com' } }, selectors).getSearchEngine() === 'google');
+{
+  const cacheWin = { location: { hostname: 'www.google.com', href: 'https://www.google.com/' } };
+  const cacheEnv = factory(cacheWin, selectors);
+  const first = cacheEnv.getSearchEngine();
+  assert('选择器-186: 缓存:同location二次调用命中缓存且结果一致', first === 'google' && cacheEnv.getSearchEngine() === first);
+  cacheWin.location.hostname = 'www.bing.com';
+  cacheWin.location.href = 'https://www.bing.com/';
+  assert('选择器-186b: 缓存:cacheKey变化后重新计算', cacheEnv.getSearchEngine() === 'bing');
+}
 assert('选择器-187: 内置引擎不因URL尾部误判(google查询含.bing.com)', factory({ location: { hostname: 'www.google.com', href: 'https://www.google.com/search?q=x.bing.com' } }, selectors).getSearchEngine() === 'google');
 assert('选择器-188: 内置引擎不因URL尾部误判(普通站查询含.bing.com)', factory({ location: { hostname: 'example.com', href: 'https://example.com/?ref=x.bing.com' } }, selectors).getSearchEngine() === 'other');
 assert('选择器-189: 空href/hostname返回other而非缓存哨兵', factory({ location: { hostname: '', href: '' } }, selectors).getSearchEngine() === 'other');
@@ -1347,36 +1356,28 @@ function createLockEnv(tabId, ttl = 2000) {
   check('选择器-204: 任务异常仍释放锁', threw === true && tab.readSyncLock('fail') === null);
 }
 
-// ---- 菜单注册测试 (非引擎站仅注册4项) ----
+// ---- 菜单注册测试 (注册3项) ----
 {
   const regMenuFn = extractFn(src, 'registerMenu');
-  const regToggleFn = extractFn(src, 'registerToggleMenu');
-  function runMenuTest(isEngine) {
+  function runMenuTest() {
     const registered = [];
     const GM_registerMenuCommand = (label, cb) => { registered.push(label); };
     const t = (k) => k;
-    const currentConfig = { language: 'zh-CN', errorDetection: true, panelCentered: false, showBubble: true, bubbleAction: 'openPanel' };
-    const isEngineSite = () => isEngine;
-    const showConfigPanel = () => {};
-    const showSelectorPanel = () => {};
-    const showHighlightColorPanel = () => {};
-    const persistConfig = () => {};
     const menuEnv = new Function(
-      'registered', 'GM_registerMenuCommand', 't', 'currentConfig', 'isEngineSite', 'showConfigPanel', 'showSelectorPanel', 'showHighlightColorPanel', 'persistConfig',
-      `${regToggleFn}
+      'registered', 'GM_registerMenuCommand', 't', 'showConfigPanel', 'showSelectorPanel', 'showHighlightColorPanel',
+      `let _menuCommandIds = [];
        ${regMenuFn}
        registerMenu();
        return registered;`
     );
-    return menuEnv(registered, GM_registerMenuCommand, t, currentConfig, isEngineSite, showConfigPanel, showSelectorPanel, showHighlightColorPanel, persistConfig);
+    return menuEnv(registered, GM_registerMenuCommand, t, () => {}, () => {}, () => {});
   }
 
-  const nonEngineMenus = runMenuTest(false);
-  check('选择器-205: 非引擎站点仅显示4个菜单项', nonEngineMenus.length === 4);
-  check('选择器-206: 非引擎站点包含打开面板', nonEngineMenus[0] === 'menuOpenPanel');
-  check('选择器-207: 非引擎站点包含自定义选择器', nonEngineMenus[1] === 'menuCustomSelectors');
-  check('选择器-208: 非引擎站点包含自定义颜色', nonEngineMenus[2] === 'menuHighlightColor');
-  check('选择器-209: 非引擎站点包含语言切换', nonEngineMenus[3].includes('menuLang'));
+  const menus = runMenuTest();
+  check('选择器-205: 注册3个菜单项', menus.length === 3);
+  check('选择器-206: 包含打开面板', menus[0] === 'menuOpenPanel');
+  check('选择器-207: 包含自定义选择器', menus[1] === 'menuCustomSelectors');
+  check('选择器-208: 包含自定义颜色', menus[2] === 'menuHighlightColor');
 }
 
 // ---- 结果摘要后备提取: 相对选择器(extraElements)不得抛异常中断结果处理 ----
@@ -1718,6 +1719,10 @@ return { injectBlockButton };
 {
   const upSrc = extractFn(src, 'updatePickedColor');
   check('复审S-1(新发现): 画布取色updatePickedColor只写展示元素(code-text/current-preview), 从不写hlcolor行输入, 保存仅读文本框(取色对配置零影响却提示已保存)', upSrc.includes('serh-hlcolor-code-text') && upSrc.includes('serh-hlcolor-current-preview') && !upSrc.includes('hlcolor-input'));
+  const rIdx = src.indexOf("getElementById('serh-hlcolor-reset')");
+  const resetSrc = rIdx >= 0 ? src.slice(rIdx, src.indexOf("getElementById('serh-hlcolor-cancel')")) : '';
+  check('复审S-2(已修复): 颜色重置仅回填输入框/预览与画布, 不直接persistConfig/forceReprocessAll(保存才落盘, 取消可放弃)', resetSrc.includes('defaults[i]') && !resetSrc.includes('persistConfig') && !resetSrc.includes('forceReprocessAll') && !resetSrc.includes('highlightColors ='));
+  check('复审S-3(已修复): 颜色/选择器两处重置仅回填面板态并提示保存后生效, 选择器重置不再直接applyUserSelectors落盘', (src.match(/showToast\(t\('resetPending'\)/g) || []).length === 2 && !/serh-selector-reset'\)\.onclick[\s\S]{0,120}applyUserSelectors/.test(src) && src.includes('serializeSelectors(SELECTORS)'));
 }
 
 // ==== [选择器-231~232] 复审V: regexSourceToLiteralText改写裸斜杠 / 辅助面板不滤合成点击 (审查新发现, 以当前行为为准) ====
