@@ -24,7 +24,7 @@ Floating ball in "Toggle Results" (show/hide results) mode — clicking the bloc
 | `*://*.example.com/*` | Matches `example.com` and all its subdomains |
 | `*://*.example.com/path/*` | Matches a specific path on `example.com` |
 | `*://*.example.*` | Matches all Top-level/Second-level domains of `example.com` |
-| `example.com` | Equivalent to `*://*.example.com/*`, script-only shorthand; rules also used in uBlacklist must add the `*://*.` prefix |
+| `example.com` | Equivalent to `*://*.example.com/*`, only supports domain name recognition and is only used for script; rules also used in uBlacklist must add the `*://*.` prefix |
 
 URL wildcard rules match from the start of the URL per match-pattern semantics; the host wildcard `*` does not cross paths; the `*.` prefix also matches the bare domain; Chinese and other IDN domains and punycode (e.g. `例子.com` and `xn--fsqu00a.com`) are treated as the same host.
 

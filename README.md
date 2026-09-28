@@ -5,8 +5,8 @@
 [中文](README.md) | [English](README.en.md)
 
 在**仅支持安装脚本**的浏览器上实现复杂规则屏蔽搜索结果功能  
-支持包括ublacklist基础规则在内的URL匹配、正则匹配、标题匹配、白名单匹配、高亮目标结果以及结果摘要(snippet)匹配  
-当前支持搜索引擎：Bing、Google、Google Scholar、DuckDuckGo(ddg/lite)、Yandex、Brave、Yahoo(&Japan)  
+支持包括ublacklist基础规则在内的URL匹配、正则匹配、标题匹配、白名单匹配、高亮目标结果、`@if`附加判断条件以及结果摘要(snippet)匹配，支持添加自定义引擎  
+当前支持搜索引擎：Bing、Google、Google Scholar、DuckDuckGo(ddg/lite)、Yandex、Brave、Yahoo(&Japan)
 
 安装源 [Github](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [Greasy Fork](https://update.greasyfork.org/scripts/552394/%E6%90%9C%E7%B4%A2%E5%BC%95%E6%93%8E%E7%BB%93%E6%9E%9C%E5%B1%8F%E8%94%BD%E5%99%A8.user.js)  
 浏览器打开直接安装
@@ -22,13 +22,14 @@
 - Webdav同步
 - 脚本管理器菜单  
 ┣ 打开面板  
-┣ 自定义选择器  
-┗ 自定义高亮颜色
+┣ 自定义高亮颜色  
+┗ 自定义引擎选择器
 
 部分设置说明：
 1. 面板居中：默认开启，关闭后根据悬浮球位置显示在屏幕四角
 2. 导出配置：默认关闭，开启后导出TXT附带`# ScriptConfig:{...}`脚本配置
-3. 悬浮球功能切换：默认点击打开面板，切换后点击显示/隐藏被屏蔽结果、长按打开面板，被屏蔽结果的屏蔽按钮再次点击则取消屏蔽
+3. 来源显示：默认开启，关闭后不在被屏蔽结果上显示命中规则
+4. 悬浮球功能切换：默认点击打开面板，切换后点击显示/隐藏被屏蔽结果、长按打开面板，被屏蔽结果的屏蔽按钮再次点击则取消屏蔽
 
 ### 1.3 关于Webdav：
 
