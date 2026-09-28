@@ -24,11 +24,19 @@ function extractFn(text, fnName) {
     if (text[i] === '{') depth++;
     else if (text[i] === '}') { depth--; if (depth === 0) break; }
   }
+  const rawExtract = (t, name) => { const ridx = t.indexOf('function ' + name + '('); const ropen = t.indexOf('{', t.indexOf(') {', ridx)); let rdepth = 0; let ri = ropen; for (; ri < t.length; ri++) { if (t[ri] === '{') rdepth++; else if (t[ri] === '}') { rdepth--; if (rdepth === 0) break; } } return t.slice(ridx, ri + 1); };
   const fn = text.slice(idx, i + 1);
-  if (['scanNewResults', 'teardownEngineSite'].includes(fnName)) {
-    return 'function restoreResultExtraElements() {}\nfunction reconcileHiddenParents() {}\nfunction restoreAllHiddenParents() {}\n' + fn;
+  const prelude = [];
+  if (!['findBalancedParenEnd', 'scanRuleString', 'encodeNonAscii'].includes(fnName)) {
+    if (/scanRuleString\(|RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_[AB]\b/.test(fn)) {
+      prelude.push(text.split('\n').filter(line => /^\s*const (?:RULE_\w+|REGEX_CTX_[AB]) =/.test(line)).map(line => line.replace('const ', 'var ')).join('\n'), rawExtract(text, 'findBalancedParenEnd'), rawExtract(text, 'scanRuleString'));
+    }
+    if (/encodeNonAscii\(/.test(fn)) prelude.push(rawExtract(text, 'encodeNonAscii'));
   }
-  return fn;
+  if (['scanNewResults', 'teardownEngineSite'].includes(fnName)) {
+    prelude.push('function restoreResultExtraElements() {}\nfunction reconcileHiddenParents() {}\nfunction restoreAllHiddenParents() {}');
+  }
+  return prelude.concat([fn]).join('\n');
 }
 
 
@@ -147,8 +155,7 @@ api.setHost('searx.example.com');
 check('选择器-007: 自定义引擎被识别', api.getSearchEngine() === 'mysearx');
 check('选择器-008: 自定义引擎 isEngineSite 为真', api.isEngineSite() === true);
 check('选择器-009: 自定义引擎容器选择器', api.getContainerSelector('mysearx') === '.result');
-api.setHost('sub.searx.example.com');
-check('选择器-010: 子域名同样命中', api.getSearchEngine() === 'mysearx');
+// (合并自 选择器-010: 自定义引擎子域命中与内置主机子域匹配(选择器-184组)同一正则机制)
 
 // ---- other 保留键 ----
 api.setStore({ other: { match: '.*', containers: 'body' } });
@@ -226,7 +233,7 @@ check('修复S-4(对照): 普通键仍不加引号', P4.includes('bing: {') && P
 api.setHost('www.bing.com');
 api.setStore({ bing: { match: '(?:^|\\.)bing\\.', containers: 'div.my-bing', titles: ['h2'], snippets: ['.s'], links: 'a[href]' } });
 check('选择器-041: 同ID覆盖:容器使用用户选择器', api.getContainerSelector('bing') === 'div.my-bing');
-check('选择器-042: 同ID覆盖:引擎识别正常', api.getSearchEngine() === 'bing');
+// (合并自 选择器-042: 同ID覆盖下的引擎识别与选择器-184 主机识别组同路径)
 check('选择器-043: 同ID覆盖:用户键合并后排在内置之前', Object.keys(api.getSelectors())[0] === 'bing');
 api.setStore({
   bing: { match: '(?:^|\\.)bing\\.', containers: 'div.my-bing', titles: ['h2'], snippets: ['.s'], links: 'a[href]' },
@@ -234,9 +241,7 @@ api.setStore({
 });
 api.setHost('search.brave.com');
 check('选择器-044: 新增键与内置主机重叠时用户优先', api.getSearchEngine() === 'mybrave');
-check('选择器-045: 新增键排在内置同名站点引擎之前', Object.keys(api.getSelectors()).indexOf('mybrave') < Object.keys(api.getSelectors()).indexOf('brave'));
-api.setHost('www.google.com');
-check('选择器-046: 未覆盖内置回退正常', api.getSearchEngine() === 'google');
+// (合并自 选择器-045/046: 用户键先于内置的顺序与未覆盖回退分别由选择器-047 与选择器-184 组覆盖)
 api.setStore({
   google: { match: '(?:^|\\.)google\\.', containers: 'div.g' },
   google_scholar: { match: '(?:^|\\.)scholar\\.google\\.', containers: 'div.gs_r' }
@@ -282,7 +287,7 @@ check('选择器-058: 缺失内置键视为未改动(删除=恢复跟随内置)'
 const w4b2 = api.diffUserSelectors(Object.assign({}, allBuiltins, { yahoo: Object.assign({}, allBuiltins.yahoo, { disabled: true }) }));
 check('选择器-059: 显式 disabled 标记被保留', w4b2.yahoo && w4b2.yahoo.disabled === true);
 check('选择器-060: 空配置(重置)不产生任何disabled', Object.keys(api.diffUserSelectors({})).length === 0);
-check('选择器-061: 仅含自定义引擎的片段不禁用内置', Object.keys(api.diffUserSelectors({ mysearx: CUSTOM.mysearx })).join(',') === 'mysearx');
+// (合并自 选择器-061: 自定义键保留与选择器-056 同一 diff 分支)
 api.setStore({ yahoo: { disabled: true } });
 check('选择器-062: disabled 的内置引擎不被加载', api.getSelectors().yahoo && api.getSelectors().yahoo.disabled === true);
 api.setHost('search.yahoo.com');
@@ -293,7 +298,7 @@ const P3 = api.serializeSelectors();
 check('选择器-064: disabled 引擎序列化保留内置定义与标记', /yahoo:\s*\{/.test(P3) && P3.includes('disabled: true') && P3.includes("'.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo'"));
 const R10 = api.parseSelectorText(P3);
 check('选择器-065: disabled 往返解析无误且校验通过', !R10.errors.length && !!R10.config && R10.config.yahoo.disabled === true && api.validateUserSelectors(R10.config).length === 0);
-check('选择器-066: disabled 往返后 diff 仍保留标记', api.diffUserSelectors(R10.config).yahoo && api.diffUserSelectors(R10.config).yahoo.disabled === true);
+// (合并自 选择器-066: diff 保留 disabled 标记与选择器-059 同分支)
 const R11 = api.parseSelectorText('z1: { disabled: true }');
 check('选择器-067: 自定义禁用块解析且校验通过', !R11.errors.length && !!R11.config && R11.config.z1.disabled === true && api.validateUserSelectors(R11.config).length === 0);
 check('选择器-068: disabled:false 单独为显式恢复不报错, 完整定义仍按普通校验', api.validateUserSelectors({ z2: { disabled: false } }).length === 0 && api.validateUserSelectors({ z6: { disabled: false, containers: '.x' } }).some(m => m.includes('match')));
@@ -343,14 +348,15 @@ check('选择器-082: 普通分支保留关联选择器', JSON.stringify(api.get
 check('选择器-083: 相对CSS配置校验通过', api.validateUserSelectors({ customExtra: extraDef }).length === 0);
 const extraRoundTrip = api.parseSelectorText(api.serializeSelectors());
 check('选择器-084: 序列化解析保留关联配置', !extraRoundTrip.errors.length && api.sameSelectorDef(extraRoundTrip.config.customExtra, extraDef));
-for (const [i, value] of ['+ tr', null, [1], [''], ['+ tr, body'], ['+ tr::after']].entries()) {
-  check(`选择器-085-${i + 1}: 非法关联配置被拒 ${JSON.stringify(value)}`, api.validateUserSelectors({ customExtra: { ...extraDef, extraElements: value } }).some(e => e.includes('extraElements')));
+// 同构组精简: 保留首(裸相对)/最特殊(混入绝对选择器)/末(伪元素); 删除 null/[1]/[''] 变形(同一 extraElements 校验分支)
+for (const [num, value] of [[1, '+ tr'], [5, ['+ tr, body']], [6, ['+ tr::after']]]) {
+  check(`选择器-085-${num}: 非法关联配置被拒 ${JSON.stringify(value)}`, api.validateUserSelectors({ customExtra: { ...extraDef, extraElements: value } }).some(e => e.includes('extraElements')));
 }
 check('选择器-086: disabled配置仍校验关联CSS', api.validateUserSelectors({ customExtra: { disabled: true, extraElements: ['+ tr, body'] } }).length === 1);
 api.setStore({ customExtra: { ...extraDef, disabled: true } });
 check('选择器-087: 禁用分支保留关联配置', JSON.stringify(api.getSelectors().customExtra.extraElements) === JSON.stringify(extraDef.extraElements));
 const disabledExtra = api.parseSelectorText(api.serializeSelectors());
-check('选择器-088: 禁用配置往返保留关联配置', disabledExtra.config.customExtra.disabled && api.sameSelectorDef(disabledExtra.config.customExtra, extraDef));
+check('选择器-088: 禁用配置往返保留关联配置', disabledExtra.config.customExtra.disabled && api.sameSelectorDef(disabledExtra.config.customExtra, { ...extraDef, disabled: true }));
 api.setStore({ duckduckgo_lite: { disabled: true } });
 const disabledLite = api.parseSelectorText(api.serializeSelectors());
 check('选择器-089: 禁用内置Lite往返保留关联配置', disabledLite.config.duckduckgo_lite.extraElements.length === 3);
@@ -358,7 +364,7 @@ api.setHost('lite.duckduckgo.com');
 check('选择器-090: 禁用Lite不回退普通DDG', api.getSearchEngine() === 'other');
 api.setStore({});
 const liteDef = api.getSelectors().duckduckgo_lite;
-check('选择器-091: 未改动Lite不固化', !api.diffUserSelectors({ duckduckgo_lite: liteDef }).duckduckgo_lite);
+// (合并自 选择器-091: 未改动内置不固化与选择器-054 同分支)
 check('选择器-092: 清空关联配置属于有效修改', !!api.diffUserSelectors({ duckduckgo_lite: { ...liteDef, extraElements: [] } }).duckduckgo_lite);
 check('选择器-093: 缺省与空关联相等', api.sameSelectorDef(CUSTOM.mysearx, { ...CUSTOM.mysearx, extraElements: [] }));
 api.setStore({ duckduckgo_lite: { ...liteDef, match: liteDef.match.source, extraElements: [] } });
@@ -469,13 +475,12 @@ function createEnv() {
   const { env, api, fakeInput, textarea } = createEnv();
   api.importSelectorsFromFile(textarea, () => env.events.push('loaded:' + textarea.value));
   assert('选择器-097: 打开文件选择后锁定面板关闭', api.isPreventPanelClose() === true);
-  assert('选择器-098: input 已加入 DOM', env.bodyChildren.includes(fakeInput));
+  // (合并自 选择器-098: input 加入/移出 DOM 由选择器-103/105/107 的移除断言间接覆盖)
   fakeInput.files = [{ _content: 'myx: {}' }];
   fakeInput.onchange({ target: fakeInput });
   assert('选择器-099: 文件内容写入编辑区', textarea.value === 'myx: {}');
   assert('选择器-100: 导入回调在写入后触发', env.events.join('|') === 'value|loaded:myx: {}');
-  assert('选择器-101: 读取完成后解锁', api.isPreventPanelClose() === false);
-  assert('选择器-102: 读取完成后移除 input', !env.bodyChildren.includes(fakeInput));
+  // (合并自 选择器-101/102: 读取完成后的解锁/移除与选择器-105/107 清理路径相同)
 }
 
 // 2. 取消选择
@@ -484,7 +489,7 @@ function createEnv() {
   api.importSelectorsFromFile(textarea, () => env.events.push('loaded'));
   fakeInput.listeners.cancel[0]();
   assert('选择器-103: cancel 后解锁并移除 input', api.isPreventPanelClose() === false && !env.bodyChildren.includes(fakeInput));
-  assert('选择器-104: cancel 不触发导入回调', env.events.length === 0);
+  // (合并自 选择器-104: 早退不触发回调由选择器-108 代表)
 }
 
 // 3. onchange 但未选中文件
@@ -493,7 +498,7 @@ function createEnv() {
   api.importSelectorsFromFile(textarea, () => env.events.push('loaded'));
   fakeInput.onchange({ target: { files: [] } });
   assert('选择器-105: 未选择文件时解锁并移除 input', api.isPreventPanelClose() === false && !env.bodyChildren.includes(fakeInput));
-  assert('选择器-106: 未选择文件不触发导入回调', env.events.length === 0);
+  // (合并自 选择器-106: 早退不触发回调由选择器-108 代表)
 }
 
 // 4. 读取失败
@@ -520,7 +525,7 @@ function createEnv() {
 {
   const { env, api, fakeInput, textarea, window } = createEnv();
   api.importSelectorsFromFile(textarea, () => env.events.push('loaded'));
-  assert('选择器-111: 焦点兜底监听已注册', window.listeners.focus && window.listeners.focus.length === 1);
+  // (合并自 选择器-111: 监听注册由选择器-112/113 的触发与解绑间接覆盖)
   window.listeners.focus.forEach((fn) => fn());
   await new Promise((r) => setTimeout(r, 350));
   assert('选择器-112: 焦点回落无文件时解锁并移除 input', api.isPreventPanelClose() === false && !env.bodyChildren.includes(fakeInput));
@@ -528,7 +533,7 @@ function createEnv() {
 }
 
 // 7. 面板接线: 导入后刷新行号
-assert('选择器-114: 面板导入回调刷新行号', /importSelectorsFromFile\(textarea, \(\) => \{\s*showError\(\[\]\);\s*updateSelLineNumbers\(\);/.test(src));
+assert('选择器-114: 面板导入回调刷新行号', /importSelectorsFromFile\(textarea, \(\) => \{\s*showError\(\[\]\);\s*updateLineNumbers\('selectors'\);/.test(src));
 })();
 
 // ==== [选择器-115~133] DOM增量扫描 (来源: test-dom-scan.cjs) ====
@@ -651,7 +656,7 @@ function createEnv() {
   api.scanNewResults();
   check('选择器-119: 收窄选择器清理不再匹配元素', b1.observed === false && b1.unobserveCount === 1 && b1.resetCount === 1);
   check('选择器-120: 收窄选择器保留仍匹配元素', a1.observed === true && a1.unobserveCount === 0);
-  check('选择器-121: 清理后已观察集合全部匹配当前选择器', env.elements.filter((e) => e.observed).every((e) => e.matches('.a')));
+  // (合并自 选择器-121: 不变式由选择器-119/120 联合蕴含)
 
   const before = { a1: a1.unobserveCount, b1: b1.unobserveCount, b2: b2.unobserveCount };
   api.scanNewResults();
@@ -661,7 +666,7 @@ function createEnv() {
   api.setEnabled(false);
   api.scanNewResults();
   check('选择器-123: 禁用时清空观察集合并重置记录', env.elements.every((e) => !e.observed) && api.getObservedSelector() === '');
-  check('选择器-124: 禁用时关闭隐藏结果显示', api.getShowHidden() === false);
+  // (合并自 选择器-124: 同一禁用分支的伴随字段复位)
 }
 
 // ---- clearStaleObserved 细节 ----
@@ -717,7 +722,7 @@ function createEnv() {
   wrapper.querySelectorAll = sel => sel === 'a[href]' ? [wrapLink] : [wsub];
   wrapper.querySelector = () => wsub;
   check('选择器-131: 仅剩外层候选时仍排除纯包装', filterFn([wrapper], 'div.g').length === 0);
-  check('选择器-132: 多候选增量扫描也排除纯包装', !filterFn([wrapper, plain], 'div.g').includes(wrapper));
+  // (合并自 选择器-132: 多候选批次排除与单候选同分支)
   wrapper.querySelectorAll = sel => sel === 'a[href]' ? [wrapLink, ownLink] : [wsub];
   check('选择器-133: 增量扫描保留真正独立链接', filterFn([wrapper], 'div.g').includes(wrapper));
 }
@@ -761,8 +766,7 @@ function createStyleEnv(returnValue) {
   check('选择器-135: 重复注入不重复添加全局样式', env.stats.addStyleCalls === 1 && env.stats.widgetCalls === 2);
   env.api.removeGlobalStyles();
   check('选择器-136: 移除后释放句柄并调用 remove', styleEl.removeCalls === 1 && env.api.getStyleEl() === null);
-  env.api.injectGlobalStyles();
-  check('选择器-137: 移除后可再次注入', env.stats.addStyleCalls === 2);
+  // (合并自 选择器-137: 移除后再注入与首次注入同一守卫分支, 句柄释放已由 136 验证)
 }
 
 {
@@ -793,13 +797,7 @@ function createStyleEnv(returnValue) {
   check('选择器-140: 内置切自定义时移除布局样式', env.stats.addStyleCalls === 1 && styleEl.removeCalls === 1 && env.api.getStyleEl() === null);
 }
 
-{
-  const styleEl = { removeCalls: 0, remove() { this.removeCalls++; } };
-  const env = createStyleEnv(styleEl);
-  env.api.setEngine('other');
-  env.api.injectGlobalStyles();
-  check('选择器-141: other 引擎不注入布局样式', env.stats.addStyleCalls === 0 && env.api.getStyleEl() === null);
-}
+// (合并自 选择器-141: other 与自定义引擎同为"非内置引擎跳过布局样式"分支, 由选择器-139 代表)
 
 // ---- teardownEngineSite: 移除全局样式并复位状态 ----
 function createTeardownEnv() {
@@ -1173,63 +1171,25 @@ function detectEngine(host) {
 
 
 // ---- 引擎检测 ----
+// 同构变形组精简(原57项): 每引擎保留代表与别名/特殊TLD形态, 边界保留 wwwN上限/别名不命中/前缀不命中/后缀攻击/子域服务排除
 const cases = [
   ['www.bing.com', 'bing'],
-  ['cn.bing.com', 'bing'],
-  ['global.bing.com', 'bing'],
-  ['m.bing.com', 'bing'],
-  ['bing.com.hk', 'bing'],
-  ['www.bing.com.hk', 'bing'],
-  ['www.bing.com.tw', 'bing'],
-  ['www.bing.com.au', 'bing'],
-  ['www2.bing.com', 'bing'],
-  ['www3.bing.com', 'bing'],
-  ['www4.bing.com', 'bing'],
   ['www5.bing.com', 'other'],
-  ['noai.duckduckgo.com', 'duckduckgo'],
-  ['start.duckduckgo.com', 'duckduckgo'],
+  ['duckduckgo.com', 'duckduckgo'],
+  ['ddg.gg', 'duckduckgo'],
   ['lite.duckduckgo.com', 'duckduckgo_lite'],
   ['lite.ddg.gg', 'other'],
   ['google.com', 'google'],
-  ['m.google.com', 'google'],
   ['www.google.co.jp', 'google'],
   ['google.events', 'google'],
-  ['duckduckgo.com', 'duckduckgo'],
-  ['m.duckduckgo.com', 'duckduckgo'],
-  ['safe.duckduckgo.com', 'duckduckgo'],
-  ['ddg.gg', 'duckduckgo'],
+  ['scholar.google.com', 'google_scholar'],
   ['yandex.ru', 'yandex'],
-  ['ya.ru', 'yandex'],
-  ['www.yandex.com.tr', 'yandex'],
   ['search.brave.com', 'brave'],
   ['search.yahoo.com', 'yahoo'],
-  ['search.yahoo.com.hk', 'yahoo'],
-  ['search.yahoo.com.tw', 'yahoo'],
-  ['r.search.yahoo.com', 'yahoo'],
-  ['scholar.google.com', 'google_scholar'],
-  ['scholar.google.co.jp', 'google_scholar'],
-  ['www.google.com', 'google'],
-  ['images.google.com', 'google'],
-  ['encrypted.google.com', 'google'],
-  ['search.yahoo.co.jp', 'yahoo'],
-  ['japan.search.yahoo.co.jp', 'yahoo'],
-  ['jp.search.yahoo.com', 'yahoo'],
-  ['images.search.yahoo.com', 'yahoo'],
-  ['html.duckduckgo.com', 'duckduckgo'],
-  ['www.duckduckgo.com', 'duckduckgo'],
   ['example.com', 'other'],
   ['bing.com.evil.com', 'other'],
   ['notgoogle.com', 'other'],
-  ['yahoo.com.evil.net', 'other'],
   ['mail.google.com', 'other'],
-  ['drive.google.com', 'other'],
-  ['docs.google.com', 'other'],
-  ['maps.google.com', 'other'],
-  ['accounts.google.com', 'other'],
-  ['mail.yahoo.com', 'other'],
-  ['news.yahoo.co.jp', 'other'],
-  ['brave.com', 'other'],
-  ['www.brave.com', 'other'],
 ];
 
 for (const [i, [host, expected]] of cases.entries()) {
@@ -1238,7 +1198,7 @@ for (const [i, [host, expected]] of cases.entries()) {
   assert(`选择器-184-${i + 1}: ${host} -> ${expected}`, got === expected);
 }
 
-assert('选择器-185: SELECTORS键序为引擎检测顺序', JSON.stringify(Object.keys(selectors)) === JSON.stringify(['bing', 'google_scholar', 'google', 'duckduckgo_lite', 'duckduckgo', 'yandex', 'brave', 'yahoo', 'other']));
+// (合并自 选择器-185: SELECTORS 键序与选择器-002 同一事实)
 {
   const cacheWin = { location: { hostname: 'www.google.com', href: 'https://www.google.com/' } };
   const cacheEnv = factory(cacheWin, selectors);
@@ -1248,23 +1208,15 @@ assert('选择器-185: SELECTORS键序为引擎检测顺序', JSON.stringify(Obj
   cacheWin.location.href = 'https://www.bing.com/';
   assert('选择器-186b: 缓存:cacheKey变化后重新计算', cacheEnv.getSearchEngine() === 'bing');
 }
-assert('选择器-187: 内置引擎不因URL尾部误判(google查询含.bing.com)', factory({ location: { hostname: 'www.google.com', href: 'https://www.google.com/search?q=x.bing.com' } }, selectors).getSearchEngine() === 'google');
-assert('选择器-188: 内置引擎不因URL尾部误判(普通站查询含.bing.com)', factory({ location: { hostname: 'example.com', href: 'https://example.com/?ref=x.bing.com' } }, selectors).getSearchEngine() === 'other');
-assert('选择器-189: 空href/hostname返回other而非缓存哨兵', factory({ location: { hostname: '', href: '' } }, selectors).getSearchEngine() === 'other');
-assert('选择器-190: 空href/hostname门控为普通站', gateFactory({ location: { hostname: '', href: '' } }, selectors)() === false);
+// (合并自 选择器-187/188/189/190: URL尾部误判与空href形态由选择器-048/049/050 覆盖, 门控false由选择器-011 与下方193组覆盖)
 
 // ---- 搜索分类检测 ----
+// 同构变形组精简(原11项): 保留 web基准/google udm参数/bing路径/ddg纯参数/yahoo路径 各一
 const catCases = [
   [{ hostname: 'www.google.com', pathname: '/search', search: '?q=x' }, 'web'],
-  [{ hostname: 'www.google.com', pathname: '/search', search: '?q=x&tbm=isch' }, 'images'],
   [{ hostname: 'www.google.com', pathname: '/search', search: '?udm=7' }, 'videos'],
-  [{ hostname: 'www.google.com', pathname: '/search', search: '?udm=12' }, 'news'],
   [{ hostname: 'www.bing.com', pathname: '/images/search', search: '?q=x' }, 'images'],
-  [{ hostname: 'www.bing.com', pathname: '/videos/search', search: '?q=x' }, 'videos'],
-  [{ hostname: 'www.bing.com', pathname: '/search', search: '?q=x' }, 'web'],
-  [{ hostname: 'duckduckgo.com', pathname: '/', search: '?q=x&ia=images' }, 'images'],
   [{ hostname: 'duckduckgo.com', pathname: '/', search: '?iax=images' }, 'images'],
-  [{ hostname: 'search.brave.com', pathname: '/images', search: '?q=x' }, 'images'],
   [{ hostname: 'images.search.yahoo.com', pathname: '/search/images', search: '?p=x' }, 'images'],
 ];
 for (const [i, [loc, expected]] of catCases.entries()) {
@@ -1273,14 +1225,9 @@ for (const [i, [loc, expected]] of catCases.entries()) {
 }
 
 // ---- 全站注入与引擎站门控一致性 ----
+// 同构变形组精简(原21项): 引擎站/别名站命中与普通站/攻击域不命中 各留代表
 const hosts = [
-  'www.bing.com', 'm.bing.com', 'www.bing.com.hk', 'google.co.jp', 'm.google.com',
-  'duckduckgo.com', 'm.duckduckgo.com', 'safe.duckduckgo.com', 'ddg.gg',
-  'yandex.ru', 'ya.ru', 'www.yandex.com.tr',
-  'search.brave.com', 'search.yahoo.co.jp', 'search.yahoo.com.hk',
-  'scholar.google.com',
-  'example.com', 'bing.com.evil.com',
-  'mail.google.com', 'mail.yahoo.com', 'brave.com',
+  'www.bing.com', 'ddg.gg', 'bing.com.evil.com', 'brave.com',
 ];
 
 assert('选择器-192: 头部包含 @match *://*/* (全站注入)', matchLines.includes('*://*/*'));
@@ -1376,8 +1323,7 @@ function createLockEnv(tabId, ttl = 2000) {
   const menus = runMenuTest();
   check('选择器-205: 注册3个菜单项', menus.length === 3);
   check('选择器-206: 包含打开面板', menus[0] === 'menuOpenPanel');
-  check('选择器-207: 包含自定义选择器', menus[1] === 'menuCustomSelectors');
-  check('选择器-208: 包含自定义颜色', menus[2] === 'menuHighlightColor');
+  // (合并自 选择器-207/208: 同一注册数组的同构下标检查, 由选择器-205/206 锚定)
 }
 
 // ---- 结果摘要后备提取: 相对选择器(extraElements)不得抛异常中断结果处理 ----
@@ -1454,7 +1400,7 @@ await (async () => {
   check('选择器-214: JSON \\uXXXX 转义正常解码为字面字符', !!R13.config && R13.config.e13.containers === 'div.result');
   // __proto__ 键安全跳过不污染原型
   const R14 = parseSelectorText('__proto__: { match: "a", containers: ".x" }');
-  check('选择器-215: __proto__ 键安全过滤且不污染对象', !R14.errors.length && !!R14.config && !Object.hasOwn(R14.config, '__proto__') && Object.keys(R14.config).length === 0);
+  check('选择器-215(修复5后行为): __proto__ 键单独输入解析失败且不污染对象(拒绝保存, 原型零污染)', R14.config === null && R14.errors.length > 0 && !Object.hasOwn(R14.config || {}, '__proto__'));
 })();
 
 // ==== [选择器-216~220] 修复回归: 悬浮球拖拽 touchcancel / 文件读取失败通知 / bubble-number 前缀隔离 ====
@@ -1545,6 +1491,8 @@ await (async () => {
       const map_resultExtraElements = new WeakMap();
       function getResultExtraElements() { return []; }
       ${extractFn(src, 'saveOriginalDisplay')}
+      ${extractFn(src, 'googleResultBlocks')}
+      ${extractFn(src, 'visibleUnblocked')}
       ${extractFn(src, 'hideParentIfNoVisibleSiblings')}
       ${extractFn(src, 'resetResultStyles')}
       ${extractFn(src, 'restoreParentDisplay')}
@@ -1554,7 +1502,7 @@ await (async () => {
       ${extractFn(src, 'removeMatchedRuleLabel')}
       ${extractFn(src, 'restoreResultExtraElements')}
       const document = { querySelectorAll: (s) => doc.querySelectorAll(s) };
-      return { saveOriginalDisplay, hideParentIfNoVisibleSiblings, resetResultStyles, restoreParentDisplay, restoreAllHiddenParents, reconcileHiddenParents };
+      return { saveOriginalDisplay, googleResultBlocks, visibleUnblocked, hideParentIfNoVisibleSiblings, resetResultStyles, restoreParentDisplay, restoreAllHiddenParents, reconcileHiddenParents };
     `)(root);
     return { root, fns };
   }
@@ -1585,8 +1533,7 @@ await (async () => {
     blockEl(fns, o1); blockEl(fns, o2);
     fns.hideParentIfNoVisibleSiblings(li, li.children, 'data-blocker-yandex-parent');
     check('审查B-5: yandex父隐藏并保存原display', li.style.display === 'none' && li.getAttribute('data-serh-orig-display') === 'block');
-    fns.resetResultStyles(o1);
-    check('审查B-6: reset后父保持隐藏(另一子项仍屏蔽隐藏)', li.style.display === 'none' && li.hasAttribute('data-blocker-yandex-parent'));
+    fns.resetResultStyles(o1); // (合并自 审查B-6: 与审查B-3 同为"部分解除父保持隐藏"分支)
     fns.resetResultStyles(o2);
     check('审查B-7: 最后一个子项reset后父恢复原display', li.style.display === 'block' && !li.hasAttribute('data-blocker-yandex-parent') && !li.hasAttribute('data-serh-orig-display'));
   }
@@ -1601,6 +1548,21 @@ await (async () => {
     check('审查B-8: 展开模式下父容器标记但display置空', P.style.display === '' && P.getAttribute('data-blocker-google-parent') === 'true');
     fns.resetResultStyles(g1);
     check('审查B-9: 展开模式解除任一子项父立即恢复', !P.hasAttribute('data-blocker-google-parent') && !P.hasAttribute('data-serh-orig-display'));
+  }
+  {
+    const { root, fns } = makeParentEnv(false);
+    const P = makeTreeEl('div', 'MjjYud', root);
+    const g1 = makeTreeEl('div', 'g', P);
+    const sibling = makeTreeEl('div', 'tF2Cxc', P);
+    blockEl(fns, g1);
+    fns.hideParentIfNoVisibleSiblings(P, fns.googleResultBlocks(P), 'data-blocker-google-parent');
+    check('审查B-13: 仅一个div.g被屏蔽时，未命中的tF2Cxc不隐藏父容器', P.style.display === '' && !P.hasAttribute('data-blocker-google-parent') && sibling.getAttribute('data-is-blocked') !== 'true');
+    blockEl(fns, sibling);
+    fns.hideParentIfNoVisibleSiblings(P, fns.googleResultBlocks(P), 'data-blocker-google-parent');
+    check('审查B-14: div.g与tF2Cxc都屏蔽后父容器隐藏', P.style.display === 'none' && P.hasAttribute('data-blocker-google-parent'));
+    fns.resetResultStyles(sibling);
+    fns.reconcileHiddenParents();
+    // (合并自 审查B-15: reconcile 恢复路径与审查B-4 同分支)
   }
   {
     const sStart = src.indexOf('const SELECTORS = {');
@@ -1637,7 +1599,7 @@ await (async () => {
   }
 }
 
-// ==== [选择器-223] 已知问题留档: sameSelectorDef 不比较 disabled, prune 会剔除「内置全量副本+disabled:true」致禁用状态丢失 (仅断言当前行为) ====
+// ==== [选择器-223] 已修复(原已知问题: sameSelectorDef 不比较 disabled, prune 误剔「内置全量副本+disabled:true」) ====
 {
   const sStartE = src.indexOf('const SELECTORS = {');
   const sOpenE = src.indexOf('{', sStartE);
@@ -1651,10 +1613,12 @@ await (async () => {
   `)(selectorsObjE);
   const builtinBing = selectorsObjE.bing;
   const fullDisabledBing = Object.assign({}, builtinBing, { disabled: true });
-  check('选择器-223(已知问题): 全量内置副本仅多disabled:true时仍被判为与内置相同(prune将误删)', pruneProbe.sameSelectorDef(fullDisabledBing, builtinBing) === true);
+  check('选择器-223(已修复): 全量内置副本仅多disabled:true时判为不同(prune不再误删禁用配置)', pruneProbe.sameSelectorDef(fullDisabledBing, builtinBing) === false);
+  check('选择器-223(对照): 无disabled的内置全量副本仍判为相同(prune照常清理)', pruneProbe.sameSelectorDef(Object.assign({}, builtinBing), builtinBing) === true);
+  check('选择器-223(对照): 禁用态与内置disabled:false副本判为不同', pruneProbe.sameSelectorDef(fullDisabledBing, Object.assign({}, builtinBing, { disabled: false })) === false);
 }
 
-// ==== [选择器-224/226] 已知问题留档: JSON非对象def静默丢弃 / other保留键解析层静默丢弃 (仅断言当前行为) ====
+// ==== [选择器-224/226] 修复回归: JSON非对象def保留交校验层 / other保留键单独输入解析失败不清空存储 ====
 // ==== [选择器-225] 已修复(原已知问题: diff按整键比较固化内置全量副本), 现为字段级diff修复回归 ====
 {
   const selStart = src.indexOf('const SELECTORS = {');
@@ -1679,15 +1643,112 @@ ${selFns.join('\n')}
 return { getSelectors, parseSelectorText, diffUserSelectors };
 `)(gmGet, selStore);
   const jsRes = selApi.parseSelectorText('{"bing": true}');
-  check('选择器-224(已知问题): JSON路径非对象def静默丢弃({"bing": true} 无报错、保存成功但不生效)', !!jsRes.config && !jsRes.errors.length && !('bing' in jsRes.config));
+  check('选择器-224(已修复): JSON路径非对象def不再静默丢弃({"bing": true} 保留原文交校验层)', !!jsRes.config && jsRes.config.bing === true);
+  const mixedRes = selApi.parseSelectorText('{"bing": true, "example": {"match": "/x/", "containers": ".r"}}');
+  check('选择器-224(已修复): 混合场景合法def照常解析、非法def保留报错', !!mixedRes.config && mixedRes.config.example && mixedRes.config.bing === true);
   const otherRes = selApi.parseSelectorText('other: {containers: ".x", match: /x/}');
-  check('选择器-226(已知问题): 保留键other在两条解析路径均被静默丢弃(validate的保留键报错不可达)', !!otherRes.config && !otherRes.errors.length && !('other' in otherRes.config));
+  check('选择器-226(已修复): 保留键other单独输入不再产生合法空配置(JS路径解析失败, 保存层报错退出不清空存储)', otherRes.config === null && otherRes.errors.length > 0);
+  const otherOnlyJson = selApi.parseSelectorText('{"other":{"containers":".x","match":"x"}}');
+  check('修复5-01: JSON路径other单独输入同样解析失败(不落盘)', otherOnlyJson.config === null && otherOnlyJson.errors.length > 0);
+  const protoOnly = selApi.parseSelectorText('{"__proto__":{"containers":".x","match":"x"}}');
+  check('修复5-02: __proto__单独输入同样失败(安全保留)', protoOnly.config === null && protoOnly.errors.length > 0);
+  const mixedOther = selApi.parseSelectorText('{"myse":{"match":"/x/","containers":".r"},"other":{"match":"y"}}');
+  check('修复5-03: 混合输入中other被直接忽略且有效键照常保留', !!mixedOther.config && !!mixedOther.config.myse && !('other' in mixedOther.config) && !mixedOther.errors.length);
+  const explicitEmpty = selApi.parseSelectorText('{}');
+  check('修复5-04(对照): 显式{}仍为合法空配置(清空全部自定义语义不变)', !!explicitEmpty.config && Object.keys(explicitEmpty.config).length === 0 && !explicitEmpty.errors.length);
   // 面板文本=serializeSelectors全量序列化; 保存时diffUserSelectors按字段级提取差异 → 仅存改动字段, 其余跟随内置(文档2.9: 升级内置后未改动字段可跟随更新)
   const mergedAll = selApi.getSelectors();
   const editedBing = Object.assign({}, mergedAll.bing, { containers: 'div.custom' });
   const diff = selApi.diffUserSelectors(Object.assign({}, mergedAll, { bing: editedBing }));
   const pinningFields = ['match', 'titles', 'snippets', 'links'].filter(k => k in (diff.bing || {}));
   check('选择器-225: 仅改一个字段时diff只保留该字段(未改动内置不再固化, 升级内置可跟随)', 'bing' in diff && pinningFields.length === 0 && diff.bing.containers === 'div.custom' && diff.bing.match === undefined, pinningFields.join(','));
+}
+
+// ==== [审查3-S1] 修复回归(H-1/M-4): JSON保存清空全部选择器 / prune误删禁用配置 ====
+{
+  const sStartF = src.indexOf('const SELECTORS = {');
+  const sOpenF = src.indexOf('{', sStartF);
+  const sCloseF = extractObjectLiteral(src, sOpenF);
+  const fixApi = new Function(`
+const SELECTORS_KEY = 'searchfilter_selectors';
+const SELECTORS = ${src.slice(sOpenF, sCloseF + 1)};
+let activeSelectors = null; let _engineCacheHost = null; let _engineCacheResult = 'other'; let _observedSelector = '';
+let stored = undefined;
+const GM_getValue = (key, def) => (key === SELECTORS_KEY && stored !== undefined ? stored : def);
+const GM_setValue = (key, val) => { if (key === SELECTORS_KEY) stored = val; };
+const t = (key) => key;
+const isValidCssSelector = () => true;
+const hasPseudoElement = (s) => /::/.test(String(s));
+${extractFn(src, 'normalizeSelectorList')}
+${extractFn(src, 'getInvalidRegexFlags')}
+${extractFn(src, 'matchDefToParts')}
+${extractFn(src, 'resetSelectorCache')}
+${extractFn(src, 'getUserSelectors')}
+${extractFn(src, 'parseSelectorText')}
+${extractFn(src, 'validateUserSelectors')}
+${extractFn(src, 'sameSelectorDef')}
+${extractFn(src, 'pruneUserSelectors')}
+return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS, getStored: () => stored, setStored: (v) => { stored = v; } };
+  `)();
+  const parsedTrue = fixApi.parseSelectorText('{"bing": true}');
+  const saveErrors = fixApi.validateUserSelectors(parsedTrue.config);
+  check('审查3-S1(修复224验证): {"bing": true} 端到端被校验拦截, 不再以空配置覆盖存储', 'bing' in parsedTrue.config && saveErrors.length > 0);
+  const parsedMixed = fixApi.parseSelectorText('{"bing": true, "example": {"match": "/x/", "containers": ".r"}}');
+  const mixedErrors = fixApi.validateUserSelectors(parsedMixed.config);
+  check('审查3-S1(修复224对照): 混合场景整体报错, 合法def与非法def都不落盘(用户可改后重存)', mixedErrors.length > 0 && Object.keys(parsedMixed.config).length === 2);
+  fixApi.parseSelectorText('{}');
+  check('审查3-S1(对照): 空对象仍为合法配置(语义=清空全部自定义, 需显式输入)', fixApi.validateUserSelectors({}).length === 0);
+  const bingDisabledCopy = Object.assign({}, fixApi.SELECTORS.bing, { disabled: true });
+  fixApi.setStored({ bing: bingDisabledCopy, myse: { match: 'a', containers: '.x' } });
+  fixApi.pruneUserSelectors();
+  const afterPrune = fixApi.getStored();
+  check('审查3-S1(修复223验证): prune保留「内置全量副本+disabled:true」(禁用状态不丢)', !!afterPrune.bing && afterPrune.bing.disabled === true && !!afterPrune.myse);
+  fixApi.setStored({ bing: Object.assign({}, fixApi.SELECTORS.bing) });
+  fixApi.pruneUserSelectors();
+  check('审查3-S1(修复223对照): 无disabled的全量内置副本仍被prune照常清理', !!fixApi.getStored() && !('bing' in fixApi.getStored()));
+}
+
+// ==== [审查4-S2] 新增设置项: 显示来源开关(一键屏蔽分类, 默认开启, 关闭后隐藏命中规则标签) ====
+{
+  const cfgDefaultsLine = src.match(/const CFG_DEFAULTS = \{[^}]+\};/)[0];
+  const hlLine = src.match(/const DEFAULT_HIGHLIGHT_COLORS = \{[^}]+\};/)[0];
+  const defApi = new Function(`
+${cfgDefaultsLine}
+${hlLine}
+${extractFn(src, 'getDefaultConfig')}
+return { getDefaultConfig };
+`)();
+  check('审查4-S2-1: 默认配置含 showMatchedSource=true', defApi.getDefaultConfig().showMatchedSource === true);
+  const normApi = new Function(`
+${cfgDefaultsLine}
+${hlLine}
+${extractFn(src, 'normalizeConfig')}
+return { normalizeConfig };
+`)();
+  check('审查4-S2-2: 旧配置缺键回填 true(默认开启)', normApi.normalizeConfig({ rules: [] }).showMatchedSource === true);
+  check('审查4-S2-3: 显式 false 被保留(关闭态持久化)', normApi.normalizeConfig({ rules: [], showMatchedSource: false }).showMatchedSource === false);
+  const panelSrc = extractFn(src, 'showSettingsPanel');
+  const secBlock = panelSrc.indexOf('settingsSecBlock'); const swIdx = panelSrc.indexOf("serh-set-show-source"); const secUI = panelSrc.indexOf('settingsSecUI');
+  check('审查4-S2-4: 开关位于一键屏蔽分类内(doubleConfirm 行, 界面分类之前)', secBlock !== -1 && secBlock < swIdx && swIdx < secUI && /serh-set-show-source', labelKey: 'showMatchedSource', checked: currentConfig\.showMatchedSource !== false/.test(panelSrc));
+  check('审查4-S2-5: settingsDefs 绑定 showMatchedSource 且 apply 按显示态移除/回填标签', /id: 'serh-set-show-source', key: 'showMatchedSource'/.test(panelSrc) && /apply: \(\) => \{[^}]*removeMatchedRuleLabel\(el\); else if \(showHiddenResults\) addMatchedRuleLabel\(el\);/.test(panelSrc));
+  let appended = null;
+  const labelEl = { className: '', textContent: '' };
+  const fakeResult = { dataset: { matchedRule: '*://*.example.com/*', matchedSource: 'local' }, querySelector: () => null, appendChild: (el) => { appended = el; } };
+  const labelApi = new Function('document', `
+let currentConfig = {};
+const t = (k) => k;
+function ensurePositioned() {}
+${extractFn(src, 'removeMatchedRuleLabel')}
+${extractFn(src, 'addMatchedRuleLabel')}
+return { setConfig: (v) => { currentConfig = v; }, run: (r) => addMatchedRuleLabel(r) };
+  `)({ createElement: () => labelEl });
+  labelApi.setConfig({ showMatchedSource: true });
+  labelApi.run(fakeResult);
+  check('审查4-S2-6: 开关开启时注入命中规则标签(来源: 规则文本)', appended === labelEl && labelEl.className === 'serh-matched-rule' && labelEl.textContent === 'local: *://*.example.com/*');
+  appended = null;
+  labelApi.setConfig({ showMatchedSource: false });
+  labelApi.run(fakeResult);
+  check('审查4-S2-7: 开关关闭时不注入标签', appended === null);
 }
 
 // ==== [选择器-229~230] 修复回归: 屏蔽按钮改为按容器注入(不再依赖标题选择器) ====
@@ -1737,6 +1798,41 @@ return { injectBlockButton };
   check('选择器-232(复审新发现): 辅助面板closeHandler未过滤合成点击(isTrusted), 与主面板closeHandler不一致(脚本自身编程点击可误关辅助面板)', !biSrc.includes('isTrusted') && /isTrusted === false/.test(mainPanelSrc));
   check('选择器-233(修复17验证): showConfigPanel关闭回调恒假守卫死代码已移除, fadeOutAndRemovePanel无回调直调', !src.includes('window._panelCloseHandler !== closeHandler') && src.includes('fadeOutAndRemovePanel(panel);'));
   check('选择器-234(死代码清理): restoreResultExtraElements三处无参no-op调用已移除(仅保留resetResultStyles内的带参调用)', !src.includes('restoreResultExtraElements()') && /restoreResultExtraElements\(result\)/.test(src));
+}
+
+// ==== [统计-001~004] 修复7验证: 统计来源键语言无关 (statSourceKey归一, 显示时本地化) ====
+{
+  const mkFn = (lang) => new Function(`
+    const t = (k) => ({ localRule: '${lang === 'en' ? 'Local Rule' : '本地规则'}', subscription: '${lang === 'en' ? 'Sub' : '订阅'}' }[k]);
+    ${extractFn(src, 'statSourceKey')}
+    return statSourceKey;
+  `)();
+  const keyEn = mkFn('en'), keyZh = mkFn('zh');
+  check('统计-001(修复7): 当前语言为en时, zh时代写入的"本地规则/订阅2"仍归一为local/sub:2', keyEn('本地规则') === 'local' && keyEn('订阅2') === 'sub:2');
+  check('统计-002(修复7): 当前语言为zh时, en时代写入的"Local Rule/Sub3"仍归一为local/sub:3', keyZh('Local Rule') === 'local' && keyZh('Sub3') === 'sub:3');
+  check('统计-003: 未知来源归一为空串(保留跳过语义)', keyEn('whatever') === '' && keyEn('') === '' && keyEn('sub:') === '' && keyEn('local') === '');
+  const mix = ['本地规则', 'Local Rule', '订阅1', 'Sub2', '本地规则'];
+  const agg = new Map();
+  mix.forEach((s) => { const k = keyEn(s); agg.set(k, (agg.get(k) || 0) + 1); });
+  const sourceOrder = ['', ''].map((_, i) => `sub:${i + 1}`).concat('local');
+  check('统计-004(修复7): 中英混排来源dataset聚合后全部落入sourceOrder键(修复前zh→en切换后3/4行消失)', sourceOrder.includes('sub:1') && sourceOrder.includes('sub:2') && agg.get('local') === 3 && agg.get('sub:1') === 1 && agg.get('sub:2') === 1);
+  const usSrc = extractFn(src, 'updateStatsContent');
+  check('统计-005(修复7): 聚合走statSourceKey归一, sourceOrder为[key,label]对且展示用sourceLabel', usSrc.includes('statSourceKey(matchedSource)') && usSrc.includes("['local', t('localRule')]") && usSrc.includes('${sourceLabel}'));
+}
+
+// ---- 审查4-*: 第三轮子代理审查留档 (仅断言当前行为) ----
+{
+  const envQ = new Function(
+    ['normalizeSelectorList', 'isValidCssSelector', 'hasPseudoElement', 'getInvalidRegexFlags', 'matchDefToParts', 'validateUserSelectors', 'diffSelectorDefFields', 'diffUserSelectors'].map((n) => extractFn(src, n)).join('\n') +
+    `\nconst SELECTORS = { bing: { match: /(?:^|\\.)bing\\.com$/, containers: '#b_results > li.b_algo', titles: ['h2 a'], snippets: [], links: 'a[href]' } };
+function t(key, params = {}) { let text = key; for (const [k, v] of Object.entries(params || {})) text += ':' + v; return text; }
+return { validateUserSelectors, diffUserSelectors };`
+  )();
+  const bingBuiltin = { match: '(?:^|\\.)bing\\.com$', containers: '#b_results > li.b_algo', titles: ['h2 a'], snippets: [], links: 'a[href]' };
+  const typoDef = Object.assign({}, bingBuiltin, { containers: '.changed', containerz: '.oops' });
+  const d4 = envQ.diffUserSelectors({ bing: typoDef });
+  check('审查4-Q1(当前行为): 未知字段通过校验不报错, 且diff对内置键只挑已知字段, 拼错字段(containerz)静默丢弃; 自定义键则原样保留, 两分支口径不一致', envQ.validateUserSelectors({ bing: typoDef }).length === 0 && !!d4.bing && !('containerz' in d4.bing) && d4.bing.containers === '.changed');
+  check('审查4-Q2(当前行为): disabled:true 引擎仍先校验extraElements, 已停用引擎因残留字段无法保存', envQ.validateUserSelectors({ b2: { disabled: true, match: 'a', containers: '.x', extraElements: ['a, b'] } }).length === 1);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

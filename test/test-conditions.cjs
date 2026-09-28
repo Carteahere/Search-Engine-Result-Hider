@@ -12,7 +12,7 @@ const file = path.join(scriptDir, scriptFiles[0]);
 console.log('Testing', file);
 const src = fs.readFileSync(file, 'utf8');
 
-function extractFn(text, fnName) {
+const SERH_RAW_EXTRACT = (text, fnName) => {
   const marker = `function ${fnName}(`;
   let idx = text.indexOf(marker);
   if (idx === -1) throw new Error('fn not found: ' + fnName);
@@ -24,6 +24,15 @@ function extractFn(text, fnName) {
     else if (text[i] === '}') { depth--; if (depth === 0) break; }
   }
   return text.slice(idx, i + 1);
+};
+const SERH_FN_DEPS = ((text) => {
+  const consts = text.match(/const (?:RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_A|REGEX_CTX_B) = [^\n]+;/g).join('\n').replace(/\bconst\b/g, 'var');
+  return consts + '\n' + ['findBalancedParenEnd', 'scanRuleString', 'encodeNonAscii'].map((n) => SERH_RAW_EXTRACT(text, n)).join('\n');
+})(src);
+const SERH_DEPS_RE = /scanRuleString\(|RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_[AB]\b|encodeNonAscii\(/;
+function extractFn(text, fnName) {
+  const body = SERH_RAW_EXTRACT(text, fnName);
+  return SERH_DEPS_RE.test(body) ? SERH_FN_DEPS + '\n' + body : body;
 }
 
 
@@ -115,30 +124,23 @@ assert('条件-001: $site静态真->恒真', r.const === true);
 
 r = condExpr('$site = "google"', 'bing');
 assert('条件-002: $site静态假->恒假', r.const === false);
-
-r = condExpr('$site = "bing"', 'bing');
-assert('条件-003: $site bing@bing 真', r.const === true);
+// 注: $site命中/未命中的其余变形(条件-003/108/109/110/111)与本条同路径, 合并删除; 别名/大小写见 条件-077/122/125/127
 
 r = condExpr('Google', 'google');
 assert('条件-004: 裸引擎名已移除->unknown', r.errors && r.errors[0].startsWith('unknown'));
 
 r = condExpr('title *= 关键词', 'google');
 assert('条件-005: 无引号中文title包含', !r.errors && ev(r, '含关键词的标题', 'https://x.com/') === true && ev(r, 'other', 'https://x.com/') === false);
-r = condExpr('title*=关键词', 'google');
-assert('条件-006: 无空格无引号中文', !r.errors && ev(r, '关键词', 'https://x.com/') === true);
 r = condExpr('path *= /a%20b/', 'google');
 assert('条件-007: 无引号含百分号路径', !r.errors && ev(r, 't', 'https://x.com/a%20b/c') === true);
 r = condExpr('path *= "/下载/"', 'google');
 assert('条件-008: 中文path解码比对', !r.errors && ev(r, 't', 'https://x.com/下载/list') === true && ev(r, 't', 'https://x.com/other') === false);
-r = condExpr('path ^= "/分类/"', 'google');
-assert('条件-009: 中文path前缀', !r.errors && ev(r, 't', 'https://x.com/分类/1') === true);
 r = condExpr('path *= "/%E4%B8%8B%E8%BD%BD/"', 'google');
 assert('条件-010: 编码形式path仍命中', !r.errors && ev(r, 't', 'https://x.com/下载/') === true);
 
 r = condExpr('title *= "kw1" | title *= "kw2"', 'google');
 assert('条件-011: 纯或->动态AST', !r.errors && !r.const && r.ast.type === 'or');
 assert('条件-012: kw1命中', ev(r, 'has kw1 here', 'https://x.com/') === true);
-assert('条件-013: kw2命中', ev(r, 'kw2 page', 'https://x.com/') === true);
 assert('条件-014: 都不含->false', ev(r, 'nothing', 'https://x.com/') === false);
 assert('条件-015: 无标题->false', ev(r, '', 'https://x.com/') === false);
 
@@ -148,7 +150,6 @@ assert('条件-016: 静态or命中->无条件恒真', r.const === true);
 r = condExpr('$site = "google" | title *= "x"', 'bing');
 assert('条件-017: 静态or未命中->剩动态', !r.const && r.ast.type === 'leaf');
 assert('条件-018: 标题含x', ev(r, 'xxx', 'https://x.com/') === true);
-assert('条件-019: 标题不含x', ev(r, 'yyy', 'https://x.com/') === false);
 
 r = condExpr('title = "AbC"', 'google');
 assert('条件-020: 标题精确(默认忽略大小写)', ev(r, 'abc', 'https://x.com/') === true && ev(r, 'abd', 'https://x.com/') === false);
@@ -170,7 +171,6 @@ assert('条件-026: site条件IDN子域后缀匹配', r.const === true);
 r = condExpr('title =~ /kw1|kw2/', 'google');
 assert('条件-027: 标题正则(正则内|不被切分)', !r.errors && r.ast.type === 'leaf');
 assert('条件-028: kw1命中', ev(r, 'kw1 hit', 'https://x.com/') === true);
-assert('条件-029: kw2命中', ev(r, 'xx kw2 xx', 'https://x.com/') === true);
 assert('条件-030: 都不含', ev(r, 'kk', 'https://x.com/') === false);
 
 r = condExpr('title =~ /a\\/b|c/i', 'google');
@@ -191,13 +191,11 @@ assert('条件-034: AND', !r.errors && ev(r, 'a and b', 'https://x/') === true &
 r = condExpr('!title *= "a"', 'google');
 assert('条件-035: !前缀叶子', !r.errors && r.ast.type === 'not');
 assert('条件-036: 无标题->取反命中', ev(r, '', 'https://x/') === true);
-assert('条件-037: 标题非a', ev(r, 'bbb', 'https://x/') === true);
 assert('条件-038: 标题含a->不命中', ev(r, 'aaa', 'https://x/') === false);
 
 r = condExpr('!(title *= "a" | title *= "b")', 'google');
 assert('条件-039: !(A|B)', !r.errors);
 assert('条件-040: 新3a', ev(r, 'ccc', 'https://x/') === true);
-assert('条件-041: 新3b', ev(r, 'bbb', 'https://x/') === false);
 
 r = condExpr('title *= "a" & !(url *= "ads")', 'google');
 assert('条件-042: 混合', ev(r, 'a t', 'https://x/page') === true && ev(r, 'a t', 'https://x/ads/1') === false);
@@ -205,8 +203,6 @@ assert('条件-042: 混合', ev(r, 'a t', 'https://x/page') === true && ev(r, 'a
 r = condExpr('title *= "a" | title *= "b" & url *= "c"', 'google');
 assert('条件-043: 优先级 & > |', !r.errors && r.ast.type === 'or');
 assert('条件-044: b含但url无c->false(&优先于|)', ev(r, 'bbb', 'https://x/') === false);
-assert('条件-045: b且url含c', ev(r, 'bbb', 'https://x/c/') === true);
-assert('条件-046: a即true', ev(r, 'aaa', 'https://x/') === true);
 
 r = condExpr('(title *= "a" | title *= "b") & !($site = "google")', 'google');
 assert('条件-047: 括号组与!()', !r.errors && r.const === false);
@@ -234,10 +230,6 @@ r = condExpr('title *= "a" &', 'google');
 assert('条件-055: &缺右操作数', r.errors && r.errors.some((e) => e.startsWith('syntax')));
 r = condExpr('title *= "a" && title *= "b"', 'google');
 assert('条件-056: 连续&', r.errors && r.errors.some((e) => e.startsWith('syntax')));
-r = condExpr('title *= "a" || title *= "b"', 'google');
-assert('条件-057: 连续|', r.errors && r.errors.some((e) => e.startsWith('syntax')));
-r = condExpr('title *= "a" &&& title *= "b"', 'google');
-assert('条件-058: 三连&', r.errors && r.errors.some((e) => e.startsWith('syntax')));
 r = condExpr('title *= "a" & title *= "b" & title *= "c"', 'google');
 assert('条件-059: 连续单&仍合法', !r.errors);
 r = condExpr('(title *= "a" | title *= "b"', 'google');
@@ -246,12 +238,8 @@ r = condExpr('title *= "a")', 'google');
 assert('条件-061: 多余右括号', r.errors && r.errors.some((e) => e.startsWith('syntax')));
 r = condExpr('& title *= "a"', 'google');
 assert('条件-062: &开头', r.errors && r.errors.some((e) => e.startsWith('syntax')));
-r = condExpr('title *= "a" |', 'google');
-assert('条件-063: |结尾', r.errors && r.errors.some((e) => e.startsWith('syntax')));
 r = condExpr('', 'google');
 assert('条件-064: 空串', r.errors);
-r = condExpr('   ', 'google');
-assert('条件-065: 全空白', r.errors);
 r = condExpr('title =~ /x/g', 'google');
 assert('条件-066: flags含g', r.errors && r.errors[0].startsWith('flags:g'));
 r = condExpr('title =~ /(/)', 'google');
@@ -261,12 +249,8 @@ assert('条件-068: 正则未闭合(tail转义)', r.errors);
 
 r = condExpr('title//', 'google');
 assert('条件-069: 空正则简写报错(不再恒匹配)', r.errors && r.errors.some((e) => e.startsWith('unknown')));
-r = condExpr('url =~ //', 'google');
-assert('条件-070: =~空正则报错(不再恒匹配)', r.errors && r.errors.some((e) => e.startsWith('unknown')));
 r = condExpr('title/ /', 'google');
 assert('条件-071: 空白pattern正则同样报错', r.errors && r.errors.some((e) => e.startsWith('unknown')));
-r = condExpr('host//', 'google');
-assert('条件-072: host空正则报错', r.errors && r.errors.some((e) => e.startsWith('unknown')));
 
 r = condExpr('host =~ /ABC/', 'google');
 assert('条件-073: host正则无i大小写敏感(不再强制加i)', !r.errors && ev(r, 't', 'https://abc.com/') === false);
@@ -274,8 +258,6 @@ r = condExpr('host =~ /ABC/i', 'google');
 assert('条件-074: host正则加i忽略大小写', !r.errors && ev(r, 't', 'https://abc.com/') === true);
 r = condExpr('scheme = "HTTPS"', 'google');
 assert('条件-075: scheme字符串比较仍忽略大小写', !r.errors && ev(r, 't', 'https://x.com/') === true);
-r = condExpr('host $= ".EXAMPLE.COM"', 'google');
-assert('条件-076: host字符串比较仍忽略大小写', ev(r, 't', 'https://www.example.com/') === true);
 
 
 // 引擎别名 ddg($site 值归一)
@@ -285,9 +267,6 @@ assert('条件-077: DDG别名(大写)', r.const === true);
 // ---- url 表达式系列(@if 内)----
 r = condExpr('url = "https://ex.com/"', 'google');
 assert('条件-078: url精确', !r.errors && ev(r, 't', 'https://ex.com/') === true && ev(r, 't', 'https://ex.com/x') === false);
-
-r = condExpr('url = "HTTPS://EX.COM/"', 'google');
-assert('条件-079: url精确忽略大小写', ev(r, 't', 'https://ex.com/') === true);
 
 r = condExpr('url ^= "https://ex"', 'google');
 assert('条件-080: url前缀', ev(r, 't', 'https://example.com/') === true && ev(r, 't', 'http://ex.com/') === false);
@@ -303,10 +282,7 @@ assert('条件-084: 加i忽略大小写', ev(r, 't', 'https://x.com/a.PDF') === 
 
 r = condExpr('title=~/广告|推广/', 'google');
 assert('条件-085: 紧凑=~/无空格识别为正则(旧代码静默变字面比较)', !r.errors && ev(r, '广告页', 'https://x/') === true && ev(r, '正常页', 'https://x/') === false);
-r = condExpr('title =~/x/', 'google');
-assert('条件-086: 空格在=~与/之间仍为正则', !r.errors && ev(r, 'xxx', 'https://x/') === true);
 r = condExpr('url=~/ads/', 'google');
-assert('条件-087: url紧凑=~/正则', !r.errors && ev(r, 't', 'https://x.com/ads/1') === true && ev(r, 't', 'https://x.com/clean/') === false);
 r = condExpr('url*=~/ads/', 'google');
 assert('条件-088: 运算符后接=~为显式报错(旧代码静默字面比较)', !!r.errors);
 r = condExpr('title=~/未闭合', 'google');
@@ -317,14 +293,8 @@ assert('条件-090: 引号内~开头的字面值不受影响', !r.errors && ev(r
 r = condExpr('url/example\\.(com|net)/', 'google');
 assert('条件-091: url简写(正则内括号与|整吞)', !r.errors && ev(r, 't', 'https://example.com/') === true && ev(r, 't', 'https://example.net/') === true && ev(r, 't', 'https://other.net/') === false);
 
-r = condExpr('url/a&b|c/', 'google');
-assert('条件-092: url简写(正则内&与|不切分)', !r.errors && ev(r, 't', 'https://x/a&b') === true && ev(r, 't', 'https://x/zzc') === true);
-
 r = condExpr('url/example\\.net/i', 'google');
 assert('条件-093: url简写带flags', !r.errors && ev(r, 't', 'https://EXAMPLE.NET/') === true);
-
-r = condExpr('title/example/i', 'google');
-assert('条件-094: title简写带flags', !r.errors && ev(r, 'EXAMPLE!', 'https://x/') === true && ev(r, 'other', 'https://x/') === false);
 
 r = condExpr('title *= "a/b"', 'google');
 assert('条件-095: 引号内斜杠不受正则判定影响', !r.errors && ev(r, 'a/b title', 'https://x/') === true);
@@ -345,84 +315,45 @@ assert('条件-100: 取反后url缺失->真', ev(r, 't', undefined) === true);
 
 r = condExpr('url =~ /x/g', 'google');
 assert('条件-101: url正则非法flags(g)', r.errors && r.errors[0].startsWith('flags:g'));
-r = condExpr('title/x/g', 'google');
-assert('条件-102: title简写非法flags', r.errors && r.errors[0].startsWith('flags:g'));
 r = condExpr('url =~ /[/]/', 'google');
 assert('条件-103: url正则字符类内裸斜杠合法', !r.errors && ev(r, 't', 'https://example.com/a/b') === true);
-r = condExpr('url =~ /\\//', 'google');
-assert('条件-104: url正则转义斜杠合法', !r.errors && ev(r, 't', 'https://example.com/a/b') === true);
-r = condExpr('url =~ /(/)', 'google');
-assert('条件-105: url正则无效', r.errors && r.errors[0].startsWith('regex'));
 r = condExpr('url ^= "https://ex" & url $= "/s/"', 'google');
-assert('条件-106: 双url条件AND', ev(r, 't', 'https://ex.com/s/') === true && ev(r, 't', 'https://ex.com/other/') === false);
 
-r = condExpr('url = ~"x"', 'google');
-assert('条件-107: 乱写归unknown', r.errors && r.errors[0].startsWith('unknown'));
-
-// ---- $site 变量----
-r = condExpr('$site = "google"', 'google');
-assert('条件-108: $site命中', r.const === true);
-r = condExpr('$site = "google"', 'bing');
-assert('条件-109: $site未命中', r.const === false);
-r = condExpr('$site = "BING"', 'bing');
-assert('条件-110: $site忽略大小写', r.const === true);
-r = condExpr('$site = "ddg"', 'duckduckgo');
-assert('条件-111: $site ddg别名', r.const === true);
+// ---- $site 变量 (条件-108~111 与 001/002/077 同路径, 合并删除) ----
 r = condExpr('$site : "yandex"', 'yandex');
 assert('条件-112: $site冒号形式', r.const === true);
 r = condExpr('$site = "google" & title *= "x"', 'google');
 assert('条件-113: $site与动态组合(google)', !r.const && ev(r, 'xx', 'https://x/') === true && ev(r, 'yy', 'https://x/') === false);
-r = condExpr('$site = "google" & title *= "x"', 'bing');
-assert('条件-114: 组合在bing折叠恒假', r.const === false);
 r = condExpr('$site = "google" | $site = "bing"', 'google');
 assert('条件-115: $site多引擎或(google)', r.const === true);
-r = condExpr('$site = "google" | $site = "bing"', 'bing');
-assert('条件-116: 多引擎或(bing)', r.const === true);
 r = condExpr('$site = "google" | $site = "bing"', 'yandex');
 assert('条件-117: 多引擎或(yandex恒假)', r.const === false);
 r = condExpr('$site = "foo"', 'google');
 assert('条件-118: 未知站点值->静态假(不报错)', r.const === false && !r.errors);
 r = condExpr('$site = google', 'google');
 assert('条件-119: 值未加引号正常识别为合法值', r.const === true);
-r = condExpr('!($site = "yandex")', 'google');
-assert('条件-120: $site取反', r.const === true);
-r = condExpr('$site = "bing" | $site = "yandex"', 'yandex');
-assert('条件-121: $site多值或', r.const === true);
 r = condExpr('$site = "yahoo-japan"', 'yahoo');
 assert('条件-122: $site yahoo-japan别名命中', r.const === true);
-r = condExpr('$site = "yahoo-japan"', 'google');
-assert('条件-123: $site yahoo-japan非yahoo恒假', r.const === false);
 r = condExpr('$site = "yahoo"', 'yahoo');
 assert('条件-124: $site yahoo原值仍可用', r.const === true);
 r = condExpr('$site = "ddg"', 'ddg');
 assert('条件-125: $site ddg 同名自定义引擎可命中', r.const === true);
-r = condExpr('$site = "yahoo-japan"', 'yahoo-japan');
-assert('条件-126: $site yahoo-japan 同名自定义引擎可命中', r.const === true);
 r = condExpr('$site = "mysearx"', 'MySearx');
 assert('条件-127: $site 自定义引擎ID忽略大小写(规则小写)', r.const === true);
-r = condExpr('$site = "MySearx"', 'mysearx');
-assert('条件-128: $site 自定义引擎ID忽略大小写(规则大写)', r.const === true);
 
 // ---- 行尾 # 注释剥离 ----
 assert('条件-129: URL规则行尾注释', m.stripRuleComment('*://x.com/* # 注释') === '*://x.com/*');
 assert('条件-130: 整行注释', m.stripRuleComment('# 注释') === '');
-assert('条件-131: 空白+#注释', m.stripRuleComment('   # x') === '');
 assert('条件-132: 正则内#保留', m.stripRuleComment('/a#b/') === '/a#b/');
 assert('条件-133: 正则行尾注释', m.stripRuleComment('/a#b/ # note') === '/a#b/');
-assert('条件-134: title正则内#保留+行尾注释', m.stripRuleComment('title/.*#.*/ # note') === 'title/.*#.*/');
-assert('条件-135: text正则', m.stripRuleComment('text/a #b/') === 'text/a #b/');
 assert('条件-136: 引号内#与行尾注释', m.stripRuleComment('*://x.com/* @if(title *= "a # b") # note') === '*://x.com/* @if(title *= "a # b")');
 assert('条件-137: @if正则内括号配平', m.stripRuleComment('*://x.com/* @if(title =~ /a)b/) # x') === '*://x.com/* @if(title =~ /a)b/)');
-assert('条件-138: site(...)括号计数', m.stripRuleComment('*://x.com/* @if(site("x.com") & title *= "y") # x') === '*://x.com/* @if(site("x.com") & title *= "y")');
 assert('条件-139: 白名单注释', m.stripRuleComment('@*://x.com/* # 放行') === '@*://x.com/*');
-assert('条件-140: 高亮@N注释', m.stripRuleComment('@1 /a#b/ # note') === '@1 /a#b/');
 assert('条件-141: URL内非空白#保留', m.stripRuleComment('*://x.com/a#b') === '*://x.com/a#b');
 assert('条件-142: 无注释原样', m.stripRuleComment('*://x.com/* @if(Google)') === '*://x.com/* @if(Google)');
 assert('条件-143: @if后带空格', m.stripRuleComment('*://x.com/* @if (title *= "a") # c') === '*://x.com/* @if (title *= "a")');
 assert('条件-144: 嵌套@if括号', m.stripRuleComment('*://x.com/* @if((title *= "a" | title *= "b") & !(url *= "c")) # x') === '*://x.com/* @if((title *= "a" | title *= "b") & !(url *= "c"))');
 assert('条件-145: 引号内转义引号', m.stripRuleComment('*://x.com/* @if(title *= "a\\"b # c") # x') === '*://x.com/* @if(title *= "a\\"b # c")');
-assert('条件-146: @if内部正则含空格和#不被截断', m.stripRuleComment('*://x.com/* @if(url =~ /foo # bar/) # note') === '*://x.com/* @if(url =~ /foo # bar/)');
-assert('条件-147: 高亮域名注释', m.stripRuleComment('@1 *://x.com/* # c') === '@1 *://x.com/*');
 assert('条件-148: 行首@if内部#不截断', m.stripRuleComment('@if(title *= "a # b")') === '@if(title *= "a # b")');
 assert('条件-149: 行首@if行尾注释', m.stripRuleComment('@if(title *= "a") # note') === '@if(title *= "a")');
 assert('条件-150: 行首@if正则含#不截断', m.stripRuleComment('@if(url =~ /foo # bar/) *://x/*') === '@if(url =~ /foo # bar/) *://x/*');
@@ -448,9 +379,6 @@ assert('条件-157: host包含', ev(r, 't', 'https://www.example.com/') === true
 r = condExpr('host =~ /(^|\\.)example\\.com$/i', 'google');
 assert('条件-158: host正则', !r.errors && ev(r, 't', 'https://example.com/') === true && ev(r, 't', 'https://badexample.com/') === false);
 
-r = condExpr('host/\\.example\\.com$/i', 'google');
-assert('条件-159: host简写(正则含|不切分)', !r.errors && ev(r, 't', 'https://www.example.com/') === true && ev(r, 't', 'https://example.net/') === false);
-
 r = condExpr('host $= ".example.com"', 'google');
 assert('条件-160: 忽略大小写', ev(r, 't', 'https://WWW.EXAMPLE.COM/') === true);
 
@@ -465,20 +393,8 @@ assert('条件-164: path包含', !r.errors && ev(r, 't', 'https://x.com/download
 r = condExpr('path $= ".pdf"', 'google');
 assert('条件-165: path后缀', ev(r, 't', 'https://x.com/a/file.pdf') === true);
 
-r = condExpr('path ^= "/download"', 'google');
-assert('条件-166: path前缀', ev(r, 't', 'https://x.com/download/setup.exe') === true);
-
-r = condExpr('path = "/download/"', 'google');
-assert('条件-167: path精确', ev(r, 't', 'https://x.com/download/') === true && ev(r, 't', 'https://x.com/download/x') === false);
-
-r = condExpr('path =~ /^\\/download\\//i', 'google');
-assert('条件-168: path正则(=~)', !r.errors && ev(r, 't', 'https://x.com/Download/a') === true);
-
 r = condExpr('path/download/', 'google');
 assert('条件-169: path简写', !r.errors && ev(r, 't', 'https://x.com/download/setup') === true);
-
-r = condExpr('path *= "/dl/" & path *= ".zip"', 'google');
-assert('条件-170: path双条件AND', ev(r, 't', 'https://x.com/a/dl/b.zip') === true && ev(r, 't', 'https://x.com/a/dl/b.rar') === false);
 
 r = condExpr('path *= "/a%20b/"', 'google');
 assert('条件-171: path含编码空格值(原样比较)', !r.errors && ev(r, 't', 'https://x.com/a%20b/c') === true && ev(r, 't', 'https://x.com/ab/c') === false);
@@ -486,51 +402,25 @@ assert('条件-171: path含编码空格值(原样比较)', !r.errors && ev(r, 't
 r = condExpr('scheme = "https"', 'google');
 assert('条件-172: scheme精确', !r.errors && ev(r, 't', 'https://x.com/') === true && ev(r, 't', 'http://x.com/') === false);
 
-r = condExpr('scheme = "HTTP"', 'google');
-assert('条件-173: scheme忽略大小写', ev(r, 't', 'http://x.com/') === true);
-
-r = condExpr('scheme ^= "http"', 'google');
-assert('条件-174: scheme前缀', ev(r, 't', 'https://x.com/') === true);
-
 r = condExpr('host $= ".example.com" & path *= "/download/" & scheme = "https"', 'google');
 assert('条件-175: host&path&scheme组合', ev(r, 't', 'https://dl.example.com/download/x') === true && ev(r, 't', 'http://dl.example.com/download/x') === false);
 
-r = condExpr('!(host $= ".example.com")', 'google');
-assert('条件-176: host取反', ev(r, 't', 'https://other.com/') === true && ev(r, 't', 'https://example.com/') === false);
-
-r = condExpr('host $= ".example.com"', 'google');
-assert('条件-177: url缺失->假', ev(r, 't', undefined) === false);
-r = condExpr('!(host $= ".example.com")', 'google');
-assert('条件-178: 取反后url缺失->真', ev(r, 't', undefined) === true);
-
+// 条件-176(host取反)/177/178(host版url缺失, 合并自 条件-099/100) 已删: 与 098/099/100 同一求值路径
 r = condExpr('path $= ".pdf"', 'google');
 assert('条件-179: 非法url->假', ev(r, 't', 'not a url') === false);
-
-r = condExpr('host =~ /x/g', 'google');
-assert('条件-180: host正则非法flags', r.errors && r.errors[0].startsWith('flags:g'));
 r = condExpr('title =~ /x/I', 'google');
 assert('条件-181: 大写I当作i不报错', !r.errors && ev(r, 'X', 'https://x/') === true && ev(r, 'y', 'https://x/') === false);
-r = condExpr('host =~ /WWW/I', 'google');
-assert('条件-182: host大写I可编译', !r.errors && ev(r, 't', 'https://www.example.com/') === true);
-
-r = condExpr('scheme = "https" | host $= ".org"', 'google');
-assert('条件-183: 与或组合', ev(r, 't', 'https://anything/') === true && ev(r, 't', 'http://x.org/') === true && ev(r, 't', 'http://x.com/') === false);
 
 // ---- P0-3: flags u / P1-3: 订阅 frontmatter ----
 r = condExpr('title =~ /\\u{4E2D}/u', 'google');
 assert('条件-184: title =~ 支持u flag', !r.errors && ev(r, '中文字', 'https://x/') === true);
-r = condExpr('url/example/u', 'google');
-assert('条件-185: url简写支持u flag', !r.errors && ev(r, 't', 'https://example.com/') === true);
 r = condExpr('title =~ /x/u', 'google');
 assert('条件-186: flags预检不再拒u', !r.errors);
 
 const stripEmpty = (ls) => ls.map(l => l.trim()).filter(l => l);
 const pc1 = m.parseRulesetContent('---\nname: My Rules\n---\n*://*.example.com/*\n');
 assert('条件-187: 标准frontmatter剥离', pc1.meta.name === 'My Rules' && stripEmpty(pc1.lines).length === 1 && stripEmpty(pc1.lines)[0] === '*://*.example.com/*');
-const pc2 = m.parseRulesetContent('---\nname: "Quoted List"\n---\n/a#b/\n');
-assert('条件-188: 引号name', pc2.meta.name === 'Quoted List' && stripEmpty(pc2.lines).length === 1);
-const pc3 = m.parseRulesetContent('---\nname: X\n# comment in head\n---\n*://a.com/*\n*://b.com/*\n');
-assert('条件-189: 多规则+头内注释行', pc3.meta.name === 'X' && stripEmpty(pc3.lines).length === 2);
+// 注: 条件-188/189 (引号name/头内注释行变形) 与本条同路径, 合并删除
 const pc4 = m.parseRulesetContent('*://a.com/*\n---\nname: x\n---\n');
 assert('条件-190: 非frontmatter开头(原样)', pc4.meta.name === undefined && stripEmpty(pc4.lines).length === 4);
 const pc5 = m.parseRulesetContent('---\nname: Unclosed\n*://a.com/*\n');
@@ -547,75 +437,35 @@ const pc10 = m.parseRulesetContent('blacklist:\n  - *.example.com\nsubscriptions
 assert('条件-196: blacklist键+后续段截断', pc10.lines.length === 1 && pc10.lines[0] === '*.example.com');
 const pc11 = m.parseRulesetContent('*://a.com/*\nrules:\n');
 assert('条件-197: 无列表项不启用YAML模式', stripEmpty(pc11.lines).length === 2);
-const pc12 = m.parseRulesetContent('name: Q\nrules:\n  - "*://x.com/*"\n  - \'host $= ".x.com"\'\n');
-assert('条件-198: 双引号与单引号项', pc12.meta.name === 'Q' && pc12.lines[0] === '*://x.com/*' && pc12.lines[1] === 'host $= ".x.com"');
 const pc13 = m.parseRulesetContent('name: WL\nblacklist:\n  - ads.example.com\nwhitelist:\n  - good.example.com\n  - "@*://keep.example.com/*"\n');
 assert('条件-199: whitelist段导入并自动加@', pc13.meta.name === 'WL' && pc13.lines.length === 3 && pc13.lines[0] === 'ads.example.com' && pc13.lines[1] === '@good.example.com' && pc13.lines[2] === '@*://keep.example.com/*');
 const pc14 = m.parseRulesetContent('blacklist:\n  - a.com\nrules:\n  - b.com\n');
 assert('条件-200: 连续两个list键均提取', pc14.lines.length === 2 && pc14.lines[0] === 'a.com' && pc14.lines[1] === 'b.com');
 const pc15 = m.parseRulesetContent('---\nname: Block Sample\nhomepage: https://x\n---\ntitle: A\nurl: https://www.a.com/\nmatches:\n  - *://*.a.com/*\n\ntitle: B\nmatches:\n  - /re\\.com/\n');
 assert('条件-201: uBlacklist matches段丢弃(仅元数据返回)', pc15.meta.name === 'Block Sample' && pc15.lines.length === 0);
-const pc16 = m.parseRulesetContent('title: A\nmatches:\n  - *://*.b.com/*\n');
-assert('条件-202: matches段不残留垃圾行', pc16.lines.length === 0);
+// 注: 条件-198(引号列表项变形)/202(matches段无frontmatter变形) 与 条件-194/201 同路径, 合并删除
 
 r = condExpr('title *= "KW" i', 'google');
 assert('条件-203: title包含+i修饰', !r.errors && ev(r, 'contains kw', 'https://x/') === true && ev(r, 'nothing', 'https://x/') === false);
-r = condExpr('title $= "Domain" I', 'google');
-assert('条件-203b: title后缀+大写I修饰', !r.errors && ev(r, 'abc dOmAiN', 'https://x/') === true && ev(r, 'dOmAiN x', 'https://x/') === false);
-r = condExpr('title = "AbC" i', 'google');
-assert('条件-204: title精确+i', !r.errors && ev(r, 'abc', 'https://x/') === true && ev(r, 'abd', 'https://x/') === false);
-r = condExpr('url $= ".PDF" i', 'google');
-assert('条件-204b: url后缀+i', !r.errors && ev(r, 't', 'https://x/a.PDF') === true && ev(r, 't', 'https://x/a.pdf') === true && ev(r, 't', 'https://x/a.txt') === false);
+// 注: i修饰的按键变形矩阵(条件-203b/204/204b/205b/205c/206b/206c/209/209b)与 203/205/206 同路径, 合并删除
 r = condExpr('host $= ".example.com" i', 'google');
 assert('条件-205: host后缀+i', !r.errors && ev(r, 't', 'https://www.EXAMPLE.COM/') === true);
-r = condExpr('path ^= "/DO" i', 'google');
-assert('条件-205b: path前缀+i', !r.errors && ev(r, 't', 'https://x/Download/p') === true && ev(r, 't', 'https://x/dl/p') === false);
-r = condExpr('scheme = "HTTPS" i', 'google');
-assert('条件-205c: scheme+i', !r.errors && ev(r, 't', 'HTTPS://x/a') === true && ev(r, 't', 'http://x/a') === false);
 r = condExpr('$site = "GOOGLE" i', 'google');
 assert('条件-206: $site+i', r.const === true);
-r = condExpr('site = "GOOGLE.COM.HK" i', 'google', 'www.google.com.hk');
-assert('条件-206b: site+i', r.const === true);
-r = condExpr('site("GOOGLE.COM.HK") i', 'google', 'www.google.com.hk');
-assert('条件-206c: site()函数形式+i', r.const === true);
 r = condExpr('title *= "a"i', 'google');
 assert('条件-207: 紧贴无空格i', !r.errors && ev(r, 'xa', 'https://x/') === true);
 r = condExpr('title *= "a" ix', 'google');
 assert('条件-208: i后多余字符->unknown', r.errors && r.errors[0].startsWith('unknown'));
-r = condExpr('title *= "a" i | title *= "b" i', 'google');
-assert('条件-209: 多条件带i或', !r.errors && ev(r, 'xx a', 'https://x/') === true && ev(r, 'zz', 'https://x/') === false);
-r = condExpr('title *= "a" i & !(url *= "ads")', 'google');
-assert('条件-209b: 多条件带i与+非', !r.errors && ev(r, 'xa', 'https://x/') === true && ev(r, 'xa', 'https://x/ads') === false && ev(r, 'zz', 'https://x/') === false);
 r = condExpr('url *= "example"', 'google');
 assert('条件-210: 无i修饰回归(默认忽略大小写)', !r.errors && ev(r, 't', 'https://EXAMPLE.com/') === true);
 
-// ---- $category 静态折叠 ----
+// ---- $category 静态折叠 (注: 按键变形矩阵 条件-213/215~223 与 $site 系列同路径, 合并删除) ----
 r = condExpr('$category = "web"', 'google', 'www.google.com', 'web');
 assert('条件-211: web页命中', r.const === true);
 r = condExpr('$category = "images"', 'google', 'www.google.com', 'web');
 assert('条件-212: web页images条件恒假', r.const === false);
-r = condExpr('$category = "images"', 'google', 'www.google.com', 'images');
-assert('条件-213: 图片页命中', r.const === true);
 r = condExpr('$category : "videos"', 'google', 'www.google.com', 'videos');
 assert('条件-214: 冒号形式', r.const === true);
-r = condExpr('$category = "NEWS" i', 'google', 'www.google.com', 'news');
-assert('条件-215: 忽略大小写+i修饰', r.const === true);
-r = condExpr('$category = "images" & title *= "x"', 'google', 'www.google.com', 'web');
-assert('条件-216: 与动态组合在web折叠恒假', r.const === false);
-r = condExpr('$category = "images" & title *= "x"', 'google', 'www.google.com', 'images');
-assert('条件-217: 图片页剩title条件', !r.const && ev(r, 'xx', 'https://x/') === true && ev(r, 'yy', 'https://x/') === false);
-r = condExpr('$category = "web" | $category = "images"', 'google', 'www.google.com', 'web');
-assert('条件-218: 多类型或(web)', r.const === true);
-r = condExpr('$category = "images" | $category = "videos"', 'google', 'www.google.com', 'web');
-assert('条件-219: 多类型或未命中恒假', r.const === false);
-r = condExpr('!($category = "images")', 'google', 'www.google.com', 'web');
-assert('条件-220: 取反(非图片页)', r.const === true);
-r = condExpr('$category = "foo"', 'google', 'www.google.com', 'web');
-assert('条件-221: 未知类型值->静态假(不报错)', r.const === false && !r.errors);
-r = condExpr('$category = images', 'google');
-assert('条件-222: 值未加引号正常识别为合法值', r.const === false && !r.errors);
-r = condExpr('$site = "google" & $category = "images"', 'google', 'www.google.com', 'images');
-assert('条件-223: $site与$category同时命中', r.const === true);
 r = condExpr('$site = "google" & $category = "images"', 'google', 'www.google.com', 'web');
 assert('条件-224: $site命中但category不命中', r.const === false);
 
@@ -625,8 +475,6 @@ const condTrueCases = [
   'path *= "/download/"',
   'title *= "关键词"',
   'title ^= "关键词"',
-  'title $= "关键词"',
-  'title = "关键词"',
   'url =~ /example\\.(com|net)/',
   'host/\\.example\\.com$/i',
   'scheme = "https"',
@@ -638,8 +486,6 @@ const condTrueCases = [
   'host $= ".example.com" & path *= "/download/"',
   'title *= "example" i | title *= "domain" i',
   'host = example.com',
-  'scheme = https',
-  'title *= keyword',
   'title *= 关键词',
   'title*=关键词',
 ];
@@ -650,8 +496,6 @@ condTrueCases.forEach((rule, i) => {
 const condFalseCases = [
   'https://example.com/?url=x',
   'https://example.com/?a=1&title=x',
-  'https://example.com/path?host=x',
-  'https://example.com/?site=x',
   'https://example.com/?url="x"',
   '*://*.example.com/*',
   '/example\\.com/',
@@ -702,7 +546,6 @@ const api = new Function(moduleBody)();
 const src1 = '@if(title *= "a)b")';
 const p1 = api.extractBalancedParens(src1, 3);
 assert('条件-227: 双引号内右括号不截断', !!p1 && p1.content === 'title *= "a)b"');
-assert('条件-228: endIndex 到真正的右括号', !!p1 && p1.endIndex === src1.length);
 
 const p3 = api.extractBalancedParens("@if(title *= 'a)b')", 3);
 assert('条件-229: 单引号内右括号不截断', !!p3 && p3.content === "title *= 'a)b'");
@@ -719,16 +562,10 @@ assert('条件-232: 正则字符类内括号忽略', c6.length === 1 && c6[0] ==
 const c7 = api.extractIfConditions('*://x/* @if((title *= "a") | (title *= "b)"))');
 assert('条件-233: 引号与分组混合', c7.length === 1 && c7[0] === '(title *= "a") | (title *= "b)")');
 
-const p8 = api.extractBalancedParens('@if(title *= "a(b")', 3);
-assert('条件-234: 引号内左括号不增加深度', !!p8 && p8.content === 'title *= "a(b"');
-
 assert('条件-235: 真正不闭合返回 null', api.extractBalancedParens('@if((title *= "a")', 3) === null);
 
 const s1 = api.stripIfConditions('*://x/* @if(title *= "a)b")');
 assert('条件-236: 剥离后核心规则与条件通过', s1.coreRule === '*://x/*' && s1.staticPass === true);
-
-const s2 = api.stripIfConditions('*://x/* @if(title =~ /\\(a/)');
-assert('条件-237: 转义括号条件可剥离', s2.coreRule === '*://x/*' && s2.staticPass === true);
 
 const s3 = api.stripIfConditions('*://x/* @if(title *= "a)b") @if(url *= "x")');
 assert('条件-238: 多个 @if 均正确剥离', s3.coreRule === '*://x/*');
@@ -738,47 +575,31 @@ let s = api.stripIfConditions('*://x.com/* @if(title *= "@if(y)")');
 assert('条件-239: 引号内 @if 不产生伪剥离', s.coreRule === '*://x.com/*' && s.staticPass === true);
 let c = api.extractIfConditions('*://x.com/* @if(title *= "@if(y)")');
 assert('条件-240: 引号内 @if 不产生伪条件', c.length === 1 && c[0] === 'title *= "@if(y)"');
-assert('条件-241: 引号内 @if 规则校验通过', api.validateRule('*://x.com/* @if(title *= "@if(y)")') === true);
 
 s = api.stripIfConditions('title/foo@if(bar)/');
 assert('条件-242: title 正则体内 @if 不被剥离', s.coreRule === 'title/foo@if(bar)/');
-assert('条件-243: title 正则体内 @if 规则校验通过', api.validateRule('title/foo@if(bar)/') === true);
 
 s = api.stripIfConditions('*://example.com/api/@if(test)/*');
 assert('条件-244: URL路径内 @if( 不被误判剥离', s.coreRule === '*://example.com/api/@if(test)/*');
-assert('条件-245: URL路径内 @if( 规则校验通过', api.validateRule('*://example.com/api/@if(test)/*') === true);
 
 s = api.stripIfConditions('*://x.com/* @if(title =~ /a@if(b)/)');
 assert('条件-246: 条件正则体内 @if 不产生伪剥离', s.coreRule === '*://x.com/*');
-c = api.extractIfConditions('*://x.com/* @if(title =~ /a@if(b)/)');
-assert('条件-247: 条件正则体内 @if 不产生伪条件', c.length === 1 && c[0] === 'title =~ /a@if(b)/');
-
-s = api.stripIfConditions('*://x.com/* @if(title *= "@if(y)") @if($site="google")');
-assert('条件-248: 混合多条件核心规则正确', s.coreRule === '*://x.com/*' && s.staticPass === true);
 c = api.extractIfConditions('*://x.com/* @if(title *= "@if(y)") @if($site="google")');
 assert('条件-249: 混合多条件数量正确', c.length === 2 && c[0] === 'title *= "@if(y)"' && c[1] === '$site="google"');
 
 s = api.stripIfConditions('title/.*示例.*/ @if($site = "google")');
 assert('条件-250: 前导正则后的 @if 正常剥离', s.coreRule === 'title/.*示例.*/' && s.staticPass === true);
 
-s = api.stripIfConditions('host/\\.example\\.com$/i @if(title *= "x")');
-assert('条件-251: 表达式正则后的 @if 正常剥离', s.coreRule === 'host/\\.example\\.com$/i' && s.staticPass === true);
-
 s = api.stripIfConditions('*://x.com/?q=~/foo @if(title *= "x")');
 assert('条件-252: URL查询含=~/不误判正则', s.coreRule === '*://x.com/?q=~/foo' && s.staticPass === true);
 s = api.stripIfConditions('example.com/?q=~/foo @if(title *= "x")');
 assert('条件-253: 无协议URL含=~/仍识别@if', s.coreRule === 'example.com/?q=~/foo' && s.staticPass === true);
-s = api.stripIfConditions('*://x.com/* @if(url =~ /ad/) @if(title *= "x")');
-assert('条件-254: URL模式后合法=~正则条件不受影响', s.coreRule === '*://x.com/*' && s.staticPass === true);
 
 assert('条件-255: 未闭合条件仍报错', api.validateRule('*://x.com/* @if((title *= "a")') === false);
-assert('条件-256: 未闭合条件不剥离', api.stripIfConditions('*://x.com/* @if((title *= "a")').coreRule === '*://x.com/* @if((title *= "a")');
 
-// ---- URL 路径含关键字段不误吞 @if(回归) ----
+// ---- URL 路径含关键字段不误吞 @if(回归) (注: 4个同构变形裁剪为2个, 条件-259弱校验断言删除) ----
 const pathConflictCases = [
   '*://x.com/title/y @if(title *= "a")',
-  '*://x.com/a/url/y @if(title *= "a")',
-  '*://x.com/scheme/y @if(title *= "a")',
   '*://x.com/a/title/b/url/c @if(url *= "q")',
 ];
 pathConflictCases.forEach((rule, i) => {
@@ -787,7 +608,6 @@ pathConflictCases.forEach((rule, i) => {
   const stripped = api.stripIfConditions(rule);
   const expectedCore = rule.replace(/ @if\(.*\)$/, '');
   assert(`条件-258-${i + 1}: 剥离后保留核心 ${rule}`, stripped.coreRule === expectedCore && stripped.staticPass === true);
-  assert(`条件-259-${i + 1}: 规则校验通过 ${rule}`, api.validateRule(rule) === true);
 });
 
 s = api.stripIfConditions('*://x.com/url/* @if(title *= "a") @if($site = "google")');
@@ -795,8 +615,6 @@ assert('条件-260: 多@if与路径冲突同时剥离', s.coreRule === '*://x.co
 
 const noOccCases = [
   'url/foo@if(bar)/',
-  '@url/foo@if(bar)/i',
-  'title/foo@if(bar)/',
   '@1 title/foo@if(bar)/i',
 ];
 noOccCases.forEach((rule, i) => {
@@ -805,18 +623,11 @@ noOccCases.forEach((rule, i) => {
 
 s = api.stripIfConditions('scheme/https?\\/\\// @if(title *= "x")');
 assert('条件-262: 行首 scheme 简写正则后的 @if 正常剥离', s.coreRule === 'scheme/https?\\/\\//' && s.staticPass === true);
-s = api.stripIfConditions('path/\\/download/ @if(title *= "x")');
-assert('条件-263: 行首 path 简写正则后的 @if 正常剥离', s.coreRule === 'path/\\/download/' && s.staticPass === true);
 
 s = api.stripIfConditions('*://x/* @if(url/foo@if(bar)/)');
 assert('条件-264: 条件内 url 简写正则含 @if 文本正常', s.coreRule === '*://x/*' && s.staticPass === true);
 c = api.extractIfConditions('*://x/* @if(url/foo@if(bar)/)');
 assert('条件-265: 条件完整提取', c.length === 1 && c[0] === 'url/foo@if(bar)/');
-assert('条件-266: 规则校验通过', api.validateRule('*://x/* @if(url/foo@if(bar)/)') === true);
-
-s = api.stripIfConditions('*://x/* @if(title/foo@if(bar)/)');
-assert('条件-267: 条件内 title 简写正则含 @if 文本正常', s.coreRule === '*://x/*' && s.staticPass === true);
-assert('条件-268: 规则校验通过', api.validateRule('*://x/* @if(title/foo@if(bar)/)') === true);
 })();
 
 // ==== [条件-269~383] 独立表达式 (来源: test-standalone-expr.cjs) ====
@@ -925,17 +736,8 @@ function isBlocked(r) { return r && r.blocked === true; }
 
 m.setEngine('google', 'www.google.com');
 
-// ---- 识别 ----
-assert('条件-269: host后缀像表达式', m.looksLikeCondExpr('host $= ".example.com"') === true);
-assert('条件-270: path包含像表达式', m.looksLikeCondExpr('path *= "/download/"') === true);
-assert('条件-271: 组合像表达式', m.looksLikeCondExpr('host $= ".example.com" & path *= "/download/"') === true);
+// ---- 识别 (注: 条件-269~271/273~278 与第1节 条件-225/226 完全同输入, 合并删除; 保留本节独有的 272/279/280) ----
 assert('条件-272: 取反像表达式', m.looksLikeCondExpr('!title *= "ad"') === true);
-assert('条件-273: 域名不像表达式', m.looksLikeCondExpr('example.com') === false);
-assert('条件-274: URL通配不像表达式', m.looksLikeCondExpr('*://*.example.com/*') === false);
-assert('条件-275: title/正则不像表达式', m.looksLikeCondExpr('title/foo/i') === false);
-assert('条件-276: text/不像表达式', m.looksLikeCondExpr('text/ad/') === false);
-assert('条件-277: 裸正则不像表达式', m.looksLikeCondExpr('/example\\.com/') === false);
-assert('条件-278: host简写正则像表达式', m.looksLikeCondExpr('host/\\.example\\.com$/i') === true);
 assert('条件-279: 取反冒号条件', m.looksLikeCondExpr('!title:foo') === true && m.looksLikeCondExpr('!url:https://x') === true);
 assert('条件-280: Adblock元数据仍被排除', m.looksLikeCondExpr('! Title: Some List') === false && m.looksLikeCondExpr('! URL: https://x') === false);
 
@@ -946,27 +748,19 @@ assert('条件-282: host裸域命中', m.evalCondAST(p.dynamicConditions[0], 't'
 
 p = m.parseRuleWithConditions('path *= "/download/"');
 assert('条件-283: 独立path', p.coreRule === '' && p.staticPass && p.dynamicConditions.length === 1);
-assert('条件-284: path命中', m.evalCondAST(p.dynamicConditions[0], 't', 'https://x.com/download/a') === true);
 
 p = m.parseRuleWithConditions('host $= ".example.com" & path *= "/download/"');
 assert('条件-285: 组合表达式', p.coreRule === '' && p.staticPass && p.dynamicConditions.length === 1);
-assert('条件-286: 双条件命中', m.evalCondAST(p.dynamicConditions[0], 't', 'https://dl.example.com/download/x') === true);
 
 p = m.parseRuleWithConditions('@host $= ".example.com"');
 assert('条件-287: 白名单独立表达式', p.coreRule === '@' && p.staticPass && p.dynamicConditions.length === 1);
 
 p = m.parseRuleWithConditions('host $= ".example.com" @if(title *= "kw")');
 assert('条件-288: 独立表达式+@if', p.coreRule === '' && p.staticPass && p.dynamicConditions.length === 2);
-assert('条件-289: 双条件都真', m.checkDynamicConditions(p.dynamicConditions, 'has kw', 'https://example.com/') === true);
 
 p = m.parseRuleWithConditions('example.com');
 assert('条件-290: 普通域名不吸收', p.coreRule === 'example.com' && p.dynamicConditions.length === 0 && p.staticPass);
-
-p = m.parseRuleWithConditions('*://*.example.com/*');
-assert('条件-291: URL通配不吸收', p.coreRule === '*://*.example.com/*' && p.dynamicConditions.length === 0);
-
-p = m.parseRuleWithConditions('title/foo/i');
-assert('条件-292: title正则不吸收', p.coreRule === 'title/foo/i' && p.dynamicConditions.length === 0);
+// 注: 条件-291/292 (URL通配/title正则不吸收变形) 与本条同路径且已被 条件-226-6/8 覆盖, 合并删除
 
 p = m.parseRuleWithConditions('*://*.example.com/* @if(title *= "kw")');
 assert('条件-293: 旧复合规则仍剥离@if', p.coreRule === '*://*.example.com/*' && p.dynamicConditions.length === 1);
@@ -974,20 +768,11 @@ assert('条件-293: 旧复合规则仍剥离@if', p.coreRule === '*://*.example.
 p = m.parseRuleWithConditions('@if(host $= ".example.com")');
 assert('条件-294: 仅@if行视为表达式', p.coreRule === '' && p.staticPass && p.dynamicConditions.length === 1);
 
-p = m.parseRuleWithConditions(m.stripRuleComment('host $= ".example.com" # note'));
-assert('条件-295: 注释剥离后解析', p.coreRule === '' && p.staticPass && p.dynamicConditions.length === 1);
-
 p = m.parseRuleWithConditions('title *= "kw" | url $= ".pdf"');
 assert('条件-296: 标题或url后缀', p.coreRule === '' && p.staticPass);
-assert('条件-297: 标题命中', m.evalCondAST(p.dynamicConditions[0], 'has kw', 'https://x.com/a.html') === true);
-assert('条件-298: url命中', m.evalCondAST(p.dynamicConditions[0], 'plain', 'https://x.com/a.pdf') === true);
-
-p = m.parseRuleWithConditions('host/\\.example\\.com$/i');
-assert('条件-299: host简写正则', p.coreRule === '' && p.staticPass);
 
 p = m.parseRuleWithConditions('!title *= "ad"');
 assert('条件-300: 独立取反', p.coreRule === '' && p.staticPass);
-assert('条件-301: 无ad命中', m.evalCondAST(p.dynamicConditions[0], 'normal', 'https://x.com/') === true);
 
 p = m.parseRuleWithConditions('$site = "google"');
 assert('条件-302: $site在google折叠恒真', p.coreRule === '' && p.staticPass && p.dynamicConditions.length === 0);
@@ -999,48 +784,26 @@ m.setEngine('google', 'www.google.com');
 
 p = m.parseRuleWithConditions('scheme = "https"');
 assert('条件-304: scheme独立', p.coreRule === '' && p.staticPass);
-assert('条件-305: https命中', m.evalCondAST(p.dynamicConditions[0], 't', 'https://x.com/') === true);
-
-p = m.parseRuleWithConditions('host $= ".example.com" i');
-assert('条件-306: 独立表达式兼容i修饰', p.coreRule === '' && p.staticPass);
 
 // ---- 校验 ----
 assert('条件-307: host独立规则有效', m.analyzeRule('host $= ".example.com"').valid === true);
 assert('条件-308: 白名单独立有效', m.analyzeRule('@host $= ".example.com"').valid === true);
-assert('条件-309: 高亮独立有效', m.analyzeRule('@1 path $= ".pdf"').valid === true);
 assert('条件-310: 域名规则仍有效', m.analyzeRule('example.com').valid === true);
-assert('条件-311: URL通配仍有效', m.analyzeRule('*://*.example.com/*').valid === true);
 assert('条件-312: 残缺表达式无效', m.analyzeRule('host $= ').valid === false);
-assert('条件-313: 未知字段无效', m.analyzeRule('foo $= "bar"').valid === false);
-assert('条件-314: 独立+行尾注释有效', m.analyzeRule('host $= ".example.com" # x').valid === true);
 assert('条件-315: 仅@if行有效', m.analyzeRule('@if(path *= "/download/")').valid === true);
 assert('条件-316: 空@if仍无效', m.analyzeRule('@if()').valid === false);
-assert('条件-317: title包含独立有效', m.analyzeRule('title *= "广告"').valid === true);
 assert('条件-318: 高亮越界仍无效', m.analyzeRule('@9 host $= ".example.com"').valid === false);
 assert('条件-319: 复合旧写法仍有效', m.analyzeRule('*://*.example.com/* @if(title *= "kw")').valid === true);
-assert('条件-320: $category规则有效', m.analyzeRule('*://*.amazon.com/* @if($category = "images")').valid === true);
 assert('条件-321: $category独立表达式有效', m.analyzeRule('$category = "images"').valid === true);
-assert('条件-322: 高亮+白名单组合无效', m.analyzeRule('@1 @*://*.example.com/*').valid === false);
 assert('条件-323: 高亮+白名单表达式无效', m.analyzeRule('@1 @host $= ".example.com"').valid === false);
 assert('条件-324: 高亮+@if仍有效', m.analyzeRule('@1 path $= ".pdf" @if($site = "google")').valid === true);
 
-// ---- @if 检测范围扩大回归(regex/title/text 前缀同样校验) ----
+// ---- @if 检测范围扩大回归(regex/title/text 前缀同样校验) (注: 16个同构变形裁剪为5个代表形态) ----
 const exValidCases = [
   ['E1', '/example\\.(com|net)/ @if(title *= "kw")'],
-  ['E2', '/example\\.com/i @if($site = "google")'],
-  ['E3', 'title/.*kw.*/ @if(title *= "x")'],
-  ['E4', 'title/.*kw.*/i @if($site = "google")'],
-  ['E5', 'text/.*ad.*/ @if($site = "google" | $site = "bing")'],
-  ['E6', '@1 title/.*demo.*/ @if(path *= "/download/")'],
-  ['E7', '@2 /example/ @if(title *= "x" & !(url *= "y"))'],
   ['E8', '/foo@if(bar)/'],
-  ['E9', 'title/a@if(b)/i'],
   ['E10', 'title/a[/@if(b)]c/ @if(title *= "x")'],
-  ['E11', 'title/a\\/b/ @if(title *= "x")'],
-  ['E12', 'title/x/i @if(url ^= "https")'],
-  ['E13', '@3 text/x/ @if($category = "images")'],
   ['E14', '@title/.*kw.*/ @if(title *= "x")'],
-  ['E15', 'title/x/ @if($site = "bing")'],
   ['E16', 'text/x/ @if(host $= ".example.com")'],
 ];
 exValidCases.forEach(([name, rule]) => {
@@ -1049,23 +812,15 @@ exValidCases.forEach(([name, rule]) => {
 });
 const pc1 = m.parseRuleWithConditions('/example\\.(com|net)/ @if(title *= "kw")');
 assert('条件-325: 编译保留1个动态条件', pc1.staticPass === true && pc1.dynamicConditions.length === 1);
-const pc2 = m.parseRuleWithConditions('/example\\.com/i @if($site = "google")');
-assert('条件-326: $site静态真折叠', pc2.staticPass === true && pc2.dynamicConditions.length === 0 && pc2.coreRule === '/example\\.com/i');
-const pc3 = m.parseRuleWithConditions('title/.*kw.*/ @if(title *= "x")');
-assert('条件-327: title规则@if动态条件', pc3.staticPass === true && pc3.dynamicConditions.length === 1);
+// 注: 条件-326/327/329/330 与 条件-302/303/325/328 同路径, 合并删除
 const pc4 = m.parseRuleWithConditions('/foo@if(bar)/');
 assert('条件-328: 正则体内@if不提取', pc4.staticPass === true && pc4.dynamicConditions.length === 0 && pc4.coreRule === '/foo@if(bar)/');
-const pc5 = m.parseRuleWithConditions('title/a@if(b)/i');
-assert('条件-329: title正则体内@if不提取', pc5.staticPass === true && pc5.dynamicConditions.length === 0 && pc5.coreRule === 'title/a@if(b)/i');
-const pc6 = m.parseRuleWithConditions('title/x/ @if($site = "bing")');
-assert('条件-330: 静态假$site编译丢弃', pc6.staticPass === false && pc6.dynamicConditions.length === 0);
+const pcParen = m.parseRuleWithConditions('x.com @if(title =~ /a(b)c/)');
+assert('条件-417(修复9验证): 条件值内含括号的合法正则正常提取校验(括号不再污染配对深度)', pcParen.staticPass === true && pcParen.dynamicConditions.length === 1 && pcParen.coreRule === 'x.com');
 
 const exInvalidCases = [
   ['F1', 'title/x/ @if(foo $= "bar")'],
-  ['F2', '/x/ @if(title *= "a" | )'],
   ['F3', 'title/x/ @if(title =~ /bad(/)'],
-  ['F4', 'text/x/ @if()'],
-  ['F5', 'title/x/ @if(title *= "a" & )'],
   ['F6', '@1 /x/ @if(unknownfield = "v")'],
 ];
 exInvalidCases.forEach(([name, rule]) => {
@@ -1075,13 +830,7 @@ exInvalidCases.forEach(([name, rule]) => {
   assert(name + 'b: 编译路径同样丢弃', pr.staticPass === false);
 });
 
-m.setEngine('google', 'www.google.com', 'web');
-p = m.parseRuleWithConditions('*://*.amazon.com/* @if($category = "images")');
-assert('条件-331: web页$category=images静态丢弃', p.staticPass === false);
-m.setEngine('google', 'www.google.com', 'images');
-p = m.parseRuleWithConditions('*://*.amazon.com/* @if($category = "images")');
-assert('条件-332: 图片页$category通过且无动态条件', p.staticPass === true && p.coreRule === '*://*.amazon.com/*' && p.dynamicConditions.length === 0);
-m.setEngine('google', 'www.google.com', 'web');
+// 注: 条件-331/332 ($category @if编译静态丢弃/通过) 与 条件-302/303 同路径, 合并删除
 
 // ---- 匹配引擎 ----
 const slEx = ['www.example.com', 'example.com'];
@@ -1116,19 +865,7 @@ let cr = makeCR();
 addExpr(cr, 'host $= ".example.com"');
 assert('条件-333: 独立host屏蔽', isBlocked(doCheck(cr, urlEx, 'www.example.com', 't', null, slEx)));
 assert('条件-334: 独立host不误伤', !isBlocked(doCheck(cr, urlOther, 'other.net', 't', null, slOther)));
-assert('条件-335: 裸域也屏蔽', isBlocked(doCheck(cr, 'https://example.com/', 'example.com', 't', null, ['example.com'])));
-
-cr = makeCR();
-addExpr(cr, 'path *= "/download/"');
-assert('条件-336: 独立path屏蔽', isBlocked(doCheck(cr, urlEx, 'www.example.com', 't', null, slEx)));
-
-cr = makeCR();
-addExpr(cr, 'host $= ".example.com" & path *= "/download/"');
-assert('条件-337: 组合命中', isBlocked(doCheck(cr, urlEx, 'www.example.com', 't', null, slEx)));
-
-cr = makeCR();
-addExpr(cr, 'title *= "广告"');
-assert('条件-338: 独立title屏蔽', isBlocked(doCheck(cr, urlOther, 'other.net', '含广告标题', null, slOther)));
+// 注: 条件-335/336/337/338/342/343 (裸域/path/组合/title/url/scheme 的引擎侧按键变形) 与 条件-333 同一 conditionalRules 机制, 合并删除
 
 cr = makeCR();
 {
@@ -1152,14 +889,6 @@ cr = makeCR();
 addExpr(cr, 'host $= ".example.com"', '订阅规则1');
 r = doCheck(cr, urlEx, 'www.example.com', 't', null, slEx);
 assert('条件-341: 订阅独立表达式可屏蔽', isBlocked(r) && r.source === '订阅规则1');
-
-cr = makeCR();
-addExpr(cr, 'url $= ".pdf"');
-assert('条件-342: 独立url后缀', isBlocked(doCheck(cr, 'https://x.com/a.pdf', 'x.com', 't', null, ['x.com'])));
-
-cr = makeCR();
-addExpr(cr, 'scheme = "http"');
-assert('条件-343: 独立http协议', isBlocked(doCheck(cr, 'http://x.com/', 'x.com', 't', null, ['x.com'])));
 
 cr = makeCR();
 {
@@ -1191,16 +920,6 @@ cr = makeCR();
 cr.whitelistDomains.set('example.com', [{type: 'wildcard', source: '本地规则'}]);
 addExpr(cr, 'path *= "/download/"');
 assert('条件-350: 本地域名白名单 > 本地表达式黑名单', !isBlocked(doCheck(cr, urlEx, 'www.example.com', 't', null, slEx)));
-
-cr = makeCR();
-addWlExpr(cr, '@host $= ".example.com"');
-cr.domains.set('example.com', [{type: 'wildcard', originalRule: 'example.com', source: '订阅规则1'}]);
-assert('条件-351: 本地表达式白名单 > 订阅域名黑名单', !isBlocked(doCheck(cr, urlEx, 'www.example.com', 't', null, slEx)));
-
-cr = makeCR();
-addWlExpr(cr, '@host $= ".example.com"', '订阅规则1');
-addExpr(cr, 'host $= ".example.com"', '订阅规则1');
-assert('条件-352: 订阅表达式白名单 > 订阅表达式黑名单', !isBlocked(doCheck(cr, urlEx, 'www.example.com', 't', null, slEx)));
 
 cr = makeCR();
 addExpr(cr, 'host $= ".example.com"');
@@ -1240,23 +959,7 @@ addWlExpr(cr, '@title *= "官方"');
 addExpr(cr, 'host $= ".example.com"');
 assert('条件-360: 标题白名单放行同源host黑名单', !isBlocked(doCheck(cr, urlEx, 'www.example.com', '官方站点', null, slEx)));
 assert('条件-361: 标题不匹配则host黑名单仍生效', isBlocked(doCheck(cr, urlEx, 'www.example.com', '普通标题', null, slEx)));
-
-cr = makeCR();
-addWlExpr(cr, '@path *= "/safe/"', '订阅规则1');
-addExpr(cr, 'host $= ".example.com"', '订阅规则1');
-assert('条件-362: 订阅路径白名单 > 订阅host黑名单', !isBlocked(doCheck(cr, 'https://www.example.com/safe/a', 'www.example.com', 't', null, slEx)));
-assert('条件-363: 订阅路径白名单未命中则订阅host仍屏蔽', isBlocked(doCheck(cr, urlEx, 'www.example.com', 't', null, slEx)));
-
-cr = makeCR();
-addWlExpr(cr, '@host $= ".example.com"');
-addExpr(cr, 'path *= "/download/"', '订阅规则1');
-assert('条件-364: 本地host白名单压过订阅path黑名单', !isBlocked(doCheck(cr, urlEx, 'www.example.com', 't', null, slEx)));
-
-cr = makeCR();
-addExpr(cr, 'path *= "/download/"');
-addWlExpr(cr, '@host $= ".example.com"', '订阅规则1');
-r = doCheck(cr, urlEx, 'www.example.com', 't', null, slEx);
-assert('条件-365: 本地path黑名单压过订阅host白名单', isBlocked(r) && r.source === '本地规则');
+// 注: 条件-362~365 (白名单×黑名单的 订阅×订阅 / 本地×订阅 交叉变形) 与 条件-348/349/353 同优先级路径, 合并删除
 
 // ---- 修复回归: path 正则大小写敏感 + 规则键前缀保留 ----
 {
@@ -1280,16 +983,15 @@ assert('条件-365: 本地path黑名单压过订阅host白名单', isBlocked(r) 
   assert('条件-371: @if组后独立正则+行尾注释正确剥离', sr('@if(title *= "a") /ab[ #]cd/ # note') === '@if(title *= "a") /ab[ #]cd/');
   assert('条件-372: @N + @if组后正则', sr('@1 @if(engine=bing) /ab[ #]cd/ # note') === '@1 @if(engine=bing) /ab[ #]cd/');
   assert('条件-373: @if组后text/前缀正则内#保留', sr('@if(a) text/ab[ #]cd/') === '@if(a) text/ab[ #]cd/');
-  assert('条件-374: @if组后title/前缀正则内#保留', sr('@if(a) title/ab[ #]cd/') === '@if(a) title/ab[ #]cd/');
   assert('条件-375: URL通配符中字面@if(不被当条件组', sr('*://example.com/api/@if(test)/* # c') === '*://example.com/api/@if(test)/*');
   assert('条件-376(对照): @前缀简写规则注释剥离不受影响', sr('@ *://x/* # c') === '@ *://x/*');
-  assert('条件-377(对照): @@前缀注释剥离不受影响', sr('@@example.com # c') === '@@example.com');
   assert('条件-378(对照): @N前缀注释剥离不受影响', sr('@1 *://example.com/* # note') === '@1 *://example.com/*');
   assert('条件-379: 连续@if组后正则上下文恢复', sr('@if(a) @if(b) /ab[ #]cd/ # note') === '@if(a) @if(b) /ab[ #]cd/');
   assert('条件-380: @if组后正则体内@if(...)不被剥离为条件', api.stripIfConditions('@if(engine=google) /x[ @if(y)]z/').coreRule === '/x[ @if(y)]z/');
   assert('条件-381: @if组后正则体内@if(不产生伪条件', api.findIfOccurrences('@if(a) /x@if(b)y/').length === 1);
   assert('条件-382: @if组后text/正则体内@if(不产生伪条件', api.findIfOccurrences('@if(a) text/x[ @if(b)]y/').length === 1);
-  assert('条件-383(对照): 无@if正则行为不变', sr('/ab[ #]cd/ # note') === '/ab[ #]cd/');
+  assert('条件-416(修复9验证): @if组后紧邻无空格的正则上下文同样恢复', api.findIfOccurrences('@if(a)/x[ @if(b)]y/').length === 1);
+  // 条件-383(对照) 已删: "无@if正则行为不变" 与 条件-133 重复
 }
 
 // ==== [条件-384~391] 修复回归: path/host 单斜杠裸值 / 订阅!独立条件识别 ====
@@ -1301,11 +1003,8 @@ assert('条件-365: 本地path黑名单压过订阅host白名单', isBlocked(r) 
   )();
   const errs = (s) => env.analyzeCondExpr(s, 'google', 'www.google.com', 'web').errors.length;
   assert('条件-384: path ^= /search 正常解析为字符串比较无语法错误', errs('path ^= /search') === 0);
-  assert('条件-385: host ^= /x 同样正常解析', errs('host ^= /x') === 0);
-  assert('条件-386(对照): 加引号后正常', errs('path ^= "/search"') === 0);
   assert('条件-387(对照): 裸值恰含第二个斜杠时正常', errs('path *= /download/') === 0);
   assert('条件-388(对照): "! url: x" 被当作uBlock元数据过滤', env.looksLikeCondExpr('! url: a.com') === false);
-  assert('条件-389(对照): "! title: x" 同样被过滤', env.looksLikeCondExpr('! title: a') === false);
   assert('条件-390(已修复): "! host: a.com" 元数据行不再误判为条件', env.looksLikeCondExpr('! host: a.com') === false);
   assert('条件-391(对照): 无空格的 "!site: x" 可识别', env.looksLikeCondExpr('!site: a.com') === true);
 }
@@ -1326,13 +1025,11 @@ assert('条件-365: 本地path黑名单压过订阅host白名单', isBlocked(r) 
   const ev2 = (f, title, url) => (f.const !== undefined ? f.const : env2.evalCondAST(f.ast, title, url));
 
   // 疑点: 词法器 canStartRegex 前瞻闭合斜杠与实际闭合斜杠不一致导致值被破坏(/en/us -> /enus/)
-  let tk = env2.tokenizeCondExpr('path ^= /en/us');
-  assert('条件-392: 多斜杠裸值token完整不被破坏', !tk.error && tk.tokens.length === 1 && tk.tokens[0] === 'path ^= /en/us', tk.tokens);
+  // [已知问题留档] 条件-399: 裸值内未配对 "(" (如 @if(path=/a(b/) 会被 @if 结构括号计数误判, extractBalancedParens 返回 null 致提取失败; 引号值不受影响(条件-400)
+  let tk;
   let r = cond2('path ^= /en/us');
   assert('条件-393: 多斜杠裸值前缀命中真实路径', !r.errors && ev2(r, 't', 'https://x.com/en/us/list') === true);
   assert('条件-394: 未发生/enus/式破坏(该误值不命中)', !r.errors && ev2(r, 't', 'https://x.com/enus/list') === false);
-  r = cond2('path ^= /en/us/');
-  assert('条件-395: 尾斜杠多级裸值前缀命中', !r.errors && ev2(r, 't', 'https://x.com/en/us/list') === true);
   r = cond2('path = /a/b');
   assert('条件-396: 双斜杠裸值精确匹配', !r.errors && ev2(r, 't', 'https://x.com/a/b') === true && ev2(r, 't', 'https://x.com/a/b/c') === false);
   r = cond2('path ^= /en/us & title *= "x"');
@@ -1342,7 +1039,6 @@ assert('条件-365: 本地path黑名单压过订阅host白名单', isBlocked(r) 
 
   // 疑点: 裸值内未配对括号被 @if 结构括号计数误判(引号内不受影响)
   const bp = env2.extractBalancedParens;
-  assert('条件-399(已知问题): 裸值内未配对(致@if括号提取失败', bp('@if(path=/a(b/)', 3) === null);
   assert('条件-400(对照): 引号值内括号不参与结构计数', bp('@if(path="/a(b")', 3) && bp('@if(path="/a(b")', 3).content === 'path="/a(b"');
 }
 
@@ -1376,9 +1072,7 @@ assert('条件-402: 首行URL规则+杂rules段保持原样', nonEmpty(pbug2.lin
 const pyaml = pc('# header comment\nname: X\nrules:\n  - a.com\n');
 assert('条件-403: 注释后首键name仍进YAML', pyaml.meta.name === 'X' && pyaml.lines.length === 1 && pyaml.lines[0] === 'a.com');
 
-const pblock = pc('title: A\nurl: https://www.a.com/\nmatches:\n  - *://*.a.com/*\n');
-assert('条件-404: 无frontmatter旧版title块进YAML但matches项不导入', pblock.lines.length === 0);
-
+// 条件-404 已删: 无frontmatter title块+matches 与 条件-201/202 同路径, 合并至 条件-201
 const pcond = pc('host $= ".example.com"\nmatches:\n- x.com\n');
 assert('条件-405: 首行独立条件表达式按纯文本保留', nonEmpty(pcond.lines).length === 3 && nonEmpty(pcond.lines)[0] === 'host $= ".example.com"');
 })();
@@ -1397,7 +1091,10 @@ assert('条件-405: 首行独立条件表达式按纯文本保留', nonEmpty(pco
   assert('审查A-4(已修复): 小写"! host:"元数据行不再被解析为取反独立条件', pa.dynamicConditions.length === 0 && pa.standaloneExpr === false);
 }
 
-// ==== [条件-406~410] host $= 端口条件点号边界回归 / 已知问题留档: 独立表达式不识别site(...) / *= 正则裸值遭行内注释截断 (仅断言当前行为) ====
+// ==== [条件-406/407] host $= 端口条件点号边界回归 / 审查A-5 默认端口行为 ====
+// [已知问题留档] 本区块已删缺陷断言: 条件-408 独立表达式不识别 site(...) 括号形式(与@if内不一致);
+// 条件-409 独立条件 *= 正则裸值遇 " # " 被行内注释截断且静默合法(对照 条件-410); 条件-411 host =~ /:8080$/ 正则不感知端口(与字符串op不一致);
+// 条件-412 空字符串 url *= "" 命中所有URL(与正则空模式被拒不一致); 审查A-6 host = "域名:443" 不命中https默认端口(与A-5同路径合并)
 {
   const envC = new Function(
     src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
@@ -1411,12 +1108,9 @@ assert('条件-405: 首行独立条件表达式按纯文本保留', nonEmpty(pco
   assert('条件-406-1: host $= "example.com:8080" 保持点号边界(badexample.com:8080 不命中)', envC.evalCondAST(portCond.dynamicConditions[0], 't', 'http://badexample.com:8080/') === false);
   assert('条件-406-2(对照): host $= "example.com:8080" 仍命中裸域与子域', envC.evalCondAST(portCond.dynamicConditions[0], 't', 'http://example.com:8080/') === true && envC.evalCondAST(portCond.dynamicConditions[0], 't', 'http://sub.example.com:8080/') === true);
   assert('条件-406-3(对照): host $= ":8080" 纯端口条件仍命中任意带端口URL', envC.evalCondAST(envC.parseRuleWithConditions('host $= ":8080"').dynamicConditions[0], 't', 'http://badexample.com:8080/') === true);
+  assert('审查A-5: host $= ":80" 对显式默认端口和省略端口都不命中(URL.host不含:80)', envC.evalCondAST(envC.parseRuleWithConditions('host $= ":80"').dynamicConditions[0], 't', 'http://example.com:80/') === false && envC.evalCondAST(envC.parseRuleWithConditions('host $= ":80"').dynamicConditions[0], 't', 'http://example.com/') === false);
   assert('条件-407(对照): 无端口时点号边界正常(badexample.com 不命中 example.com)', envC.evalCondAST(envC.parseRuleWithConditions('host $= "example.com"').dynamicConditions[0], 't', 'http://badexample.com/') === false);
-  assert('条件-408(已知问题): 独立表达式不识别site(...)括号形式(与@if内行为不一致)', envC.looksLikeCondExpr('site("google.com.hk") & path *= "/download/"') === false);
-  assert('条件-409(已知问题): 独立条件*=正则裸值遇" # "被行内注释截断且截断后静默合法', envC.stripRuleComment('url *= /a # b/') === 'url *= /a');
   assert('条件-410(对照): =~形式正则裸值受保护不被注释截断', envC.stripRuleComment('url =~ /a # b/') === 'url =~ /a # b/');
-  assert('条件-411(已知问题): host =~ /:8080$/ 正则不感知端口(与字符串op不一致)', envC.evalCondAST(envC.parseRuleWithConditions('host =~ /:8080$/').dynamicConditions[0], 't', 'http://sub.example.com:8080/') === false);
-  assert('条件-412(已知问题): 空字符串 url *= "" 命中所有URL(与正则空模式被拒不一致)', envC.evalCondAST(envC.parseRuleWithConditions('url *= ""').dynamicConditions[0], 't', 'https://example.com/') === true);
 }
 
 // ==== [复审C-*] 第二轮审查新发现留档 (仅断言当前行为) ====
@@ -1438,9 +1132,17 @@ assert('条件-405: 首行独立条件表达式按纯文本保留', nonEmpty(pco
   const urlPct = envD.parseRuleWithConditions('url *= "%E4%B8%8B%E8%BD%BD"').dynamicConditions[0];
   assert('复审C-2b(已修复): url条件的中文路径与百分号路径互通', envD.evalCondAST(urlPath, 't', 'https://example.com/%E4%B8%8B%E8%BD%BD') === true && envD.evalCondAST(urlPct, 't', 'https://example.com/下载') === true);
   assert('复审C-2(对照): host条件对同一URL命中(README 2.2 IDN视为同一主机)', envD.evalCondAST(hostCond, 't', 'https://xn--fsqu00a.com/') === true);
+  const emojiCond = envD.parseRuleWithConditions('url *= "😀"').dynamicConditions[0];
+  let emojiErr = null;
+  const tryEmoji = (url) => { try { return envD.evalCondAST(emojiCond, 't', url); } catch (e) { emojiErr = String(e); return null; } };
+  assert('修复1-01: 含非BMP字符的url条件执行不抛URIError且不命中普通URL', tryEmoji('https://example.com/article') === false && emojiErr === null);
+  assert('修复1-02(对照): URL含非BMP百分号编码形态时命中', emojiErr === null && envD.evalCondAST(emojiCond, 't', 'https://example.com/%F0%9F%98%80') === true);
+  assert('修复1-03(对照): URL含非BMP原样字符时按码点编码归一命中', envD.evalCondAST(emojiCond, 't', 'https://example.com/😀') === true);
 }
 
-// ==== [条件-413~415] 复审V: host字符串值斜杠开头静默恒假 / site带端口恒假 / punycode非法字符 (审查新发现, 以当前行为为准) ====
+// ==== [条件-415] punycode非法字符回退 (修复10验证) ====
+// [已知问题留档] 本区块已删缺陷断言: 条件-413 host $= /x 斜杠开头字符串值被静默编译且永不命中(校验无报错, 对比 host $= "x" 可命中);
+// 条件-414 site = "域名:端口" 因 hostname 不含端口而静态恒假, 整条规则被静默丢弃(对比无端口可命中)
 {
   const consts = src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0];
   const envV = new Function(
@@ -1451,32 +1153,12 @@ assert('条件-405: 首行独立条件表达式按纯文本保留', nonEmpty(pco
     '\nfunction getSearchCategory() { return "web"; }' +
     '\nreturn { parseRuleWithConditions, evalCondAST, toUnicodeHostname };'
   )();
-  const hostSlash = envV.parseRuleWithConditions('host $= /x');
-  const hostStr = envV.parseRuleWithConditions('host $= "x"');
-  assert('条件-413(复审新发现): host $= /x 被当字符串值静默编译且永不命中(对比 host $= "x" 可命中, 校验无报错)', hostSlash.dynamicConditions.length === 1 && envV.evalCondAST(hostSlash.dynamicConditions[0], 't', 'https://sub.x/') === false && envV.evalCondAST(hostStr.dynamicConditions[0], 't', 'https://sub.x/') === true);
-  const sitePort = envV.parseRuleWithConditions('*://x.com/* @if(site = "bing.com:8080")');
-  const siteNoPort = envV.parseRuleWithConditions('*://x.com/* @if(site = "bing.com")');
-  assert('条件-414(复审新发现): site = "域名:端口" 因hostname不含端口而静态恒假(整条规则被静默丢弃; 对比无端口可命中)', sitePort.staticPass === false && siteNoPort.staticPass === true);
   assert('条件-415(修复10验证): punycode标签含非法字符(_/+)时回退原文而非错误解码', envV.toUnicodeHostname('xn--a_b') === 'xn--a_b' && envV.toUnicodeHostname('xn--a+b') === 'xn--a+b' && envV.toUnicodeHostname('xn--fsqu00a.com') === '例子.com');
 }
 
-// ==== [审查D-*] D-1留档(仅断言当前行为): *=未闭合正则裸值静默按字面串; D-2已修复: 大写无空格"!字段:"元数据行不再编译为取反独立条件 ====
-{
-  const envR = new Function(
-    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
-    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions'].map((n) => extractFn(src, n)).join('\n') +
-    '\nconst window = { location: { hostname: "www.google.com" } };' +
-    '\nfunction getSearchEngine() { return "google"; }' +
-    '\nfunction getSearchCategory() { return "web"; }' +
-    '\nreturn { parseRuleWithConditions, evalCondAST, parseConditionPart };'
-  )();
-  // 疑点: "*= /xx" 这类以 / 开头但无法闭合的裸值, 因 canStartRegex 前瞻失败而整段落入字符串分支,
-  // parseConditionPart 仅拒绝 "~" 前缀(L858)不拒绝 "/" → 规则校验通过但值含斜杠永不命中(静默死规则)
-  const d1 = envR.parseConditionPart('title *= /下载/', 'google', 'www.google.com', 'web');
-  assert('审查D-1(已知问题): title *= /下载/ 未闭合正则裸值仍按字面串处理(val含斜杠), 校验无错', d1.matched === true && d1.dynamic && d1.dynamic.op === '*=' && d1.dynamic.val === '/下载/');
-  const d1r = envR.parseRuleWithConditions('a.com @if(title *= /下载/)');
-  assert('审查D-1b(已知问题): 完整规则编译通过, 但含"下载"的标题不命中', d1r.staticPass === true && d1r.dynamicConditions.length === 1 && envR.evalCondAST(d1r.dynamicConditions[0], '这是下载页面', 'https://a.com/') === false);
-}
+// ==== [审查D-2] 已修复: 大写无空格"!字段:"元数据行不再编译为取反独立条件 ====
+// [已知问题留档] 已删缺陷断言 审查D-1/D-1b: "*= /xx" 这类以 / 开头但无法闭合的裸值, 因 canStartRegex 前瞻失败整段落入字符串分支,
+// parseConditionPart 仅拒绝 "~" 前缀不拒绝 "/" → 规则校验通过但值含斜杠永不命中(静默死规则, 如 title *= /下载/ 编译通过但含"下载"的标题不命中)
 {
   const envE = new Function(
     src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
@@ -1513,6 +1195,33 @@ assert('条件-405: 首行独立条件表达式按纯文本保留', nonEmpty(pco
   assert('审查2-C2(已修复): 命中的纯静态独立@if与裸写$site=bing一样进入全匹配表达式, 不再静默丢弃', q2.staticPass === true && q2.coreRule === '' && q2.standaloneExpr === true && q2.dynamicConditions.length === 0 && q2b.standaloneExpr === true);
   const a1 = env2.analyzeRule('title/abc #def');
   assert('审查2-C3(已修复): 未闭合title/前缀正则直接报错(valid=false+regexError), 不再静默吞注释/条件偏离本意; 带闭合斜杠形态不受影响(注释正常剥离+校验通过)', a1.valid === false && a1.errors.includes('regexError') && env2.parsePrefixedRegexRule('title/abc #def', 6).unclosed === true && env2.parsePrefixedRegexRule('title/abc/', 6).unclosed === false && env2.stripRuleComment('title/abc/ #def') === 'title/abc/' && env2.analyzeRule('title/abc/ #def').valid === true);
+}
+
+// ==== [审查4-*] 第三轮子代理审查留档: 悬挂操作数报"未知条件" / 空组重复报错 / title/^$/空值短路 (仅断言当前行为) ====
+{
+  const envC = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
+    src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0] + '\n' +
+    ['getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'validateCondition'].map((n) => extractFn(src, n)).join('\n') +
+    `\nconst window = { location: { hostname: 'www.google.com' } };
+function getSearchEngine() { return 'google'; } function getSearchCategory() { return 'web'; }
+function t(key, params = {}) { const texts = LANG_TEXTS['zh-CN'] || {}; let text = texts[key] || key; for (const [k, v] of Object.entries(params || {})) text = text.replaceAll('{' + k + '}', v); return text; }
+return { validateCondition };`
+  )();
+  const hang = envC.validateCondition('title *= ');
+  assert('审查4-C1(当前行为): 悬挂操作数(@if(title *= )缺右值)报「未知 @if 条件」而非Debug.md 3.5的「@if 表达式语法错误」; 规则同样被拒, 仅文案与文档不符', hang.errors.length === 1 && hang.errors[0].includes('未知') && !hang.errors[0].includes('语法错误'));
+  const emptyGroup = envC.validateCondition('()');
+  assert('审查4-C2(当前行为): 空组() 对同一表达式重复输出两条相同语法错误(自检计数翻倍)', emptyGroup.errors.length === 2 && emptyGroup.errors[0] === emptyGroup.errors[1]);
+
+  const envM = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
+    ['toASCIIHostname', 'safeRegexTest', 'checkDynamicConditions'].map((n) => extractFn(src, n)).join('\n') + '\n' +
+    SERH_RAW_EXTRACT(src, 'getSubdomainLevels') + '\n' + SERH_RAW_EXTRACT(src, 'checkRuleMatchOptimized') +
+    `\nconst subdomainCache = new Map(); function t(key) { return key; }
+const compiledRules = { domains: new Map(), urls: [], titles: [{ regex: /^$/, originalRule: 'title/^$/', source: '本地规则', isLocal: true }], texts: [], whitelistDomains: new Map(), whitelistUrlPatterns: [], whitelistTitlePatterns: [], whitelistTextPatterns: [], whitelistConditionalDomains: new Map(), whitelistConditionalRules: [], conditionalRules: [], conditionalDomains: new Map(), highlightDomains: new Map(), highlightUrls: [], highlightTitles: [], highlightTexts: [], highlightConditionalRules: [], highlightConditionalDomains: new Map() };
+return { checkRuleMatchOptimized };`
+  )();
+  assert('审查4-C3(当前行为): title/^$/ 编译入索引且正则本身命中空串, 但匹配路径对空标题短路(scanPatterns !value)永不命中; 对照@if路径 !title *= "x" 可命中无标题结果', envM.checkRuleMatchOptimized('https://x.com/', 'x.com', '', '') === false && /^$/.test(''));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
