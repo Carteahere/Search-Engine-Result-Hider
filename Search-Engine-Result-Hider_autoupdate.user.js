@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.5.1
+// @version      8.5.2
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -44,6 +44,7 @@
   const SUBSCRIPTION_URL_KEY = 'searchfilter_subscription_url', SUBSCRIPTION_LAST_UPDATE_KEY = 'searchfilter_subscription_last_update';
   const SUBSCRIPTION_RULES_KEY = 'searchfilter_subscription_rules', SUBSCRIPTIONS_KEY = 'searchfilter_subscriptions';
   const WEBDAV_LAST_SYNC_KEY = 'searchfilter_webdav_last_sync', LOCAL_LAST_MODIFIED_KEY = 'searchfilter_local_last_modified';
+  const SETTINGS_LAST_MODIFIED_KEY = 'searchfilter_settings_last_modified';
   const WEBDAV_AUTO_SYNC_KEY = 'searchfilter_webdav_auto_sync', WEBDAV_SYNC_CONFIG_KEY = 'searchfilter_webdav_sync_config';
   const WEBDAV_SYNC_SELECTORS_KEY = 'searchfilter_webdav_sync_selectors', WEBDAV_SYNC_SNAPSHOT_KEY = 'searchfilter_webdav_sync_snapshot';
   const SUBSCRIPTION_SYNC_SNAPSHOT_KEY = 'searchfilter_subscription_sync_snapshot'; const WEBDAV_LAST_SYNC_SELECTORS_KEY = 'searchfilter_webdav_last_sync_selectors'; const HL_STATS_REGEX = /^@\d+/;
@@ -52,32 +53,21 @@
   const RESULT_RETRY_LIMIT = 3, RESULT_RETRY_DELAY = 200;
 
   // 默认配置
+  const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', autoDark: true, exportConfig: false, showSubBtn: true, showSyncBtn: true, language: 'zh-CN' };
+  const DEFAULT_HIGHLIGHT_COLORS = {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'};
   function getDefaultConfig() {
     return {
       rules: ['*://*.example.com/*'],
-      enabled: true,
       showCount: false,
       bubbleSize: 30,
       debug: false,
-      showBlockBtn: false,
-      blockDomain: false,
-      blockConfirm: true,
-      showBubble: true,
       bubbleState: null,
-      panelCentered: true,
-      bubbleAction: 'openPanel',
-      language: 'zh-CN',
-      highlightColors: {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'},
       subscriptionAutoUpdate: false,
       errorDetection: true,
-      autoDark: true,
-      exportConfig: false
+      ...CFG_DEFAULTS,
+      highlightColors: { ...DEFAULT_HIGHLIGHT_COLORS }
     };
   }
-
-  // 兼容旧配置
-  const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', autoDark: true, exportConfig: false, language: 'zh-CN' };
-  const DEFAULT_HIGHLIGHT_COLORS = {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'};
   function normalizeConfig(cfg) {
     if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) cfg = {};
     if (!Array.isArray(cfg.rules)) cfg.rules = []; cfg.rules = cfg.rules.filter(rule => typeof rule === 'string');
@@ -267,8 +257,9 @@
   const LANG_TEXTS = {
     'zh-CN': {
       disableBlock: '临时禁用', showCount: '显示数量', debugMode: '调试模式',
-      enableFeature: '启用功能', blockDomain: '屏蔽域名', doubleConfirm: '二次确认',
+      enableFeature: '启用功能', blockDomain: '屏蔽域名', doubleConfirm: '二次确认', showMatchedSource: '来源显示',
       autoDark: '自动深色', exportConfig: '导出配置',
+      showSubBtn: '订阅按钮', showSyncBtn: '同步按钮',
       settingsBtn: '设置', settingsPanelTitle: '脚本设置',
       settingsSecBlock: '一键屏蔽', settingsSecUI: '界面显示', settingsSecOther: '其他设置',
       bubbleSize: '悬浮球:', blockRules: '屏蔽规则:', sync: '同步',
@@ -334,8 +325,9 @@
     },
     'en': {
       disableBlock: 'Disable Block', showCount: 'Show Count', debugMode: 'Debug Mode',
-      enableFeature: 'Enable Feature', blockDomain: 'Block Domain', doubleConfirm: 'Double Confirm',
+      enableFeature: 'Enable Feature', blockDomain: 'Block Domain', doubleConfirm: 'Double Confirm', showMatchedSource: 'Show Source',
       autoDark: 'Auto Dark', exportConfig: 'Export Config',
+      showSubBtn: 'Sub Button', showSyncBtn: 'Sync Button',
       settingsBtn: 'Settings', settingsPanelTitle: 'Script Settings',
       settingsSecBlock: 'One-click Block', settingsSecUI: 'Interface', settingsSecOther: 'Other',
       bubbleSize: 'Bubble:', blockRules: 'Block Rules:', sync: 'Sync',
@@ -402,28 +394,19 @@
   };
 
   // Map
-  let compiledRules = {
-    domains: new Map(),
-    urls: [],
-    titles: [],
-    texts: [],
-    whitelistDomains: new Map(),
-    whitelistUrlPatterns: [],
-    whitelistTitlePatterns: [],
-    whitelistTextPatterns: [],
-    whitelistConditionalDomains: new Map(),
-    whitelistConditionalRules: [],
-    conditionalRules: [],
-    conditionalDomains: new Map(),
-    highlightDomains: new Map(),
-    highlightUrls: [],
-    highlightTitles: [],
-    highlightTexts: [],
-    highlightConditionalRules: [],
-    highlightConditionalDomains: new Map()
-  };
+  function newCompiledRules() {
+    return {
+      domains: new Map(), urls: [], titles: [], texts: [],
+      whitelistDomains: new Map(), whitelistUrlPatterns: [], whitelistTitlePatterns: [], whitelistTextPatterns: [],
+      whitelistConditionalDomains: new Map(), whitelistConditionalRules: [],
+      conditionalRules: [], conditionalDomains: new Map(),
+      highlightDomains: new Map(), highlightUrls: [], highlightTitles: [], highlightTexts: [],
+      highlightConditionalRules: [], highlightConditionalDomains: new Map()
+    };
+  }
+  let compiledRules = newCompiledRules();
 
-  const validationCache = new Map(); const subdomainCache = new Map(); let cachedSubscriptionRules = null; let _lineDebounceTimer = null; let forceReprocessBatchId = 0;
+  const validationCache = new Map(); const subdomainCache = new Map(); let cachedSubscriptionRules = null; let forceReprocessBatchId = 0;
   function t(key, params = {}) {
     const lang = currentConfig.language; const texts = LANG_TEXTS[lang] || LANG_TEXTS['zh-CN']; let text = texts[key] || key;
     for (const [k, v] of Object.entries(params)) {
@@ -431,6 +414,382 @@
     }
     return text;
   }
+
+  // 统一调用开始
+  function escHtml(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function showToast(message, type = 'info', duration = 3000) {
+    let container = document.getElementById('serh-toast-container');
+    if (!container) {
+      container = document.createElement('div'); container.id = 'serh-toast-container'; document.body.appendChild(container);
+    }
+
+    const panel = document.getElementById('serh-webdav-panel') ||
+      document.getElementById('serh-subscription-panel') ||
+      document.getElementById('serh-hlcolor-panel') ||
+      document.getElementById('serh-selector-panel') ||
+      document.getElementById('serh-settings-panel') ||
+      document.getElementById('serh-panel');
+    if (panel) {
+      if (container.parentElement !== panel) {
+        panel.appendChild(container);
+      }
+      const anchoredBottom = !!(panel.style && panel.style.bottom && panel.style.bottom !== 'auto'); container.style.position = 'absolute';
+      if (anchoredBottom) {
+        container.style.top = 'auto'; container.style.bottom = 'calc(100% + 4px)';
+      } else {
+        container.style.top = 'calc(100% + 4px)'; container.style.bottom = '';
+      }
+      container.style.left = '0'; container.style.right = '0'; container.style.width = 'auto'; container.style.maxWidth = 'none';
+    } else {
+      if (container.parentElement !== document.body) {
+        document.body.appendChild(container);
+      }
+      container.style.position = ''; container.style.top = ''; container.style.right = ''; container.style.left = ''; container.style.bottom = ''; container.style.width = '';
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `serh-toast serh-toast-${type}`;
+    toast.textContent = message; container.appendChild(toast); requestAnimationFrame(() => toast.classList.add('show'));
+
+    let timer = null;
+    const dismiss = () => {
+      if (!toast.parentElement) return; clearTimeout(timer); toast.classList.remove('show'); toast.addEventListener('transitionend', () => toast.remove(), { once: true });
+      setTimeout(() => toast.remove(), 400);
+    };
+    toast.addEventListener('click', dismiss); timer = setTimeout(dismiss, duration); return { dismiss };
+  }
+
+  const RULE_PREFIX_RE = /^(?:title|text|host|path|url|scheme)\//i;
+  const RULE_PREFIX_REGEX_RE = /^(?:title|text|host|path|url|scheme)\/(?:[^/\\]|\\.)*\//i;
+  const RULE_LEADING_REGEX_RE = /^\/(?:[^/\\]|\\.)*\//;
+  const REGEX_CTX_A = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*=~$/i;
+  const REGEX_CTX_B = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)$/i;
+
+  function scanRuleString(str, mode) {
+    const strip = mode === 'strip';
+    const n = str.length;
+    let i = 0;
+    while (i < n && /\s/.test(str[i])) i++;
+    if (str[i] === '@' && str.substr(i + 1, 2).toLowerCase() !== 'if') {
+      i++; while (i < n && /\d/.test(str[i])) i++; while (i < n && /\s/.test(str[i])) i++;
+    }
+    let inRE = false, inReClass = false, inSQ = false, inDQ = false;
+    let ifDepth = 0, atIf = false, justClosedIf = false;
+    const body = str.slice(i);
+    if (RULE_LEADING_REGEX_RE.test(body)) { i += 1; inRE = true; }
+    else if (RULE_PREFIX_REGEX_RE.test(body)) { i += RULE_PREFIX_RE.exec(body)[0].length; inRE = true; }
+    const occurrences = [];
+    for (; i < n; i++) {
+      const ch = str[i];
+      if (inSQ) { if (ch === '\\') i++; else if (ch === "'") inSQ = false; continue; }
+      if (inDQ) { if (ch === '\\') i++; else if (ch === '"') inDQ = false; continue; }
+      if (inRE) {
+        if (ch === '\\') { i++; continue; }
+        if (inReClass) { if (ch === ']') inReClass = false; continue; }
+        if (ch === '[') { inReClass = true; continue; }
+        if (ch === '/') inRE = false;
+        continue;
+      }
+      if (strip && atIf) {
+        if (ch === '(') { ifDepth = 1; atIf = false; continue; }
+        if (!/\s/.test(ch)) atIf = false;
+        continue;
+      }
+      if (ch === "'") { inSQ = true; continue; }
+      if (ch === '"') { inDQ = true; continue; }
+      if (ch === '/' && !inRE) {
+        const prev = str.slice(0, i).trimEnd();
+        if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev)) { inRE = true; continue; }
+      }
+      if (justClosedIf) {
+        if (/\s/.test(ch)) continue;
+        justClosedIf = false;
+        if (ch === '/') { inRE = true; continue; }
+        const prefixM = RULE_PREFIX_RE.exec(str.slice(i));
+        if (prefixM) { i += prefixM[0].length; inRE = true; continue; }
+      }
+      if (ch === '@' && str.substr(i, 3).toLowerCase() === '@if') {
+        const prevChar = i > 0 ? str[i - 1] : '';
+        const isBoundary = i === 0 || /\s/.test(prevChar) || prevChar === '@' || prevChar === '(' || prevChar === ')';
+        if (strip) {
+          if (isBoundary) atIf = true;
+          i += 2; continue;
+        }
+        if (isBoundary) {
+          let j = i + 3; while (j < n && /\s/.test(str[j])) j++;
+          if (str[j] === '(') {
+            const end = findBalancedParenEnd(str, j);
+            occurrences.push({ index: i, condStart: j, endIndex: end });
+            if (end !== -1) { i = end; justClosedIf = true; }
+          }
+        }
+        continue;
+      }
+      if (strip) {
+        if (ch === '(' && ifDepth > 0) { ifDepth++; continue; }
+        if (ch === ')' && ifDepth > 0) { ifDepth--; if (ifDepth === 0) justClosedIf = true; continue; }
+        if (ch === '#' && ifDepth === 0) {
+          const prev = str[i - 1];
+          if (prev === undefined || /\s/.test(prev)) {
+            let end = i; while (end > 0 && /\s/.test(str[end - 1])) end--;
+            return { stripped: str.slice(0, end), occurrences };
+          }
+        }
+      }
+    }
+    return { stripped: str, occurrences };
+  }
+
+  function findBalancedParenEnd(str, openIdx) {
+    let depth = 0; let inSQ = false; let inDQ = false; let inRE = false; let inReClass = false;
+    for (let i = openIdx; i < str.length; i++) {
+      const ch = str[i];
+      if (inSQ) { if (ch === '\\') i++; else if (ch === "'") inSQ = false; continue; }
+      if (inDQ) { if (ch === '\\') i++; else if (ch === '"') inDQ = false; continue; }
+      if (inRE) {
+        if (ch === '\\') { i++; continue; }
+        if (inReClass) { if (ch === ']') inReClass = false; continue; }
+        if (ch === '[') { inReClass = true; continue; }
+        if (ch === '/') { inRE = false; continue; }
+        continue;
+      }
+      if (ch === "'") { inSQ = true; continue; }
+      if (ch === '"') { inDQ = true; continue; }
+      if (ch === '/') {
+        const prev = str.slice(0, i).trimEnd();
+        if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev)) { inRE = true; continue; }
+      }
+      if (ch === '(') depth++;
+      else if (ch === ')') { depth--; if (depth === 0) return i; }
+    }
+    return -1;
+  }
+
+  function extractBalancedParens(str, startIndex) {
+    if (str[startIndex] !== '(') return null;
+    const end = findBalancedParenEnd(str, startIndex);
+    return end === -1 ? null : { content: str.substring(startIndex + 1, end), endIndex: end + 1 };
+  }
+
+  function stripRuleComment(line) {
+    return scanRuleString(String(line), 'strip').stripped;
+  }
+
+  function findIfOccurrences(ruleStr) {
+    return scanRuleString(ruleStr, 'scan').occurrences.map(o => ({ index: o.index, condStart: o.condStart }));
+  }
+
+  const LINE_NUM_CHUNK = 200;
+  const lineNumTargets = {
+    rules: { textareaId: 'serh-rules', lineNumsId: 'serh-line-numbers', syntaxCheck: true, pending: false, dirty: false, token: 0, timer: null },
+    selectors: { textareaId: 'serh-sel-rules', lineNumsId: 'serh-sel-line-numbers', syntaxCheck: false, pending: false, dirty: false, token: 0, timer: null }
+  };
+
+  function updateLineNumbersIncremental(key) {
+    const target = lineNumTargets[key || 'rules'];
+    const textarea = document.getElementById(target.textareaId); const lineNums = document.getElementById(target.lineNumsId);
+    if (!textarea || !lineNums) {
+      target.pending = false; return;
+    }
+
+    const lines = textarea.value.split('\n'); const len = lines.length; const token = ++target.token;
+    lineNums.style.minWidth = `max(20px, calc(${String(len).length}ch + 8px))`;
+
+    let index = 0;
+    const step = () => {
+      if (token !== target.token) return;
+      if (!lineNums.isConnected) {
+        target.pending = false; target.dirty = false; return;
+      }
+
+      const children = lineNums.children;
+      while (children.length > len) {
+        lineNums.removeChild(children[children.length - 1]);
+      }
+
+      const end = Math.min(index + LINE_NUM_CHUNK, len); const frag = document.createDocumentFragment();
+      for (let i = index; i < end; i++) {
+        let node = children[i];
+        if (!node) {
+          node = document.createElement('div'); node.style.position = 'relative'; node.style.color = '#a0aec0'; node.style.height = '1.4em'; frag.appendChild(node);
+        }
+        const analysis = target.syntaxCheck && currentConfig.errorDetection !== false ? cachedAnalyzeRule(lines[i]) : { valid: true, errors: [], warnings: [] }; const valid = analysis.valid;
+        const errMsg = valid ? '' : analysis.errors.join(' | ');
+        const html = `${i + 1}${valid ? '' : `<span class="serh-line-error" title="${escHtml(errMsg)}" data-error="${escHtml(errMsg)}" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 10px; background: #edf2f7; z-index: 1; cursor: pointer;">⚠️</span>`}`;
+        if (node.dataset.v !== html) {
+          node.innerHTML = html; node.dataset.v = html;
+        }
+      }
+      if (frag.childNodes.length > 0) {
+        lineNums.appendChild(frag);
+      }
+
+      index = end;
+      if (index < len) {
+        requestAnimationFrame(step); return;
+      }
+
+      if (target.dirty) {
+        target.dirty = false; requestAnimationFrame(() => updateLineNumbersIncremental(key));
+      } else {
+        target.pending = false;
+      }
+    };
+    requestAnimationFrame(step);
+  }
+
+  function scheduleLineNumbersUpdate(key = 'rules') {
+    const target = lineNumTargets[key];
+    if (target.timer) clearTimeout(target.timer);
+    target.timer = setTimeout(() => {
+      target.timer = null; updateLineNumbers(key);
+    }, 100);
+  }
+
+  function updateLineNumbers(key = 'rules') {
+    const target = lineNumTargets[key];
+    if (target.pending) {
+      target.dirty = true; return;
+    }
+    target.pending = true; updateLineNumbersIncremental(key);
+  }
+
+  function getPanelPositionStyles() {
+    const statusBtn = document.getElementById('serh-status');
+    if (currentConfig.panelCentered) {
+      return `top: 60%; left: 50%; transform: translate(-50%, -50%);`;
+    }
+
+    let rect;
+    if (statusBtn) {
+      rect = statusBtn.getBoundingClientRect();
+    } else {
+      rect = {
+        left: window.innerWidth - 50,
+        right: window.innerWidth - 10,
+        top: window.innerHeight - 50,
+        bottom: window.innerHeight - 10,
+        width: 40,
+        height: 40
+      };
+    }
+    const centerX = rect.left + rect.width / 2; const centerY = rect.top + rect.height / 2; const isLeft = centerX < window.innerWidth / 2; const isTop = centerY < window.innerHeight / 2;
+
+    if (isLeft && isTop) return 'top: 10px; left: 10px; transform: none;'; if (!isLeft && isTop) return 'top: 10px; right: 10px; transform: none;';
+    if (isLeft && !isTop) return 'bottom: 10px; left: 10px; transform: none;'; return 'bottom: 10px; right: 10px; transform: none;';
+  }
+
+  function createPanel(id, width = '320px', padding = '15px') {
+    const panel = document.createElement('div'); panel.id = id; panel.classList.add('serh-panel-fade', 'serh-window');
+    panel.style.cssText = `
+        position: fixed;
+        ${getPanelPositionStyles()}
+        width: ${width};
+        z-index: 10001;
+        padding: ${padding};
+        display: flex;
+        flex-direction: column;
+    `;    document.body.appendChild(panel);
+    requestAnimationFrame(() => requestAnimationFrame(() => panel.classList.add('show'))); return panel;
+  }
+
+  function fadeOutAndRemovePanel(panel, onClosed) {
+    panel.classList.remove('show'); let done = false;
+    const finish = () => {
+      if (done) return; done = true; panel.remove(); if (onClosed) onClosed();
+      if (!isSerhPanelOpen()) {
+        checkAutoSubscription(); checkAutoWebDAV();
+      }
+    };
+    panel.addEventListener('transitionend', finish, { once: true }); setTimeout(finish, 350);
+  }
+
+  function bindOutsideClickClose(panel, onBeforeClose) {
+    let pressStartedInside = false;
+    const pressHandler = (e) => {
+      pressStartedInside = panel.contains(e.target);
+    };
+    const closeHandler = (e) => {
+      if (preventPanelClose) return;
+      if (pressStartedInside) {
+        pressStartedInside = false; return;
+      }
+      if (!panel.contains(e.target)) closePanel();
+    };
+    const closePanel = () => {
+      try {
+        if (typeof onBeforeClose === 'function') onBeforeClose();
+      } catch (err) {
+        console.error('[面板] 关闭前回调失败:', err);
+      }
+      document.removeEventListener('click', closeHandler); document.removeEventListener('pointerdown', pressHandler); document.removeEventListener('mousedown', pressHandler);
+      panel._cleanupClick = null; fadeOutAndRemovePanel(panel);
+    };
+    panel._cleanupClick = () => {
+      document.removeEventListener('click', closeHandler); document.removeEventListener('pointerdown', pressHandler); document.removeEventListener('mousedown', pressHandler);
+    };
+    setTimeout(() => {
+      if (panel.isConnected) {
+        document.addEventListener('pointerdown', pressHandler); document.addEventListener('mousedown', pressHandler); document.addEventListener('click', closeHandler);
+      }
+    }, 200);
+    return closePanel;
+  }
+
+  // 注入面板
+  function openPanel(id, { width = '320px', padding = '15px', beforeClose = null, onExisting = null, bindClose = true } = {}) {
+    injectWidgetStyles();
+    const existing = document.getElementById(id);
+    if (existing) {
+      if (typeof existing._cleanupClick === 'function') existing._cleanupClick();
+      if (onExisting) onExisting(existing);
+      existing.remove();
+      return null;
+    }
+    const panel = createPanel(id, width, padding);
+    return { panel, closePanel: bindClose ? bindOutsideClickClose(panel, beforeClose) : null };
+  }
+
+  function subscriptionsSignature(subs) {
+    return JSON.stringify((Array.isArray(subs) ? subs : [])
+      .filter(s => s && s.url)
+      .map(s => [s.url, s.name || '', s.enabled !== false])
+      .sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  }
+
+  function buildDavPutHeaders(headers, uploadedTime, guard = null) {
+    const putHeaders = {
+      ...headers,
+      'Content-Type': 'text/plain; charset=utf-8',
+      'X-OC-Mtime': Math.floor(uploadedTime / 1000).toString()
+    };
+    if (guard) {
+      if (guard.ifNoneMatch) putHeaders['If-None-Match'] = '*';
+      else if (guard.etag) putHeaders['If-Match'] = guard.etag;
+      else if (guard.lastMod) putHeaders['If-Unmodified-Since'] = guard.lastMod;
+    }
+    return putHeaders;
+  }
+
+  function persistSyncSnapshots(rules, { modifiedTime = null, settingsModifiedAt = null, subs = null, selectors = null } = {}) {
+    getSettingsModifiedTime(); if (settingsModifiedAt !== null && GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) GM_setValue(SETTINGS_LAST_MODIFIED_KEY, settingsModifiedAt);
+    if (modifiedTime !== null) GM_setValue(LOCAL_LAST_MODIFIED_KEY, modifiedTime);
+    setRuleSyncSnapshot(rules);
+    if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) setSubscriptionSyncSnapshot(subs || getSubscriptions());
+    if (GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false) && selectors !== null) setSelectorSyncSnapshot(selectors);
+  }
+
+  async function putWebDAVRules(ctx, content, uploadedTime, remotePreserved, putHeaders) {
+    const settingsModifiedAt = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) ? (ctx.settingsModifiedAt ?? getSettingsModifiedTime()) : null;
+    const rulesModifiedAt = ctx.rulesModifiedAt ?? uploadedTime; const selectors = GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false) ? getUserSelectors() : null;
+    const uploadData = buildUploadContent(content, rulesModifiedAt, { ...remotePreserved, settingsModifiedAt });
+    await gmPutWebDAV(ctx.fullUrl, { headers: putHeaders, data: uploadData }, ctx.folderUrl, ctx.headers);
+    persistSyncSnapshots(ctx.rules, { modifiedTime: rulesModifiedAt, settingsModifiedAt, subs: ctx.subs, selectors });
+  }
+  // 统一调用结束
 
   function hostLabelToASCII(label) {
     const s = String(label || ''); if (!s || s === '*' || /^[a-z0-9_-]*$/i.test(s)) return s;
@@ -519,6 +878,10 @@
     }
   }
 
+  function encodeNonAscii(str) {
+    const s = String(str ?? ''); return /[^\x00-\x7F]/.test(s) ? s.replace(/[^\x00-\x7F]/gu, ch => encodeURIComponent(ch)) : s;
+  }
+
   function filterValidRuleLines(lines) {
     return lines
       .map(line => line.trim())
@@ -527,69 +890,6 @@
 
   function getRuleKey(r) {
     if (!r || typeof r !== 'string') return ''; const trimmed = r.trim(); if (trimmed.startsWith('#')) return trimmed; const stripped = stripRuleComment(trimmed); return stripped.trim();
-  }
-
-  function stripRuleComment(line) {
-    const n = line.length; let i = 0; while (i < n && /\s/.test(line[i])) i++;
-    if (line[i] === '@' && line.substr(i + 1, 2).toLowerCase() !== 'if') {
-      i++; while (i < n && /\d/.test(line[i])) i++; while (i < n && /\s/.test(line[i])) i++;
-    }
-    const body = line.slice(i); const prefixRegexMatch = body.match(/^(?:title|text|host|path|url|scheme)\/(?:[^/\\]|\\.)*\//i); let inRE = false; let justClosedIf = false;
-    if (/^\/(?:[^/\\]|\\.)*\//.test(body)) {
-      i += 1; inRE = true;
-    } else if (prefixRegexMatch) {
-      const prefix = body.match(/^(?:title|text|host|path|url|scheme)\//i)[0]; i += prefix.length; inRE = true;
-    }
-    let inReClass = false; let inSQ = false; let inDQ = false; let ifDepth = 0; let atIf = false;
-    for (; i < n; i++) {
-      const ch = line[i];
-      if (inSQ) {
-        if (ch === '\\') i++; else if (ch === "'") inSQ = false; continue;
-      }
-      if (inDQ) {
-        if (ch === '\\') i++; else if (ch === '"') inDQ = false; continue;
-      }
-      if (inRE) {
-        if (ch === '\\') { i++; continue; }
-        if (inReClass) {
-          if (ch === ']') inReClass = false; continue;
-        }
-        if (ch === '[') { inReClass = true; continue; }
-        if (ch === '/') inRE = false; continue;
-      }
-      if (atIf) {
-        if (ch === '(') { ifDepth = 1; atIf = false; continue; }
-        if (!/\s/.test(ch)) atIf = false; continue;
-      }
-      if (ch === "'") { inSQ = true; continue; }
-      if (ch === '"') { inDQ = true; continue; }
-      if (ch === '/' && !inRE) {
-        const prev = line.slice(0, i).trimEnd();
-        if (/(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*=~$/i.test(prev) || /(?:^|[\s(&|!])(?:title|url|host|path|scheme)$/i.test(prev)) {
-          inRE = true; continue;
-        }
-      }
-      if (justClosedIf) {
-        if (/\s/.test(ch)) continue; justClosedIf = false;
-        if (ch === '/') { inRE = true; continue; }
-        const prefixM = /^(?:title|text|host|path|url|scheme)\//i.exec(line.slice(i));
-        if (prefixM) { i += prefixM[0].length; inRE = true; continue; }
-      }
-      if (ch === '@' && line.substr(i, 3).toLowerCase() === '@if') {
-        const prevChar = i > 0 ? line[i - 1] : ''; if (i === 0 || /\s/.test(prevChar) || prevChar === '@' || prevChar === '(' || prevChar === ')') atIf = true; i += 2; continue;
-      }
-      if (ch === '(' && ifDepth > 0) { ifDepth++; continue; }
-      if (ch === ')' && ifDepth > 0) { ifDepth--; if (ifDepth === 0) justClosedIf = true; continue; }
-      if (ch === '#') {
-        if (ifDepth === 0) {
-          const prev = line[i - 1];
-          if (prev === undefined || /\s/.test(prev)) {
-            let end = i; while (end > 0 && /\s/.test(line[end - 1])) end--; return line.slice(0, end);
-          }
-        }
-      }
-    }
-    return line;
   }
 
   // 条件表达式
@@ -773,7 +1073,7 @@
           const host = raw.split(/[/?#]/)[0]; const ascii = toASCIIHostname(host.replace(/:\d+$/, ''));
           if (ascii && ascii !== host) out = ascii + raw.slice(host.length);
         }
-        out = out.replace(/[^\x00-\x7F]/g, ch => encodeURIComponent(ch)); return out.toLowerCase();
+        out = encodeNonAscii(out); return out.toLowerCase();
       };
       const cmpUrl = foldUrl(cond.op === '=~' ? '' : cond.val); const urlHit = (pred) => pred(lowerUrl) || pred(foldUrl(url));
       if (cond.op === '=') return urlHit(v => v === cmpUrl); if (cond.op === '^=') return urlHit(v => v.startsWith(cmpUrl));
@@ -905,107 +1205,6 @@
   function evaluateCondition(condStr, dynamicConditionsList) {
     const { ast, errors } = analyzeCondExpr(condStr); if (errors.length || !ast) return false; const folded = foldCondExpr(ast); if (folded.type === 'const') return folded.value;
     dynamicConditionsList.push(folded); return true;
-  }
-
-  function extractBalancedParens(str, startIndex) {
-    if (str[startIndex] !== '(') return null; let depth = 0; let inSQ = false; let inDQ = false; let inRE = false; let inReClass = false;
-    for (let i = startIndex; i < str.length; i++) {
-      const ch = str[i];
-      if (inSQ) {
-        if (ch === '\\') { i++; continue; }
-        if (ch === "'") inSQ = false; continue;
-      }
-      if (inDQ) {
-        if (ch === '\\') { i++; continue; }
-        if (ch === '"') inDQ = false; continue;
-      }
-      if (inRE) {
-        if (ch === '\\') { i++; continue; }
-        if (inReClass) {
-          if (ch === ']') inReClass = false; continue;
-        }
-        if (ch === '[') { inReClass = true; continue; }
-        if (ch === '/') inRE = false; continue;
-      }
-      if (ch === '\\') { i++; continue; }
-      if (ch === "'") { inSQ = true; continue; }
-      if (ch === '"') { inDQ = true; continue; }
-      if (ch === '/') {
-        const prev = str.slice(0, i).trimEnd();
-        if (/(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*=~$/i.test(prev) || /(?:^|[\s(&|!])(?:title|url|host|path|scheme)$/i.test(prev)) {
-          inRE = true; continue;
-        }
-      }
-      if (ch === '(') depth++;
-      else if (ch === ')') {
-        depth--;
-        if (depth === 0) {
-          return {
-            content: str.substring(startIndex + 1, i),
-            endIndex: i + 1
-          };
-        }
-      }
-    }
-    return null;
-  }
-
-  function findIfOccurrences(ruleStr) {
-    const occurrences = []; const n = ruleStr.length; let start = 0;
-    if (ruleStr[start] === '@') {
-      start++; while (start < n && /\d/.test(ruleStr[start])) start++; while (start < n && /\s/.test(ruleStr[start])) start++;
-    }
-    let i = 0; let inRE = false; let inReClass = false; let inSQ = false; let inDQ = false; let justClosedIf = false;
-    const prefixRegexMatch = /^(?:url|host|path|scheme|title|text)\/(?:[^/\\]|\\.)*\//i.exec(ruleStr.slice(start));
-    if (ruleStr[start] === '/' && /^\/(?:[^/\\]|\\.)*\//.test(ruleStr.slice(start))) {
-      inRE = true; i = start + 1;
-    } else if (prefixRegexMatch) {
-      const prefix = /^(?:url|host|path|scheme|title|text)\//i.exec(ruleStr.slice(start))[0]; inRE = true; i = start + prefix.length;
-    }
-    for (; i < n; i++) {
-      const ch = ruleStr[i];
-      if (inSQ) {
-        if (ch === '\\') i++; else if (ch === "'") inSQ = false; continue;
-      }
-      if (inDQ) {
-        if (ch === '\\') i++; else if (ch === '"') inDQ = false; continue;
-      }
-      if (inRE) {
-        if (ch === '\\') { i++; continue; }
-        if (inReClass) {
-          if (ch === ']') inReClass = false; continue;
-        }
-        if (ch === '[') { inReClass = true; continue; }
-        if (ch === '/') inRE = false; continue;
-      }
-      if (ch === "'") { inSQ = true; continue; }
-      if (ch === '"') { inDQ = true; continue; }
-      if (ch === '/' && !inRE) {
-        const prev = ruleStr.slice(0, i).trimEnd();
-        if (/(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*=~$/i.test(prev) || /(?:^|[\s(&|!])(?:title|url|host|path|scheme)$/i.test(prev)) {
-          inRE = true; continue;
-        }
-      }
-      if (justClosedIf) {
-        if (/\s/.test(ch)) continue; justClosedIf = false;
-        if (ch === '/') { inRE = true; continue; }
-        const prefixM = /^(?:url|host|path|scheme|title|text)\//i.exec(ruleStr.slice(i));
-        if (prefixM) { i += prefixM[0].length; inRE = true; continue; }
-      }
-      if (ch === '@' && ruleStr.substr(i, 3).toLowerCase() === '@if') {
-        const prevChar = i > 0 ? ruleStr[i - 1] : ''; const isBoundary = i === 0 || /\s/.test(prevChar) || prevChar === '@' || prevChar === '(' || prevChar === ')';
-        if (!isBoundary) {
-          continue;
-        }
-        let j = i + 3; while (j < n && /\s/.test(ruleStr[j])) j++;
-        if (ruleStr[j] === '(') {
-          occurrences.push({ index: i, condStart: j }); const parenResult = extractBalancedParens(ruleStr, j);
-          if (parenResult) { i = parenResult.endIndex - 1; justClosedIf = true; }
-        }
-        continue;
-      }
-    }
-    return occurrences;
   }
 
   function stripIfConditions(ruleStr, evaluateCond) {
@@ -1266,9 +1465,7 @@
         if (!label || label === '*' || label.includes('\\') || /^[\x00-\x7F]*$/.test(label)) return label; return hostLabelToASCII(label);
       }).join('.');
     }
-    if (!isHost && part && /[^\x00-\x7F]/.test(part)) {
-      part = part.replace(/[^\x00-\x7F]/g, ch => encodeURIComponent(ch));
-    }
+    if (!isHost) part = encodeNonAscii(part);
     let out = ''; let i = 0;
     if (isHost && part.startsWith('*.')) {
       out += '(?:[^/]*\\.)?'; i = 2;
@@ -1454,26 +1651,7 @@
     const signature = JSON.stringify([currentConfig.rules, subscriptionRules, currentConfig.language, pageContext]); if (compiledRules && compiledRules.indexSignature === signature) return;
     validationCache.clear(); subdomainCache.clear(); if (ruleToRegex._memo) ruleToRegex._memo.clear(); if (parsePrefixedRegexRule._memo) parsePrefixedRegexRule._memo.clear();
     if (compileRuleRegex._memo) compileRuleRegex._memo.clear();
-    compiledRules = {
-      domains: new Map(),
-      urls: [],
-      titles: [],
-      texts: [],
-      whitelistDomains: new Map(),
-      whitelistUrlPatterns: [],
-      whitelistTitlePatterns: [],
-      whitelistTextPatterns: [],
-      whitelistConditionalDomains: new Map(),
-      whitelistConditionalRules: [],
-      conditionalRules: [],
-      conditionalDomains: new Map(),
-      highlightDomains: new Map(),
-      highlightUrls: [],
-      highlightTitles: [],
-      highlightTexts: [],
-      highlightConditionalRules: [],
-      highlightConditionalDomains: new Map()
-    };
+    compiledRules = newCompiledRules();
     compiledRules.indexSignature = signature; const allRules = currentConfig.rules.concat(subscriptionRules); const subscriptions = getSubscriptions();
     const localRuleCount = currentConfig.rules.length; const subscriptionSources = [];
     subscriptions.forEach((sub, idx) => {
@@ -1675,7 +1853,6 @@
     };
     const lowerDomain = toASCIIHostname(domain);
 
-    // 通用扫描
     const scanDomainMap = (map, filter) => {
       for (const level of subdomainLevels) {
         const entries = map.get(level); if (!entries) continue;
@@ -1845,7 +2022,7 @@
   }
 
   function resolveUrlDomain(link) {
-    const rawUrl = getCleanUrl(link); let url = toASCIIUrl(rawUrl) || rawUrl; if (/[^\x00-\x7F]/.test(url)) url = url.replace(/[^\x00-\x7F]/g, ch => encodeURIComponent(ch)); let domain = '';
+    const rawUrl = getCleanUrl(link); let url = encodeNonAscii(toASCIIUrl(rawUrl) || rawUrl); let domain = '';
     try {
       domain = toASCIIHostname(new URL(url).hostname);
     } catch (e) {}
@@ -2220,9 +2397,17 @@
     if (!el || el.hasAttribute('data-serh-orig-display')) return; el.setAttribute('data-serh-orig-display', el.style.display || '');
   }
 
+  function googleResultBlocks(parent) {
+    if (!parent || typeof parent.querySelectorAll !== 'function') return [];
+    return Array.from(parent.querySelectorAll('div.g, div.tF2Cxc, div.MjjYud'));
+  }
+
+  function visibleUnblocked(el) {
+    return el.style.display !== 'none' && el.getAttribute('data-is-blocked') !== 'true';
+  }
+
   function hideParentIfNoVisibleSiblings(parent, children, attr) {
-    const hasVisible = Array.from(children).some(el =>
-      el.style.display !== 'none' && el.getAttribute('data-is-blocked') !== 'true');
+    const hasVisible = Array.from(children).some(visibleUnblocked);
     if (!hasVisible) {
       saveOriginalDisplay(parent); parent.style.display = showHiddenResults ? '' : 'none'; parent.setAttribute(attr, 'true');
     }
@@ -2250,7 +2435,7 @@
     }
     const googleParent = result.closest ? result.closest('[data-blocker-google-parent]') : null;
     if (googleParent) {
-      const stillHasBlockedHidden = Array.from(googleParent.querySelectorAll('div.g')).some(el =>
+      const stillHasBlockedHidden = googleResultBlocks(googleParent).some(el =>
         el !== result && el.getAttribute('data-is-blocked') === 'true' && el.style.display === 'none');
       const parentOrig = googleParent.getAttribute('data-serh-orig-display');
       if (stillHasBlockedHidden) {
@@ -2278,9 +2463,7 @@
       if (hasVisibleUnblocked) restoreParentDisplay(parent);
     });
     document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
-      const hasVisibleUnblocked = Array.from(parent.querySelectorAll('div.g')).some(el =>
-        el.style.display !== 'none' && el.getAttribute('data-is-blocked') !== 'true');
-      if (hasVisibleUnblocked) restoreParentDisplay(parent);
+      if (googleResultBlocks(parent).some(visibleUnblocked)) restoreParentDisplay(parent);
     });
   }
 
@@ -2309,7 +2492,7 @@
   }
 
   function addMatchedRuleLabel(result) {
-    if (!result.dataset.matchedRule) return; removeMatchedRuleLabel(result); const label = document.createElement('div'); label.className = 'serh-matched-rule';
+    if (currentConfig.showMatchedSource === false || !result.dataset.matchedRule) return; removeMatchedRuleLabel(result); const label = document.createElement('div'); label.className = 'serh-matched-rule';
     const sourceText = result.dataset.matchedSource || t('matchedRule'); const ruleText = result.dataset.matchedRule;
     label.textContent = `${sourceText}: ${ruleText}`;
     ensurePositioned(result); result.appendChild(label);
@@ -2341,14 +2524,12 @@
       saveOriginalDisplay(result); result.style.display = showHiddenResults ? '' : 'none'; setResultExtraElementsVisible(result, showHiddenResults);
       result.setAttribute('data-blocker-processed', 'true'); result.setAttribute('data-is-blocked', 'true');
 
-      // yandex空白
       if (engine === 'yandex') {
         const parent = result.parentElement; if (parent) hideParentIfNoVisibleSiblings(parent, parent.children, 'data-blocker-yandex-parent');
       }
 
-      // google空白
       if (engine === 'google' && result.matches && result.matches('div.g')) {
-        const parent = result.closest('div.MjjYud'); if (parent && parent !== result) hideParentIfNoVisibleSiblings(parent, parent.querySelectorAll('div.g'), 'data-blocker-google-parent');
+        const parent = result.closest('div.MjjYud'); if (parent && parent !== result) hideParentIfNoVisibleSiblings(parent, googleResultBlocks(parent), 'data-blocker-google-parent');
       }
 
       result.dataset.matchedRule = matchResult.rule || ''; result.dataset.matchedSource = matchResult.source || '';
@@ -2577,25 +2758,36 @@
   `;
 
   let widgetStylesInjected = false; let _globalStyleEl = null;
-  // 组件样式
   function injectWidgetStyles() {
     if (widgetStylesInjected) return; widgetStylesInjected = true;
     GM_addStyle(`
         /* 隔离 */
-        [id^="serh-"]:not(button) {
+        [id^="serh-"]:not(button),
+        #serh-settings-panel * {
             text-align: left !important; letter-spacing: normal !important; word-spacing: normal !important;
             text-transform: none !important; text-indent: 0 !important; text-shadow: none !important;
             text-decoration: none !important; direction: ltr !important;
             font-style: normal !important; font-variant: normal !important;
         }
 
-        #serh-panel, #serh-webdav-panel, #serh-subscription-panel, #serh-selector-panel, #serh-settings-panel {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
-            font-size: 13px !important; box-sizing: border-box !important; background: white !important;
+        /* 面板共用样式 */
+        .serh-window, .serh-window * {
+            box-sizing: border-box !important;
+        }
+        .serh-window {
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+            font-size: 13px !important; background: #ffffff !important; color: #2d3748 !important;
             border: 1px solid #e2e8f0 !important; border-radius: 8px !important;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important; text-align: left !important; line-height: 1.5 !important;
             transition: all 0.3s ease;
         }
+
+        #serh-settings-panel * { line-height: 1.2 !important; }
+        #serh-settings-panel label,
+        #serh-settings-panel span,
+        #serh-settings-panel select { font-weight: 400 !important; }
+        #serh-settings-panel span { font-size: inherit !important; }
+        #serh-settings-panel #serh-settings-close { font-size: 12px !important; }
 
         [id^="serh-"] button,
         .serh-button {
@@ -2604,7 +2796,7 @@
             white-space: nowrap !important; vertical-align: middle !important;
             appearance: none !important; -webkit-appearance: none !important; background-image: none !important;
             box-shadow: none !important; margin: 0 !important; outline: none !important; text-shadow: none !important;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
             transition: background-color 0.2s;
         }
 
@@ -2671,10 +2863,10 @@
             overflow-x: auto !important; overflow-y: auto !important; outline: none !important; box-shadow: none !important;
         }
 
-        #serh-rules::-webkit-scrollbar, #serh-sel-rules::-webkit-scrollbar { width: 6px; height: 0px; }
-        #serh-rules::-webkit-scrollbar-track, #serh-sel-rules::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
-        #serh-rules::-webkit-scrollbar-thumb, #serh-sel-rules::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
-        #serh-rules::-webkit-scrollbar-thumb:hover, #serh-sel-rules::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+        :is(#serh-rules, #serh-sel-rules)::-webkit-scrollbar { width: 6px; height: 0px; }
+        :is(#serh-rules, #serh-sel-rules, #serh-stats-content, #serh-subscription-rows-container)::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
+        :is(#serh-rules, #serh-sel-rules, #serh-stats-content, #serh-subscription-rows-container)::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
+        :is(#serh-rules, #serh-sel-rules, #serh-stats-content, #serh-subscription-rows-container)::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
 
         #serh-stats-panel {
             position: absolute; top: 10px; left: 15px; right: 15px; bottom: 50px;
@@ -2688,9 +2880,6 @@
         }
 
         #serh-stats-content::-webkit-scrollbar { width: 6px; }
-        #serh-stats-content::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
-        #serh-stats-content::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
-        #serh-stats-content::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
 
         /* 屏蔽按钮 */
         .serh-quick-block {
@@ -2719,9 +2908,7 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             font-size: 12px; text-align: left; line-height: 1.4; box-sizing: border-box;
         }
-        #serh-block-confirm-dialog .sfb-confirm-domain {
-            font-size: 11px; color: #718096; word-break: break-all; margin-bottom: 2px;
-        }
+        #serh-block-confirm-dialog .sfb-confirm-domain { font-size: 11px; color: #718096; word-break: break-all; margin-bottom: 2px; }
         #serh-block-confirm-dialog .sfb-confirm-option {
             display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0; padding: 0;
             border: none; background: transparent; font-weight: normal; white-space: nowrap;
@@ -2731,17 +2918,9 @@
             cursor: pointer !important; width: auto !important; height: auto !important; min-width: 0 !important;
             appearance: auto !important; -webkit-appearance: auto !important; display: inline-block !important;
         }
-        #serh-block-confirm-dialog .sfb-confirm-option-disabled {
-            cursor: not-allowed;
-            opacity: 0.6;
-        }
-        #serh-block-confirm-dialog .sfb-confirm-option-disabled input[type="radio"] {
-            cursor: not-allowed !important;
-        }
-        #serh-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule {
-            background: #edf2f7;
-            color: #a0aec0;
-        }
+        #serh-block-confirm-dialog .sfb-confirm-option-disabled { cursor: not-allowed; opacity: 0.6; }
+        #serh-block-confirm-dialog .sfb-confirm-option-disabled input[type="radio"] { cursor: not-allowed !important; }
+        #serh-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule { background: #edf2f7; color: #a0aec0; }
 
         .serh-switch input[type="checkbox"] {
             opacity: 0 !important; width: 0 !important; height: 0 !important;
@@ -2749,42 +2928,23 @@
             position: absolute !important; pointer-events: none !important;
             appearance: none !important; -webkit-appearance: none !important; border: none !important;
         }
-        #serh-block-confirm-dialog .sfb-confirm-label {
-            flex-shrink: 0; min-width: 36px; white-space: nowrap; font-size: 12px;
-        }
+        #serh-block-confirm-dialog .sfb-confirm-label { flex-shrink: 0; min-width: 36px; white-space: nowrap; font-size: 12px; }
         #serh-block-confirm-dialog .sfb-confirm-rule {
             flex: 1; min-width: 0; padding: 3px 6px; border: 1px solid #e2e8f0; border-radius: 4px;
             font-size: 11px; font-family: 'Consolas', 'Monaco', monospace; background: #f7fafc;
             color: #2d3748; outline: none; box-shadow: none; height: auto; box-sizing: border-box;
         }
-        #serh-block-confirm-dialog .sfb-confirm-rule:focus {
-            border-color: #3182ce;
-            background: #ffffff;
-        }
-        #serh-block-confirm-dialog .sfb-confirm-btns {
-            display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px;
-        }
-        #serh-block-confirm-dialog .sfb-confirm-btns .serh-button {
-            height: 24px;
-            padding: 0 10px;
-            font-size: 11px;
-        }
+        #serh-block-confirm-dialog .sfb-confirm-rule:focus { border-color: #3182ce; background: #ffffff; }
+        #serh-block-confirm-dialog .sfb-confirm-btns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+        #serh-block-confirm-dialog .sfb-confirm-btns .serh-button { height: 24px; padding: 0 10px; font-size: 11px; }
         @media (prefers-color-scheme: dark) {
             body.serh-dark-on #serh-block-confirm-dialog {
                 background: #171717; color: #f3f4f6; border-color: #374151;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.5);
             }
-            body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-rule {
-                background: #374151; border-color: #4b5563; color: #f3f4f6;
-            }
-            body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-rule:focus {
-                border-color: #60a5fa;
-                background: #374151;
-            }
-            body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule {
-                background: #1f2937;
-                color: #6b7280;
-            }
+            body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-rule { background: #374151; border-color: #4b5563; color: #f3f4f6; }
+            body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-rule:focus { border-color: #60a5fa; background: #374151; }
+            body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule { background: #1f2937; color: #6b7280; }
         }
 
         /* 快速跳转 */
@@ -2799,113 +2959,36 @@
         .serh-quick-block:hover { transform: scale(1.1); opacity: 1; }
 
         /* 隐藏按钮 */
-        .isv-r .serh-quick-block, 
-        .image-section .serh-quick-block,
-        g-img .serh-quick-block,
-        .is-extra-container .serh-quick-block { display: none !important; }
-        header .serh-quick-block,
-        [role="navigation"] .serh-quick-block,
-        [role="tablist"] .serh-quick-block,
-        [role="search"] .serh-quick-block,
-        g-scrolling-carousel .serh-quick-block,
-        #hdtb .serh-quick-block,
-        #appbar .serh-quick-block,
-        #searchform .serh-quick-block,
-        #top_nav .serh-quick-block,
-        #extabar .serh-quick-block { display: none !important; }
+        :is(.isv-r, .image-section, g-img, .is-extra-container) .serh-quick-block,
+        :is(header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav, #extabar) .serh-quick-block { display: none !important; }
 
-        #serh-webdav-panel,
-        #serh-subscription-panel {
-            height: 332px;
-            overflow: visible;
-        }
-
-        #serh-webdav-panel #serh-toast-container,
-        #serh-subscription-panel #serh-toast-container,
-        #serh-selector-panel #serh-toast-container {
-            max-width: none;
-            width: auto;
-            left: 0;
-            right: 0;
-        }
-
-        #serh-panel,
-        #serh-webdav-panel,
-        #serh-subscription-panel,
-        #serh-hlcolor-panel {
-        box-sizing: border-box !important; background: #ffffff !important; color: #2d3748 !important;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
-        border: 1px solid #e2e8f0 !important; border-radius: 8px !important;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important; text-align: left !important; line-height: 1.5 !important;
-        }
-
-        #serh-panel *,
-        #serh-webdav-panel *,
-        #serh-subscription-panel *,
-        #serh-selector-panel *,
-        #serh-hlcolor-panel * {
-        box-sizing: border-box !important;
-        }
+        :is(#serh-webdav-panel, #serh-subscription-panel) { height: 332px; overflow: visible; }
+        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-selector-panel) #serh-toast-container { max-width: none; width: auto; left: 0; right: 0; }
 
         @media (prefers-color-scheme: dark) {
-            body.serh-dark-on #serh-panel {
-        background: #171717 !important;
-        color: #f3f4f6 !important;
-        border-color: #374151 !important;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
-        }
             body.serh-dark-on #serh-panel .serh-option-label,
-            body.serh-dark-on #serh-panel .serh-compact-row span {
-            color: #f3f4f6 !important;
-        }
-            body.serh-dark-on #serh-panel .serh-rules-container,
-            body.serh-dark-on #serh-selector-panel .serh-rules-container {
-            border-color: #4b5563 !important;
-            background: #1E1F21 !important;
-        }
-            body.serh-dark-on #serh-line-numbers,
-            body.serh-dark-on #serh-sel-line-numbers {
-            background: #222629 !important; border-right-color: #4b5563 !important; color: #9ca3af !important;
-        }
-            body.serh-dark-on #serh-rules,
-            body.serh-dark-on #serh-sel-rules {
-            background: #1E1F21 !important;
-            color: #f3f4f6 !important;
-        }
-            body.serh-dark-on #serh-rules::placeholder {
-            color: #6b7280 !important;
-        }
-            body.serh-dark-on #serh-stats-panel {
-            background: #171717 !important;
-            border-color: #374151 !important;
-        }
-            body.serh-dark-on #serh-stats-content {
-            color: #f3f4f6 !important;
-        }
+            body.serh-dark-on #serh-panel .serh-compact-row span { color: #f3f4f6 !important; }
+            body.serh-dark-on :is(#serh-panel, #serh-selector-panel) .serh-rules-container { border-color: #4b5563 !important; background: #1E1F21 !important; }
+            body.serh-dark-on :is(#serh-line-numbers, #serh-sel-line-numbers) { background: #222629 !important; border-right-color: #4b5563 !important; color: #9ca3af !important; }
+            body.serh-dark-on :is(#serh-rules, #serh-sel-rules) { background: #1E1F21 !important; color: #f3f4f6 !important; }
+            body.serh-dark-on #serh-rules::placeholder { color: #6b7280 !important; }
+            body.serh-dark-on #serh-stats-panel { background: #171717 !important; border-color: #374151 !important; }
+            body.serh-dark-on #serh-stats-content { color: #f3f4f6 !important; }
             body.serh-dark-on #serh-panel .serh-compact-row button.serh-button {
-            height: auto !important; min-height: 0 !important; width: auto !important; min-width: 0 !important;
-            flex: 0 0 auto !important; line-height: normal !important; padding: 3px 8px !important;
-            font-size: 11px !important; margin: 0 !important;
-        }
-        }
-
-        #serh-webdav-panel *,
-        #serh-subscription-panel * {
-            box-sizing: border-box !important;
+                height: auto !important; min-height: 0 !important; width: auto !important; min-width: 0 !important;
+                flex: 0 0 auto !important; line-height: normal !important; padding: 3px 8px !important;
+                font-size: 11px !important; margin: 0 !important;
+            }
         }
 
-        #serh-webdav-panel h3,
-        #serh-subscription-panel h3,
-        #serh-hlcolor-panel h3 {
+        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-hlcolor-panel) h3 {
             margin: 0 0 8px 0 !important; font-size: 14px !important; color: inherit !important;
             font-weight: 600 !important; padding: 0 !important; border: none !important;
             background: transparent !important; letter-spacing: normal !important;
         }
 
         #serh-selector-panel h3 {
-            margin: 0 !important; font-size: 14px !important; color: inherit !important;
-            font-weight: 600 !important; padding: 0 !important; border: none !important;
-            background: transparent !important; letter-spacing: normal !important; line-height: 1.2 !important;
+            margin: 0 !important; line-height: 1.2 !important;
         }
 
         #serh-webdav-panel .serh-webdav-row {
@@ -2913,15 +2996,13 @@
             border: none !important; background: transparent !important; display: block !important;
         }
 
-        #serh-webdav-panel label,
-        #serh-subscription-panel label {
+        :is(#serh-webdav-panel, #serh-subscription-panel) label {
             display: block !important; margin: 0 0 4px 0 !important; color: #4a5568 !important;
             font-size: 12px !important; font-weight: normal !important; line-height: 1.2 !important;
         }
 
-        #serh-webdav-panel input[type="text"],
-        #serh-webdav-panel input[type="password"],
-        #serh-subscription-panel input[type="text"] {
+        :is(#serh-webdav-panel, #serh-subscription-panel) input[type="text"],
+        :is(#serh-webdav-panel, #serh-subscription-panel) input[type="password"] {
             width: 100% !important; padding: 6px 8px !important; margin: 0 !important;
             border: 1px solid #e2e8f0 !important; border-radius: 4px !important;
             font-size: 13px !important; background: #ffffff !important; color: #2d3748 !important;
@@ -2929,8 +3010,7 @@
             outline: none !important; display: block !important;
         }
 
-        #serh-webdav-panel input:focus,
-        #serh-subscription-panel input:focus {
+        :is(#serh-webdav-panel, #serh-subscription-panel) input:focus {
             border-color: #3182ce !important;
         }
 
@@ -2938,11 +3018,8 @@
             display: flex !important; gap: 8px !important; justify-content: flex-end !important; margin-top: 12px !important;
         }
 
-        #serh-webdav-panel .serh-button,
-        #serh-subscription-panel .serh-button,
-        #serh-hlcolor-panel .serh-button,
-        #serh-panel .serh-action-button,
-        #serh-selector-panel .serh-action-button {
+        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-hlcolor-panel) .serh-button,
+        :is(#serh-panel, #serh-selector-panel) .serh-action-button {
             height: 30px !important; min-height: 30px !important; max-height: 30px !important; padding: 0 12px !important;
             font-size: 13px !important; font-weight: 500 !important; box-sizing: border-box !important; margin: 0 !important;
             display: flex !important; align-items: center !important; justify-content: center !important;
@@ -2956,11 +3033,7 @@
         }
 
         @media (prefers-color-scheme: dark) {
-            body.serh-dark-on #serh-webdav-panel,
-            body.serh-dark-on #serh-subscription-panel,
-            body.serh-dark-on #serh-selector-panel,
-            body.serh-dark-on #serh-hlcolor-panel,
-            body.serh-dark-on #serh-settings-panel {
+            body.serh-dark-on .serh-window {
                 background: #171717 !important; color: #f3f4f6 !important; border-color: #374151 !important;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
             }
@@ -2994,17 +3067,14 @@
         .serh-panel-fade {
             opacity: 0;
             transform: translate(-50%, -48%);
-            transition: opacity 0.1s ease, transform 0.1s ease;
+            transition: all 0.3s ease;
         }
         .serh-panel-fade.show {
             opacity: 1;
             transform: translate(-50%, -50%);
         }
 
-        #serh-panel:not(.serh-panel-fade),
-        #serh-webdav-panel:not(.serh-panel-fade),
-        #serh-subscription-panel:not(.serh-panel-fade),
-        #serh-hlcolor-panel:not(.serh-panel-fade) {
+        .serh-window:not(.serh-panel-fade) {
             transition: opacity 0.1s ease;
         }
 
@@ -3019,9 +3089,6 @@
             scrollbar-width: thin; padding-right: 2px;
         }
         #serh-subscription-rows-container::-webkit-scrollbar { width: 6px; }
-        #serh-subscription-rows-container::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
-        #serh-subscription-rows-container::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
-        #serh-subscription-rows-container::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
         .serh-subscription-row {
             display: flex;
             flex-direction: column;
@@ -3071,12 +3138,7 @@
             flex: 1 !important;
         }
         @media (prefers-color-scheme: dark) {
-            body.serh-dark-on .serh-subscription-index {
-                color: #9ca3af;
-            }
-            body.serh-dark-on .serh-subscription-info {
-                color: #9ca3af;
-            }
+            body.serh-dark-on :is(.serh-subscription-index, .serh-subscription-info) { color: #9ca3af; }
         }
 
         /* 屏蔽灰底 */
@@ -3165,7 +3227,7 @@
         /* 开关 */
         .serh-switch {
             position: relative; display: inline-block; width: 28px; height: 16px;
-            margin-right: 6px; flex-shrink: 0;
+            margin-right: 6px; padding: 0 !important; flex-shrink: 0;
         }
 
         .serh-switch input {
@@ -3467,7 +3529,7 @@
         hideParentIfNoVisibleSiblings(parent, parent.children, 'data-blocker-yandex-parent');
       });
       document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
-        hideParentIfNoVisibleSiblings(parent, parent.querySelectorAll('div.g'), 'data-blocker-google-parent');
+        hideParentIfNoVisibleSiblings(parent, googleResultBlocks(parent), 'data-blocker-google-parent');
       });
     }
     const status = document.getElementById('serh-status');
@@ -3476,99 +3538,40 @@
     }
   }
 
-  // 行号/语法检查
-  let _lineUpdatePending = false; let _lineUpdateDirty = false; let _lineChunkToken = 0; const LINE_NUM_CHUNK = 200;
-
-  function updateLineNumbersIncremental() {
-    const textarea = document.getElementById('serh-rules'); const lineNums = document.getElementById('serh-line-numbers');
-    if (!textarea || !lineNums) {
-      _lineUpdatePending = false; return;
-    }
-
-    const lines = textarea.value.split('\n'); const len = lines.length; const token = ++_lineChunkToken;
-    lineNums.style.minWidth = `max(20px, calc(${String(len).length}ch + 8px))`;
-
-    let index = 0;
-    const step = () => {
-      if (token !== _lineChunkToken) return;
-      if (!lineNums.isConnected) {
-        _lineUpdatePending = false; _lineUpdateDirty = false; return;
-      }
-
-      const children = lineNums.children;
-      while (children.length > len) {
-        lineNums.removeChild(children[children.length - 1]);
-      }
-
-      const end = Math.min(index + LINE_NUM_CHUNK, len); const frag = document.createDocumentFragment();
-      for (let i = index; i < end; i++) {
-        let node = children[i];
-        if (!node) {
-          node = document.createElement('div'); node.style.position = 'relative'; node.style.color = '#a0aec0'; node.style.height = '1.4em'; frag.appendChild(node);
-        }
-        const analysis = currentConfig.errorDetection !== false ? cachedAnalyzeRule(lines[i]) : { valid: true, errors: [], warnings: [] }; const valid = analysis.valid;
-        const errMsg = valid ? '' : analysis.errors.join(' | ');
-        const html = `${i + 1}${valid ? '' : `<span class="serh-line-error" title="${escHtml(errMsg)}" data-error="${escHtml(errMsg)}" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 10px; background: #edf2f7; z-index: 1; cursor: pointer;">⚠️</span>`}`;
-        if (node.dataset.v !== html) {
-          node.innerHTML = html; node.dataset.v = html;
-        }
-      }
-      if (frag.childNodes.length > 0) {
-        lineNums.appendChild(frag);
-      }
-
-      index = end;
-      if (index < len) {
-        requestAnimationFrame(step); return;
-      }
-
-      if (_lineUpdateDirty) {
-        _lineUpdateDirty = false; requestAnimationFrame(updateLineNumbersIncremental);
-      } else {
-        _lineUpdatePending = false;
-      }
-    };
-    requestAnimationFrame(step);
-  }
-
-  function scheduleLineNumbersUpdate() {
-    if (_lineDebounceTimer) clearTimeout(_lineDebounceTimer);
-    _lineDebounceTimer = setTimeout(() => {
-      _lineDebounceTimer = null; updateLineNumbers();
-    }, 100);
-  }
-
-  function updateLineNumbers() {
-    if (_lineUpdatePending) {
-      _lineUpdateDirty = true; return;
-    }
-    _lineUpdatePending = true; updateLineNumbersIncremental();
-  }
-
-  function escHtml(str) {
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  }
-
   function adoptStoredConfigBeforeWrite() {
     adoptStoredConfigIfNewer(); if (!Array.isArray(currentConfig.rules)) currentConfig.rules = [];
   }
 
+  function getSyncSettings(config) {
+    const { rules, bubbleState, bubbleSize, selectors, subscriptions, syncedAt, rulesSyncedAt, settingsModifiedAt, tombstones, ruleAddedTimes, subscriptionTombstones, ...settings } = config || {};
+    return settings;
+  }
+
+  function getSettingsModifiedTime() {
+    const saved = GM_getValue(SETTINGS_LAST_MODIFIED_KEY, null); if (typeof saved === 'number' && Number.isFinite(saved) && saved >= 0) return saved;
+    const legacy = GM_getValue(LOCAL_LAST_MODIFIED_KEY, 0); const time = typeof legacy === 'number' && Number.isFinite(legacy) && legacy > 0 ? legacy : 0;
+    GM_setValue(SETTINGS_LAST_MODIFIED_KEY, time); return time;
+  }
+
   function persistConfig(updateModifiedTime = false) {
+    getSettingsModifiedTime(); const previous = normalizeConfig(GM_getValue(CONFIG_KEY, getDefaultConfig()));
+    const rulesChanged = updateModifiedTime && JSON.stringify(previous.rules) !== JSON.stringify(currentConfig.rules);
+    const settingsChanged = updateModifiedTime && !selectorsEqual(getSyncSettings(previous), getSyncSettings(currentConfig));
     GM_setValue(CONFIG_KEY, currentConfig);
     if (updateModifiedTime) {
-      markLocalModifiedTime();
+      if (rulesChanged) markLocalModifiedTime(); if (settingsChanged) markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY);
       if (typeof triggerWebDAVSyncDelayed === 'function') {
         triggerWebDAVSyncDelayed(5000);
       }
     }
   }
 
-  function markLocalModifiedTime() {
-    const prev = GM_getValue(LOCAL_LAST_MODIFIED_KEY, 0) || 0; const now = Date.now(); if (now > prev) GM_setValue(LOCAL_LAST_MODIFIED_KEY, now);
+  function markLocalModifiedTime(key = LOCAL_LAST_MODIFIED_KEY) {
+    getSettingsModifiedTime(); const prev = GM_getValue(key, 0) || 0; const now = Math.max(Date.now(), prev + 1); GM_setValue(key, now);
     if (typeof getTrustedNow === 'function') {
       Promise.resolve(getTrustedNow()).then(trusted => {
-        if (trusted > (GM_getValue(LOCAL_LAST_MODIFIED_KEY, 0) || 0)) {
-          GM_setValue(LOCAL_LAST_MODIFIED_KEY, trusted);
+        if (GM_getValue(key, 0) === now && trusted > now) {
+          GM_setValue(key, trusted);
         }
       }).catch(() => {});
     }
@@ -3648,49 +3651,6 @@
     }
   }
 
-  // 悬浮通知
-  function showToast(message, type = 'info', duration = 3000) {
-    let container = document.getElementById('serh-toast-container');
-    if (!container) {
-      container = document.createElement('div'); container.id = 'serh-toast-container'; document.body.appendChild(container);
-    }
-
-    const panel = document.getElementById('serh-webdav-panel') ||
-      document.getElementById('serh-subscription-panel') ||
-      document.getElementById('serh-hlcolor-panel') ||
-      document.getElementById('serh-selector-panel') ||
-      document.getElementById('serh-settings-panel') ||
-      document.getElementById('serh-panel');
-    if (panel) {
-      if (container.parentElement !== panel) {
-        panel.appendChild(container);
-      }
-      const anchoredBottom = !!(panel.style && panel.style.bottom && panel.style.bottom !== 'auto'); container.style.position = 'absolute';
-      if (anchoredBottom) {
-        container.style.top = 'auto'; container.style.bottom = 'calc(100% + 4px)';
-      } else {
-        container.style.top = 'calc(100% + 4px)'; container.style.bottom = '';
-      }
-      container.style.left = '0'; container.style.right = '0'; container.style.width = 'auto'; container.style.maxWidth = 'none';
-    } else {
-      if (container.parentElement !== document.body) {
-        document.body.appendChild(container);
-      }
-      container.style.position = ''; container.style.top = ''; container.style.right = ''; container.style.left = ''; container.style.bottom = ''; container.style.width = '';
-    }
-
-    const toast = document.createElement('div');
-    toast.className = `serh-toast serh-toast-${type}`;
-    toast.textContent = message; container.appendChild(toast); requestAnimationFrame(() => toast.classList.add('show'));
-
-    let timer = null;
-    const dismiss = () => {
-      if (!toast.parentElement) return; clearTimeout(timer); toast.classList.remove('show'); toast.addEventListener('transitionend', () => toast.remove(), { once: true });
-      setTimeout(() => toast.remove(), 400);
-    };
-    toast.addEventListener('click', dismiss); timer = setTimeout(dismiss, duration); return { dismiss };
-  }
-
   function hideStatsPanel() {
     const statsPanel = document.getElementById('serh-stats-panel'); if (statsPanel) statsPanel.style.display = 'none';
   }
@@ -3705,7 +3665,12 @@
     updateStatsContent(); statsPanel.style.display = 'flex';
   }
 
-  // 统计
+  function statSourceKey(s) {
+    const sub = /^(?:订阅|Sub)(\d+)$/i.exec(s || '');
+    if (sub) return 'sub:' + sub[1];
+    return (s === t('localRule') || s === '本地规则' || s === 'Local Rule') ? 'local' : '';
+  }
+
   function updateStatsContent() {
     const statsContent = document.getElementById('serh-stats-content'); if (!statsContent) return;
 
@@ -3755,14 +3720,14 @@
     const engine = getSearchEngine(); const selector = getContainerSelector(engine); const results = selector ? document.querySelectorAll(selector) : []; const statsBySource = new Map();
     results.forEach(result => {
       const matchedRule = result.dataset.matchedRule; const matchedSource = result.dataset.matchedSource; if (!matchedRule || !matchedSource) return;
-
-      if (!statsBySource.has(matchedSource)) {
-        statsBySource.set(matchedSource, {
+      const sourceKey = statSourceKey(matchedSource); if (!sourceKey) return;
+      if (!statsBySource.has(sourceKey)) {
+        statsBySource.set(sourceKey, {
           total: 0,
           rules: new Map()
         });
       }
-      const sourceStats = statsBySource.get(matchedSource); sourceStats.total++; const ruleMap = sourceStats.rules; ruleMap.set(matchedRule, (ruleMap.get(matchedRule) || 0) + 1);
+      const sourceStats = statsBySource.get(sourceKey); sourceStats.total++; const ruleMap = sourceStats.rules; ruleMap.set(matchedRule, (ruleMap.get(matchedRule) || 0) + 1);
     });
 
     const ruleErrorsArray = Object.entries(ruleErrors).map(([rule, errors]) => ({
@@ -3804,15 +3769,15 @@
       resultHTML += issueBlockHtml(t('statsWarnings', {count: ruleWarningsArray.length}), '#b7791f', '#fffff0', 'warningWord', ruleWarningsArray);
     }
 
-    const sourceOrder = getSubscriptions().map((_, i) => `${t('subscription')}${i + 1}`).concat(t('localRule'));
+    const sourceOrder = getSubscriptions().map((_, i) => [`sub:${i + 1}`, `${t('subscription')}${i + 1}`]).concat([['local', t('localRule')]]);
     let hasMatches = false;
 
-    sourceOrder.forEach(source => {
+    sourceOrder.forEach(([source, sourceLabel]) => {
       const sourceStats = statsBySource.get(source); if (!sourceStats || sourceStats.total === 0) return; hasMatches = true;
 
       resultHTML += `<div style="margin-bottom: 16px;">`;
       resultHTML += `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #cbd5e0;">`;
-      resultHTML += `<span style="font-weight: bold; color: #2d3748; font-size: 14px;">${source}</span>`;
+      resultHTML += `<span style="font-weight: bold; color: #2d3748; font-size: 14px;">${sourceLabel}</span>`;
       resultHTML += `<span style="background: #2c5282; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px;">${t('matchedCountLabel')} ${sourceStats.total} ${t('matchedCountUnit')}</span>`;
       resultHTML += `</div>`;
 
@@ -3855,91 +3820,14 @@
     statsContent.innerHTML = resultHTML;
   }
 
-  function getPanelPositionStyles() {
-    const statusBtn = document.getElementById('serh-status');
-    if (currentConfig.panelCentered) {
-      return `top: 60%; left: 50%; transform: translate(-50%, -50%);`;
-    }
-
-    let rect;
-    if (statusBtn) {
-      rect = statusBtn.getBoundingClientRect();
-    } else {
-      rect = {
-        left: window.innerWidth - 50,
-        right: window.innerWidth - 10,
-        top: window.innerHeight - 50,
-        bottom: window.innerHeight - 10,
-        width: 40,
-        height: 40
-      };
-    }
-    const centerX = rect.left + rect.width / 2; const centerY = rect.top + rect.height / 2; const isLeft = centerX < window.innerWidth / 2; const isTop = centerY < window.innerHeight / 2;
-
-    if (isLeft && isTop) return 'top: 10px; left: 10px; transform: none;'; if (!isLeft && isTop) return 'top: 10px; right: 10px; transform: none;';
-    if (isLeft && !isTop) return 'bottom: 10px; left: 10px; transform: none;'; return 'bottom: 10px; right: 10px; transform: none;';
-  }
-
-  function createPanel(id, width = '320px', padding = '15px') {
-    const panel = document.createElement('div'); panel.id = id; panel.classList.add('serh-panel-fade');
-    panel.style.cssText = `
-        position: fixed;
-        ${getPanelPositionStyles()}
-        width: ${width};
-        z-index: 10001;
-        padding: ${padding};
-        display: flex;
-        flex-direction: column;
-    `;    document.body.appendChild(panel);
-    requestAnimationFrame(() => panel.classList.add('show')); return panel;
-  }
-
-  function fadeOutAndRemovePanel(panel, onClosed) {
-    panel.classList.remove('show'); let done = false;
-    const finish = () => {
-      if (done) return; done = true; panel.remove(); if (onClosed) onClosed();
-      if (!isSerhPanelOpen()) {
-        checkAutoSubscription(); checkAutoWebDAV();
-      }
-    };
-    panel.addEventListener('transitionend', finish, { once: true }); setTimeout(finish, 350);
-  }
-
-  function bindOutsideClickClose(panel, onBeforeClose) {
-    let pressStartedInside = false;
-    const pressHandler = (e) => {
-      pressStartedInside = panel.contains(e.target);
-    };
-    const closeHandler = (e) => {
-      if (preventPanelClose) return;
-      if (pressStartedInside) {
-        pressStartedInside = false; return;
-      }
-      if (!panel.contains(e.target)) closePanel();
-    };
-    const closePanel = () => {
-      try {
-        if (typeof onBeforeClose === 'function') onBeforeClose();
-      } catch (err) {
-        console.error('[面板] 关闭前回调失败:', err);
-      }
-      document.removeEventListener('click', closeHandler); document.removeEventListener('pointerdown', pressHandler); document.removeEventListener('mousedown', pressHandler);
-      panel._cleanupClick = null; fadeOutAndRemovePanel(panel);
-    };
-    panel._cleanupClick = () => {
-      document.removeEventListener('click', closeHandler); document.removeEventListener('pointerdown', pressHandler); document.removeEventListener('mousedown', pressHandler);
-    };
-    setTimeout(() => {
-      if (panel.isConnected) {
-        document.addEventListener('pointerdown', pressHandler); document.addEventListener('mousedown', pressHandler); document.addEventListener('click', closeHandler);
-      }
-    }, 200);
-    return closePanel;
-  }
-
   // 面板样式
+  function applySubSyncBtnVisibility() {
+    const subBtn = document.getElementById('serh-subscribe'); const syncBtn = document.getElementById('serh-sync');
+    if (subBtn) subBtn.style.display = currentConfig.showSubBtn !== false ? '' : 'none';
+    if (syncBtn) syncBtn.style.display = currentConfig.showSyncBtn !== false ? '' : 'none';
+  }
+
   function showConfigPanel() {
-    injectWidgetStyles();
     const clearPanelCloseTimers = () => {
       if (window._panelCloseTimer) {
         clearTimeout(window._panelCloseTimer); window._panelCloseTimer = null;
@@ -3951,13 +3839,11 @@
         document.removeEventListener('pointerdown', window._panelPressHandler); document.removeEventListener('mousedown', window._panelPressHandler); window._panelPressHandler = null;
       }
     };
-    const existingPanel = document.getElementById('serh-panel');
-    if (existingPanel) {
-      clearPanelCloseTimers(); existingPanel.remove(); return;
-    }
     clearPanelCloseTimers();
 
-    const panel = createPanel('serh-panel'); panel._initialRules = Array.isArray(currentConfig.rules) ? [...currentConfig.rules] : [];
+    const opened = openPanel('serh-panel', { bindClose: false, onExisting: () => clearPanelCloseTimers() });
+    if (!opened) return;
+    const { panel } = opened; panel._initialRules = Array.isArray(currentConfig.rules) ? [...currentConfig.rules] : [];
     const initialSize = getBubbleSize();
     panel.innerHTML = `
             <div class="serh-option-row" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px;">
@@ -3996,8 +3882,9 @@
         `;
 
     updateLineNumbers();
+    applySubSyncBtnVisibility();
     const textarea = document.getElementById('serh-rules'); const lineNums = document.getElementById('serh-line-numbers');
-    textarea.addEventListener('input', scheduleLineNumbersUpdate);
+    textarea.addEventListener('input', () => scheduleLineNumbersUpdate());
     textarea.addEventListener('scroll', () => {
       lineNums.scrollTop = textarea.scrollTop;
     });
@@ -4111,7 +3998,7 @@
       });
     }
 
-    const closeZoneSelector = '#serh-status, #serh-webdav-panel, #serh-subscription-panel, #serh-hlcolor-panel, #serh-hlcolor-popup, #serh-selector-panel, #serh-block-confirm-dialog, #serh-settings-panel';
+    const closeZoneSelector = '#serh-status, #serh-webdav-panel, #serh-subscription-panel, #serh-hlcolor-panel, #serh-hlcolor-popup, #serh-selector-panel, #serh-block-confirm-dialog, #serh-settings-panel, .serh-quick-block';
     const isPanelZone = (target) => panel.contains(target) || !!(target.closest && target.closest(closeZoneSelector)); let pressStartedInside = false;
     const pressHandler = (e) => {
       if (e.isTrusted === false) return; pressStartedInside = isPanelZone(e.target);
@@ -4153,33 +4040,30 @@
   }
 
   function showSettingsPanel() {
-    injectWidgetStyles(); const existing = document.getElementById('serh-settings-panel');
-    if (existing) {
-      if (typeof existing._cleanupClick === 'function') existing._cleanupClick(); existing.remove(); return;
-    }
-
-    const panel = createPanel('serh-settings-panel', '250px');
+    const opened = openPanel('serh-settings-panel', { width: '260px' });
+    if (!opened) return;
+    const { panel, closePanel } = opened;
     const settingsSwitch = (id, label, checked) => `
-                <label style="display: flex; align-items: center; flex: 1; justify-content: space-between; white-space: nowrap; cursor: pointer; font-size: 12px; color: #4a5568;">
-                    <span style="display: flex; align-items: center;">
+                <label style="display: flex; align-items: center; flex: 1; justify-content: space-between; white-space: nowrap; cursor: pointer; font-size: 12px; color: #4a5568; margin: 0; padding: 0;">
+                    <span style="display: flex; align-items: center; margin: 0; padding: 0;">
                         <span class="serh-switch">
                             <input type="checkbox" id="${id}" ${checked ? 'checked' : ''}>
                             <span class="serh-slider"></span>
                         </span>
-                        <span>${label}</span>
+                        <span style="margin: 0; padding: 0;">${label}</span>
                     </span>
                 </label>`;
     const settingsRow = (items, last) => `
-            <div style="display: flex; gap: 8px; margin-bottom: ${last ? 0 : 10}px;">
+            <div style="display: flex; gap: 8px; margin: 0 0 ${last ? 0 : 10}px; padding: 0;">
                 ${items.map(item => settingsSwitch(item.id, t(item.labelKey), item.checked)).join('\n                ')}
             </div>`;
     const settingsHeader = key => `
-            <div style="margin: 0 0 6px; font-size: 11px; font-weight: 600; color: #718096;">${t(key)}</div>`;
+            <div style="margin: 0 0 6px; padding: 0; font-size: 11px; font-weight: 600; color: #718096;">${t(key)}</div>`;
 
     panel.innerHTML = `
-            <div style="display: flex; align-items: center; justify-content: space-between; margin: 0 0 4px;">
-                <h3 style="margin: 0; font-size: 13px; color: #2d3748; font-weight: 600;">${escHtml(t('settingsPanelTitle'))}</h3>
-                <span id="serh-settings-close" style="cursor: pointer; font-size: 12px; line-height: 1;">❌</span>
+            <div style="display: flex; align-items: center; justify-content: space-between; margin: 0 0 4px; padding: 0;">
+                <h3 style="margin: 0; padding: 0; font-size: 13px; color: #2d3748; font-weight: 600;">${escHtml(t('settingsPanelTitle'))}</h3>
+                <span id="serh-settings-close" style="cursor: pointer; font-size: 12px; line-height: 1; margin: 0; padding: 0;">❌</span>
             </div>
             ${settingsHeader('settingsSecBlock')}
             ${settingsRow([
@@ -4187,7 +4071,8 @@
               { id: 'serh-set-block-domain', labelKey: 'blockDomain', checked: currentConfig.blockDomain === true }
             ])}
             ${settingsRow([
-              { id: 'serh-set-block-confirm', labelKey: 'doubleConfirm', checked: currentConfig.blockConfirm === true }
+              { id: 'serh-set-block-confirm', labelKey: 'doubleConfirm', checked: currentConfig.blockConfirm === true },
+              { id: 'serh-set-show-source', labelKey: 'showMatchedSource', checked: currentConfig.showMatchedSource !== false }
             ])}
             ${settingsHeader('settingsSecUI')}
             ${settingsRow([
@@ -4198,6 +4083,10 @@
               { id: 'serh-set-panel-centered', labelKey: 'menuCenter', checked: currentConfig.panelCentered === true },
               { id: 'serh-set-auto-dark', labelKey: 'autoDark', checked: currentConfig.autoDark !== false }
             ])}
+            ${settingsRow([
+              { id: 'serh-set-show-sub-btn', labelKey: 'showSubBtn', checked: currentConfig.showSubBtn !== false },
+              { id: 'serh-set-show-sync-btn', labelKey: 'showSyncBtn', checked: currentConfig.showSyncBtn !== false }
+            ])}
             ${settingsHeader('settingsSecOther')}
             ${settingsRow([
               { id: 'serh-set-disable-block', labelKey: 'disableBlock', checked: currentConfig.enabled === false },
@@ -4207,17 +4096,17 @@
               { id: 'serh-set-error-detection', labelKey: 'menuErrorDetection', checked: currentConfig.errorDetection !== false },
               { id: 'serh-set-export-config', labelKey: 'exportConfig', checked: currentConfig.exportConfig === true }
             ])}
-            <div style="display: flex; gap: 8px; margin-bottom: 0;">
-                <div style="flex: 1; min-width: 0;">
-                    <label for="serh-set-bubble-action" style="display: block; margin-bottom: 4px; cursor: pointer; font-size: 12px; color: #4a5568;">${t('menuBubbleAction')}</label>
-                    <select id="serh-set-bubble-action" style="width: 100%; min-width: 0; font-size: 12px; padding: 3px 4px; border: 1px solid #cbd5e0; border-radius: 4px; background: #fff; color: #2d3748; cursor: pointer; outline: none; font-family: inherit;">
+            <div style="display: flex; gap: 8px; margin: 0; padding: 0;">
+                <div style="flex: 1; min-width: 0; margin: 0; padding: 0;">
+                    <label for="serh-set-bubble-action" style="display: block; margin: 0 0 4px; padding: 0; cursor: pointer; font-size: 12px; color: #4a5568;">${t('menuBubbleAction')}</label>
+                    <select id="serh-set-bubble-action" style="width: 100%; min-width: 0; margin: 0; font-size: 12px; padding: 3px 4px; border: 1px solid #cbd5e0; border-radius: 4px; background: #fff; color: #2d3748; cursor: pointer; outline: none; font-family: inherit;">
                         <option value="openPanel" ${currentConfig.bubbleAction !== 'toggleHidden' ? 'selected' : ''}>${t('menuBubbleActionOpen')}</option>
                         <option value="toggleHidden" ${currentConfig.bubbleAction === 'toggleHidden' ? 'selected' : ''}>${t('menuBubbleActionToggle')}</option>
                     </select>
                 </div>
-                <div style="flex: 1; min-width: 0;">
-                    <label for="serh-set-language" style="display: block; margin-bottom: 4px; cursor: pointer; font-size: 12px; color: #4a5568;">${t('menuLanguage')}</label>
-                    <select id="serh-set-language" style="width: 100%; min-width: 0; font-size: 12px; padding: 3px 4px; border: 1px solid #cbd5e0; border-radius: 4px; background: #fff; color: #2d3748; cursor: pointer; outline: none; font-family: inherit;">
+                <div style="flex: 1; min-width: 0; margin: 0; padding: 0;">
+                    <label for="serh-set-language" style="display: block; margin: 0 0 4px; padding: 0; cursor: pointer; font-size: 12px; color: #4a5568;">${t('menuLanguage')}</label>
+                    <select id="serh-set-language" style="width: 100%; min-width: 0; margin: 0; font-size: 12px; padding: 3px 4px; border: 1px solid #cbd5e0; border-radius: 4px; background: #fff; color: #2d3748; cursor: pointer; outline: none; font-family: inherit;">
                         <option value="zh-CN" ${currentConfig.language !== 'en' ? 'selected' : ''}>中文</option>
                         <option value="en" ${currentConfig.language === 'en' ? 'selected' : ''}>English</option>
                     </select>
@@ -4236,12 +4125,19 @@
       { id: 'serh-set-show-block-btn', key: 'showBlockBtn', apply: () => { forceReprocessAll(); } },
       { id: 'serh-set-block-domain', key: 'blockDomain', apply: null },
       { id: 'serh-set-block-confirm', key: 'blockConfirm', apply: null },
+      { id: 'serh-set-show-source', key: 'showMatchedSource', apply: () => {
+        document.querySelectorAll('[data-is-blocked="true"]').forEach(el => {
+          if (currentConfig.showMatchedSource === false) removeMatchedRuleLabel(el); else if (showHiddenResults) addMatchedRuleLabel(el);
+        });
+      } },
       { id: 'serh-set-show-bubble', key: 'showBubble', apply: () => { updateStatus(document.querySelectorAll('[data-is-blocked="true"]').length); } },
       { id: 'serh-set-show-count', key: 'showCount', apply: () => { const s = document.getElementById('serh-status'); if (s) updateBubbleContent(s, parseInt(s.dataset.blockedCount || 0)); } },
       { id: 'serh-set-panel-centered', key: 'panelCentered', apply: () => {
         applyPanelPosition(document.getElementById('serh-panel')); applyPanelPosition(document.getElementById('serh-settings-panel'));
       } },
       { id: 'serh-set-auto-dark', key: 'autoDark', apply: () => { applyDarkModeClass(); } },
+      { id: 'serh-set-show-sub-btn', key: 'showSubBtn', apply: () => { applySubSyncBtnVisibility(); } },
+      { id: 'serh-set-show-sync-btn', key: 'showSyncBtn', apply: () => { applySubSyncBtnVisibility(); } },
       { id: 'serh-set-disable-block', key: 'enabled', invert: true, apply: () => { forceReprocessAll(); } },
       { id: 'serh-set-debug', key: 'debug', apply: () => { exposeDebugApi(); } },
       { id: 'serh-set-error-detection', key: 'errorDetection', apply: () => {
@@ -4277,17 +4173,15 @@
     }
 
     document.getElementById('serh-settings-close').onclick = (e) => {
-      e.stopPropagation(); if (typeof panel._cleanupClick === 'function') panel._cleanupClick(); fadeOutAndRemovePanel(panel);
+      e.stopPropagation(); closePanel();
     };
-    bindOutsideClickClose(panel);
   }
 
   // 高亮面板
   function showHighlightColorPanel() {
-    injectWidgetStyles(); const existing = document.getElementById('serh-hlcolor-panel');
-    if (existing) {
-      if (typeof existing._cleanupClick === 'function') existing._cleanupClick(); existing.remove(); return;
-    }
+    const opened = openPanel('serh-hlcolor-panel', { width: 'auto; max-width: 350px' });
+    if (!opened) return;
+    const { panel, closePanel } = opened;
 
     function hsvToRgb(h, s, v) {
       h /= 360; let r, g, b; const i = Math.floor(h * 6); const f = h * 6 - i; const p = v * (1 - s); const q = v * (1 - f * s); const t = v * (1 - (1 - f) * s);
@@ -4313,7 +4207,6 @@
       return '#' + [r,g,b].map(x => x.toString(16).padStart(2,'0').toUpperCase()).join('');
     }
 
-    const panel = createPanel('serh-hlcolor-panel', 'auto; max-width: 350px');
     const colors = currentConfig.highlightColors || {}; const sanitizeHex = (val, fallback) => (/^#[0-9A-Fa-f]{6}$/.test(String(val || '')) ? String(val).toUpperCase() : fallback); let rowsHtml = '';
     for (let i = 1; i <= 5; i++) {
       const hex = sanitizeHex(colors[i], '#CE2029');
@@ -4446,7 +4339,7 @@
     };
 
     document.getElementById('serh-hlcolor-reset').onclick = () => {
-      const defaults = {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'};
+      const defaults = DEFAULT_HIGHLIGHT_COLORS;
       for (let i = 1; i <= 5; i++) {
         document.getElementById(`serh-hlcolor-input-${i}`).value = defaults[i];
         document.getElementById(`serh-hlcolor-preview-${i}`).style.background = defaults[i];
@@ -4455,7 +4348,6 @@
       [currentHue, currentSat, currentVal] = rgbToHsv(r, g, b); drawSVCanvas(currentHue); updatePickedColor(); showToast(t('resetPending'), 'success');
     };
 
-    const closePanel = bindOutsideClickClose(panel);
     document.getElementById('serh-hlcolor-cancel').onclick = (e) => {
       e.stopPropagation(); closePanel();
     };
@@ -4588,7 +4480,7 @@
   }
 
   function sameSelectorDef(a, b) {
-    if (!a || !b) return false; const aM = matchDefToParts(a.match); const bM = matchDefToParts(b.match); if (aM.source !== bM.source || aM.flags !== bM.flags) return false;
+    if (!a || !b) return false; if (!!a.disabled !== !!b.disabled || !!a.disable !== !!b.disable) return false; const aM = matchDefToParts(a.match); const bM = matchDefToParts(b.match); if (aM.source !== bM.source || aM.flags !== bM.flags) return false;
     if ((a.containers || '') !== (b.containers || '')) return false; const norm = (v) => JSON.stringify(normalizeSelectorList(v)); if (norm(a.titles) !== norm(b.titles)) return false;
     if (norm(a.snippets) !== norm(b.snippets)) return false; if (norm(a.extraElements) !== norm(b.extraElements)) return false; if (norm(a.links) !== norm(b.links)) return false; return true;
   }
@@ -4671,8 +4563,9 @@
                 }
               }
               cfg[k] = cleanDef;
-            }
+            } else cfg[k] = def;
           }
+          if (!Object.keys(cfg).length && Object.keys(parsedJson).length) return fail();
           return { config: cfg, errors: [] };
         }
       } catch (eJson) {}
@@ -4703,7 +4596,7 @@
       }
       return null;
     };
-    const config = {};
+    const config = {}; let keyCount = 0;
     const readKey = () => {
       if (s[i] === '\'' || s[i] === '"') return readString(); const m = /^[A-Za-z_$][\w$-]*/.exec(s.slice(i)); if (!m) return null; i += m[0].length; return m[0];
     };
@@ -4748,12 +4641,12 @@
           def[field] = false; i += 5;
         } else return fail();
       }
-      if (key === 'other' || key === '__proto__') continue; config[key] = def;
+      keyCount++; if (key === 'other' || key === '__proto__') continue; config[key] = def;
     }
+    if (keyCount && !Object.keys(config).length) return fail();
     return { config, errors: [] };
   }
 
-  // 文件选择
   function pickTextFile(accept, onLoaded) {
     preventPanelClose = true; const fileInput = document.createElement('input'); fileInput.type = 'file'; fileInput.accept = accept; fileInput.style.display = 'none';
     document.body.appendChild(fileInput);
@@ -4793,12 +4686,10 @@
 
   // 选择器面板
   function showSelectorPanel() {
-    injectWidgetStyles(); hideStatsPanel(); const existing = document.getElementById('serh-selector-panel');
-    if (existing) {
-      if (typeof existing._cleanupClick === 'function') existing._cleanupClick(); existing.remove(); return;
-    }
-
-    const panel = createPanel('serh-selector-panel', '320px', '15px'); const syncSelectorsEnabled = GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false);
+    hideStatsPanel();
+    const opened = openPanel('serh-selector-panel');
+    if (!opened) return;
+    const { panel, closePanel } = opened; const syncSelectorsEnabled = GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false);
     panel.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                 <h3 style="margin:0;font-size:14px;line-height:1.2;">${t('selectorPanelTitle')}</h3>
@@ -4826,19 +4717,10 @@
             </div>
         `;
 
-    const closePanel = bindOutsideClickClose(panel); const textarea = document.getElementById('serh-sel-rules'); const lineNums = document.getElementById('serh-sel-line-numbers');
-    const updateSelLineNumbers = () => {
-      if (!textarea || !lineNums || !lineNums.isConnected) return; const lines = textarea.value.split('\n');
-      lineNums.style.minWidth = `max(20px, calc(${String(lines.length).length}ch + 8px))`;
-      let html = '';
-      for (let i = 1; i <= lines.length; i++) {
-        html += `<div style="position:relative;height:1.4em;">${i}</div>`;
-      }
-      lineNums.innerHTML = html;
-    };
-    updateSelLineNumbers();
+    const textarea = document.getElementById('serh-sel-rules'); const lineNums = document.getElementById('serh-sel-line-numbers');
+    updateLineNumbers('selectors');
 
-    textarea.addEventListener('input', updateSelLineNumbers);
+    textarea.addEventListener('input', () => scheduleLineNumbersUpdate('selectors'));
     textarea.addEventListener('scroll', () => {
       lineNums.scrollTop = textarea.scrollTop;
     });
@@ -4860,7 +4742,7 @@
 
     document.getElementById('serh-selector-import').onclick = () => {
       importSelectorsFromFile(textarea, () => {
-        showError([]); updateSelLineNumbers();
+        showError([]); updateLineNumbers('selectors');
       });
     };
 
@@ -4885,7 +4767,7 @@
     };
 
     document.getElementById('serh-selector-reset').onclick = () => {
-      textarea.value = serializeSelectors(SELECTORS); showError([]); updateSelLineNumbers(); showToast(t('resetPending'), 'success');
+      textarea.value = serializeSelectors(SELECTORS); showError([]); updateLineNumbers('selectors'); showToast(t('resetPending'), 'success');
     };
 
     document.getElementById('serh-selector-cancel').onclick = (e) => {
@@ -5054,10 +4936,16 @@
     const m = responseHeaders && String(responseHeaders).match(/^date:\s*(.+)$/im); if (!m) return 0; const parsed = Date.parse(m[1].trim()); return isNaN(parsed) ? 0 : parsed;
   }
 
+  function getCloudModifiedTime(config, key, trustedNow) {
+    if (!config || typeof config !== 'object' || Array.isArray(config)) return 0;
+    const value = Object.prototype.hasOwnProperty.call(config, key) ? config[key] : config.syncedAt;
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= trustedNow + WEBDAV_TIME_TOLERANCE ? value : 0;
+  }
+
   function extractValidCloudTimes(cloudConfig, trustedNow) {
     const times = []; const limit = trustedNow + WEBDAV_TIME_TOLERANCE;
     if (cloudConfig && typeof cloudConfig === 'object' && !Array.isArray(cloudConfig)) {
-      [cloudConfig.syncedAt, cloudConfig.rulesSyncedAt].forEach(v => {
+      [cloudConfig.syncedAt, cloudConfig.rulesSyncedAt, cloudConfig.settingsModifiedAt].forEach(v => {
         if (typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= limit) times.push(v);
       });
     }
@@ -5212,9 +5100,9 @@
       }
       return null;
     };
-    const END = {}; const place = new Map();
+    const END = {}; const place = new Map(); const pendingByAnchor = new Map();
     const noteInsert = (key, anchor) => {
-      if (!place.has(key)) place.set(key, anchor);
+      if (place.has(key)) return; place.set(key, anchor); if (!pendingByAnchor.has(anchor)) pendingByAnchor.set(anchor, []); pendingByAnchor.get(anchor).push(key);
     };
     const orderedRows = orderSide === cloudMeta ? cloudRows : localRows; const otherRows = orderSide === cloudMeta ? localRows : cloudRows;
     orderedRows.forEach((row, i) => {
@@ -5230,9 +5118,7 @@
       if (!key || seen.has(key) || deleted(key)) return; const line = pickLine(key); if (!line) return; seen.add(key); result.push(line);
     };
     const emitPending = (anchor) => {
-      for (const [key, before] of place) {
-        if (before === anchor) emit(key);
-      }
+      const keys = pendingByAnchor.get(anchor); if (keys) for (const key of keys) emit(key);
     };
 
     emitPending(null);
@@ -5245,17 +5131,16 @@
     emitPending(END); for (const key of place.keys()) emit(key); return result;
   }
 
-  function buildSyncPayload(syncedAt = Date.now()) {
+  function buildSyncPayload(settingsModifiedAt = getSettingsModifiedTime()) {
     const stored = GM_getValue(CONFIG_KEY); const base = (stored && typeof stored === 'object' && !Array.isArray(stored)) ? stored : currentConfig;
-    const { rules, bubbleState, bubbleSize, selectors, ...settings } = base;
     const payload = {
-      ...settings,
+      ...getSyncSettings(base),
       subscriptions: getSubscriptions().map(s => ({
         url: s.url,
         name: s.name,
         enabled: s.enabled
       })),
-      syncedAt
+      syncedAt: settingsModifiedAt, settingsModifiedAt
     };
     return payload;
   }
@@ -5356,7 +5241,6 @@
     };
   }
 
-    // 递归创建目录
   async function ensureWebDAVFolder(folderUrl, headers) {
     let url = String(folderUrl).trim().replace(/\/+$/, '') + '/'; const parsed = new URL(url); const rootPath = parsed.origin + '/'; if (url === rootPath || parsed.pathname === '/') return;
 
@@ -5407,7 +5291,7 @@
     const syncSelectors = GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false);
 
     if (syncConfig) {
-      const payload = buildSyncPayload(syncedAt); payload.rulesSyncedAt = syncedAt; prefix += '# ScriptConfig:' + JSON.stringify(payload) + '\n';
+      const payload = buildSyncPayload(remotePreserved.settingsModifiedAt ?? getSettingsModifiedTime()); payload.rulesSyncedAt = syncedAt; prefix += '# ScriptConfig:' + JSON.stringify(payload) + '\n';
     } else if (remotePreserved.rawScriptConfig) {
       let updatedHeader = remotePreserved.rawScriptConfig;
       try {
@@ -5513,7 +5397,7 @@
       if (flowOpen) {
         const close = flowCloseAt(idx + 1);
         if (close !== -1) {
-          hasSection = true; const payload = lines.slice(idx + 1, close).map((l) => l.trim()).filter((l) => l && !l.startsWith('#')).join(' ');
+          hasSection = true; const payload = lines.slice(idx + 1, close).map((l) => l.trim().replace(/(^|\s+)#.*$/, '').trim()).filter(Boolean).join(', ');
           if (flowOpen.key !== 'matches') {
             for (const part of splitFlowItems(payload)) pushYamlItem(part, flowOpen.key);
           } else if (payload.trim()) {
@@ -5671,12 +5555,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   }
 
   function showSubscriptionPanel() {
-    hideStatsPanel(); const existing = document.getElementById('serh-subscription-panel');
-    if (existing) {
-      if (typeof existing._cleanupClick === 'function') existing._cleanupClick(); existing.remove(); return;
-    }
-
-    const panel = createPanel('serh-subscription-panel', '320px', '20px');
+    hideStatsPanel();
+    const opened = openPanel('serh-subscription-panel', { padding: '20px', beforeClose: () => { if (!cancelDiscardsEdits) persistCurrentSubscriptions(); } });
+    if (!opened) return;
+    const { panel, closePanel } = opened;
     let subscriptions = getSubscriptions(); const deletedUrls = new Set();
     function createSubscriptionRow(sub = {}) {
       const url = typeof sub === 'string' ? sub : (sub.url || ''); const enabled = typeof sub === 'object' && sub.enabled !== undefined ? sub.enabled : true; const row = document.createElement('div');
@@ -5755,8 +5637,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           return;
         }
         seenUrls.add(url);
-        const existingSub = latestSubs.find(s => s && s.url === url) ||
-          latestSubs.find(s => s && s.url === origUrl); if (origUrl && url === origUrl && !existingSub) return;
+        const existingSub = latestSubs.find(s => s && s.url === url); if (origUrl && url === origUrl && !existingSub) return;
         const enabledChanged = row.dataset.originalEnabled === undefined ||
           String(enabled) !== row.dataset.originalEnabled;
         const subData = {
@@ -5778,17 +5659,13 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     function persistCurrentSubscriptions() {
       const latestSubs = getSubscriptions(); const { newSubs, hasError } = collectSubscriptionsFromRows(latestSubs, deletedUrls); if (hasError) return false;
       const savedSubs = newSubs.filter(s => s.url);
-      const subsSig = list => JSON.stringify((Array.isArray(list) ? list : [])
-        .filter(s => s && s.url)
-        .map(s => [s.url, s.name || '', s.enabled !== false])
-        .sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-      const subsChanged = subsSig(savedSubs) !== subsSig(latestSubs); saveSubscriptions(savedSubs); deletedUrls.clear(); subscriptions = getSubscriptions();
+      const subsChanged = subscriptionsSignature(savedSubs) !== subscriptionsSignature(latestSubs); saveSubscriptions(savedSubs); deletedUrls.clear(); subscriptions = getSubscriptions();
       container.querySelectorAll('.serh-subscription-row').forEach(row => {
         const input = row.querySelector('.serh-subscription-url'); if (input) row.dataset.originalUrl = input.value.trim(); const toggle = row.querySelector('.serh-subscription-enable-toggle');
         if (toggle) row.dataset.originalEnabled = String(toggle.checked);
       });
       if (subsChanged) {
-        markLocalModifiedTime();
+        markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY);
         if (typeof triggerWebDAVSyncDelayed === 'function') {
           triggerWebDAVSyncDelayed(5000);
         }
@@ -5817,9 +5694,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
     reindexRows(); bindDeleteEvents();
     let cancelDiscardsEdits = false;
-    const closePanel = bindOutsideClickClose(panel, () => {
-      if (!cancelDiscardsEdits) persistCurrentSubscriptions();
-    });
 
     document.getElementById('serh-subscription-import').onclick = async () => {
       const rows = Array.from(container.querySelectorAll('.serh-subscription-row')); if (!persistCurrentSubscriptions()) return; showToast(t('importing'), 'info');
@@ -5917,16 +5791,19 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   }
 
   function showWebDAVPanel() {
-    hideStatsPanel(); const existing = document.getElementById('serh-webdav-panel');
-    if (existing) {
-      const password = existing.querySelector('#serh-webdav-password'); if (password) password.value = ''; if (typeof existing._cleanupClick === 'function') existing._cleanupClick();
-      existing.remove(); return;
-    }
+    hideStatsPanel();
+    const opened = openPanel('serh-webdav-panel', {
+      padding: '20px',
+      onExisting: (existing) => {
+        const password = existing.querySelector('#serh-webdav-password'); if (password) password.value = '';
+      },
+      beforeClose: () => { passwordInput.value = ''; updateWebDAVPasswordState(); }
+    });
+    if (!opened) return;
+    const { panel, closePanel } = opened;
 
     const webdavConfig = loadWebDAVConfig();
-    const panel = createPanel('serh-webdav-panel', '320px', '20px');
     const autoSyncEnabled = GM_getValue(WEBDAV_AUTO_SYNC_KEY, false); const syncConfigEnabled = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false);
-    // webdav面板
     panel.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0;">
         <h3 style="margin:0;font-size:16px;color:#2d3748;line-height:1;">${t('webdavTitle')}</h3>
@@ -6009,16 +5886,13 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         password: passwordInput.value,
         filename: filenameInput.value
       });
-      if (!config) showToast(t('webdavPasswordRequired'), 'error'); return config;
+      if (!config) { showToast(t('webdavPasswordRequired'), 'error'); }
+      return config;
     }
 
     urlInput.addEventListener('input', updateWebDAVPasswordState); usernameInput.addEventListener('input', updateWebDAVPasswordState);
     passwordInput.addEventListener('input', updateWebDAVPasswordState); updateWebDAVPasswordState();
-    const closePanel = bindOutsideClickClose(panel, () => {
-      passwordInput.value = ''; updateWebDAVPasswordState();
-    });
 
-    // webdav上传
     document.getElementById('serh-webdav-upload').onclick = async () => {
       const config = getValidatedWebDAVConfig(); if (!config) return; const uploadBtn = document.getElementById('serh-webdav-upload'); if (uploadBtn.disabled) return; setWebDAVBusy(true);
       adoptStoredConfigBeforeWrite(); const textarea = document.getElementById('serh-rules');
@@ -6041,23 +5915,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           const serverTime = parseHttpDateHeader(resp.responseHeaders); const netOffset = await getNetworkTimeOffset();
           const trustedNow = netOffset !== null ? Date.now() + netOffset : (serverTime > 0 ? serverTime : Date.now()); const validRemoteTimes = extractValidCloudTimes(remoteConfig, trustedNow);
           const remoteSyncedAt = validRemoteTimes.length > 0 ? Math.max(...validRemoteTimes) : 0; const uploadedTime = Math.max(remoteSyncedAt + 1000, trustedNow);
-          const uploadData = buildUploadContent(content, uploadedTime, remotePreserved);
-          const putHeaders = {
-            ...headers,
-            'Content-Type': 'text/plain; charset=utf-8',
-            'X-OC-Mtime': Math.floor(uploadedTime / 1000).toString()
-          };
-          await gmPutWebDAV(fullUrl, {
-            headers: putHeaders,
-            data: uploadData
-          }, folderUrl, headers);
-          GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime); GM_setValue(WEBDAV_LAST_SYNC_KEY, uploadedTime); setRuleSyncSnapshot(content.split('\n'));
-          if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
-            setSubscriptionSyncSnapshot(getSubscriptions());
-          }
-          if (GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false)) {
-            setSelectorSyncSnapshot(getUserSelectors());
-          }
+          await putWebDAVRules({ fullUrl, folderUrl, headers, rules: content.split('\n'), settingsModifiedAt: uploadedTime }, content, uploadedTime, remotePreserved, buildDavPutHeaders(headers, uploadedTime));
+          GM_setValue(WEBDAV_LAST_SYNC_KEY, uploadedTime);
         });
         loadingToast.dismiss();
         if (lockAcquired === false) {
@@ -6083,7 +5942,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       GM_setValue(WEBDAV_SYNC_CONFIG_KEY, e.target.checked);
     };
 
-    // webdav下载
     document.getElementById('serh-webdav-download').onclick = async () => {
       const config = getValidatedWebDAVConfig(); if (!config) return; const downloadBtn = document.getElementById('serh-webdav-download'); if (downloadBtn.disabled) return; setWebDAVBusy(true);
       const loadingToast = showToast(t('webdavDownloading'), 'info', 10000);
@@ -6108,15 +5966,11 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   }
 
   async function performWebDAVDownload(config) {
-    adoptStoredConfigIfNewer(); const { fullUrl, headers } = getWebDAVRequest(config); const resp = await gmRequest('GET', fullUrl, { headers }); const content = resp.responseText;
+    getSettingsModifiedTime(); adoptStoredConfigIfNewer(); const { fullUrl, headers } = getWebDAVRequest(config); const resp = await gmRequest('GET', fullUrl, { headers }); const content = resp.responseText;
     if (isInvalidSyncResponse(content, resp.responseHeaders)) throw new Error(t('subImportFailed')); const parsedHeader = parseSyncHeader(content);
     if (isNonRuleTextResponse(parsedHeader.restLines)) throw new Error(t('subImportFailed')); const newRules = filterValidRuleLines(parsedHeader.restLines);
     if (parsedHeader.config) {
-      const {
-        syncedAt, rulesSyncedAt, subscriptions,
-        bubbleState, bubbleSize, selectors, ...settings
-      } = parsedHeader.config;
-      delete settings.subscriptionTombstones; delete settings.tombstones; delete settings.ruleAddedTimes;
+      const { subscriptions, selectors } = parsedHeader.config; const settings = getSyncSettings(parsedHeader.config);
 
       if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
         if (Object.keys(settings).length > 0) {
@@ -6146,7 +6000,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         GM_setValue(SELECTORS_KEY, selectors); setSelectorSyncSnapshot(selectors); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite();
       }
     }
-    const trustedNow = await getTrustedNow(); let cloudTime = 0; const validCloudTimes = extractValidCloudTimes(parsedHeader.config, trustedNow);
+    const trustedNow = await getTrustedNow(); let cloudTime = 0; const validCloudTimes = [getCloudModifiedTime(parsedHeader.config, 'rulesSyncedAt', trustedNow)].filter(v => v > 0);
+    if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) && parsedHeader.config && (Object.keys(getSyncSettings(parsedHeader.config)).length || Array.isArray(parsedHeader.config.subscriptions))) {
+      GM_setValue(SETTINGS_LAST_MODIFIED_KEY, getCloudModifiedTime(parsedHeader.config, 'settingsModifiedAt', trustedNow));
+    }
     if (validCloudTimes.length > 0) {
       cloudTime = Math.max(...validCloudTimes);
     } else {
@@ -6166,7 +6023,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   // webdav逻辑
   async function performAutoWebDAVSync(config, depth = 0) {
-    adoptStoredConfigIfNewer(); const { folderUrl, fullUrl, headers } = getWebDAVRequest(config);
+    getSettingsModifiedTime(); adoptStoredConfigIfNewer(); const { folderUrl, fullUrl, headers } = getWebDAVRequest(config);
 
     const resp = await gmRequest('GET', fullUrl, { headers, allow404: true }); const trustedNow = await getTrustedNow(parseHttpDateHeader(resp.responseHeaders));
     let cloudRules = []; let cloudConfig = null; let cloudTime = 0; let cloudSettingsTime = 0; let cloudETag = ''; let cloudLastMod = ''; let parsedHeader = null;
@@ -6179,7 +6036,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       if (isNonRuleTextResponse(parsedHeader.restLines)) {
         console.warn('[自动 WebDAV] 云端返回非规则文本，已跳过'); return;
       }
-      cloudRules = parsedHeader.restLines.map(r => r.trim()).filter(r => r); const validHeaderTimes = extractValidCloudTimes(parsedHeader.config, trustedNow); let lastModTime = 0;
+      cloudRules = parsedHeader.restLines.map(r => r.trim()).filter(r => r); const validHeaderTimes = [getCloudModifiedTime(parsedHeader.config, 'rulesSyncedAt', trustedNow)].filter(v => v > 0); let lastModTime = 0;
       if (resp.responseHeaders && typeof resp.responseHeaders === 'string') {
         const lastModMatch = resp.responseHeaders.match(/last-modified:\s*(.+)$/im);
         if (lastModMatch) {
@@ -6195,39 +6052,21 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       } else {
         cloudTime = lastModTime; if (isNaN(cloudTime) || cloudTime > trustedNow + WEBDAV_TIME_TOLERANCE) cloudTime = 0;
       }
-      if (cloudConfig && typeof cloudConfig === 'object' && !Array.isArray(cloudConfig) && typeof cloudConfig.syncedAt === 'number' && Number.isFinite(cloudConfig.syncedAt) && cloudConfig.syncedAt > 0 && cloudConfig.syncedAt <= trustedNow + WEBDAV_TIME_TOLERANCE) {
-        cloudSettingsTime = cloudConfig.syncedAt;
-      }
+      cloudSettingsTime = getCloudModifiedTime(cloudConfig, 'settingsModifiedAt', trustedNow);
     }
 
     adoptStoredConfigIfNewer(); let localTime = GM_getValue(LOCAL_LAST_MODIFIED_KEY, 0); if (localTime > trustedNow + WEBDAV_TIME_TOLERANCE) localTime = trustedNow;
+    let localSettingsTime = getSettingsModifiedTime(); if (localSettingsTime > trustedNow + WEBDAV_TIME_TOLERANCE) localSettingsTime = trustedNow;
     const localRules = currentConfig.rules || [];
     const scriptedEmptyCloud = resp.status !== 404 && cloudRules.length === 0 && !!(parsedHeader && parsedHeader.config && typeof parsedHeader.config.rulesSyncedAt === 'number' && Number.isFinite(parsedHeader.config.rulesSyncedAt) && parsedHeader.config.rulesSyncedAt > 0);
     if (resp.status !== 404 && cloudRules.length === 0 && !scriptedEmptyCloud) {
       if (localRules.length > 0 && localTime > cloudTime) {
         console.log('[自动 WebDAV] 云端文件为空且本地规则较新，上传本地规则...'); const uploadedTime = Math.max(cloudTime + 1000, localTime + 1, trustedNow);
-        const putHeaders = {
-          ...headers,
-          'Content-Type': 'text/plain; charset=utf-8',
-          'X-OC-Mtime': Math.floor(uploadedTime / 1000).toString()
-        };
-        if (cloudETag) {
-          putHeaders['If-Match'] = cloudETag;
-        } else if (cloudLastMod) {
-          putHeaders['If-Unmodified-Since'] = cloudLastMod;
-        }
         try {
-          const uploadData = buildUploadContent(localRules.join('\n'), uploadedTime, {
+          await putWebDAVRules({ fullUrl, folderUrl, headers, rules: localRules }, localRules.join('\n'), uploadedTime, {
             rawScriptConfig: parsedHeader ? parsedHeader.rawScriptConfig : null,
             rawSelectors: parsedHeader ? parsedHeader.rawSelectors : null
-          });
-          await gmPutWebDAV(fullUrl, { headers: putHeaders, data: uploadData }, folderUrl, headers); GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime); setRuleSyncSnapshot(localRules);
-          if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
-            setSubscriptionSyncSnapshot(getSubscriptions());
-          }
-          if (GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false)) {
-            setSelectorSyncSnapshot(getUserSelectors());
-          }
+          }, buildDavPutHeaders(headers, uploadedTime, { etag: cloudETag, lastMod: cloudLastMod }));
         } catch (err) {
           if (err && err.message && err.message.includes('412')) {
             if (depth >= WEBDAV_SYNC_MAX_RETRIES) {
@@ -6245,25 +6084,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
 
     if (resp.status === 404) {
-      console.log('[自动 WebDAV] 云端文件不存在，初始上传中...'); await ensureWebDAVFolder(folderUrl, headers); const localContent = localRules.join('\n'); const uploadedTime = trustedNow;
-      const uploadData = buildUploadContent(localContent, uploadedTime);
+      console.log('[自动 WebDAV] 云端文件不存在，初始上传中...'); await ensureWebDAVFolder(folderUrl, headers);
       try {
-        await gmPutWebDAV(fullUrl, {
-          headers: {
-            ...headers,
-            'Content-Type': 'text/plain; charset=utf-8',
-            'X-OC-Mtime': Math.floor(uploadedTime / 1000).toString(),
-            'If-None-Match': '*'
-          },
-          data: uploadData
-        }, folderUrl, headers);
-        GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime); setRuleSyncSnapshot(localRules);
-        if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
-          setSubscriptionSyncSnapshot(getSubscriptions());
-        }
-        if (GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false)) {
-          setSelectorSyncSnapshot(getUserSelectors());
-        }
+        await putWebDAVRules({ fullUrl, folderUrl, headers, rules: localRules }, localRules.join('\n'), trustedNow, null, buildDavPutHeaders(headers, trustedNow, { ifNoneMatch: true }));
       } catch (err) {
         if (err && err.message && err.message.includes('412') && depth < WEBDAV_SYNC_MAX_RETRIES) {
           console.warn(`[自动 WebDAV] 云端文件被并发创建 (412)，重新同步 (${depth + 1}/${WEBDAV_SYNC_MAX_RETRIES})`);
@@ -6273,7 +6096,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       }
     } else {
       const baseRules = getRuleSyncSnapshot(); let mergedRules;
-      if (!baseRules) {
+      if (!baseRules && scriptedEmptyCloud) mergedRules = [];
+      else if (!baseRules) {
         const seen = new Set(); const union = [];
         const addRule = (r) => {
           const trimmed = (r || '').trim(); if (!trimmed) return; const k = getRuleKey(trimmed);
@@ -6289,18 +6113,11 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       const mergedContent = mergedRules.join('\n');
       let mergedSubs = null;
       if (cloudConfig && Array.isArray(cloudConfig.subscriptions) && GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
-        mergedSubs = applyCloudSubscriptions(cloudConfig.subscriptions, localTime >= cloudSettingsTime);
+        mergedSubs = applyCloudSubscriptions(cloudConfig.subscriptions, localSettingsTime >= cloudSettingsTime);
       }
 
-      if (cloudSettingsTime > localTime && cloudConfig) {
-        const {
-          syncedAt, rulesSyncedAt, subscriptions,
-          bubbleState, bubbleSize, selectors, ...settings
-        } = cloudConfig;
-        delete settings.subscriptionTombstones; delete settings.tombstones; delete settings.ruleAddedTimes;
-        if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) && Object.keys(settings).length > 0) {
-          Object.assign(currentConfig, settings);
-        }
+      if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) && cloudSettingsTime > localSettingsTime && cloudConfig) {
+        Object.assign(currentConfig, getSyncSettings(cloudConfig)); localSettingsTime = cloudSettingsTime; GM_setValue(SETTINGS_LAST_MODIFIED_KEY, localSettingsTime);
       }
 
       currentConfig.rules = mergedRules; persistConfig(false);
@@ -6313,44 +6130,19 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           GM_setValue(SELECTORS_KEY, mergedSelectors); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite();
         }
       }
-      const selectorsChanged = !!mergedSelectors && !selectorsEqual(mergedSelectors, cloudSelectors); const contentChanged = mergedRules.join('\n') !== cloudRules.join('\n');
-      const localNewer = localTime > cloudTime; const localSettingsNewer = localTime > cloudSettingsTime;
-      const subscriptionSignature = subs => JSON.stringify((Array.isArray(subs) ? subs : [])
-        .filter(s => s && s.url)
-        .map(s => [s.url, s.name || '', s.enabled !== false])
-        .sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+      const selectorsChanged = syncSelectors && (cloudSelectors === null || !selectorsEqual(mergedSelectors, cloudSelectors)); const contentChanged = mergedRules.join('\n') !== cloudRules.join('\n');
+      const localNewer = localTime > cloudTime; const localSettingsNewer = localSettingsTime > cloudSettingsTime;
       const subscriptionsChanged = syncConfig && (
-        subscriptionSignature(mergedSubs || getSubscriptions()) !== subscriptionSignature(cloudConfig && cloudConfig.subscriptions));
+        subscriptionsSignature(mergedSubs || getSubscriptions()) !== subscriptionsSignature(cloudConfig && cloudConfig.subscriptions));
       const shouldUpload = contentChanged || subscriptionsChanged || selectorsChanged || (syncConfig && localSettingsNewer) || (syncSelectors && localNewer);
 
       if (shouldUpload) {
         console.log('[自动 WebDAV] 规则合并或配置更新完成，上传至云端...'); const uploadedTime = Math.max(cloudTime + 1000, localTime + 1, trustedNow);
-        const uploadData = buildUploadContent(mergedContent, uploadedTime, {
-          rawScriptConfig: parsedHeader ? parsedHeader.rawScriptConfig : null,
-          rawSelectors: parsedHeader ? parsedHeader.rawSelectors : null
-        });
-        const putHeaders = {
-          ...headers,
-          'Content-Type': 'text/plain; charset=utf-8',
-          'X-OC-Mtime': Math.floor(uploadedTime / 1000).toString()
-        };
-        if (cloudETag) {
-          putHeaders['If-Match'] = cloudETag;
-        } else if (cloudLastMod) {
-          putHeaders['If-Unmodified-Since'] = cloudLastMod;
-        }
         try {
-          await gmPutWebDAV(fullUrl, { headers: putHeaders, data: uploadData }, folderUrl, headers); GM_setValue(LOCAL_LAST_MODIFIED_KEY, uploadedTime); setRuleSyncSnapshot(mergedRules);
-          if (mergedSubs) {
-            setSubscriptionSyncSnapshot(mergedSubs);
-          } else if (syncConfig) {
-            setSubscriptionSyncSnapshot(getSubscriptions());
-          }
-          if (mergedSelectors) {
-            setSelectorSyncSnapshot(mergedSelectors);
-          } else if (syncSelectors) {
-            setSelectorSyncSnapshot(getUserSelectors());
-          }
+          await putWebDAVRules({ fullUrl, folderUrl, headers, rules: mergedRules, subs: mergedSubs, selectors: mergedSelectors, rulesModifiedAt: contentChanged ? uploadedTime : (cloudTime || uploadedTime), settingsModifiedAt: subscriptionsChanged ? Math.max(uploadedTime, localSettingsTime) : localSettingsTime }, mergedContent, uploadedTime, {
+            rawScriptConfig: parsedHeader ? parsedHeader.rawScriptConfig : null,
+            rawSelectors: parsedHeader ? parsedHeader.rawSelectors : null
+          }, buildDavPutHeaders(headers, uploadedTime, { etag: cloudETag, lastMod: cloudLastMod }));
         } catch (err) {
           if (err && err.message && err.message.includes('412')) {
             if (depth >= WEBDAV_SYNC_MAX_RETRIES) {
@@ -6363,17 +6155,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           console.warn('[自动 WebDAV] 上传失败:', err.message); return;
         }
       } else {
-        setRuleSyncSnapshot(mergedRules);
-        if (mergedSubs) {
-          setSubscriptionSyncSnapshot(mergedSubs);
-        } else if (syncConfig) {
-          setSubscriptionSyncSnapshot(getSubscriptions());
-        }
-        if (mergedSelectors) {
-          setSelectorSyncSnapshot(mergedSelectors);
-        } else if (syncSelectors) {
-          setSelectorSyncSnapshot(getUserSelectors());
-        }
+        persistSyncSnapshots(mergedRules, { subs: mergedSubs, selectors: mergedSelectors });
         if (cloudTime > 0) {
           GM_setValue(LOCAL_LAST_MODIFIED_KEY, cloudTime);
         }
@@ -6384,11 +6166,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   }
 
   function isSerhPanelOpen() {
-    return !!(document.getElementById('serh-panel') ||
-      document.getElementById('serh-subscription-panel') ||
-      document.getElementById('serh-webdav-panel') ||
-      document.getElementById('serh-selector-panel') ||
-      document.getElementById('serh-hlcolor-panel'));
+    return ['serh-panel', 'serh-subscription-panel', 'serh-webdav-panel', 'serh-selector-panel', 'serh-settings-panel', 'serh-hlcolor-panel'].some(id => document.getElementById(id));
   }
 
   let _webdavSyncDelayedTimer = null;
@@ -6427,21 +6205,17 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
   }
 
-  // TXT导入
   function importRulesFromFile() {
     pickTextFile('.txt,text/plain', (content) => {
       const parsedHeader = parseSyncHeader(content);
       const headerConfig = parsedHeader.config;
       if (headerConfig && typeof headerConfig === 'object' && !Array.isArray(headerConfig)) {
-        const {
-          syncedAt, rulesSyncedAt, subscriptions,
-          bubbleState, bubbleSize, selectors, ...settings
-        } = headerConfig;
-        delete settings.subscriptionTombstones; delete settings.tombstones; delete settings.ruleAddedTimes;
+        const settings = getSyncSettings(headerConfig);
         if (Object.keys(settings).length > 0) {
-          currentConfig = normalizeConfig(Object.assign(getDefaultConfig(), settings, {
-            rules: currentConfig.rules || [], bubbleState: currentConfig.bubbleState, bubbleSize: currentConfig.bubbleSize
-          }));
+          const next = Object.assign({}, currentConfig); const colors = settings.highlightColors;
+          if (colors && typeof colors === 'object' && !Array.isArray(colors)) settings.highlightColors = Object.assign({}, currentConfig.highlightColors, colors);
+          Object.assign(next, settings); next.rules = currentConfig.rules || []; next.bubbleState = currentConfig.bubbleState; next.bubbleSize = currentConfig.bubbleSize;
+          currentConfig = normalizeConfig(next);
         }
       }
       const textarea = document.getElementById('serh-rules');
@@ -6454,19 +6228,17 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     });
   }
 
-  // TXT导出
   function exportRulesToFile() {
     preventPanelClose = true; const textarea = document.getElementById('serh-rules'); let content = textarea.value;
     if (!content.trim()) {
       alert(t('noRulesExport')); preventPanelClose = false; return;
     }
     if (currentConfig.exportConfig === true) {
-      const { rules, bubbleState, bubbleSize, selectors, ...settings } = currentConfig; content = '# ScriptConfig:' + JSON.stringify(settings) + '\n' + content;
+      content = '# ScriptConfig:' + JSON.stringify(getSyncSettings(currentConfig)) + '\n' + content;
     }
     downloadTextFile(timestampFilename('rules', 'txt'), content, 'text/plain;charset=utf-8'); preventPanelClose = false;
   }
 
-  // 管理器菜单
   let _menuCommandIds = [];
   function registerMenu() {
     _menuCommandIds.forEach(id => { try { GM_unregisterMenuCommand(id); } catch (e) {} }); _menuCommandIds = [];
