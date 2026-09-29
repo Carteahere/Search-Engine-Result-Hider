@@ -370,9 +370,10 @@ check('选择器-093: 缺省与空关联相等', api.sameSelectorDef(CUSTOM.myse
 api.setStore({ duckduckgo_lite: { ...liteDef, match: liteDef.match.source, extraElements: [] } });
 check('选择器-094: 覆盖可清空内置关联', api.getSelectors().duckduckgo_lite.extraElements.length === 0);
 const parseCondition = new Function(extractFn(src, 'hostLabelToASCII') + extractFn(src, 'toASCIIHostname') + extractFn(src, 'parseConditionPart') + '; return parseConditionPart;')();
-for (const [i, id] of ['duckduckgo', 'ddg', 'duckduckgo_lite'].entries()) {
-  check(`选择器-095-${i + 1}: Lite条件匹配 ${id}`, parseCondition('$site=' + id, 'duckduckgo_lite', 'lite.duckduckgo.com').static === true);
+for (const [i, id] of ['duckduckgo', 'ddg'].entries()) {
+  check(`选择器-095-${i + 1}: 主站条件不匹配Lite ${id}`, parseCondition('$site=' + id, 'duckduckgo_lite', 'lite.duckduckgo.com').static === false);
 }
+check('选择器-095-3: Lite条件匹配专有ID', parseCondition('$site=duckduckgo_lite', 'duckduckgo_lite', 'lite.duckduckgo.com').static === true);
 check('选择器-096: 专有ID不匹配普通DDG', parseCondition('$site=duckduckgo_lite', 'duckduckgo', 'duckduckgo.com').static === false);
 })();
 
@@ -1833,6 +1834,25 @@ return { validateUserSelectors, diffUserSelectors };`
   const d4 = envQ.diffUserSelectors({ bing: typoDef });
   check('审查4-Q1(当前行为): 未知字段通过校验不报错, 且diff对内置键只挑已知字段, 拼错字段(containerz)静默丢弃; 自定义键则原样保留, 两分支口径不一致', envQ.validateUserSelectors({ bing: typoDef }).length === 0 && !!d4.bing && !('containerz' in d4.bing) && d4.bing.containers === '.changed');
   check('审查4-Q2(当前行为): disabled:true 引擎仍先校验extraElements, 已停用引擎因残留字段无法保存', envQ.validateUserSelectors({ b2: { disabled: true, match: 'a', containers: '.x', extraElements: ['a, b'] } }).length === 1);
+}
+
+// ==== [审查候选] links 空数组/空白项: 校验放行, 合并后没有默认 a[href], 结果链接取空 ====
+{
+  const linkEnv = new Function(
+    ['normalizeSelectorList', 'mergeSelectorDef', 'isValidCssSelector', 'hasPseudoElement', 'getInvalidRegexFlags', 'validateUserSelectors', 'getResultLink'].map((n) => extractFn(src, n)).join('\n') +
+    `\nconst SELECTORS = { bing: { links: ['h2 a[href]', 'a[href]'] } };
+function getSelectors() { return { bing: { links: ['h2 a[href]', 'a[href]'] }, mine: { links: activeLinks } }; }
+let activeLinks = 'a[href]';
+function t(key, params = {}) { let text = key; for (const [k, v] of Object.entries(params || {})) text += ':' + v; return text; }
+const card = { querySelector: (sel) => (String(sel).includes('a[href]')) ? { href: 'https://example.com/p' } : null };
+return {
+  validate: (links) => validateUserSelectors({ mine: { match: 'example', containers: '.r', links } }).length,
+  merge: (links) => mergeSelectorDef(links === undefined ? {} : { links }, {}).links,
+  link: (links) => { activeLinks = mergeSelectorDef({ links }, { links: 'a[href]' }).links; const el = getResultLink(card, 'mine'); return el && el.href; },
+};`
+  )();
+  check('审查候选: links [] 与 [""] 校验通过, 合并结果为空数组, 有 a[href] 的结果仍取不到链接', linkEnv.validate([]) === 0 && linkEnv.validate(['']) === 0 && JSON.stringify(linkEnv.merge([])) === '[]' && JSON.stringify(linkEnv.merge([''])) === '[]' && linkEnv.link([]) === null && linkEnv.link(['']) === null);
+  check('审查候选(对照): 省略 links 或 links:"" 仍回退 a[href] 并取到链接', JSON.stringify(linkEnv.merge(undefined)) === '"a[href]"' && linkEnv.link('') === 'https://example.com/p');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

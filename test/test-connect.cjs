@@ -1678,6 +1678,8 @@ await (async () => {
   assert('审查W-8: 一边只改顺序、另一边改同一条正文时，改写挂到被移动的那一行', JSON.stringify(movedAndEdited) === JSON.stringify(['c # note', 'a', 'b']));
   const editUnmoved = merge3(['a', 'b', 'c'], ['c', 'a', 'b'], ['a # note', 'b', 'c']);
   assert('审查W-8(对照): 改写的是没被移动的行时正文位置正确', JSON.stringify(editUnmoved) === JSON.stringify(['c', 'a # note', 'b']));
+  const dupAdd = merge3(['# 广告', 'a.com', '# 广告', 'b.com'], ['# 广告', 'a.com', 'c.com', '# 广告', 'b.com'], ['# 广告', 'a.com', '# 广告', 'b.com', 'd.com']);
+  assert('审查候选-重复注释(设计,对照 README 1.5.3): 两个同文注释行合并成一组, 第二组新增落到第一组后面', JSON.stringify(dupAdd) === JSON.stringify(['# 广告', 'a.com', 'c.com', 'b.com', 'd.com']));
 }
 // 修复W-4: 自动同步/手动下载增加整体拒绝兜底——非空正文若不含任何合法规则行或注释行, 视为错误文本整体拒绝(不并入不回传);
 // 词表白名单本身未扩(复审W-4 留档: "Too Many Requests"等不在isInvalidSyncResponse词表内, 拒绝由下游兜底承担)
@@ -1887,6 +1889,14 @@ return { adoptedNoop, snapshotNoop, adopted, cfg: currentConfig };
   `)(() => subs4.map((s) => ({ ...s })), (v) => { subs4 = v; }, () => [], () => {});
   const outSub4 = apiSub4([{ url: 'https://s/x', enabled: true }], false);
   assert('审查4-S6(当前行为): base快照缺失且双方新增同URL订阅、云端项无name时, 本地订阅名被覆盖丢失(仅显示层, 不影响规则)', outSub4[0].name === undefined);
+  // 审查候选: 云端订阅项省略 enabled 时, enabledOf 把缺字段当成启用; 三方都未改启用位时仍取云端, 本地 false 被翻成 true
+  let subsOmit = [{ url: 'https://s/off', enabled: false, rules: ['blocked.example'], lastUpdate: 8, name: 'Mine' }];
+  const apiOmit = new Function('getSubscriptions', 'saveSubscriptions', 'getSubscriptionSyncSnapshot', 'checkAutoSubscription', `
+    ${extractFn(src, 'applyCloudSubscriptions')}
+    return applyCloudSubscriptions;
+  `)(() => subsOmit.map((s) => ({ ...s })), (v) => { subsOmit = v; }, () => [{ url: 'https://s/off', enabled: false, name: 'Mine' }], () => {});
+  const outOmit = apiOmit([{ url: 'https://s/off', name: 'Mine' }], false);
+  assert('审查候选: 云端订阅省略enabled且双方都未改启用位时, 本地禁用被当成启用', outOmit.length === 1 && outOmit[0].enabled === true && outOmit[0].rules[0] === 'blocked.example');
 }
 
 // ==== [修复R1b] 无快照设备遇脚本清空(头含rulesSyncedAt)空云端: 采纳清空, 清空意图传播不再被union回退复活(与修复R1语义对齐); 云端非空无快照仍union ====
@@ -1903,6 +1913,63 @@ return { adoptedNoop, snapshotNoop, adopted, cfg: currentConfig };
   envUnion.setCurrent({ rules: kept.slice(), enabled: true });
   await envUnion.run(syncCfg);
   assert('修复R1b-3(对照): 云端非空+无快照仍union保留两端(同步-007保守语义不变)', JSON.stringify(envUnion.getCurrent().rules.slice().sort()) === JSON.stringify(kept.concat(cloudRule).slice().sort()));
+}
+
+// ==== [同步-159~160] 本轮复审: openPanel已存在面板路径跳过beforeClose / applyConfigToMainPanel不回填设置面板独有控件 (审查新发现, 以当前行为为准) ====
+{
+  const opSrc = extractFn(src, 'openPanel');
+  const existBranch = opSrc.slice(opSrc.indexOf('if (existing)'), opSrc.indexOf('return null'));
+  assert('同步-159(新发现,当前行为): openPanel对已存在面板仅清理监听并remove且从不调用beforeClose, showSubscriptionPanel因返回null直接return(面板开着时再点订阅按钮=丢弃未保存的URL编辑且面板不再重开, 需再点一次)', existBranch.includes('existing.remove()') && !existBranch.includes('beforeClose') && extractFn(src, 'showSubscriptionPanel').includes('if (!opened) return;'));
+  const acSrc = extractFn(src, 'applyConfigToMainPanel');
+  const keysSrc = src.match(/const SETTINGS_PANEL_CHECKBOXES = \{[\s\S]*?\};/)[0];
+  const uncovered = ['serh-set-show-source', 'serh-set-show-sub-btn', 'serh-set-show-sync-btn', 'serh-set-language'].filter((id) => !keysSrc.includes(id) && !acSrc.includes(id));
+  assert('同步-160(新发现,当前行为): applyConfigToMainPanel只回填SETTINGS_PANEL_CHECKBOXES与气泡动作下拉, 来源显示/订阅按钮/同步按钮/语言四控件在WebDAV下载或导入应用配置后保持旧显示(仅视觉陈旧, 无配置破坏)', uncovered.length === 4 && acSrc.includes('serh-set-bubble-action') && keysSrc.includes("'serh-set-show-bubble'"));
+}
+
+// ==== [审查7-S*] 第四轮子代理审查留档: 双头行后者覆盖 / filterValidRuleLines不剔头行 / 404空规则初始上传生成脚本化空文件+合并清空机制 ====
+{
+  const parse7 = new Function(extractFn(src, 'parseSyncHeader') + '\nreturn parseSyncHeader;')();
+  const fvl7 = new Function(extractFn(src, 'filterValidRuleLines') + '\nreturn filterValidRuleLines;')();
+  const dbl7 = parse7('# ScriptConfig:{"language":"en-US"}\n# ScriptConfig:{"language":"zh-CN"}\nrule1\n');
+  assert('审查7-S1(新发现,当前行为): 导出正文若混入旧# ScriptConfig行, 再导出时出现双头行, 导入时parseSyncHeader顺序扫描后行覆盖前行 → 过期设置回退生效', !!dbl7.config && dbl7.config.language === 'zh-CN' && dbl7.restLines.filter((l) => l.trim()).join() === 'rule1');
+  assert('审查7-S1b(新发现,当前行为): saveConfig/手动上传路径filterValidRuleLines不剔除# ScriptConfig头行(与导入路径restLines不一致), 头行作为注释规则入库参与同步', fvl7(['# ScriptConfig:{"a":1}', '', 'rule1']).join('|') === '# ScriptConfig:{"a":1}|rule1');
+}
+{
+  const store7 = new Map();
+  store7.set(KEYS.WEBDAV_SYNC_CONFIG_KEY, false);
+  store7.set(KEYS.WEBDAV_SYNC_SELECTORS_KEY, false);
+  const f7 = new Function('store', `
+    const WEBDAV_SYNC_CONFIG_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_CONFIG_KEY)};
+    const WEBDAV_SYNC_SELECTORS_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_SELECTORS_KEY)};
+    const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
+    const GM_setValue = (k, v) => { store.set(k, v); };
+    function getUserSelectors() { return {}; }
+    ${extractFn(src, 'buildUploadContent')}
+    return { build: (c, at, p) => buildUploadContent(c, at, p) };
+  `);
+  const out7 = f7(store7).build('', 12345, {});
+  const merge7 = new Function(`\n${extractFn(src, 'stripRuleComment')}\n${extractFn(src, 'getRuleKey')}\n${extractFn(src, 'mergeRules3Way')}\nreturn mergeRules3Way;`)();
+  assert('审查7-S2(新发现,当前行为): 404初始上传不区分本地规则是否为空, buildUploadContent("")仍生成rulesSyncedAt>0头 → 他机scriptedEmptyCloud判定成立(与6076空云端跳过分支不对称)', out7.startsWith('# ScriptConfig:') && out7.includes('"rulesSyncedAt":12345'));
+  assert('审查7-S2b(机制对照): 该脚本化空文件落入有快照设备时mergeRules3Way删除胜出清空全部规则(放大S2为跨设备规则丢失)', JSON.stringify(merge7(['a', 'b'], ['a', 'b'], [])) === '[]');
+}
+
+// ==== [修复SUB] 订阅面板改"保存"制: ❌删除/开关切换不再立即持久化, 取消可整体回滚 ====
+{
+  assert('修复SUB-1: 面板主按钮文案改用 save 键(不再显示导入)', /serh-subscription-import" class="serh-button serh-button-primary">\$\{t\('save'\)\}/.test(src));
+  assert('修复SUB-2: ❌删除仅记录原URL墓碑并移除行, 不再立即持久化', (() => {
+    const row = { dataset: { originalUrl: 'https://x/rules' }, removed: false, remove: () => { row.removed = true; } };
+    const deletedUrls = new Set(); const btn = { onclick: null, closest: () => row }; let persisted = 0;
+    new Function('container', 'deletedUrls', 'reindexRows', 'persistCurrentSubscriptions', `
+      ${extractFn(src, 'bindDeleteEvents')}
+      return bindDeleteEvents;
+    `)({ querySelectorAll: () => [btn] }, deletedUrls, () => {}, () => { persisted++; })();
+    btn.onclick({ stopPropagation() {} });
+    return row.removed && deletedUrls.size === 1 && persisted === 0;
+  })());
+  assert('修复SUB-3: 开关切换不再挂即时持久化监听(否则会连带落库待删墓碑, 使取消失效)', !extractFn(src, 'createSubscriptionRow').includes('persistCurrentSubscriptions'));
+  const saveSeg = src.slice(src.indexOf("serh-subscription-import').onclick"), src.indexOf("serh-subscription-cancel').onclick"));
+  assert('修复SUB-4: 保存仍先持久化全部编辑(含待删墓碑)再自动导入各行', saveSeg.includes('persistCurrentSubscriptions()') && saveSeg.includes('performSubscriptionForUrl('));
+  assert('修复SUB-5: 持久化在订阅变更时同步刷新过滤引擎(正常关闭路径也生效)', /if\s*\(subsChanged\)\s*\{[^}]*forceReprocessAll\(\)/.test(extractFn(src, 'persistCurrentSubscriptions')));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

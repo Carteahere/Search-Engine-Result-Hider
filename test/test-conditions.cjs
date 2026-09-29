@@ -795,7 +795,7 @@ assert('条件-316: 空@if仍无效', m.analyzeRule('@if()').valid === false);
 assert('条件-318: 高亮越界仍无效', m.analyzeRule('@9 host $= ".example.com"').valid === false);
 assert('条件-319: 复合旧写法仍有效', m.analyzeRule('*://*.example.com/* @if(title *= "kw")').valid === true);
 assert('条件-321: $category独立表达式有效', m.analyzeRule('$category = "images"').valid === true);
-assert('条件-323: 高亮+白名单表达式无效', m.analyzeRule('@1 @host $= ".example.com"').valid === false);
+assert('条件-323: 高亮+白名单表达式有效', m.analyzeRule('@1 @host $= ".example.com"').valid === true);
 assert('条件-324: 高亮+@if仍有效', m.analyzeRule('@1 path $= ".pdf" @if($site = "google")').valid === true);
 
 // ---- @if 检测范围扩大回归(regex/title/text 前缀同样校验) (注: 16个同构变形裁剪为5个代表形态) ----
@@ -1124,7 +1124,7 @@ assert('条件-405: 首行独立条件表达式按纯文本保留', nonEmpty(pco
     '\nreturn { parseRuleWithConditions, evalCondAST };'
   )();
   const liteRule = envD.parseRuleWithConditions('*://*.example.com/* @if($site = "duckduckgo")');
-  assert('复审C-1(新发现): $site = "duckduckgo"在duckduckgo_lite站点静态命中(与"lite使用独立ID"文档相悖, 无法表达仅主站)', liteRule.staticPass === true && liteRule.dynamicConditions.length === 0);
+  assert('复审C-1(已修复): $site = "duckduckgo"在duckduckgo_lite站点不再命中(仅匹配主站)', liteRule.staticPass === false && liteRule.dynamicConditions.length === 0);
   const urlCond = envD.parseRuleWithConditions('url *= "例子.com"').dynamicConditions[0];
   const hostCond = envD.parseRuleWithConditions('host $= ".例子.com"').dynamicConditions[0];
   assert('复审C-2(已修复): url条件与host同样做IDN/punycode归一, 中文域名字面条件命中punycode URL', envD.evalCondAST(urlCond, 't', 'https://xn--fsqu00a.com/') === true);
@@ -1222,6 +1222,94 @@ const compiledRules = { domains: new Map(), urls: [], titles: [{ regex: /^$/, or
 return { checkRuleMatchOptimized };`
   )();
   assert('审查4-C3(当前行为): title/^$/ 编译入索引且正则本身命中空串, 但匹配路径对空标题短路(scanPatterns !value)永不命中; 对照@if路径 !title *= "x" 可命中无标题结果', envM.checkRuleMatchOptimized('https://x.com/', 'x.com', '', '') === false && /^$/.test(''));
+}
+
+// ==== [审查5-C1] url =~ 不走字符串比较那条百分号/IDN归一, 页面实际URL匹配失败 ====
+{
+  const envU = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
+    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions'].map((n) => extractFn(src, n)).join('\n') +
+    `\nconst window = { location: { hostname: 'www.google.com' } };
+function getSearchEngine() { return 'google'; } function getSearchCategory() { return 'web'; }
+return { parseRuleWithConditions, evalCondAST };`
+  )();
+  const ev = (rule, url) => envU.evalCondAST(envU.parseRuleWithConditions(rule).dynamicConditions[0], 't', url);
+  assert('审查5-C1(已修复): url =~ 同时测原文与foldUrl, 中文正则命中百分号URL, 百分号正则仍命中原文, punycode主机同样命中', ev('url =~ /下载/', 'https://example.com/%E4%B8%8B%E8%BD%BD') === true && ev('url =~ /%E4%B8%8B%E8%BD%BD/', 'https://example.com/%E4%B8%8B%E8%BD%BD') === true && ev('url =~ /例子/', 'https://xn--fsqu00a.com/') === true && ev('url =~ /xn--fsqu00a/', 'https://xn--fsqu00a.com/') === true);
+}
+
+// ==== [审查6-C1~C3] 本轮复审: @if(...)内#注释不被截断但条件解析器报未知条件, 整规则失效被索引跳过 (审查新发现, 以当前行为为准) ====
+{
+  const envN = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
+    src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0] + '\n' +
+    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateCondition', 'analyzeRule'].map((n) => extractFn(src, n)).join('\n') +
+    `\nconst window = { location: { hostname: 'www.google.com' } };
+function getSearchEngine() { return 'google'; } function getSearchCategory() { return 'web'; }
+const currentConfig = { rules: [], debug: false, language: 'zh-CN' };
+const validationCache = new Map(); const subdomainCache = new Map();
+${src.match(/function t\(key, params = \{\}\) \{[\s\S]*?\n  \}/)[0]}
+return { stripRuleComment, analyzeRule };`
+  )();
+  assert('审查6-C1(对照): @if(...)括号内的#注释受保护不被stripRuleComment截断, 括号外尾注正常剥离', envN.stripRuleComment('*://*.example.com/* @if(title *= "广告" # 注)') === '*://*.example.com/* @if(title *= "广告" # 注)' && envN.stripRuleComment('*://*.example.com/* @if(title *= "广告") # 注') === '*://*.example.com/* @if(title *= "广告")');
+  assert('审查6-C2(新发现,当前行为): 括号内#注释被整段当条件文本报「未知 @if 条件」使规则valid=false, 而括号外等价尾注合法(注释只能写在@if括号外, 写在括号内规则整体失效)', envN.analyzeRule('*://*.example.com/* @if(title *= "广告" # 注)').valid === false && envN.analyzeRule('*://*.example.com/* @if(title *= "广告") # 注').valid === true);
+  const briSrc = SERH_RAW_EXTRACT(src, 'buildRuleIndex');
+  assert('审查6-C3(当前行为): buildRuleIndex对无效规则直接跳过且仅debug模式告警, 审查6-C2的规则静默不生效(页面无任何反馈)', briSrc.includes('if (!ruleValid)') && briSrc.includes('规则校验未通过'));
+}
+
+// ==== [审查7-*] 第四轮子代理审查留档 (仅断言当前行为): "= /re/flags"非法flags静默字面量化 / 紧贴@if死规则 / matches-only订阅空规则 / 多行flow闭合同行丢失 / t()替换$模式失真 ====
+{
+  const env7 = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
+    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions'].map((n) => extractFn(src, n)).join('\n') +
+    '\nconst window = { location: { hostname: "www.google.com" } };' +
+    '\nfunction getSearchEngine() { return "google"; } function getSearchCategory() { return "web"; }' +
+    '\nreturn { analyzeCondExpr, foldCondExpr, evalCondAST };'
+  )();
+  const ev7 = (cond, title, url) => { const { ast, errors } = env7.analyzeCondExpr(cond, 'google', 'www.google.com', 'web'); if (errors.length) return { errors }; const f = env7.foldCondExpr(ast); return f.type === 'const' ? { c: f.value } : { v: env7.evalCondAST(f, title, url) }; };
+  const bad7 = ev7('title = /x/g', 'x', 'https://a.com/');
+  assert('审查7-C1(新发现,当前行为): @if(title = /x/g) 非法flags不经leafParser预检(预检正则缺"=\\s*"分支), parseConditionPart退化strMatch字面等值且自检零报错(规则静默永不命中)', !bad7.errors && bad7.v === false);
+  const ok7 = ev7('title = /x/i', 'x', 'https://a.com/');
+  assert('审查7-C1b(对照): 合法flags的 title = /x/i 仍按正则编译命中', !ok7.errors && ok7.v === true);
+}
+{
+  const env7b = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' + src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0] + '\n' +
+    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'encodeNonAscii', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'stripRuleComment', 'extractIfConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateCondition', 'analyzeRule'].map((n) => extractFn(src, n)).join('\n') +
+    '\nconst window = { location: { hostname: "www.bing.com" } };' +
+    '\nfunction getSearchEngine() { return "bing"; } function getSearchCategory() { return "web"; }' +
+    '\nfunction t(key) { return key; }' +
+    '\nconst currentConfig = { rules: [], debug: false };' +
+    '\nreturn { analyzeRule, findIfOccurrences };'
+  )();
+  assert('审查7-C2(新发现,当前行为): @if紧贴规则无空格时occurrence为空, analyzeRule("example.com@if(bing)")零报错通过(编译为字面@if(bing)死规则永不命中; 对照带空格报未知条件)', env7b.findIfOccurrences('example.com@if(bing)').length === 0 && env7b.analyzeRule('example.com@if(bing)').valid === true && env7b.analyzeRule('example.com @if(bing)').valid === false);
+}
+{
+  const env7c = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
+    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'splitHostAndPort', 'escapeHostPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'checkDynamicConditions', 'getSubdomainLevels', 'matchDomainEntryType', 'extractYamlRuleItems', 'parseRulesetContent', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule'].map((n) => extractFn(src, n)).join('\n') + `
+const window = { location: { hostname: 'www.google.com' } };
+function getSearchEngine() { return 'google'; } function getSearchCategory() { return 'web'; }
+function t(key) { return key; }
+const currentConfig = { rules: [], debug: false };
+const validationCache = new Map(); const subdomainCache = new Map();
+let compiledRules;
+return { parseRulesetContent };`
+  )();
+  const pc7 = env7c.parseRulesetContent;
+  const nz7 = (ls) => ls.map((l) => l.trim()).filter((l) => l);
+  const pM7 = pc7('name: X\nmatches:\n- foo.com\n');
+  assert('审查7-C4(新发现,当前行为): 仅含matches:的合法uBlacklist订阅解析为空规则集(lines:[]), 上游validRules=0按导入失败抛错且lastUpdate不更新→每小时及每次关面板重试', pM7.lines.length === 0 && pM7.meta.name === 'X');
+  const pF7 = pc7('name: X\nrules: [\n  a.com,\n  b.com]\n');
+  assert('审查7-C5(新发现,当前行为): 多行flow列表闭合]与末元素同行时flowCloseAt找不到闭合, 整段回退纯文本(rules列表全部丢失)', nz7(pF7.lines).length === 4 && nz7(pF7.lines)[1] === 'rules: [');
+}
+{
+  const tEnv7 = new Function(
+    src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0] + '\n' +
+    src.match(/function t\(key, params = \{\}\) \{[\s\S]*?\n  \}/)[0] +
+    '\nconst currentConfig = { language: "zh-CN" };' +
+    '\nreturn { t };'
+  )();
+  assert('审查7-C6(新发现,当前行为): t()替换参数未转义$, 参数含"$&"时被replaceAll特殊模式吞成{part}(错误提示文案失真, 仅显示层)', tEnv7.t('condRegexError', { part: 'title/$&/i' }) === '条件正则无效: title/{part}/i');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

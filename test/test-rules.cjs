@@ -405,11 +405,11 @@ cr = api.getCR();
 assert('规则-113: 禁用订阅不加载', !cr.domains.has('off.com'));
 assert('规则-114: 启用订阅保留原始序号标签', cr.domains.get('on.com')[0].source === '订阅2');
 
-// @N+白名单组合：编译期必须跳过（否则成为惰性规则）
+// @N+白名单组合同时编译为高亮和白名单
 api.setState(['@1 @*://*.bad.com/*', '@2 @host $= ".bad2.com"', '@3 *://*.good.com/*'], []);
 api.buildRuleIndex();
 cr = api.getCR();
-assert('规则-115: 高亮+白名单组合不编译', cr.highlightUrls.length === 0 && cr.highlightConditionalRules.length === 0);
+assert('规则-115: 高亮+白名单同时编译', cr.highlightDomains.has('bad.com') && cr.whitelistDomains.has('bad.com') && cr.highlightConditionalRules.some(e => e.N === 2) && cr.whitelistConditionalRules.length === 1);
 assert('规则-116: 正常高亮域名规则不受影响', cr.highlightDomains.has('good.com'));
 
 // @N 前缀需要分隔符：@数字后紧跟字母视为白名单域名规则
@@ -1060,12 +1060,12 @@ await (async () => {
     const hlGuard = (rule) => {
       const hlBody = rule.replace(/^@\d+\s*/, '');
       const parsed = api.parseRuleWithConditions(hlBody);
-      return parsed.staticPass && !parsed.coreRule.startsWith('@');
+      return parsed.staticPass && !parsed.coreRule.startsWith('@@');
     };
     check('规则-224: @@规则不再计入白名单(与编译器跳过一致)', wlGuard('@@example.com') === false);
     check('规则-225(对照): 正常白名单仍计入', wlGuard('@*://*.example.com/*') === true);
     check('规则-226(对照): @+条件表达式白名单仍计入', wlGuard('@host $= ".example.com"') === true);
-    check('规则-227: @N+白名单组合不再计入高亮(与编译器拒绝一致)', hlGuard('@1 @example.com') === false);
+    check('规则-227: @N+白名单组合计入高亮', hlGuard('@1 @example.com') === true);
     check('规则-228(对照): 正常高亮仍计入', hlGuard('@1 example.com') === true);
   }
 
@@ -1111,8 +1111,8 @@ await (async () => {
     check('规则-233: title/…/gi 判定无效并报flags错误', analyzeRule('title/.*广告.*/gi').valid === false && flagsErrorOf('title/.*广告.*/gi')); // 合并自 规则-234(text变体)/规则-235(@1高亮前缀变体)
     check('规则-236: 行尾注释剥离后仍检测', analyzeRule('title/abc/gi # 注释').valid === false);
     check('规则-237: 对照 字面路径def仍有效', analyzeRule('title/abc/def').valid === true); // 合并自 规则-238(重复ii)/规则-239(合法s)/规则-240(多段路径) 对照项, 见 审查W-1 与 规则-300
-    check('审查R-1: 文档示例 @1@*:// 未识别为高亮+白名单冲突，误报通配无效', analyzeRule('@1@*://*.example.com/*').valid === false && analyzeRule('@1@*://*.example.com/*').errors.indexOf('hlWhitelistConflict') === -1);
-    check('审查R-1(对照): 中间有空格的 @1 @*:// 才报高亮与白名单冲突', analyzeRule('@1 @*://*.example.com/*').errors.indexOf('hlWhitelistConflict') !== -1);
+    check('审查R-1: 无空格 @1@*:// 仍报通配无效', analyzeRule('@1@*://*.example.com/*').valid === false && analyzeRule('@1@*://*.example.com/*').errors.indexOf('hlWhitelistConflict') === -1);
+    check('审查R-1(对照): 中间有空格的 @1 @*:// 不再报高亮与白名单冲突', analyzeRule('@1 @*://*.example.com/*').valid === true && analyzeRule('@1 @*://*.example.com/*').errors.indexOf('hlWhitelistConflict') === -1);
     check('审查R-1(对照): 紧贴 @1*:// 仍是合法高亮', analyzeRule('@1*://*.example.com/*').valid === true);
     check('规则-241(已修复): 全转义斜杠=无闭合界定符, 按未闭合直接报错(不再整段静默沦为字面pattern)', analyzeRule('title/https:\\/\\/foo\\/i').valid === false);
     check('规则-241(对照): 转义斜杠+闭合界定符正常有效', analyzeRule('title/https:\\/\\/foo\\/i/').valid === true);
@@ -1821,9 +1821,9 @@ return { analyzeRule, parseRuleWithConditions, t };`
   )();
   const hlNoSpace = env4.analyzeRule('@1@*://x.com/*');
   const hlWithSpace = env4.analyzeRule('@1 @*://x.com/*');
-  assert('审查4-R1(当前行为): @1@*://x.com/*(无空格)报「URL通配符格式无效」, 带空格才报Debug.md 3.5的「高亮规则不能与白名单组合」; 两种写法均被拒, 仅文案与文档不符', hlNoSpace.valid === false && hlNoSpace.errors.length === 1 && hlNoSpace.errors[0].includes('通配符格式无效') && hlWithSpace.valid === false && hlWithSpace.errors[0].includes('白名单组合'));
+  assert('审查4-R1: @1@*://x.com/*(无空格)仍报通配无效, 带空格的高亮+白名单不再报组合冲突', hlNoSpace.valid === false && hlNoSpace.errors.length === 1 && hlNoSpace.errors[0].includes('通配符格式无效') && hlWithSpace.valid === true && !hlWithSpace.errors.some(e => e.includes('白名单组合')));
   const atIf = env4.parseRuleWithConditions('@@if(title *= "a")');
-  assert('审查4-R2(当前行为): @@if(...) 校验通过无报错(Debug.md称@@开头不支持应报invalidUrlWildcard), 残留@前缀+独立条件静默编译为生效的白名单条件规则(标题含a的结果放行)', env4.analyzeRule('@@if(title *= "a")').valid === true && atIf.coreRule === '@' && atIf.standaloneExpr === true && atIf.dynamicConditions.length === 1);
+  assert('审查4-R2(已修复): @@if(...) 报通配无效, 解析为@@且不再收成白名单条件', env4.analyzeRule('@@if(title *= "a")').valid === false && /通配符格式无效/.test(env4.analyzeRule('@@if(title *= "a")').errors.join(',')) && atIf.coreRule === '@@' && atIf.standaloneExpr === true);
   assert('审查4-R3(当前行为): t()替换串未转义$, 参数含$&时被替换模式污染(规则自检输出「a{part}b」而非「a$&b」)', env4.t('unknownIfCondition', { part: 'a$&b' }).includes('{part}'));
 }
 
@@ -1856,6 +1856,205 @@ return { buildRuleIndex, checkRuleMatchOptimized, getCR: () => compiledRules, se
   envV.setState(['@1 *://*.io/*'], []); envV.buildRuleIndex();
   const vHl = envV.checkRuleMatchOptimized('https://x.io/y', 'x.io', 't', '', ['x.io']);
   assert('审查V-3(复核): @1 *://*.io/* 高亮经regex回退命中', vHl && vHl.highlight === 1);
+}
+
+// ==== [审查5-*] 本轮: 主机里的 userinfo 被当成域名索引键, 真实主机对不上, 规则静默失效 ====
+{
+  const lang5 = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
+  const env5 = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' + lang5 + '\n' +
+    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
+     'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
+     'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule',
+     'validateUrlWildcard', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'ruleToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
+     'compileRuleRegex', 'checkDynamicConditions', 'getSubdomainLevels', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules', 'checkRuleMatchOptimized'
+    ].map((n) => extractFn(src, n)).join('\n') +
+    `\nconst validationCache = new Map(); const subdomainCache = new Map(); let compiledRules;
+const window = { location: { hostname: 'www.google.com' } };
+function getSearchEngine() { return 'google'; } function getSearchCategory() { return 'web'; }
+const currentConfig = { rules: [], debug: false, language: 'zh-CN' };
+function getSubscriptions() { return []; } function getAllSubscriptionRules() { return []; }
+${src.match(/function t\(key, params = \{\}\) \{[\s\S]*?\n  \}/)[0]}
+return { buildRuleIndex, checkRuleMatchOptimized, compileRuleRegex, safeRegexTest, matchSimpleDomain, analyzeRule, getCR: () => compiledRules, setRules: (rules) => { currentConfig.rules = rules; } };`
+  )();
+  env5.setRules(['*://user@example.com/*']); env5.buildRuleIndex();
+  const cr = env5.getCR();
+  const missed = env5.checkRuleMatchOptimized('https://user@example.com/page', 'example.com', '', '');
+  assert('审查5-R1(已修复): *://user@example.com/* 不进域名快路径, 走通配正则后命中带账号URL, 无账号同主机不命中', env5.analyzeRule('*://user@example.com/*').valid === true && !cr.domains.has('user@example.com') && missed && missed.blocked === true && env5.checkRuleMatchOptimized('https://example.com/page', 'example.com', '', '') === false);
+  env5.setRules(['@*://user@example.com/*', 'example.com']); env5.buildRuleIndex();
+  const wlHit = env5.checkRuleMatchOptimized('https://user@example.com/page', 'example.com', '', '');
+  const bareStill = env5.checkRuleMatchOptimized('https://example.com/page', 'example.com', '', '');
+  assert('审查5-R1b(已修复): 白名单 @*://user@example.com/* 放行带账号URL, 无账号同主机仍被黑名单屏蔽', !env5.getCR().whitelistDomains.has('user@example.com') && (!wlHit || wlHit.blocked !== true) && bareStill && bareStill.blocked === true);
+}
+
+// ==== [审查候选] 取消屏蔽白名单去重与屏蔽写入不一致; 注释⬆️对照 README 1.5.3 ====
+{
+  const panelSrc = src.slice(src.indexOf('function showConfigPanel'), src.indexOf('function saveConfig'));
+  const jumpSrc = panelSrc.slice(panelSrc.indexOf('const COMMENT_HEADING_REGEX'), panelSrc.indexOf('const bindScrollBtn'));
+  const jumpTo = (text, cursor, dir) => {
+    const textarea = { value: text, selectionStart: cursor, setSelectionRange(pos) { this.sel = pos; }, scrollTo() {}, clientHeight: 200, focus() {} };
+    new Function('textarea', 'lineNums', 'window', 'document', jumpSrc + '\nreturn jumpToComment;')(
+      textarea, { scrollTo() {} }, { getComputedStyle: () => ({ lineHeight: '15.4' }) }, { activeElement: null }
+    )(dir);
+    const lines = text.split('\n');
+    let acc = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (acc === textarea.sel) return lines[i];
+      acc += lines[i].length + 1;
+    }
+    return null;
+  };
+  const posOf = (text, n) => text.split('\n').slice(0, n).reduce((p, line) => p + line.length + 1, 0);
+  const grouped = ['*://a.com/*', '# group A', 'rule-a', '# group B', 'rule-b'].join('\n');
+  assert('审查候选-注释⬆️(对照): 光标在规则行时移到上一个注释行', jumpTo(grouped, posOf(grouped, 2), 'prev') === '# group A');
+  assert('审查候选-注释⬇️(对照): 光标在规则行时移到下一个注释行', jumpTo(grouped, posOf(grouped, 2), 'next') === '# group B');
+  assert('审查候选-注释⬆️(对照): 第一个注释行或第一行时⬆️跳到最后一行', jumpTo(grouped, posOf(grouped, 1), 'prev') === 'rule-b' && jumpTo(grouped, 0, 'prev') === 'rule-b');
+
+  const strip = new Function(extractFn(src, 'stripRuleComment') + '\nreturn stripRuleComment;')();
+  const whitelistAdd = (rules, chosen) => {
+    if (!rules.some((rule) => strip(rule.trim()) === chosen)) rules.push(chosen);
+    return rules;
+  };
+  const blockAdd = (rules, chosen) => {
+    const clean = strip(chosen.trim());
+    if (!rules.some((rule) => strip(rule.trim()) === clean)) rules.push(chosen);
+    return rules;
+  };
+  assert('审查候选-白名单去重(当前行为): 已有 @*://a.com/* 时, 确认框带尾注释的同一白名单会再写入一条', JSON.stringify(whitelistAdd(['@*://abc.example.com/*'], '@*://abc.example.com/* # extra')) === JSON.stringify(['@*://abc.example.com/*', '@*://abc.example.com/* # extra']));
+  assert('审查候选-白名单去重(对照): 屏蔽写入 applyBlockRule 会剥掉尾注释, 同一规则不重复', JSON.stringify(blockAdd(['@*://abc.example.com/*'], '@*://abc.example.com/* # extra')) === JSON.stringify(['@*://abc.example.com/*']));
+  assert('审查候选-白名单去重(对照): 已有带尾注释的白名单时, 裸规则不再重复写入', JSON.stringify(whitelistAdd(['@*://abc.example.com/* # keep'], '@*://abc.example.com/*')) === JSON.stringify(['@*://abc.example.com/* # keep']));
+}
+
+// 高亮只附加边框, 不改变屏蔽的隐藏结果
+{
+  const paint = (matchResult) => {
+    const result = { attrs: {}, style: { display: '', outline: '', outlineOffset: '' }, classes: new Set(), dataset: {}, children: [] };
+    result.setAttribute = (k, v) => { result.attrs[k] = String(v); };
+    result.getAttribute = (k) => (k in result.attrs ? result.attrs[k] : null);
+    result.removeAttribute = (k) => { delete result.attrs[k]; };
+    result.hasAttribute = (k) => k in result.attrs;
+    result.classList = { add: (c) => result.classes.add(c), remove: (c) => result.classes.delete(c) };
+    result.querySelector = () => null;
+    result.matches = () => false;
+    result.closest = () => null;
+    const link = { href: 'https://example.com/page' };
+    new Function('result', 'link', 'matchResult', `
+      const showHiddenResults = false;
+      const currentConfig = { enabled: true, showBlockBtn: false, highlightColors: { 2: '#123456' } };
+      function getSearchEngine() { return 'other'; }
+      function getResultLink() { return link; }
+      function resolveUrlDomain() { return { url: link.href, domain: 'example.com' }; }
+      function getResultTitle() { return ''; }
+      function getResultSnippet() { return ''; }
+      function buildContentSignature() { return ''; }
+      function getSubdomainLevels() { return ['example.com']; }
+      function checkRuleMatchOptimized() { return matchResult; }
+      const _hrefUrlCache = { set() {} }, _resultContentCache = { set() {} }, _resultRetryCounts = { delete() {} };
+      function saveOriginalDisplay() {}
+      function setResultExtraElementsVisible() {}
+      function clearMatchedData() {}
+      function injectBlockButton() {}
+      ${extractFn(src, 'processSingleResult')}
+      return processSingleResult(result);
+    `)(result, link, matchResult);
+    return result;
+  };
+  const both = paint({ highlight: 2, blocked: true, rule: 'example.com', source: '本地规则' });
+  const only = paint({ highlight: 2 });
+  assert('高亮附加: 同时屏蔽时仍隐藏且保留边框', both.getAttribute('data-is-blocked') === 'true' && both.style.display === 'none' && both.style.outline === '2px solid #123456' && both.getAttribute('data-highlight-n') === '2');
+  assert('高亮附加(对照): 仅高亮时不隐藏', only.getAttribute('data-is-blocked') === null && only.style.display === '' && only.style.outline === '2px solid #123456');
+}
+
+// ==== [审查4-*] 第四轮整体审查发现留档 (仅断言当前行为, 修复后应反转断言): 悬浮球"显示被屏蔽结果"路径置 parent.style.display='' 而非按 data-serh-orig-display 还原 ====
+{
+  const mkParent = (orig) => { const p = { attrs: orig !== null ? { 'data-serh-orig-display': orig } : {}, style: { display: 'none' } }; p.getAttribute = (k) => (k in p.attrs ? p.attrs[k] : null); return p; };
+  const run = (parent) => new Function('parent', `
+    let showHiddenResults = false;
+    const document = { querySelectorAll: (sel) => (sel.indexOf('data-is-blocked') !== -1 ? [] : [parent]), getElementById: () => null };
+    ${extractFn(src, 'toggleHiddenResults')}
+    toggleHiddenResults();
+    return parent.style.display;
+  `)(parent);
+  check('审查4-1(已知问题): 父容器原内联 display:flex 被隐藏后, 切换显示时应还原 flex(同 resetResultStyles/restoreParentDisplay 口径), 当前被置空致布局塌陷(刷新自愈)', run(mkParent('flex')) === '' && run(mkParent(null)) === '');
+}
+
+// ==== [审查6-*] 高亮兼白名单只放行精确主机, 子域仍被同页黑名单屏蔽 (当前行为, 修复后应反转) ====
+{
+  const lang6 = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
+  const env6 = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' + lang6 + '\n' +
+    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'encodeNonAscii', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
+     'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
+     'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule',
+     'validateUrlWildcard', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'ruleToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
+     'compileRuleRegex', 'checkDynamicConditions', 'getSubdomainLevels', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules', 'checkRuleMatchOptimized'
+    ].map((n) => extractFn(src, n)).join('\n') +
+    `\nconst validationCache = new Map(); const subdomainCache = new Map(); let compiledRules;
+const window = { location: { hostname: 'www.google.com' } };
+function getSearchEngine() { return 'google'; } function getSearchCategory() { return 'web'; }
+const currentConfig = { rules: ['@1 @*://example.com/*', 'example.com'], debug: false, language: 'zh-CN' };
+function getSubscriptions() { return []; } function getAllSubscriptionRules() { return []; }
+${src.match(/function t\(key, params = \{\}\) \{[\s\S]*?\n  \}/)[0]}
+return { buildRuleIndex, checkRuleMatchOptimized, getSubdomainLevels };`
+  )();
+  env6.buildRuleIndex();
+  const lv = (d) => env6.getSubdomainLevels(d);
+  const apex = env6.checkRuleMatchOptimized('https://example.com/a', 'example.com', '', '', lv('example.com'));
+  const sub = env6.checkRuleMatchOptimized('https://www.example.com/a', 'www.example.com', '', '', lv('www.example.com'));
+  assert('审查6-1(当前行为): @1 @*://example.com/* 对裸域只高亮不屏蔽', apex && apex.highlight === 1 && apex.blocked !== true);
+  assert('审查6-1(当前行为): 同一条高亮白名单不覆盖子域, www 仍被裸域黑名单 example.com 屏蔽且无高亮', sub && sub.blocked === true && !sub.highlight);
+}
+
+// ==== [审查6-2] @@if 不再编译成白名单条件 ====
+{
+  const lang62 = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
+  const env62 = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' + lang62 + '\n' +
+    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'encodeNonAscii', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
+     'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
+     'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule',
+     'validateUrlWildcard', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'ruleToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
+     'compileRuleRegex', 'checkDynamicConditions', 'getSubdomainLevels', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules', 'checkRuleMatchOptimized'
+    ].map((n) => extractFn(src, n)).join('\n') +
+    `\nconst validationCache = new Map(); const subdomainCache = new Map(); let compiledRules;
+const window = { location: { hostname: 'www.google.com' } };
+function getSearchEngine() { return 'google'; } function getSearchCategory() { return 'web'; }
+const currentConfig = { rules: ['@@if(title *= "a")', 'example.com'], debug: false, language: 'zh-CN' };
+function getSubscriptions() { return []; } function getAllSubscriptionRules() { return []; }
+${src.match(/function t\(key, params = \{\}\) \{[\s\S]*?\n  \}/)[0]}
+return { buildRuleIndex, checkRuleMatchOptimized, getSubdomainLevels, getCR: () => compiledRules };`
+  )();
+  env62.buildRuleIndex();
+  const lv = env62.getSubdomainLevels('example.com');
+  const titled = env62.checkRuleMatchOptimized('https://example.com/a', 'example.com', 'a news', '', lv);
+  const other = env62.checkRuleMatchOptimized('https://example.com/a', 'example.com', 'b news', '', lv);
+  const wl = env62.getCR().whitelistConditionalRules;
+  assert('审查6-2(已修复): @@if(title *= "a") 不进入白名单条件, 标题含a仍被 example.com 屏蔽', titled && titled.blocked === true && (!wl || wl.length === 0));
+  assert('审查6-2(对照): 标题不含a同样屏蔽', other && other.blocked === true);
+}
+
+// ==== [规则-325] 本轮复审: 取消屏蔽弹窗"删除"按stripRuleComment等值匹配, 编辑规则文本后删除静默无操作 (审查新发现, 以当前行为为准) ====
+{
+  const lang325 = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
+  const env325 = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' + lang325 + '\n' +
+    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'encodeNonAscii', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
+     'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
+     'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule',
+     'validateUrlWildcard', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'ruleToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
+     'compileRuleRegex', 'checkDynamicConditions'
+    ].map((n) => extractFn(src, n)).join('\n') +
+    `\nconst window = { location: { hostname: 'www.google.com' } };
+function getSearchEngine() { return 'google'; } function getSearchCategory() { return 'web'; }
+const validationCache = new Map(); const subdomainCache = new Map();
+${src.match(/function t\(key, params = \{\}\) \{[\s\S]*?\n  \}/)[0]}
+return { stripRuleComment, validateRule };`
+  )();
+  const deleteLocal = (rules, chosen) => rules.filter((r) => env325.stripRuleComment(r.trim()) !== env325.stripRuleComment(chosen.trim()));
+  const stored = ['*://a.com/*'];
+  const edited = '*://a.com/path/*';
+  assert('规则-325(新发现,当前行为): 确认弹窗的规则输入可编辑且编辑值能过validateRule, 但"删除"按stripRuleComment等值匹配不到原规则 → 过滤后原样返回, 无提示且屏蔽仍生效(仅注释改动仍等值可删)', env325.validateRule(edited) === true && JSON.stringify(deleteLocal(stored, edited)) === JSON.stringify(stored));
+  assert('规则-325(对照): 仅改动注释部分与存量规则等值, 删除生效', JSON.stringify(deleteLocal(stored, '*://a.com/* # 注')) === '[]');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
