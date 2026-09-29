@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.5.2
+// @version      8.5.3
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -152,7 +152,6 @@
     }
   };
 
-  // 自定义选择器
   let activeSelectors = null; let _selectorStoreSignature = null;
 
   function normalizeSelectorList(value) {
@@ -253,7 +252,6 @@
     return getSearchEngine() !== 'other';
   }
 
-  // 语言
   const LANG_TEXTS = {
     'zh-CN': {
       disableBlock: '临时禁用', showCount: '显示数量', debugMode: '调试模式',
@@ -305,7 +303,6 @@
       statsWarnings: '发现 {count} 个规则警告: ',
       duplicateRules: '重复规则', invalidRule: '规则无效',
       hlColorError: '高亮级别需在 1-5 之间',
-      hlWhitelistConflict: '高亮规则不能与白名单组合',
       ifParenError: '@if(...) 括号未闭合',
       condRegexError: '条件正则无效: {part}',
       regexError: '正则表达式无效', urlError: 'URL规则无效',
@@ -373,7 +370,6 @@
       statsWarnings: 'Found {count} rule warnings: ',
       duplicateRules: 'Duplicate Rules', invalidRule: 'Invalid rule',
       hlColorError: 'Highlight level must be 1-5',
-      hlWhitelistConflict: 'Highlight rules cannot be combined with whitelist',
       ifParenError: 'Unbalanced @if(...) parentheses',
       condRegexError: 'Invalid condition regex: {part}',
       regexError: 'Invalid regex', urlError: 'Invalid URL rule',
@@ -739,7 +735,6 @@
     return closePanel;
   }
 
-  // 注入面板
   function openPanel(id, { width = '320px', padding = '15px', beforeClose = null, onExisting = null, bindClose = true } = {}) {
     injectWidgetStyles();
     const existing = document.getElementById(id);
@@ -807,7 +802,6 @@
     if (/^[\x00-\x7F]*$/.test(raw)) return raw; return raw.split('.').map(label => label ? hostLabelToASCII(label) : label).join('.');
   }
 
-  // 中文解码
   function punycodeDecodeLabel(label) {
     const s = String(label || '').toLowerCase(); if (!s.startsWith('xn--')) return label; const body = s.slice(4);
     const base = 36, tmin = 1, tmax = 26, skew = 38, damp = 700, initialBias = 72, initialN = 128; let n = initialN, i = 0, bias = initialBias; const output = [];
@@ -892,7 +886,6 @@
     if (!r || typeof r !== 'string') return ''; const trimmed = r.trim(); if (trimmed.startsWith('#')) return trimmed; const stripped = stripRuleComment(trimmed); return stripped.trim();
   }
 
-  // 条件表达式
   function tokenizeCondExpr(str) {
     const tokens = []; let leaf = ''; let i = 0; const n = str.length; let inSQ = false; let inDQ = false; let inRE = false; let inReClass = false; let leafParens = 0;
 
@@ -1019,7 +1012,6 @@
     const ast = parseOr(); if (peek() !== undefined) return syntaxError(); return ast;
   }
 
-  // @if条件
   function analyzeCondExpr(condStr, engine, site, category) {
     if (engine === undefined) {
       engine = getSearchEngine(); site = window.location.hostname; if (category === undefined) category = getSearchCategory();
@@ -1078,7 +1070,24 @@
       const cmpUrl = foldUrl(cond.op === '=~' ? '' : cond.val); const urlHit = (pred) => pred(lowerUrl) || pred(foldUrl(url));
       if (cond.op === '=') return urlHit(v => v === cmpUrl); if (cond.op === '^=') return urlHit(v => v.startsWith(cmpUrl));
       if (cond.op === '$=') return urlHit(v => v.endsWith(cmpUrl)); if (cond.op === '*=') return urlHit(v => v.includes(cmpUrl));
-      if (cond.op === '=~') return safeRegexTest(cond.regex, url); return false;
+      if (cond.op === '=~') {
+        if (safeRegexTest(cond.regex, url)) return true;
+        let folded = '';
+        try {
+          const abs = /^[a-z][a-z0-9+.-]*:\/\//i.test(url) || url.startsWith('//');
+          if (!abs) folded = safeDecodeURIComponent(url);
+          else {
+            const u = new URL(url.startsWith('//') ? 'http:' + url : url);
+            const host = toUnicodeHostname(u.hostname);
+            const auth = u.username ? u.username + (u.password ? ':' + u.password : '') + '@' : '';
+            const port = u.port ? ':' + u.port : '';
+            const tail = safeDecodeURIComponent(u.pathname + u.search) + safeDecodeURIComponent(u.hash);
+            folded = (url.startsWith('//') ? '//' : u.protocol + '//') + auth + host + port + tail;
+          }
+        } catch (_) { folded = safeDecodeURIComponent(url); }
+        return folded !== url && safeRegexTest(cond.regex, folded);
+      }
+      return false;
     }
     if (cond.type === 'host' || cond.type === 'path' || cond.type === 'scheme') {
       if (!url) return false; let u;
@@ -1150,7 +1159,7 @@
     if (enginePropMatch) {
       const raw = (enginePropMatch[1] !== undefined ? enginePropMatch[1] : enginePropMatch[2]).trim().toLowerCase();
       const target = raw.replace(/^ddg$/, 'duckduckgo').replace(/^yahoo-japan$/, 'yahoo'); const engine = String(currentEngine || '').toLowerCase();
-      return { matched: true, static: engine === target || engine === raw || (target === 'duckduckgo' && engine === 'duckduckgo_lite') };
+      return { matched: true, static: engine === target || engine === raw };
     }
 
     const categoryMatch = trimmed.match(/^(?:\$category|category)\s*[=:]\s*(?:['"](.*?)['"]|([^\s\)]+))\s*i?\s*$/i);
@@ -1280,7 +1289,7 @@
     }
     const staticMatchAll = !absorbed && !coreRule && staticPass && !dynamicConditions.length && /@if\s*\(/i.test(ruleStr);
 
-    const standaloneExpr = !!absorbed || staticMatchAll || (!coreRule && dynamicConditions.length > 0); if (whitelist) coreRule = '@' + coreRule;
+    const standaloneExpr = !!absorbed || staticMatchAll || (!coreRule && dynamicConditions.length > 0); if (whitelist) coreRule = '@' + coreRule; if (coreRule === '@' && /@@if\s*\(/i.test(ruleStr)) coreRule = '@@';
     return {
       coreRule,
       staticPass,
@@ -1313,7 +1322,6 @@
     return { errors, warnings };
   }
 
-  // 规则分析
   function analyzeRule(rule) {
     if (!rule || rule.trim() === '') return { valid: true, errors: [], warnings: [] };
 
@@ -1328,6 +1336,7 @@
       hlN = N; ruleToCheck = ruleToCheck.substring(hlValMatch[0].length).trim(); if (!ruleToCheck) return { valid: false, errors: [t('emptyPrefixRule')], warnings };
     }
 
+    if (/^@@if\b/i.test(ruleToCheck)) return { valid: false, errors: [t('invalidUrlWildcard', { rule: ruleToCheck })], warnings };
     const hasIfCond = /@if\s*\(/i.test(ruleToCheck);
     if (hasIfCond) {
         let unbalanced = false;
@@ -1345,9 +1354,6 @@
 
     const stripped = stripIfConditions(ruleToCheck); ruleToCheck = stripped.coreRule;
     if (ruleToCheck.startsWith('@')) {
-      if (hlN !== null) {
-        errors.push(t('hlWhitelistConflict')); return { valid: false, errors, warnings };
-      }
       if (ruleToCheck.startsWith('@@')) {
         errors.push(t('invalidUrlWildcard', { rule: ruleToCheck })); return { valid: false, errors, warnings };
       }
@@ -1589,7 +1595,6 @@
     memo.set(rule, out); return out;
   }
 
-  // 域名检查
   function matchWildcardDomainPattern(pattern) {
     if (pattern.startsWith('.')) pattern = '*' + pattern; if (pattern.includes(':') && !pattern.startsWith('*://')) return null; const bareWildcard = pattern.match(/^\*\.([^\/\*\s:?#]+)$/);
     if (bareWildcard && bareWildcard[1].includes('.')) {
@@ -1602,8 +1607,8 @@
         return { domain: toASCIIHostname(pattern), domainType: 'wildcard' };
       }
     }
-    const wildcardMatch = pattern.match(/^\*:\/\/\*\.([^\/\*:]+)\/\*$/);
-    if (wildcardMatch && wildcardMatch[1].includes('.')) return { domain: toASCIIHostname(wildcardMatch[1]), domainType: 'wildcard' }; const exactMatch = pattern.match(/^\*:\/\/([^\/\*:]+)\/\*$/);
+    const wildcardMatch = pattern.match(/^\*:\/\/\*\.([^\/\*:@]+)\/\*$/);
+    if (wildcardMatch && wildcardMatch[1].includes('.')) return { domain: toASCIIHostname(wildcardMatch[1]), domainType: 'wildcard' }; const exactMatch = pattern.match(/^\*:\/\/([^\/\*:@]+)\/\*$/);
     if (exactMatch) return { domain: toASCIIHostname(exactMatch[1]), domainType: 'exact' }; return null;
   }
 
@@ -1642,7 +1647,7 @@
     if (!entry) return false; if (entry.isLocal !== undefined) return entry.isLocal; return entry.source === t('localRule') || entry.source === '本地规则' || entry.source === 'Local Rule';
   }
 
-  // 规则预编译
+  // 预编译
   function buildRuleIndex() {
     const subscriptionRules = getAllSubscriptionRules(); let pageContext = '';
     try {
@@ -1682,41 +1687,40 @@
           if (currentConfig.debug) console.warn('高亮规则解析失败:', hlRule, e); return;
         }
         if (!parsed.staticPass) return; let coreRule = parsed.coreRule;
-        if (coreRule.startsWith('@')) {
-          if (currentConfig.debug) console.warn('高亮+白名单组合规则无效，已跳过:', hlRule); return;
-        }
+        const highlightWhitelist = coreRule.startsWith('@') && !coreRule.startsWith('@@');
+        if (highlightWhitelist) coreRule = coreRule.substring(1).trim();
 
         if (!coreRule && (parsed.standaloneExpr || parsed.dynamicConditions.length)) {
-          compiledRules.highlightConditionalRules.push({type: 'expr', conditions: parsed.dynamicConditions, N}); return;
-        }
-        if (!coreRule) return;
-
-        const dm = matchSimpleDomain(coreRule);
-        if (dm) {
-          if (!parsed.dynamicConditions.length) {
-            if (!compiledRules.highlightDomains.has(dm.domain))
-              compiledRules.highlightDomains.set(dm.domain, []); compiledRules.highlightDomains.get(dm.domain).push({N, type: dm.domainType});
+          compiledRules.highlightConditionalRules.push({type: 'expr', conditions: parsed.dynamicConditions, N});
+          if (!highlightWhitelist) return;
+        } else if (coreRule) {
+          const dm = matchSimpleDomain(coreRule);
+          if (dm) {
+            if (!parsed.dynamicConditions.length) {
+              if (!compiledRules.highlightDomains.has(dm.domain))
+                compiledRules.highlightDomains.set(dm.domain, []); compiledRules.highlightDomains.get(dm.domain).push({N, type: dm.domainType});
+            } else {
+              const hlCondRule = {type: 'domain', domain: dm.domain, N, conditions: parsed.dynamicConditions, domainType: dm.domainType};
+              if (!compiledRules.highlightConditionalDomains.has(dm.domain))
+                compiledRules.highlightConditionalDomains.set(dm.domain, []); compiledRules.highlightConditionalDomains.get(dm.domain).push(hlCondRule);
+            }
           } else {
-            const hlCondRule = {type: 'domain', domain: dm.domain, N, conditions: parsed.dynamicConditions, domainType: dm.domainType};
-            if (!compiledRules.highlightConditionalDomains.has(dm.domain))
-              compiledRules.highlightConditionalDomains.set(dm.domain, []); compiledRules.highlightConditionalDomains.get(dm.domain).push(hlCondRule);
+            try {
+              const compiled = compileRuleRegex(coreRule); const ruleObj = {type: compiled.type, regex: compiled.regex, conditions: parsed.dynamicConditions, N};
+              if (!parsed.dynamicConditions.length) {
+                if (compiled.type === 'url' || compiled.type === 'regex') compiledRules.highlightUrls.push({regex: compiled.regex, N});
+                else if (compiled.type === 'title') compiledRules.highlightTitles.push({regex: compiled.regex, N});
+                else if (compiled.type === 'text') compiledRules.highlightTexts.push({regex: compiled.regex, N});
+              } else {
+                compiledRules.highlightConditionalRules.push(ruleObj);
+              }
+            } catch (e) {
+              if (currentConfig.debug) console.warn('高亮规则编译失败:', hlRule, e);
+            }
           }
-          return;
         }
-
-        try {
-          const compiled = compileRuleRegex(coreRule); const ruleObj = {type: compiled.type, regex: compiled.regex, conditions: parsed.dynamicConditions, N};
-          if (!parsed.dynamicConditions.length) {
-            if (compiled.type === 'url' || compiled.type === 'regex') compiledRules.highlightUrls.push({regex: compiled.regex, N});
-            else if (compiled.type === 'title') compiledRules.highlightTitles.push({regex: compiled.regex, N});
-            else if (compiled.type === 'text') compiledRules.highlightTexts.push({regex: compiled.regex, N});
-          } else {
-            compiledRules.highlightConditionalRules.push(ruleObj);
-          }
-        } catch (e) {
-          if (currentConfig.debug) console.warn('高亮规则编译失败:', hlRule, e);
-        }
-        return;
+        if (!highlightWhitelist) return;
+        rule = hlRule;
       }
 
       if (!rule || rule.trim() === '' || rule.startsWith('#')) return;
@@ -1845,7 +1849,6 @@
     return entryType === 'wildcard' || (entryType === 'exact' && level === lowerDomain);
   }
 
-  // 规则优先级
   function checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels) {
     if (!subdomainLevels) subdomainLevels = getSubdomainLevels(domain);
     const isLocalEntry = (entry) => {
@@ -1939,7 +1942,6 @@
     return /^https?:\/\//i.test(value) ? value : '';
   }
 
-  // bing解码
   function decodeBingCkTarget(u) {
     if (!u) return ''; let rawEncoded = u; if (/^a[01]/i.test(rawEncoded)) rawEncoded = rawEncoded.slice(2); let base64 = rawEncoded.replace(/-/g, '+').replace(/_/g, '/');
     const rem = base64.length % 4; if (rem === 1) return ''; if (rem > 0) base64 += '='.repeat(4 - rem); let realUrl = '';
@@ -2298,7 +2300,6 @@
     };
   }
 
-  // 一键屏蔽
   function injectBlockButton(result, engine, url, domain) {
     if (!domain) return; if (result.closest('header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav')) return;
     if (engine === 'google') {
@@ -2498,7 +2499,6 @@
     ensurePositioned(result); result.appendChild(label);
   }
 
-  // 结果处理
   function processSingleResult(result) {
     if (result.closest('.sys_algo_rs, .AlsoTry_M, [data-yga*="sugg"]')) return false;
 
@@ -2520,6 +2520,12 @@
     _resultRetryCounts.delete(result);
     const lowerDomain = domain.toLowerCase(); const subdomainLevels = getSubdomainLevels(domain);
     const matchResult = checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels);
+    const matchHL = matchResult && matchResult.highlight;
+    if (matchHL) {
+      const color = currentConfig.highlightColors[matchHL] || '#CE2029';
+      result.style.outline = `2px solid ${color}`; result.style.outlineOffset = '-2px';
+      result.setAttribute('data-is-highlighted', 'true'); result.setAttribute('data-highlight-n', matchHL);
+    }
     if (matchResult && matchResult.blocked) {
       saveOriginalDisplay(result); result.style.display = showHiddenResults ? '' : 'none'; setResultExtraElementsVisible(result, showHiddenResults);
       result.setAttribute('data-blocker-processed', 'true'); result.setAttribute('data-is-blocked', 'true');
@@ -2539,14 +2545,10 @@
       return true;
     }
 
-    if (matchResult && matchResult.highlight) {
-      const matchHL = matchResult.highlight; const color = currentConfig.highlightColors[matchHL] || '#CE2029'; saveOriginalDisplay(result); result.style.display = '';
-      result.style.outline = `2px solid ${color}`;
-      result.style.outlineOffset = '-2px'; result.classList.remove('serh-blocked-visible'); result.setAttribute('data-blocker-processed', 'true'); result.setAttribute('data-is-highlighted', 'true');
-      result.setAttribute('data-highlight-n', matchHL); result.removeAttribute('data-is-blocked'); clearMatchedData(result);
-      if (currentConfig.showBlockBtn) {
-        injectBlockButton(result, engine, url, domain);
-      }
+    if (matchHL) {
+      saveOriginalDisplay(result); result.style.display = '';
+      result.classList.remove('serh-blocked-visible'); result.setAttribute('data-blocker-processed', 'true'); result.removeAttribute('data-is-blocked'); clearMatchedData(result);
+      if (currentConfig.showBlockBtn) injectBlockButton(result, engine, url, domain);
       return false;
     }
 
@@ -2656,7 +2658,6 @@
     }
   }
 
-  // 增量扫描
   function scanNewResults() {
     if (!currentConfig.enabled) {
       document.querySelectorAll('[data-blocker-processed], [data-observed]').forEach(result => {
@@ -3102,7 +3103,7 @@
         }
         .serh-subscription-info {
             font-size: 11px; color: #718096; white-space: nowrap; line-height: 1.2;
-            margin-left: auto; margin-right: 40px;
+            margin-left: auto; margin-right: 24px;
         }
         .serh-subscription-input-row {
             display: flex; align-items: center; gap: 6px;
@@ -3116,7 +3117,7 @@
         }
         .serh-subscription-delete-btn {
             background: none; border: none; font-size: 16px; cursor: pointer; color: #c53030;
-            padding: 0 4px; opacity: 0.7; transition: opacity 0.2s;
+            padding: 0; width: 18px; line-height: 1; text-align: center; flex-shrink: 0; opacity: 0.7; transition: opacity 0.2s;
         }
         .serh-subscription-delete-btn:hover {
             opacity: 1;
@@ -3166,6 +3167,7 @@
 
         .serh-bubble-number {
             color: #000000 !important;
+            line-height: 1 !important;
         }
 
         @media (prefers-color-scheme: dark) {
@@ -3326,7 +3328,6 @@
     }
   }
 
-  // 悬浮球样式
   function applyBubbleStyle(element) {
     element.style.cssText = `
             position: fixed; background: transparent; color: #2c5282; border-radius: 4px;
@@ -3353,6 +3354,7 @@
 
   function applyBubbleSize(element) {
     const size = getBubbleSize(); element.style.fontSize = size + 'px'; element.style.padding = '5px 5px'; element.style.lineHeight = (1 + (size - 12) * 0.015).toFixed(2);
+    element.style.height = (size + 10) + 'px';
   }
 
   function updateBubbleContent(statusBtn, blocked) {
@@ -3378,7 +3380,6 @@
     }
   }
 
-  // 悬浮球移动
   function updateStatus(blocked) {
     if (!isEngineSite()) return;
     function applyBubbleStatePosition(el) {
@@ -3502,7 +3503,6 @@
     applyBubbleSize(status); status.dataset.blockedCount = blocked; updateBubbleContent(status, blocked);
   }
 
-  // 悬浮球切换
   function toggleHiddenResults() {
     showHiddenResults = !showHiddenResults;
     document.querySelectorAll('[data-is-blocked="true"]').forEach(el => {
@@ -3698,7 +3698,7 @@
         const N = parseInt(hlMatch[1]); const hlBody = rule.substring(hlMatch[0].length).trim();
         if (N >= 1 && N <= 5 && hlBody) {
           try {
-            const hlParsed = parseRuleWithConditions(hlBody); if (hlParsed.staticPass && !hlParsed.coreRule.startsWith('@')) highlightRules.push(rule);
+            const hlParsed = parseRuleWithConditions(hlBody); if (hlParsed.staticPass && !hlParsed.coreRule.startsWith('@@')) highlightRules.push(rule);
           } catch (e) {
             if (currentConfig.debug) console.warn('统计高亮规则解析失败:', rule, e);
           }
@@ -3820,7 +3820,6 @@
     statsContent.innerHTML = resultHTML;
   }
 
-  // 面板样式
   function applySubSyncBtnVisibility() {
     const subBtn = document.getElementById('serh-subscribe'); const syncBtn = document.getElementById('serh-sync');
     if (subBtn) subBtn.style.display = currentConfig.showSubBtn !== false ? '' : 'none';
@@ -4177,7 +4176,6 @@
     };
   }
 
-  // 高亮面板
   function showHighlightColorPanel() {
     const opened = openPanel('serh-hlcolor-panel', { width: 'auto; max-width: 350px' });
     if (!opened) return;
@@ -4418,7 +4416,6 @@
     return /::/.test(String(selector).replace(/(["'])(?:\\.|(?!\1).)*\1/g, ''));
   }
 
-  // 选择器校验
   function validateUserSelectors(config) {
     if (!config || typeof config !== 'object' || Array.isArray(config)) return [t('selectorJsonError')]; const errors = [];
     for (const key of Object.keys(config)) {
@@ -4529,7 +4526,6 @@
     }
   }
 
-  // 选择器解析
   function parseSelectorText(text) {
     const fail = () => ({ config: null, errors: [t('selectorJsonError')] }); let s = String(text == null ? '' : text).trim(); if (!s) return fail();
     if (s.charCodeAt(0) === 123 && !/^const\s+SELECTORS\s*=/i.test(s)) {
@@ -4684,7 +4680,6 @@
     });
   }
 
-  // 选择器面板
   function showSelectorPanel() {
     hideStatsPanel();
     const opened = openPanel('serh-selector-panel');
@@ -5565,12 +5560,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       row.className = 'serh-subscription-row';
       row.innerHTML = `<div class="serh-subscription-meta-row"><span class="serh-subscription-index"></span><div class="serh-subscription-status-message"></div><span class="serh-subscription-info"></span></div><div class="serh-subscription-input-row"><label class="serh-switch serh-subscription-toggle-switch" style="margin:0 2px 0 0;"><input type="checkbox" class="serh-subscription-enable-toggle" ${enabled ? 'checked' : ''}><span class="serh-slider"></span></label><input type="text" class="serh-subscription-url" placeholder="https://example.com/rules.txt"><button class="serh-subscription-delete-btn">❌</button></div>`;
       row.querySelector('.serh-subscription-url').value = url; row.dataset.originalUrl = url; row.dataset.originalEnabled = String(enabled !== false);
-      const toggle = row.querySelector('.serh-subscription-enable-toggle');
-      toggle.addEventListener('change', () => {
-        if (persistCurrentSubscriptions()) {
-          forceReprocessAll(); showToast(t('saved'), 'success');
-        }
-      });
       return row;
     }
 
@@ -5587,7 +5576,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
             </div>
             <div id="serh-subscription-rows-container"></div>
             <div class="serh-subscription-btn-group">
-                <button id="serh-subscription-import" class="serh-button serh-button-primary">${t('import')}</button>
+                <button id="serh-subscription-import" class="serh-button serh-button-primary">${t('save')}</button>
                 <button id="serh-subscription-add" class="serh-button serh-button-success">+</button>
                 <button id="serh-subscription-cancel" class="serh-button serh-button-secondary">${t('cancel')}</button>
             </div>
@@ -5665,7 +5654,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         if (toggle) row.dataset.originalEnabled = String(toggle.checked);
       });
       if (subsChanged) {
-        markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY);
+        markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY); forceReprocessAll();
         if (typeof triggerWebDAVSyncDelayed === 'function') {
           triggerWebDAVSyncDelayed(5000);
         }
@@ -5677,13 +5666,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       container.querySelectorAll('.serh-subscription-delete-btn').forEach(btn => {
         btn.onclick = (e) => {
           e.stopPropagation(); const row = btn.closest('.serh-subscription-row'); const origUrl = (row.dataset.originalUrl || '').trim();
-          if (origUrl) {
-            deletedUrls.add(origUrl);
-          }
+          if (origUrl) deletedUrls.add(origUrl);
           row.remove(); reindexRows();
-          if (persistCurrentSubscriptions()) {
-            showToast(t('saved'), 'success'); forceReprocessAll();
-          }
         };
       });
     }
@@ -6021,7 +6005,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     applyConfigToMainPanel(); forceReprocessAll(); GM_setValue(WEBDAV_LAST_SYNC_KEY, trustedNow);
   }
 
-  // webdav逻辑
   async function performAutoWebDAVSync(config, depth = 0) {
     getSettingsModifiedTime(); adoptStoredConfigIfNewer(); const { folderUrl, fullUrl, headers } = getWebDAVRequest(config);
 
@@ -6306,7 +6289,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }).catch(err => console.error('[订阅] 更新失败:', err.message));
   }
 
-  // 同步定时
   function startBackgroundSync() {
     if (_syncIntervalIds.length) return;
     _syncIntervalIds = [
