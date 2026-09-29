@@ -72,9 +72,8 @@ Regex uses browser-supported JavaScript `RegExp` flags: `i`, `m`, `s`, `u` (`s` 
 | `@N title/.*example.*/` | Adds a colored border to results whose title contains `example` |
 
 Notes:
-1. Priority: Highlight > Whitelist, but Blacklist > Highlight
-2. `@N` must be separated by a space from rules that do not start with `*://`, such as `@1example.com` which will be recognized as a whitelist rule (allowing `1example.com`)
-3. Only 5 colors are supported, `@N` = `@1`–`@5`; open the custom color panel from the script menu
+1. `@N` must be separated by a space from naked domain name rules, such as `@1example.com` which will be recognized as a whitelist rule (allowing `1example.com`)
+2. Only 5 colors are supported, `@N` = `@1`–`@5`; open the custom color panel from the script menu
 
 ### 2.8 Composite Rules:
 

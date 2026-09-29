@@ -84,7 +84,6 @@ Error output
 | Message | Example | Cause | Fix |
 | --- | --- | --- | --- |
 | Highlight level must be 1-5 | `@6*://*.example.com/*` | `@N` out of the `@1`–`@5` range | Use `@1`–`@5` |
-| Highlight rules cannot be combined with whitelist | `@1@*://*.example.com/*` | `@N` highlight prefix stacked with the `@` whitelist prefix | Keep one of the two, remove the other prefix |
 | Missing content after rule prefix | `title//` | Nothing after the prefix (`@`/`@N`/`title/`/`text/`) | Add the actual rule or regex content |
 | Invalid URL wildcard format: {rule} | `@@*://example.com/*` | The `@@` prefix (uBO exception syntax) is unsupported; or the wildcard structure cannot be parsed | Remove the extra `@`; check the wildcard format (whitelist needs only a single `@`) |
 | Invalid regex | `title/(unclosed/` | Unclosed slashes, invalid groups/quantifiers, etc. | Close the slashes, fix the regex syntax |
