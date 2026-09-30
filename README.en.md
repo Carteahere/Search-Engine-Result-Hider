@@ -23,7 +23,7 @@ Open with a browser to install directly.
 - Script manager menu  
 ┣ Open panel  
 ┣ Custom highlight colors  
-┗ Custom engine selectors  
+┗ Custom engine
 
 Partial setting instructions:
 1. Panel Center: Enabled by default; when disabled, it displays in the four corners of the screen based on the floating bubble's position.
