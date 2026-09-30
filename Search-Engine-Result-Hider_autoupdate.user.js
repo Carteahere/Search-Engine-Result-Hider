@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.5.3
+// @version      8.5.4
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -272,7 +272,7 @@
       urlRule: 'URL规则', titleRule: '标题规则', textRule: '正文规则',
       regexRule: '正则规则', statsCompound: '复合规则', noMatch: '无匹配项',
       whitelistRules: '白名单规则',
-      menuOpenPanel: '⚙️ 打开配置面板', menuErrorDetection: '规则自检',
+      menuOpenPanel: '⚙️ 打开面板', menuErrorDetection: '规则自检',
       menuCenter: '面板居中', menuBubble: '显示悬浮球', menuBubbleAction: '悬浮球功能', menuLanguage: 'Language',
       subscriptionSuccess: '订阅成功！已更新 {count} 条规则。',
       saved: '已保存', uploadSuccess: '上传成功！',
@@ -297,8 +297,8 @@
       subLinkInvalid: '链接错误', importing: '导入中',
       autoSync: '自动同步', syncScriptConfig: '同步配置',
       webdavUrlEmpty: 'WebDAV地址为空',
-      highlightRules: '高亮规则', menuHighlightColor: '🎨 高亮颜色设置',
-      hlColorTitle: '高亮颜色设置', hlColorReset: '重置', resetPending: '已重置，保存后生效',
+      highlightRules: '高亮规则', menuHighlightColor: '🎨 高亮颜色',
+      hlColorTitle: '高亮颜色', hlColorReset: '重置', resetPending: '已重置，保存后生效', hlColorHint: '点击色块快速保存',
       autoUpdate: '自动更新', errorWord: '错误', warningWord: '警告',
       statsWarnings: '发现 {count} 个规则警告: ',
       duplicateRules: '重复规则', invalidRule: '规则无效',
@@ -311,7 +311,7 @@
       emptyIfCondition: '@if() 条件不能为空', unknownIfCondition: '未知 @if 条件: {part}',
       condExprError: '@if 表达式语法错误: {part}',
       invalidUrlWildcard: 'URL 通配符格式无效: {rule}',
-      menuCustomSelectors: '🖋️ 自定义选择器', selectorPanelTitle: '选择器',
+      menuCustomSelectors: '🖋️ 自定义引擎', selectorPanelTitle: '引擎选择器',
       selectorHint: '如果不知道有什么用，请勿修改。',
       selectorJsonError: '解析失败，请检查格式',
       selectorReservedKey: '保留键不可使用: {key}',
@@ -365,7 +365,7 @@
       autoSync: 'Auto Sync', syncScriptConfig: 'Sync Config',
       webdavUrlEmpty: 'WebDAV URL is empty',
       highlightRules: 'Highlight Rules', menuHighlightColor: '🎨 Highlight Colors',
-      hlColorTitle: 'Highlight Color Settings', hlColorReset: 'Reset', resetPending: 'Reset, takes effect after saving',
+      hlColorTitle: 'Highlight Colors', hlColorReset: 'Reset', resetPending: 'Reset, takes effect after saving', hlColorHint: 'Click a swatch to apply it quickly.',
       autoUpdate: 'Auto Update', errorWord: 'Error', warningWord: 'Warning',
       statsWarnings: 'Found {count} rule warnings: ',
       duplicateRules: 'Duplicate Rules', invalidRule: 'Invalid rule',
@@ -378,7 +378,7 @@
       emptyIfCondition: '@if() condition cannot be empty', unknownIfCondition: 'Unknown @if condition: {part}',
       condExprError: 'Syntax error in @if expression: {part}',
       invalidUrlWildcard: 'Invalid URL wildcard format: {rule}',
-      menuCustomSelectors: '🖋️ Custom Selectors', selectorPanelTitle: 'Selectors',
+      menuCustomSelectors: '🖋️ Custom Engine', selectorPanelTitle: 'Engine Selectors',
       selectorHint: 'If you don\'t know what it is for, do not modify it.',
       selectorJsonError: 'Failed to parse, check the format',
       selectorReservedKey: 'Reserved key not allowed: {key}',
@@ -1595,21 +1595,32 @@
     memo.set(rule, out); return out;
   }
 
+  function normalizeHostCandidate(host) {
+    const domain = toASCIIHostname(String(host || '').replace(/^\.+/, '').replace(/\\/g, ''));
+    return /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)+$/.test(domain) ? domain : null;
+  }
+
   function matchWildcardDomainPattern(pattern) {
     if (pattern.startsWith('.')) pattern = '*' + pattern; if (pattern.includes(':') && !pattern.startsWith('*://')) return null; const bareWildcard = pattern.match(/^\*\.([^\/\*\s:?#]+)$/);
-    if (bareWildcard && bareWildcard[1].includes('.')) {
-      return { domain: toASCIIHostname(bareWildcard[1]), domainType: 'wildcard' };
+    if (bareWildcard) {
+      const domain = normalizeHostCandidate(bareWildcard[1]); if (domain) return { domain, domainType: 'wildcard' };
     }
     if (!pattern.startsWith('/') && !pattern.startsWith('title/') && !pattern.startsWith('text/') &&
       !pattern.includes('*') && !pattern.includes('://') && !pattern.startsWith('.')) {
       if (pattern.includes('.') && !/\s/.test(pattern) && !pattern.includes('/') &&
         !pattern.includes(':') && !pattern.includes('?') && !pattern.includes('#')) {
-        return { domain: toASCIIHostname(pattern), domainType: 'wildcard' };
+        const domain = normalizeHostCandidate(pattern); if (domain) return { domain, domainType: 'wildcard' };
       }
     }
     const wildcardMatch = pattern.match(/^\*:\/\/\*\.([^\/\*:@]+)\/\*$/);
-    if (wildcardMatch && wildcardMatch[1].includes('.')) return { domain: toASCIIHostname(wildcardMatch[1]), domainType: 'wildcard' }; const exactMatch = pattern.match(/^\*:\/\/([^\/\*:@]+)\/\*$/);
-    if (exactMatch) return { domain: toASCIIHostname(exactMatch[1]), domainType: 'exact' }; return null;
+    if (wildcardMatch) {
+      const domain = normalizeHostCandidate(wildcardMatch[1]); if (domain) return { domain, domainType: 'wildcard' };
+    }
+    const exactMatch = pattern.match(/^\*:\/\/([^\/\*:@]+)\/\*$/);
+    if (exactMatch) {
+      const domain = normalizeHostCandidate(exactMatch[1]); if (domain) return { domain, domainType: 'exact' };
+    }
+    return null;
   }
 
   function extractSimpleWhitelistDomain(rule) {
@@ -1660,12 +1671,10 @@
     compiledRules.indexSignature = signature; const allRules = currentConfig.rules.concat(subscriptionRules); const subscriptions = getSubscriptions();
     const localRuleCount = currentConfig.rules.length; const subscriptionSources = [];
     subscriptions.forEach((sub, idx) => {
-      if (sub.enabled && sub.rules && Array.isArray(sub.rules)) {
-        for (let i = 0; i < sub.rules.length; i++) {
-          subscriptionSources.push(`${t('subscription')}${idx + 1}`);
-        }
-      }
+      if (!sub.enabled || !Array.isArray(sub.rules)) return;
+      for (let i = 0; i < sub.rules.length; i++) subscriptionSources.push(`${t('subscription')}${idx + 1}`);
     });
+    while (subscriptionSources.length < subscriptionRules.length) subscriptionSources.push(t('localRule'));
 
     allRules.forEach((rule, ruleIndex) => {
       rule = stripRuleComment(rule.trim()); if (!rule) return; let ruleValid = true;
@@ -1851,9 +1860,6 @@
 
   function checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels) {
     if (!subdomainLevels) subdomainLevels = getSubdomainLevels(domain);
-    const isLocalEntry = (entry) => {
-      if (!entry) return false; if (entry.isLocal !== undefined) return entry.isLocal; return entry.source === t('localRule') || entry.source === '本地规则' || entry.source === 'Local Rule';
-    };
     const lowerDomain = toASCIIHostname(domain);
 
     const scanDomainMap = (map, filter) => {
@@ -2020,11 +2026,11 @@
   }
 
   function getCleanUrl(link) {
-    if (!link || !link.href) return ''; return unwrapRedirectUrl(link.href) || link.href;
+    if (!link || !link.href) return ''; return unwrapRedirectUrl(link.href);
   }
 
   function resolveUrlDomain(link) {
-    const rawUrl = getCleanUrl(link); let url = encodeNonAscii(toASCIIUrl(rawUrl) || rawUrl); let domain = '';
+    const rawUrl = getCleanUrl(link); let url = toASCIIUrl(rawUrl) || rawUrl; let domain = '';
     try {
       domain = toASCIIHostname(new URL(url).hostname);
     } catch (e) {}
@@ -2059,7 +2065,7 @@
       try {
         elem = result.querySelector(selector);
       } catch (e) { continue; }
-      if (elem && elem.textContent) return elem.textContent.trim();
+      const text = elem ? elem.textContent.trim() : ''; if (text) return text;
     }
     return '';
   }
@@ -2202,7 +2208,7 @@
     return { isIP, tldWide, domainRule, exactRule, whitelistRule, suffixLike };
   }
 
-  function applyBlockRule(result, newRule) {
+  function applyBlockRule(newRule) {
     adoptStoredConfigBeforeWrite(); const cleanRule = stripRuleComment(newRule.trim());
     if (!currentConfig.rules.some(rule => stripRuleComment(rule.trim()) === cleanRule)) {
       currentConfig.rules.push(newRule); persistConfig(true); appendRuleToTextarea(newRule);
@@ -2300,7 +2306,7 @@
     };
   }
 
-  function injectBlockButton(result, engine, url, domain) {
+  function injectBlockButton(result, engine, domain) {
     if (!domain) return; if (result.closest('header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav')) return;
     if (engine === 'google') {
       if (result.classList.contains('isv-r') || result.querySelector('g-img')) {
@@ -2379,9 +2385,9 @@
               { label: t('bcDomain'), rule: opts.domainRule },
               { label: t('bcWhitelist'), rule: opts.whitelistRule }
             ]
-          : null; showBlockConfirmPanel(btn, domain, (chosenRule) => applyBlockRule(result, chosenRule), panelOptions); return;
+          : null; showBlockConfirmPanel(btn, domain, (chosenRule) => applyBlockRule(chosenRule), panelOptions); return;
       }
-      applyBlockRule(result, currentConfig.blockDomain ? opts.domainRule : opts.exactRule);
+      applyBlockRule(currentConfig.blockDomain ? opts.domainRule : opts.exactRule);
     };
     result.appendChild(btn);
   }
@@ -2396,6 +2402,10 @@
 
   function saveOriginalDisplay(el) {
     if (!el || el.hasAttribute('data-serh-orig-display')) return; el.setAttribute('data-serh-orig-display', el.style.display || '');
+  }
+
+  function restoreOriginalDisplay(el) {
+    if (!el) return; const orig = el.getAttribute('data-serh-orig-display'); el.style.display = orig !== null ? orig : '';
   }
 
   function googleResultBlocks(parent) {
@@ -2517,9 +2527,8 @@
 
     const { url, domain } = resolveUrlDomain(link); _hrefUrlCache.set(result, url);
     const title = getResultTitle(result, engine); const snippet = getResultSnippet(result, engine); _resultContentCache.set(result, buildContentSignature(url, title, snippet));
-    _resultRetryCounts.delete(result);
     const lowerDomain = domain.toLowerCase(); const subdomainLevels = getSubdomainLevels(domain);
-    const matchResult = checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels);
+    const matchResult = checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels); _resultRetryCounts.delete(result);
     const matchHL = matchResult && matchResult.highlight;
     if (matchHL) {
       const color = currentConfig.highlightColors[matchHL] || '#CE2029';
@@ -2527,7 +2536,7 @@
       result.setAttribute('data-is-highlighted', 'true'); result.setAttribute('data-highlight-n', matchHL);
     }
     if (matchResult && matchResult.blocked) {
-      saveOriginalDisplay(result); result.style.display = showHiddenResults ? '' : 'none'; setResultExtraElementsVisible(result, showHiddenResults);
+      _resultRetryCounts.delete(result); saveOriginalDisplay(result); result.style.display = showHiddenResults ? '' : 'none'; setResultExtraElementsVisible(result, showHiddenResults);
       result.setAttribute('data-blocker-processed', 'true'); result.setAttribute('data-is-blocked', 'true');
 
       if (engine === 'yandex') {
@@ -2540,19 +2549,19 @@
 
       result.dataset.matchedRule = matchResult.rule || ''; result.dataset.matchedSource = matchResult.source || '';
       if (showHiddenResults) {
-        result.classList.add('serh-blocked-visible'); if (currentConfig.showBlockBtn) injectBlockButton(result, engine, url, domain); addMatchedRuleLabel(result);
+        result.classList.add('serh-blocked-visible'); if (currentConfig.showBlockBtn) injectBlockButton(result, engine, domain); addMatchedRuleLabel(result);
       }
       return true;
     }
 
     if (matchHL) {
-      saveOriginalDisplay(result); result.style.display = '';
+      _resultRetryCounts.delete(result); saveOriginalDisplay(result); result.style.display = '';
       result.classList.remove('serh-blocked-visible'); result.setAttribute('data-blocker-processed', 'true'); result.removeAttribute('data-is-blocked'); clearMatchedData(result);
-      if (currentConfig.showBlockBtn) injectBlockButton(result, engine, url, domain);
+      if (currentConfig.showBlockBtn) injectBlockButton(result, engine, domain);
       return false;
     }
 
-    clearMatchedData(result); result.setAttribute('data-blocker-processed', 'true'); if (currentConfig.showBlockBtn) injectBlockButton(result, engine, url, domain); return false;
+    _resultRetryCounts.delete(result); clearMatchedData(result); result.setAttribute('data-blocker-processed', 'true'); if (currentConfig.showBlockBtn) injectBlockButton(result, engine, domain); return false;
   }
 
   const resultObserver = new IntersectionObserver((entries, observer) => {
@@ -2589,7 +2598,7 @@
   function scheduleResultRetry(result) {
     const attempt = (_resultRetryCounts.get(result) || 0) + 1;
     if (attempt > RESULT_RETRY_LIMIT) {
-      _resultRetryCounts.delete(result); result.setAttribute('data-blocker-processed', 'true'); return;
+      _resultRetryCounts.delete(result); result.removeAttribute('data-observed'); resultObserver.unobserve(result); return;
     }
     _resultRetryCounts.set(result, attempt);
     setTimeout(() => {
@@ -2599,7 +2608,7 @@
       if (result.hasAttribute('data-blocker-processed')) {
         _resultRetryCounts.delete(result); return;
       }
-      result.removeAttribute('data-observed'); resultObserver.observe(result);
+      result.setAttribute('data-observed', 'true'); resultObserver.observe(result);
     }, RESULT_RETRY_DELAY * attempt);
   }
 
@@ -2988,6 +2997,10 @@
             background: transparent !important; letter-spacing: normal !important;
         }
 
+        #serh-hlcolor-panel h3 {
+            margin: 0 0 1px 0 !important; line-height: 1.2 !important;
+        }
+
         #serh-selector-panel h3 {
             margin: 0 !important; line-height: 1.2 !important;
         }
@@ -3108,7 +3121,7 @@
         .serh-subscription-input-row {
             display: flex; align-items: center; gap: 6px;
         }
-        .serh-subscription-toggle-switch {
+        .serh-subscription-input-row .serh-subscription-toggle-switch {
             width: 28px !important; height: 16px !important; margin: 0 !important; flex-shrink: 0 !important;
         }
         .serh-subscription-input-row input.serh-subscription-url {
@@ -3198,20 +3211,29 @@
         #serh-hlcolor-panel .serh-hlcolor-row {
             margin-bottom: 2px !important; padding: 0 !important; border: none !important;
             background: transparent !important; display: flex !important; align-items: center !important; gap: 4px !important;
+            height: auto !important; min-height: 0 !important; max-height: none !important;
         }
         #serh-hlcolor-panel .serh-hlcolor-row label {
             min-width: 20px !important; font-size: 12px !important; color: #4a5568 !important;
             font-weight: 600 !important; margin: 0 !important; line-height: 1.2 !important;
+            padding: 0 !important; border: none !important; background: transparent !important;
+            height: auto !important; min-height: 0 !important; max-height: none !important;
+            display: block !important; box-sizing: border-box !important;
         }
         #serh-hlcolor-panel .serh-hlcolor-row .serh-hlcolor-preview {
             width: 12px !important; height: 12px !important; border-radius: 2px !important;
-            border: 1px solid #e2e8f0 !important; flex-shrink: 0 !important;
+            border: 1px solid #e2e8f0 !important; flex-shrink: 0 !important; cursor: pointer !important;
+            margin: 0 !important; padding: 0 !important; box-sizing: border-box !important;
+            min-height: 0 !important; max-height: none !important;
         }
         #serh-hlcolor-panel .serh-hlcolor-row input {
             width: 70px !important; flex: none !important; padding: 2px 4px !important; margin: 0 !important;
             border: 1px solid #e2e8f0 !important; border-radius: 3px !important; font-size: 11px !important;
             font-family: 'Consolas', monospace !important; background: #ffffff !important; color: #2d3748 !important;
             height: 20px !important; line-height: normal !important; box-shadow: none !important; outline: none !important;
+            display: block !important; font-weight: normal !important; box-sizing: border-box !important;
+            min-width: 0 !important; max-width: none !important; min-height: 0 !important; max-height: none !important;
+            transform: none !important; appearance: none !important; -webkit-appearance: none !important;
         }
         #serh-hlcolor-panel .serh-hlcolor-row input:focus {
             border-color: #3182ce !important;
@@ -3222,14 +3244,35 @@
         #serh-hlcolor-sv-canvas, #serh-hlcolor-hue-canvas {
             cursor: crosshair !important; border-radius: 3px !important; border: 1px solid #e2e8f0 !important;
         }
+        #serh-hlcolor-sv-dot, #serh-hlcolor-hue-dot {
+            position: absolute !important; pointer-events: none !important; transform: translate(-50%, -50%) !important;
+            border: 2px solid #ffffff !important; box-shadow: 0 0 3px rgba(0,0,0,0.55) !important; box-sizing: border-box !important; z-index: 2 !important;
+        }
+        #serh-hlcolor-sv-dot { width: 13px !important; height: 13px !important; border-radius: 50% !important; }
+        #serh-hlcolor-hue-dot { width: 30px !important; height: 6px !important; border-radius: 3px !important; }
         #serh-hlcolor-current-preview {
             flex-shrink: 0 !important;
+            margin: 0 !important; padding: 0 !important; box-sizing: border-box !important;
+            min-height: 0 !important; max-height: none !important;
+        }
+        #serh-hlcolor-code-text {
+            display: flex !important; align-items: center !important; justify-content: center !important;
+            width: 70px !important; height: 20px !important; flex: none !important;
+            margin: 0 !important; padding: 2px 4px !important; box-sizing: border-box !important;
+            border: 1px solid #e2e8f0 !important; border-radius: 3px !important;
+            background: #f7fafc !important; color: #2d3748 !important;
+            font-size: 11px !important; font-family: 'Consolas', monospace !important; font-weight: normal !important;
+            line-height: normal !important; min-height: 0 !important; max-height: none !important;
+            min-width: 0 !important; overflow: hidden !important; white-space: nowrap !important;
         }
 
         /* 开关 */
         .serh-switch {
-            position: relative; display: inline-block; width: 28px; height: 16px;
-            margin-right: 6px; padding: 0 !important; flex-shrink: 0;
+            position: relative !important; display: inline-block !important; width: 28px !important; height: 16px !important;
+            margin: 0 6px 0 0 !important; padding: 0 !important; flex-shrink: 0 !important;
+            border: none !important; box-shadow: none !important; background: transparent !important;
+            min-width: 0 !important; max-width: none !important; min-height: 0 !important; max-height: none !important;
+            box-sizing: border-box !important;
         }
 
         .serh-switch input {
@@ -3240,40 +3283,55 @@
         }
 
         .serh-slider {
-            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
-            background-color: #cbd5e0; transition: .2s; border-radius: 16px;
+            position: absolute !important; cursor: pointer !important;
+            top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+            background-color: #cbd5e0 !important; transition: .2s !important; border-radius: 16px !important;
+            border: none !important; box-shadow: none !important; margin: 0 !important; padding: 0 !important;
+            box-sizing: border-box !important;
         }
 
         .serh-slider:before {
-            position: absolute; content: ""; height: 12px; width: 12px; left: 2px; bottom: 2px;
-            background-color: white; transition: .2s; border-radius: 50%;
+            position: absolute !important; content: "" !important; height: 12px !important; width: 12px !important;
+            left: 2px !important; bottom: 2px !important; top: auto !important; right: auto !important;
+            background-color: #ffffff !important; transition: .2s !important; border-radius: 50% !important;
+            border: none !important; box-shadow: none !important; margin: 0 !important; padding: 0 !important;
+            box-sizing: border-box !important; transform: none !important;
         }
 
         .serh-switch input:checked + .serh-slider {
-            background-color: #2c5282;
+            background-color: #2c5282 !important;
         }
 
         .serh-switch input:checked + .serh-slider:before {
-            transform: translateX(12px);
+            transform: translateX(12px) !important;
         }
 
         @media (prefers-color-scheme: dark) {
             body.serh-dark-on .serh-slider {
-                background-color: #4b5563;
+                background-color: #4b5563 !important;
             }
             body.serh-dark-on .serh-switch input:checked + .serh-slider {
-                background-color: #2c5282;
+                background-color: #2c5282 !important;
             }
         }
 
         /* 滑条 */
+        #serh-bubble-size-slider {
+            flex: 1 1 0% !important; margin: 0 0 0 5px !important;
+            height: 4px !important; min-height: 0 !important; max-height: none !important;
+            width: auto !important; min-width: 0 !important; max-width: none !important;
+            padding: 0 !important; border: none !important; border-radius: 2px !important;
+            background: #cbd5e0 !important; outline: none !important; box-shadow: none !important;
+            appearance: none !important; -webkit-appearance: none !important; -moz-appearance: none !important;
+            cursor: pointer !important; transform: none !important; vertical-align: middle !important;
+        }
         #serh-bubble-size-slider::-webkit-slider-thumb {
-            -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
-            background: #2c5282; cursor: pointer;
+            -webkit-appearance: none !important; width: 14px !important; height: 14px !important; border-radius: 50% !important;
+            background: #2c5282 !important; cursor: pointer !important; border: none !important;
         }
         #serh-bubble-size-slider::-moz-range-thumb {
-            width: 14px; height: 14px; border-radius: 50%; background: #2c5282;
-            cursor: pointer; border: none;
+            width: 14px !important; height: 14px !important; border-radius: 50% !important; background: #2c5282 !important;
+            cursor: pointer !important; border: none !important;
         }
 
         #serh-toast-container {
@@ -3506,13 +3564,13 @@
   function toggleHiddenResults() {
     showHiddenResults = !showHiddenResults;
     document.querySelectorAll('[data-is-blocked="true"]').forEach(el => {
-      saveOriginalDisplay(el); el.style.display = showHiddenResults ? '' : 'none'; setResultExtraElementsVisible(el, showHiddenResults);
+      saveOriginalDisplay(el); if (showHiddenResults) restoreOriginalDisplay(el); else el.style.display = 'none'; setResultExtraElementsVisible(el, showHiddenResults);
       if (showHiddenResults) {
         el.classList.add('serh-blocked-visible'); const engine = getSearchEngine(); const link = getResultLink(el, engine);
         if (link && link.href && currentConfig.showBlockBtn) {
-          const { url, domain } = resolveUrlDomain(link);
+          const { domain } = resolveUrlDomain(link);
           if (!el.querySelector('.serh-quick-block')) {
-            injectBlockButton(el, engine, url, domain);
+            injectBlockButton(el, engine, domain);
           }
         }
         addMatchedRuleLabel(el);
@@ -3522,7 +3580,7 @@
     });
     if (showHiddenResults) {
       document.querySelectorAll('[data-blocker-google-parent], [data-blocker-yandex-parent]').forEach(parent => {
-        parent.style.display = '';
+        restoreOriginalDisplay(parent);
       });
     } else {
       document.querySelectorAll('[data-blocker-yandex-parent]').forEach(parent => {
@@ -3548,9 +3606,9 @@
   }
 
   function getSettingsModifiedTime() {
-    const saved = GM_getValue(SETTINGS_LAST_MODIFIED_KEY, null); if (typeof saved === 'number' && Number.isFinite(saved) && saved >= 0) return saved;
+    const saved = GM_getValue(SETTINGS_LAST_MODIFIED_KEY, null); if (typeof saved === 'number' && Number.isFinite(saved) && saved > 0) return saved;
     const legacy = GM_getValue(LOCAL_LAST_MODIFIED_KEY, 0); const time = typeof legacy === 'number' && Number.isFinite(legacy) && legacy > 0 ? legacy : 0;
-    GM_setValue(SETTINGS_LAST_MODIFIED_KEY, time); return time;
+    if (time > 0) GM_setValue(SETTINGS_LAST_MODIFIED_KEY, time); return time;
   }
 
   function persistConfig(updateModifiedTime = false) {
@@ -3560,7 +3618,7 @@
     GM_setValue(CONFIG_KEY, currentConfig);
     if (updateModifiedTime) {
       if (rulesChanged) markLocalModifiedTime(); if (settingsChanged) markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY);
-      if (typeof triggerWebDAVSyncDelayed === 'function') {
+      if ((rulesChanged || settingsChanged) && typeof triggerWebDAVSyncDelayed === 'function') {
         triggerWebDAVSyncDelayed(5000);
       }
     }
@@ -4035,7 +4093,14 @@
     currentConfig.rules = finalRules;
     persistConfig(rulesChanged);
     if (panel) panel._initialRules = [...finalRules]; if (backgroundNewRules.length > 0) syncRulesTextarea();
-    showHiddenResults = false; forceReprocessAll();
+    if (showHiddenResults) {
+      showHiddenResults = false;
+      document.querySelectorAll('[data-is-blocked="true"]').forEach(el => {
+        el.style.display = 'none'; el.classList.remove('serh-blocked-visible'); setResultExtraElementsVisible(el, false); removeMatchedRuleLabel(el);
+      });
+      document.querySelectorAll('[data-blocker-google-parent], [data-blocker-yandex-parent]').forEach(parent => { parent.style.display = 'none'; });
+    }
+    forceReprocessAll();
   }
 
   function showSettingsPanel() {
@@ -4156,7 +4221,9 @@
     const bubbleActionSelect = document.getElementById('serh-set-bubble-action');
     if (bubbleActionSelect) {
       bubbleActionSelect.addEventListener('change', function() {
+        const wasToggleMode = currentConfig.bubbleAction === 'toggleHidden';
         adoptStoredConfigBeforeWrite(); currentConfig.bubbleAction = this.value; persistConfig(true);
+        if (wasToggleMode && this.value !== 'toggleHidden' && showHiddenResults) toggleHiddenResults();
         const statusBtn = document.getElementById('serh-status'); if (statusBtn) updateBubbleContent(statusBtn, parseInt(statusBtn.dataset.blockedCount || 0));
         if (this.value === 'toggleHidden') showToast(t('bubbleToggleHint'), 'info');
       });
@@ -4215,9 +4282,10 @@
       </div>`;
     }
 
-    const defaultHex = sanitizeHex(colors[1], '#CE2029'); const [ir, ig, ib] = hexToRgb(defaultHex); let [currentHue, currentSat, currentVal] = rgbToHsv(ir, ig, ib);
+    const defaultHex = '#66CCFF'; const [ir, ig, ib] = hexToRgb(defaultHex); let [currentHue, currentSat, currentVal] = rgbToHsv(ir, ig, ib);
     panel.innerHTML = `
-      <h3 style="margin:0 0 3px;font-size:13px;color:#2d3748;font-weight:600;">${escHtml(t('hlColorTitle'))}</h3>
+      <h3 style="margin:0 0 1px;font-size:13px;line-height:1.2;color:#2d3748;font-weight:600;">${escHtml(t('hlColorTitle'))}</h3>
+      <div style="font-size:11px;color:#718096;margin:0 0 3px;">${t('hlColorHint')}</div>
       <div style="display:flex;gap:2px;align-items:stretch;">
         <div id="serh-hlcolor-left" style="flex:0 0 auto;display:flex;flex-direction:column;height:132px;">
           ${rowsHtml}
@@ -4227,9 +4295,11 @@
             <span id="serh-hlcolor-code-text" style="font-size:11px;font-family:'Consolas',monospace;padding:2px 4px;background:#f7fafc;border-radius:3px;border:1px solid #e2e8f0;width:70px;flex:none;text-align:center;">${escHtml(defaultHex)}</span>
           </div>
         </div>
-        <div class="serh-hlcolor-picker-wrapper" style="display:flex;gap:2px;align-items:stretch;flex-shrink:0;">
+        <div class="serh-hlcolor-picker-wrapper" style="display:flex;gap:2px;align-items:stretch;flex-shrink:0;position:relative;">
           <canvas id="serh-hlcolor-sv-canvas"></canvas>
           <canvas id="serh-hlcolor-hue-canvas" width="22"></canvas>
+          <span id="serh-hlcolor-sv-dot"></span>
+          <span id="serh-hlcolor-hue-dot"></span>
         </div>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:5px;">
@@ -4242,7 +4312,7 @@
     function resizeCanvasToMatch() {
       const left = document.getElementById('serh-hlcolor-left'); const svCanvas = document.getElementById('serh-hlcolor-sv-canvas');
       const hueCanvas = document.getElementById('serh-hlcolor-hue-canvas'); if (!left || !svCanvas || !hueCanvas) return; svCanvas.width = svCanvas.height = left.clientHeight;
-      hueCanvas.height = left.clientHeight; drawSVCanvas(currentHue); drawHueCanvas();
+      hueCanvas.height = left.clientHeight; drawSVCanvas(currentHue); drawHueCanvas(); updateIndicators();
     }
     requestAnimationFrame(() => {
       resizeCanvasToMatch(); updatePickedColor();
@@ -4277,13 +4347,19 @@
     const svCanvas = document.getElementById('serh-hlcolor-sv-canvas');
     function onSVMove(clientX, clientY) {
       const rect = svCanvas.getBoundingClientRect(); const x = Math.max(0, Math.min(svCanvas.width, clientX - rect.left)); const y = Math.max(0, Math.min(svCanvas.height, clientY - rect.top));
-      currentSat = x / svCanvas.width; currentVal = 1 - y / svCanvas.height; updatePickedColor();
+      currentSat = x / svCanvas.width; currentVal = 1 - y / svCanvas.height; updatePickedColor(); updateIndicators();
     }
 
     const hueCanvas = document.getElementById('serh-hlcolor-hue-canvas');
+    const svDot = document.getElementById('serh-hlcolor-sv-dot'); const hueDot = document.getElementById('serh-hlcolor-hue-dot');
+    function updateIndicators() {
+      if (!svDot || !hueDot || !svCanvas.width) return; const wrap = svCanvas.parentElement.getBoundingClientRect(); const sr = svCanvas.getBoundingClientRect(); const hr = hueCanvas.getBoundingClientRect();
+      svDot.style.left = (sr.left + currentSat * sr.width - wrap.left) + 'px'; svDot.style.top = (sr.top + (1 - currentVal) * sr.height - wrap.top) + 'px';
+      hueDot.style.left = (hr.left + hr.width / 2 - wrap.left) + 'px'; hueDot.style.top = (hr.top + (currentHue / 360) * hr.height - wrap.top) + 'px';
+    }
     function onHueMove(clientY) {
       const rect = hueCanvas.getBoundingClientRect(); const y = Math.max(0, Math.min(hueCanvas.height, clientY - rect.top)); currentHue = (y / hueCanvas.height) * 360; drawSVCanvas(currentHue);
-      updatePickedColor();
+      updatePickedColor(); updateIndicators();
     }
 
     const bindCanvasDrag = (canvas, onMove) => {
@@ -4317,6 +4393,10 @@
 
     for (let i = 1; i <= 5; i++) {
       document.getElementById(`serh-hlcolor-input-${i}`).addEventListener('input', () => updatePreview(i));
+      document.getElementById(`serh-hlcolor-preview-${i}`).addEventListener('click', () => {
+        const hexEl = document.getElementById('serh-hlcolor-code-text'); const hex = hexEl && hexEl.textContent; const input = document.getElementById(`serh-hlcolor-input-${i}`);
+        if (hex && input && /^#[0-9a-fA-F]{6}$/.test(hex)) { input.value = hex; updatePreview(i); }
+      });
     }
 
     document.getElementById('serh-hlcolor-save').onclick = () => {
@@ -4325,9 +4405,9 @@
         const input = document.getElementById(`serh-hlcolor-input-${i}`);
         const val = input.value.trim(); if (val === '') continue;
         if (!/^#[0-9a-fA-F]{6}$/.test(val)) {
-          const saveBtn = document.getElementById('serh-hlcolor-save'); const originalText = saveBtn.textContent; saveBtn.textContent = t('errorWord'); saveBtn.style.backgroundColor = '#c53030';
-          setTimeout(() => {
-            saveBtn.textContent = originalText; saveBtn.style.backgroundColor = '';
+          const saveBtn = document.getElementById('serh-hlcolor-save'); if (!saveBtn._errTimer) saveBtn._errText = saveBtn.textContent; saveBtn.textContent = t('errorWord'); saveBtn.style.backgroundColor = '#c53030';
+          clearTimeout(saveBtn._errTimer); saveBtn._errTimer = setTimeout(() => {
+            saveBtn.textContent = saveBtn._errText; saveBtn.style.backgroundColor = ''; saveBtn._errTimer = null;
           }, 1500);
           hasError = true; break;
         }
@@ -4342,8 +4422,8 @@
         document.getElementById(`serh-hlcolor-input-${i}`).value = defaults[i];
         document.getElementById(`serh-hlcolor-preview-${i}`).style.background = defaults[i];
       }
-      const [r, g, b] = hexToRgb('#CE2029');
-      [currentHue, currentSat, currentVal] = rgbToHsv(r, g, b); drawSVCanvas(currentHue); updatePickedColor(); showToast(t('resetPending'), 'success');
+      const [r, g, b] = hexToRgb('#66CCFF');
+      [currentHue, currentSat, currentVal] = rgbToHsv(r, g, b); drawSVCanvas(currentHue); updatePickedColor(); updateIndicators(); showToast(t('resetPending'), 'success');
     };
 
     document.getElementById('serh-hlcolor-cancel').onclick = (e) => {
@@ -4526,6 +4606,13 @@
     }
   }
 
+  function normalizeMatchLiteral(field, val) {
+    if (field !== 'match' || typeof val !== 'string') return val;
+    const m = val.match(/^\/(.*)\/([a-z]*)$/i);
+    if (!m || getInvalidRegexFlags(m[2])) return val;
+    return m[2] ? { source: m[1], flags: m[2].toLowerCase() } : m[1];
+  }
+
   function parseSelectorText(text) {
     const fail = () => ({ config: null, errors: [t('selectorJsonError')] }); let s = String(text == null ? '' : text).trim(); if (!s) return fail();
     if (s.charCodeAt(0) === 123 && !/^const\s+SELECTORS\s*=/i.test(s)) {
@@ -4619,7 +4706,7 @@
           if (flags && getInvalidRegexFlags(flags)) return { config: null, errors: [t('invalidRegexFlags', { flags })] }; i = k; if (field !== 'match') return fail();
           def[field] = flags ? { source: src, flags: flags.toLowerCase() } : src;
         } else if (s[i] === '\'' || s[i] === '"') {
-          const val = readString(); if (val === null) return fail(); def[field] = val;
+          const val = readString(); if (val === null) return fail(); def[field] = normalizeMatchLiteral(field, val);
         } else if (s[i] === '[') {
           i++; const arr = [];
           while (true) {
@@ -5062,7 +5149,12 @@
       });
       return { index, line };
     };
-    const localMeta = sideMeta(localRows); const cloudMeta = sideMeta(cloudRows); const deleted = (key) => localDeleted.has(key) || cloudDeleted.has(key);
+    const localMeta = sideMeta(localRows); const cloudMeta = sideMeta(cloudRows); const lineOf = (meta, key) => (meta.line.has(key) ? meta.line.get(key) : null);
+    const deleted = (key) => {
+      if (!localDeleted.has(key) && !cloudDeleted.has(key)) return false;
+      const baseLine = baseIndex.has(key) ? baseRows[baseIndex.get(key)].line : ''; const localLine = lineOf(localMeta, key); const cloudLine = lineOf(cloudMeta, key);
+      return (localLine === null || localLine === baseLine) && (cloudLine === null || cloudLine === baseLine);
+    };
 
     const moved = (rows) => {
       let prev = -1;
@@ -5078,9 +5170,10 @@
 
     const pickLine = (key) => {
       const inBase = baseIndex.has(key); const inLocal = localMeta.line.has(key); const inCloud = cloudMeta.line.has(key); if (!inLocal && !inCloud) return '';
-      if (inLocal && !inCloud) return deleted(key) ? '' : localMeta.line.get(key); if (inCloud && !inLocal) return deleted(key) ? '' : cloudMeta.line.get(key); if (deleted(key)) return '';
+      if (deleted(key) && !inBase) return '';
+      if (inLocal && !inCloud) return localMeta.line.get(key); if (inCloud && !inLocal) return cloudMeta.line.get(key);
       if (!inBase) return localMeta.line.get(key); const baseLine = baseRows[baseIndex.get(key)].line; const localLine = localMeta.line.get(key); const cloudLine = cloudMeta.line.get(key);
-      if (localLine !== baseLine && cloudLine === baseLine) return localLine; if (cloudLine !== baseLine && localLine === baseLine) return cloudLine; return localLine;
+      if (localLine !== baseLine && cloudLine === baseLine) return localLine; if (cloudLine !== baseLine && localLine === baseLine) return cloudLine; if (localLine === baseLine && cloudLine === baseLine) return deleted(key) ? '' : localLine; return localLine;
     };
 
     const anchorBefore = (rows, at) => {
@@ -5170,7 +5263,7 @@
         } catch (e) {
           if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[WebDAV] 配置头解析失败:', e);
         }
-          if (config) headerLineIndexes.add(i);
+          headerLineIndexes.add(i); if (!config) rawScriptConfig = null;
       } else if (line.startsWith('# Selectors:')) {
         rawSelectors = line;
         try {
@@ -5178,7 +5271,7 @@
         } catch (e) {
           if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[WebDAV] 选择器头解析失败:', e);
         }
-          if (selectors) headerLineIndexes.add(i);
+          headerLineIndexes.add(i); if (!selectors) rawSelectors = null;
       } else if (!line.startsWith('#')) {
         break;
       }
@@ -5193,12 +5286,12 @@
     const restLines = lines.filter((_, idx) => !headerLineIndexes.has(idx)); return { config, rawScriptConfig, rawSelectors, restLines };
   }
 
-  function isNonRuleTextResponse(restLines) {
+  function isNonRuleTextResponse(restLines, hasHeader = false) {
     const lines = (Array.isArray(restLines) ? restLines : [])
       .map((l) => String(l || '').trim())
       .filter((l) => l.length > 0); if (lines.length === 0) return false; if (lines.some((l) => /<\s*\/?\s*(?:!doctype|html|head|body)\b/i.test(l))) return true;
     const ruleLines = lines.filter((l) => !l.startsWith('#')); if (ruleLines.some((l) => validateRule(l))) return false; if (lines.some((l) => /<\s*\/?\s*[a-z!?][^>\n]*>/i.test(l))) return true;
-    if (ruleLines.length === 0) return false; return true;
+    if (ruleLines.length === 0 || hasHeader) return false; return true;
   }
 
   function safeBase64Encode(str) {
@@ -5226,7 +5319,8 @@
       const authStr = `${config.username}:${config.password || ''}`;
       headers['Authorization'] = 'Basic ' + safeBase64Encode(authStr);
     }
-    const cleanFilename = String(config.filename || 'rules.txt').trim().replace(/^\/+/, ''); const segments = cleanFilename.split('/').filter(Boolean);
+    const cleanFilename = String(config.filename || 'rules.txt').trim().replace(/^\/+/, '');
+    const segments = cleanFilename.split('/').filter(seg => seg && seg !== '.' && seg !== '..');
     const fileBaseName = segments.pop() || 'rules.txt'; const subPath = segments.length > 0 ? segments.map(encodeURIComponent).join('/') + '/' : '';
     const cleanFolderUrl = String(config.url).trim().replace(/\/+$/, '') + '/' + subPath; const encodedFilename = encodeURIComponent(fileBaseName);
     return {
@@ -5343,14 +5437,33 @@
     };
     const flowCloseAt = (from) => {
       for (let j = from; j < lines.length; j++) {
-        if (/^\]\s*(?:#.*)?$/.test(lines[j].trim())) return j;
+        const m = stripLineComment(lines[j]).match(/^(.*)\]\s*$/);
+        if (m) return { line: j, prefix: m[1].trim() };
       }
-      return -1;
+      return null;
+    };
+    const stripLineComment = (line) => {
+      let quote = null;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (quote === "'") {
+          if (ch === "'") { if (line[i + 1] === "'") i++; else quote = null; }
+          continue;
+        }
+        if (quote === '"') {
+          if (ch === '\\') i++;
+          else if (ch === '"') quote = null;
+          continue;
+        }
+        if (ch === "'" || ch === '"') { quote = ch; continue; }
+        if (ch === '#' && (i === 0 || /\s/.test(line[i - 1]))) return line.slice(0, i).trim();
+      }
+      return line.trim();
     };
     const pushYamlItem = (rawItem, kind) => {
       let item;
       try {
-        item = stripQ(rawItem).trim();
+        item = stripQ(stripLineComment(rawItem));
       } catch (e) {
         if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[订阅] YAML列表项已跳过:', rawItem, e); return;
       }
@@ -5359,46 +5472,54 @@
     const joinFold = (from, baseIndent) => {
       const chunks = []; let j = from;
       for (; j < lines.length; j++) {
-        const raw = lines[j]; if (!raw.trim() || raw.trim().startsWith('#')) continue; const trimmed = raw.trim(); if (trimmed.startsWith('-') || raw.search(/\S/) < baseIndent) break;
-        chunks.push(raw.trim());
+        const raw = lines[j]; if (!raw.trim()) continue; const trimmed = raw.trim(); if (trimmed.startsWith('-') || raw.search(/\S/) < baseIndent) break;
+        chunks.push(trimmed);
       }
       return { text: chunks.join(' ').replace(/\s+/g, ' ').trim(), next: j };
     };
-    const splitFlowItems = (payload) => {
-      const parts = []; let cur = ''; let quote = null;
-      for (let i = 0; i < payload.length; i++) {
-        const ch = payload[i];
-        if (quote === "'") {
-          cur += ch;
-          if (ch === "'") {
-            if (payload[i + 1] === "'") { cur += "'"; i++; }
-            else quote = null;
+    const flowLineItems = (listLines) => {
+      const out = [];
+      for (const line of listLines) {
+        const parts = []; let cur = ''; let quote = null;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (quote === "'") {
+            cur += ch;
+            if (ch === "'") {
+              if (line[i + 1] === "'") { cur += "'"; i++; }
+              else quote = null;
+            }
+            continue;
           }
-          continue;
-        }
-        if (quote === '"') {
+          if (quote === '"') {
+            cur += ch;
+            if (ch === '\\') { cur += line[i + 1] || ''; i++; }
+            else if (ch === '"') quote = null;
+            continue;
+          }
+          if (ch === "'" || ch === '"') { quote = ch; cur += ch; continue; }
+          if (ch === ',') { parts.push(cur.trim()); cur = ''; continue; }
           cur += ch;
-          if (ch === '\\') { cur += payload[i + 1] || ''; i++; }
-          else if (ch === '"') quote = null; continue;
         }
-        if (ch === "'" || ch === '"') { quote = ch; cur += ch; continue; }
-        if (ch === ',') { parts.push(cur.trim()); cur = ''; continue; }
-        cur += ch;
+        parts.push(cur.trim()); for (const part of parts) { if (part) out.push(part); }
       }
-      parts.push(cur.trim()); return parts.filter(Boolean);
+      return out;
     };
+    const splitFlowItems = (payload) => (payload.indexOf('\n') !== -1 ? flowLineItems(payload.split('\n')) : flowLineItems([payload]));
     for (let idx = 0; idx < lines.length; idx++) {
       const line = lines[idx]; const flowOpen = flowOpenOf(line);
       if (flowOpen) {
         const close = flowCloseAt(idx + 1);
-        if (close !== -1) {
-          hasSection = true; const payload = lines.slice(idx + 1, close).map((l) => l.trim().replace(/(^|\s+)#.*$/, '').trim()).filter(Boolean).join(', ');
+        if (close) {
+          hasSection = true;
+          let payload = lines.slice(idx + 1, close.line).map((l) => l.trim()).filter(Boolean).join('\n');
+          if (close.prefix) payload = payload ? payload + '\n' + close.prefix : close.prefix;
           if (flowOpen.key !== 'matches') {
             for (const part of splitFlowItems(payload)) pushYamlItem(part, flowOpen.key);
           } else if (payload.trim()) {
             matchesItemCount++;
           }
-          idx = close; continue;
+          idx = close.line; continue;
         }
       }
       const flow = flowKeyOf(line);
@@ -5470,7 +5591,7 @@
   }
 
   function parseRulesetContent(content) {
-    let lines = String(content || '').replace(/^\uFEFF/, '').split('\n'); let meta = {}; let isYaml = false; const firstContentIdx = lines.findIndex((l) => l.trim() !== '');
+    let lines = String(content || '').replace(/^\uFEFF/, '').split('\n'); let meta = {}; let yamlPre = false; let isYaml = false; const firstContentIdx = lines.findIndex((l) => l.trim() !== '');
     if (firstContentIdx !== -1 && lines[firstContentIdx].trim() === '---') {
       const endIndex = lines.findIndex((l, i) => i > firstContentIdx && l.trim() === '---');
       if (endIndex !== -1) {
@@ -5478,9 +5599,10 @@
         if (nameMatch) {
           const raw = nameMatch[1].trim(); const quoted = (raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'")); meta.name = quoted ? raw.slice(1, -1) : raw;
         }
-        lines = lines.slice(endIndex + 1);
+        if (/(?:^|\n)\s*(?:rules|blacklist|whitelist|matches)\s*:/i.test(head)) isYaml = true;
+        else lines = lines.slice(endIndex + 1);
       } else {
-        isYaml = true;
+        isYaml = true; yamlPre = true;
       }
     }
     if (!isYaml) {
@@ -5497,6 +5619,7 @@
       if (yaml) {
         if (meta.name === undefined && yaml.name) meta.name = yaml.name; return { lines: yaml.items, meta };
       }
+      if (!yamlPre) return { lines: [], meta };
     }
     return { lines, meta };
   }
@@ -5864,6 +5987,11 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       if (!url.toLowerCase().startsWith('https://')) {
         showToast(t('webdavHttpsRequired'), 'error'); return null;
       }
+      if (filenameInput.value.split('/').some(seg => {
+        const s = seg.trim(); return s === '.' || s === '..';
+      })) {
+        showToast(t('filename') + ': . / ..', 'error'); return null;
+      }
       const config = resolveWebDAVPanelConfig(loadWebDAVConfig(), {
         url,
         username: usernameInput.value,
@@ -5952,7 +6080,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   async function performWebDAVDownload(config) {
     getSettingsModifiedTime(); adoptStoredConfigIfNewer(); const { fullUrl, headers } = getWebDAVRequest(config); const resp = await gmRequest('GET', fullUrl, { headers }); const content = resp.responseText;
     if (isInvalidSyncResponse(content, resp.responseHeaders)) throw new Error(t('subImportFailed')); const parsedHeader = parseSyncHeader(content);
-    if (isNonRuleTextResponse(parsedHeader.restLines)) throw new Error(t('subImportFailed')); const newRules = filterValidRuleLines(parsedHeader.restLines);
+    if (isNonRuleTextResponse(parsedHeader.restLines, !!(parsedHeader.rawScriptConfig || parsedHeader.rawSelectors))) throw new Error(t('subImportFailed')); const newRules = filterValidRuleLines(parsedHeader.restLines);
     if (parsedHeader.config) {
       const { subscriptions, selectors } = parsedHeader.config; const settings = getSyncSettings(parsedHeader.config);
 
@@ -5986,7 +6114,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
     const trustedNow = await getTrustedNow(); let cloudTime = 0; const validCloudTimes = [getCloudModifiedTime(parsedHeader.config, 'rulesSyncedAt', trustedNow)].filter(v => v > 0);
     if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) && parsedHeader.config && (Object.keys(getSyncSettings(parsedHeader.config)).length || Array.isArray(parsedHeader.config.subscriptions))) {
-      GM_setValue(SETTINGS_LAST_MODIFIED_KEY, getCloudModifiedTime(parsedHeader.config, 'settingsModifiedAt', trustedNow));
+      const cloudSettingsTime = getCloudModifiedTime(parsedHeader.config, 'settingsModifiedAt', trustedNow);
+      if (cloudSettingsTime > 0) GM_setValue(SETTINGS_LAST_MODIFIED_KEY, cloudSettingsTime);
     }
     if (validCloudTimes.length > 0) {
       cloudTime = Math.max(...validCloudTimes);
@@ -6016,7 +6145,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         console.warn('[自动 WebDAV] 云端返回异常内容，已跳过'); return;
       }
       parsedHeader = parseSyncHeader(content); cloudConfig = parsedHeader.config;
-      if (isNonRuleTextResponse(parsedHeader.restLines)) {
+      if (isNonRuleTextResponse(parsedHeader.restLines, !!(parsedHeader.rawScriptConfig || parsedHeader.rawSelectors))) {
         console.warn('[自动 WebDAV] 云端返回非规则文本，已跳过'); return;
       }
       cloudRules = parsedHeader.restLines.map(r => r.trim()).filter(r => r); const validHeaderTimes = [getCloudModifiedTime(parsedHeader.config, 'rulesSyncedAt', trustedNow)].filter(v => v > 0); let lastModTime = 0;
@@ -6079,8 +6208,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       }
     } else {
       const baseRules = getRuleSyncSnapshot(); let mergedRules;
-      if (!baseRules && scriptedEmptyCloud) mergedRules = [];
-      else if (!baseRules) {
+      if (!baseRules) {
         const seen = new Set(); const union = [];
         const addRule = (r) => {
           const trimmed = (r || '').trim(); if (!trimmed) return; const k = getRuleKey(trimmed);
