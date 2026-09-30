@@ -312,10 +312,10 @@ const fns = [
   'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
   'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr',
   'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule',
-  'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
+  'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
   'compileRuleRegex', 'checkDynamicConditions', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules',
   'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule',
-  'checkRuleMatchOptimized',
+  'checkRuleMatchOptimized', 'isLocalEntry',
 ].map((n) => extractFn(src, n));
 
 const consts = src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0];
@@ -450,7 +450,7 @@ assert('规则-127: 同批合法高亮规则不受影响', cr.highlightUrls.leng
 
 // ==== [规则-128~154] 优先级 (来源: test-priority.cjs) ====
 await (async () => {
-const fns = ['safeRegexTest', 'matchDomainEntryType', 'checkDynamicConditions', 'toASCIIHostname', 'hostLabelToASCII']
+const fns = ['safeRegexTest', 'matchDomainEntryType', 'checkDynamicConditions', 'toASCIIHostname', 'hostLabelToASCII', 'isLocalEntry']
   .map((n) => extractFn(src, n));
 
 const crmMarker = 'function checkRuleMatchOptimized(';
@@ -902,7 +902,7 @@ await (async () => {
     'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
     'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr',
     'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule',
-    'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain',
+    'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain',
     'validateCondition', 'analyzeRule'
   ];
   const langMatch = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
@@ -997,13 +997,12 @@ await (async () => {
     check('规则-215: 合法规则内容 + text/html CT 仍可用', isInvalidSyncResponse(good, 'content-type: text/html; charset=utf-8') === false);
   }
 
-  // 前 50 行内 JSON 解析失败的 # ScriptConfig: 行被剥离/保留问题 (合并自 规则-216: 非JSON坏头行同样作为注释保留在 restLines)
+  // 前 50 行内 JSON 解析失败的 # ScriptConfig: 行自动剔除 (修复2; 合并自 规则-216: 非JSON坏头行同样剔除)
   {
     const parseSyncHeaderFn = extractFn(src, 'parseSyncHeader');
     const run = (content) => new Function('currentConfig', 'console', `${parseSyncHeaderFn}\nreturn parseSyncHeader;`)({ debug: false }, { warn: () => {} })(content);
-    // JSON 截断的坏头行同样留在 restLines, 自动同步会把它当规则合并进本地并回传云端(无法自愈)
     const r2 = run('# ScriptConfig:{"syncedAt":12\nrule1');
-    check('规则-217(已知问题): JSON 截断头行留在 restLines 被当规则合并', r2.config === null && r2.restLines.join('\n') === '# ScriptConfig:{"syncedAt":12\nrule1');
+    check('规则-217(修复2): JSON 截断(缺后括号})头行剔除出 restLines 且不重发, 不再被当规则合并', r2.config === null && r2.rawScriptConfig === null && r2.restLines.join('\n') === 'rule1');
   }
 
   // 部分覆盖内置引擎时 match 丢失(WebDAV 选择器下行未校验即写入可触发)
@@ -1033,7 +1032,7 @@ await (async () => {
       'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr',
       'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule',
       'escapeWildcardPart', 'wildcardToRegex', 'splitHostAndPort', 'escapeHostPart',
-      'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
+      'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
       'validateCondition', 'analyzeRule', 'validateRule', 'isScriptRuleLine', 'isElementRuleLine',
       'collectSubscriptionRules'
     ];
@@ -1092,7 +1091,7 @@ await (async () => {
       'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr',
       'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule',
       'escapeWildcardPart', 'wildcardToRegex', 'splitHostAndPort', 'escapeHostPart',
-      'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
+      'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
       'validateCondition', 'analyzeRule', 'validateRule', 'isScriptRuleLine', 'isElementRuleLine',
       'collectSubscriptionRules'
     ];
@@ -1294,7 +1293,7 @@ await (async () => {
 
 // ==== [修复H1/M1/L3/L4] 订阅YAML: matches段丢弃 / 识别机制(description等元数据键开头、frontmatter前导空行、单行flow序列) / 映射形列表项丢弃 / 无空格冒号键形标量保留 ====
 {
-  const yamlFns = ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'checkDynamicConditions', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule', 'checkRuleMatchOptimized', 'extractYamlRuleItems', 'parseRulesetContent', 'collectSubscriptionRules', 'isElementRuleLine', 'isScriptRuleLine', 'filterValidRuleLines'].map((n) => extractFn(src, n));
+  const yamlFns = ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'checkDynamicConditions', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule', 'checkRuleMatchOptimized', 'isLocalEntry', 'extractYamlRuleItems', 'parseRulesetContent', 'collectSubscriptionRules', 'isElementRuleLine', 'isScriptRuleLine', 'filterValidRuleLines'].map((n) => extractFn(src, n));
   const consts2 = src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0];
   const lang2 = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
   const yApi = new Function(consts2 + '\n' + lang2 + `
@@ -1378,10 +1377,10 @@ return { buildRuleIndex, checkRuleMatchOptimized, parseRulesetContent, collectSu
     'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
     'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr',
     'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule',
-    'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
+    'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
     'compileRuleRegex', 'checkDynamicConditions', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules',
     'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule',
-    'checkRuleMatchOptimized',
+    'checkRuleMatchOptimized', 'isLocalEntry',
   ].map((n) => extractFn(src, n));
   const consts5 = src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0];
   const lang5 = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
@@ -1492,7 +1491,7 @@ const coreFns = [
   'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences',
   'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr',
   'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule',
-  'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
+  'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
   'validateCondition', 'analyzeRule', 'validateRule',
 ].map((n) => extractFn(src, n));
 
@@ -1520,10 +1519,10 @@ const idxFns = [
   'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
   'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr',
   'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule',
-  'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
+  'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
   'compileRuleRegex', 'checkDynamicConditions', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules',
   'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule',
-  'checkRuleMatchOptimized',
+  'checkRuleMatchOptimized', 'isLocalEntry',
 ].map((n) => extractFn(src, n));
 
 const api = new Function(
@@ -1665,7 +1664,7 @@ return { compileRuleRegex, safeRegexTest };
 {
   const langMatch = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
   const consts = src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0];
-  const fns = ['hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateCondition', 'analyzeRule'].map((n) => extractFn(src, n));
+  const fns = ['hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateCondition', 'analyzeRule'].map((n) => extractFn(src, n));
   const api = new Function(
     consts + '\n' + langMatch + '\n' +
     `function t(key, params = {}) {
@@ -1699,7 +1698,7 @@ return { compileRuleRegex, safeRegexTest };
 {
   const langMatch = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
   const consts = src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0];
-  const fns = ['hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateCondition', 'analyzeRule'].map((n) => extractFn(src, n));
+  const fns = ['hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateCondition', 'analyzeRule'].map((n) => extractFn(src, n));
   const api = new Function(
     consts + '\n' + langMatch + '\n' +
     `function t(key, params = {}) {
@@ -1727,7 +1726,7 @@ return { compileRuleRegex, safeRegexTest };
 {
   const langMatch = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
   const consts = src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0];
-  const fns = ['hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateCondition', 'analyzeRule'].map((n) => extractFn(src, n));
+  const fns = ['hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateCondition', 'analyzeRule'].map((n) => extractFn(src, n));
   const api = new Function(
     consts + '\n' + langMatch + '\n' +
     `function t(key, params = {}) {
@@ -1761,7 +1760,7 @@ await (async () => {
     'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
     'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr',
     'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule',
-    'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
+    'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
     'compileRuleRegex', 'checkDynamicConditions', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules',
     'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule',
   ].map((n) => extractFn(src, n));
@@ -1811,7 +1810,7 @@ return { buildRuleIndex, analyzeRule, getCR: () => compiledRules };
   const tFn = src.match(/function t\(key, params = \{\}\) \{[\s\S]*?\n  \}/)[0];
   const env4 = new Function(
     src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' + lang4 + '\n' +
-    ['stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'extractIfConditions', 'validateCondition', 'analyzeRule'].map((n) => extractFn(src, n)).join('\n') +
+    ['stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'extractIfConditions', 'validateCondition', 'analyzeRule'].map((n) => extractFn(src, n)).join('\n') +
     `\nconst validationCache = new Map(); const subdomainCache = new Map(); const currentConfig = { rules: [], debug: false, language: 'zh-CN' };
 const window = { location: { hostname: 'www.google.com' } };
 function getSearchEngine() { return 'google'; } function getSearchCategory() { return 'web'; }
@@ -1835,8 +1834,8 @@ return { analyzeRule, parseRuleWithConditions, t };`
     ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
      'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
      'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule',
-     'validateUrlWildcard', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'ruleToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
-     'compileRuleRegex', 'checkDynamicConditions', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules', 'checkRuleMatchOptimized'
+     'validateUrlWildcard', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'ruleToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
+     'compileRuleRegex', 'checkDynamicConditions', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules', 'checkRuleMatchOptimized', 'isLocalEntry'
     ].map((n) => extractFn(src, n)).join('\n') +
     `\nconst validationCache = new Map(); const subdomainCache = new Map(); let compiledRules;
 const window = { location: { hostname: 'www.google.com' } };
@@ -1866,8 +1865,8 @@ return { buildRuleIndex, checkRuleMatchOptimized, getCR: () => compiledRules, se
     ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
      'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
      'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule',
-     'validateUrlWildcard', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'ruleToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
-     'compileRuleRegex', 'checkDynamicConditions', 'getSubdomainLevels', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules', 'checkRuleMatchOptimized'
+     'validateUrlWildcard', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'ruleToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
+     'compileRuleRegex', 'checkDynamicConditions', 'getSubdomainLevels', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules', 'checkRuleMatchOptimized', 'isLocalEntry'
     ].map((n) => extractFn(src, n)).join('\n') +
     `\nconst validationCache = new Map(); const subdomainCache = new Map(); let compiledRules;
 const window = { location: { hostname: 'www.google.com' } };
@@ -1965,17 +1964,19 @@ return { buildRuleIndex, checkRuleMatchOptimized, compileRuleRegex, safeRegexTes
   assert('高亮附加(对照): 仅高亮时不隐藏', only.getAttribute('data-is-blocked') === null && only.style.display === '' && only.style.outline === '2px solid #123456');
 }
 
-// ==== [审查4-*] 第四轮整体审查发现留档 (仅断言当前行为, 修复后应反转断言): 悬浮球"显示被屏蔽结果"路径置 parent.style.display='' 而非按 data-serh-orig-display 还原 ====
+// ==== [审查4-*] 第四轮整体审查发现留档: 悬浮球"显示被屏蔽结果"路径已改为按 data-serh-orig-display 还原 ====
 {
   const mkParent = (orig) => { const p = { attrs: orig !== null ? { 'data-serh-orig-display': orig } : {}, style: { display: 'none' } }; p.getAttribute = (k) => (k in p.attrs ? p.attrs[k] : null); return p; };
   const run = (parent) => new Function('parent', `
     let showHiddenResults = false;
     const document = { querySelectorAll: (sel) => (sel.indexOf('data-is-blocked') !== -1 ? [] : [parent]), getElementById: () => null };
+    ${extractFn(src, 'saveOriginalDisplay')}
+    ${extractFn(src, 'restoreOriginalDisplay')}
     ${extractFn(src, 'toggleHiddenResults')}
     toggleHiddenResults();
     return parent.style.display;
   `)(parent);
-  check('审查4-1(已知问题): 父容器原内联 display:flex 被隐藏后, 切换显示时应还原 flex(同 resetResultStyles/restoreParentDisplay 口径), 当前被置空致布局塌陷(刷新自愈)', run(mkParent('flex')) === '' && run(mkParent(null)) === '');
+  check('审查4-1(已修复): 父容器原内联 display:flex 被隐藏后, 切换显示时按 data-serh-orig-display 还原(此前被置空致布局塌陷)', run(mkParent('flex')) === 'flex' && run(mkParent(null)) === '');
 }
 
 // ==== [审查6-*] 高亮兼白名单只放行精确主机, 子域仍被同页黑名单屏蔽 (当前行为, 修复后应反转) ====
@@ -1986,8 +1987,8 @@ return { buildRuleIndex, checkRuleMatchOptimized, compileRuleRegex, safeRegexTes
     ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'encodeNonAscii', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
      'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
      'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule',
-     'validateUrlWildcard', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'ruleToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
-     'compileRuleRegex', 'checkDynamicConditions', 'getSubdomainLevels', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules', 'checkRuleMatchOptimized'
+     'validateUrlWildcard', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'ruleToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
+     'compileRuleRegex', 'checkDynamicConditions', 'getSubdomainLevels', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules', 'checkRuleMatchOptimized', 'isLocalEntry'
     ].map((n) => extractFn(src, n)).join('\n') +
     `\nconst validationCache = new Map(); const subdomainCache = new Map(); let compiledRules;
 const window = { location: { hostname: 'www.google.com' } };
@@ -2013,8 +2014,8 @@ return { buildRuleIndex, checkRuleMatchOptimized, getSubdomainLevels };`
     ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'encodeNonAscii', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
      'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
      'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule',
-     'validateUrlWildcard', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'ruleToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
-     'compileRuleRegex', 'checkDynamicConditions', 'getSubdomainLevels', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules', 'checkRuleMatchOptimized'
+     'validateUrlWildcard', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'ruleToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
+     'compileRuleRegex', 'checkDynamicConditions', 'getSubdomainLevels', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules', 'checkRuleMatchOptimized', 'isLocalEntry'
     ].map((n) => extractFn(src, n)).join('\n') +
     `\nconst validationCache = new Map(); const subdomainCache = new Map(); let compiledRules;
 const window = { location: { hostname: 'www.google.com' } };
@@ -2041,7 +2042,7 @@ return { buildRuleIndex, checkRuleMatchOptimized, getSubdomainLevels, getCR: () 
     ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'encodeNonAscii', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
      'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
      'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule',
-     'validateUrlWildcard', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'ruleToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
+     'validateUrlWildcard', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'ruleToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
      'compileRuleRegex', 'checkDynamicConditions'
     ].map((n) => extractFn(src, n)).join('\n') +
     `\nconst window = { location: { hostname: 'www.google.com' } };
@@ -2056,6 +2057,18 @@ return { stripRuleComment, validateRule };`
   assert('规则-325(新发现,当前行为): 确认弹窗的规则输入可编辑且编辑值能过validateRule, 但"删除"按stripRuleComment等值匹配不到原规则 → 过滤后原样返回, 无提示且屏蔽仍生效(仅注释改动仍等值可删)', env325.validateRule(edited) === true && JSON.stringify(deleteLocal(stored, edited)) === JSON.stringify(stored));
   assert('规则-325(对照): 仅改动注释部分与存量规则等值, 删除生效', JSON.stringify(deleteLocal(stored, '*://a.com/* # 注')) === '[]');
 }
+
+// ==== [规则-326] 审查发现: 输入本身为裸公共后缀时无前缀可剥, 不触发回退与标记 (以当前行为为准) ====
+await (async () => {
+  const consts = src.match(/const COMMON_HOST_PREFIXES = new Set\(\[[^\]]*\]\);/)[0] + '\n' +
+    src.match(/const PUBLIC_SUFFIX_2LD = new Set\([\s\S]*?\}\)\);/)[0];
+  const build = new Function(
+    consts + '\n' + extractFn(src, 'isPublicSuffixBase') + '\n' + extractFn(src, 'buildBlockRuleOptions') + '\nreturn buildBlockRuleOptions;'
+  )();
+  const o = build('co.uk');
+  assert('规则-326(新发现,当前行为): 裸后缀co.uk直接屏蔽生成 *://*.co.uk/* 且 tldWide/suffixLike 均false(对照 规则-280 m.co.uk 剥后回退+标记), TLD级确认面板不触发, 一键即屏蔽全部 *.co.uk', o.domainRule === '*://*.co.uk/*' && o.tldWide === false && o.suffixLike === false);
+  assert('规则-326(对照): 裸单标签uk仍 tldWide=true 有确认面板', build('uk').tldWide === true);
+})();
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

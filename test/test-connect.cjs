@@ -84,7 +84,7 @@ const ruleValidateFns = [
   'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition',
   'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions',
   'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex',
-  'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex',
+  'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex',
   'validateCondition', 'analyzeRule', 'validateRule',
 ];
 const syncFns = [...new Set(baseSyncFns.concat(ruleValidateFns))].map((n) => extractFn(src, n));
@@ -662,15 +662,17 @@ rules:
   assert('同步-071: 关闭回调仅在非取消路径持久化', /if \(!cancelDiscardsEdits\) persistCurrentSubscriptions\(\);/.test(src));
 }
 
-// G12-G13: 损坏同步头必须保留原始注释，合法头才从规则正文移除
+// G12-G13: 合法头从规则正文移除; 损坏头(如缺后括号}的截断JSON)同样剔除且不重发, 不再作为伪规则入库 (修复2)
 {
   const parse = new Function(
     extractFn(src, 'parseSyncHeader') + '\nreturn parseSyncHeader;'
   )();
   const broken = parse('# ScriptConfig:{broken-json}\n*://a.com/*');
-  assert('同步-072: 损坏 ScriptConfig 头保留', broken.restLines[0] === '# ScriptConfig:{broken-json}');
+  assert('同步-072(修复2): 损坏 ScriptConfig 头行自动剔除出规则正文且 rawScriptConfig 置空(不再回传坏头)', broken.restLines.length === 1 && broken.restLines[0] === '*://a.com/*' && broken.rawScriptConfig === null && broken.config === null);
   const valid = parse('# ScriptConfig: {"syncedAt":1}\n*://a.com/*');
   assert('同步-073: 合法 ScriptConfig 头移除', valid.restLines[0] === '*://a.com/*' && valid.config.syncedAt === 1);
+  const brokenSel = parse('# ScriptConfig: {"syncedAt":1}\n# Selectors:{bad\n*://a.com/*');
+  assert('同步-072b(修复2): 损坏 Selectors 行同样剔除且 rawSelectors 置空, 好头不受影响', brokenSel.restLines.join('|') === '*://a.com/*' && brokenSel.rawSelectors === null && brokenSel.config.syncedAt === 1);
 }
 
 // 网关 200 + JSON/纯文本错误页不被当作规则写入本地, 也不回传云端
@@ -1411,7 +1413,13 @@ await (async () => {
   const r = getReq({ url: 'https://dav.example.com/dav/', username: 'u', password: 'p', filename: 'sub dir/my rules.txt' });
   assert('审查D-12: 子路径与文件名分别编码', r.fullUrl === 'https://dav.example.com/dav/sub%20dir/my%20rules.txt' && r.folderUrl === 'https://dav.example.com/dav/sub%20dir/');
   const trav = getReq({ url: 'https://dav.example.com/dav/', username: 'u', password: 'p', filename: '../rules.txt' });
-  assert('审查D-12b(已知问题): 文件名含../段未过滤可逃逸配置目录', trav.fullUrl === 'https://dav.example.com/dav/../rules.txt' && trav.folderUrl === 'https://dav.example.com/dav/../');
+  assert('审查D-12b(已修复): 文件名含../段被过滤, 规范化后不逃逸配置目录', trav.fullUrl === 'https://dav.example.com/dav/rules.txt' && trav.folderUrl === 'https://dav.example.com/dav/');
+  const trav2 = getReq({ url: 'https://dav.example.com/dav/', username: 'u', password: 'p', filename: 'sub/../../x.txt' });
+  assert('审查D-12c: 多级 ../ 同样被过滤', trav2.fullUrl === 'https://dav.example.com/dav/sub/x.txt' && trav2.folderUrl === 'https://dav.example.com/dav/sub/');
+  const trav3 = getReq({ url: 'https://dav.example.com/dav/', username: 'u', password: 'p', filename: '..' });
+  assert('审查D-12d: 文件名仅 .. 时回退 rules.txt', trav3.fullUrl === 'https://dav.example.com/dav/rules.txt');
+  const trav4 = getReq({ url: 'https://dav.example.com/dav/', username: 'u', password: 'p', filename: './rules.txt' });
+  assert('审查D-12e(对照): 单点段被过滤且子目录仍保留', trav4.fullUrl === 'https://dav.example.com/dav/rules.txt');
 }
 
 // 头部扫描跳过空白行: 首行为空白行时头仍可解析且头行从 restLines 剔除
@@ -1745,7 +1753,7 @@ await (async () => {
 // ==== [同步-154~158] 复审V: <tag>规则行误判HTML / 头行-only判空 / YAML flow项丢弃 / ---分隔丢弃 / 混淆前缀碰撞 (审查新发现, 以当前行为为准) ====
 {
   const consts = src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0];
-  const fns = ['hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateCondition', 'analyzeRule', 'validateRule', 'isScriptRuleLine', 'isElementRuleLine', 'getRuleKey', 'isHtmlResponse', 'isNonRuleTextResponse', 'parseSyncHeader', 'extractYamlRuleItems', 'parseRulesetContent', 'webdavB64ToBytes', 'webdavXorBytes', 'deobfuscateWebDAVPassword'].map((n) => extractFn(src, n));
+  const fns = ['hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateCondition', 'analyzeRule', 'validateRule', 'isScriptRuleLine', 'isElementRuleLine', 'getRuleKey', 'isHtmlResponse', 'isNonRuleTextResponse', 'parseSyncHeader', 'extractYamlRuleItems', 'parseRulesetContent', 'webdavB64ToBytes', 'webdavXorBytes', 'deobfuscateWebDAVPassword'].map((n) => extractFn(src, n));
   const api = new Function(
     consts + '\n' +
     `function t(key) { return key; }
@@ -1763,7 +1771,11 @@ await (async () => {
   const yamlItems = api.extractYamlRuleItems(['rules:', "- ['ads1.com','ads2.com']", '- block.com']);
   assert('同步-156(复审新发现): YAML块序列中的flow项([- x,y])被当字典项静默丢弃', !!yamlItems && yamlItems.items.includes('block.com') === true && yamlItems.items.some((i) => /ads1\.com/.test(i)) === false);
   const flowCommented = api.parseRulesetContent('rules: [\n  a.com # ads\n  b.com\n]\nwhitelist: [\n  keep.com, # allow\n  ok.com\n]\n');
-  assert('审查W-9: 跨行flow行尾注释只从该项去掉，下一条规则保留', JSON.stringify(flowCommented.lines) === JSON.stringify(['a.com', 'b.com', '@keep.com', '@ok.com']), flowCommented.lines);
+  assert('审查W-9(已修复): 跨行flow行尾注释只从该项去掉, 同行后续元素不再被整行截断', JSON.stringify(flowCommented.lines) === JSON.stringify(['a.com', 'b.com', '@keep.com', '@ok.com']), flowCommented.lines);
+  const flowQuoted = api.parseRulesetContent('rules: [\n  "a # b",\n  c.com\n]\n');
+  assert('审查W-9c: 跨行flow引号内的#是内容不被当注释(此前整个rules列表丢失)', JSON.stringify(flowQuoted.lines) === JSON.stringify(['a # b', 'c.com']), flowQuoted.lines);
+  const flowQuotedSingle = api.parseRulesetContent('rules: ["a # b", c.com]\n');
+  assert('审查W-9c(对照): 单行flow引号内#同样保留', JSON.stringify(flowQuotedSingle.lines) === JSON.stringify(['a # b', 'c.com']), flowQuotedSingle.lines);
   // (留档) 审查W-9b 已删: 与 审查W-9 同一 flow 行尾注释处理分支(整行注释为行内注释的退化形态)
   const dash = api.parseRulesetContent('---\n*://a.com/*\n---\n*://b.com/*');
   assert('同步-157(复审新发现): 无name:的---分隔块被当front matter整块丢弃', dash.lines.join('\n').includes('a.com') === false && dash.lines.join('\n').includes('b.com') === true);
@@ -1899,15 +1911,24 @@ return { adoptedNoop, snapshotNoop, adopted, cfg: currentConfig };
   assert('审查候选: 云端订阅省略enabled且双方都未改启用位时, 本地禁用被当成启用', outOmit.length === 1 && outOmit[0].enabled === true && outOmit[0].rules[0] === 'blocked.example');
 }
 
-// ==== [修复R1b] 无快照设备遇脚本清空(头含rulesSyncedAt)空云端: 采纳清空, 清空意图传播不再被union回退复活(与修复R1语义对齐); 云端非空无快照仍union ====
+// ==== [修复R1b] 区分「有快照(参与过同步)→清空传播」与「无快照(首同步设备)→救援本地规则」：A1 方案① ====
 {
   const kept = ['*://a.example.com/*', '*://b.example.com/*'];
   const scriptedEmpty = '# ScriptConfig:' + JSON.stringify({ syncedAt: 1000, rulesSyncedAt: 1000 });
-  const envClear = makeSyncEnv({ cloudText: scriptedEmpty, localRules: kept, localTime: 0, syncConfig: false });
-  envClear.setCurrent({ rules: kept.slice(), enabled: true });
-  await envClear.run(syncCfg);
-  assert('修复R1b-1: 无快照+脚本清空空云端时采纳清空(本地规则清空, 不再union回滚复活)', JSON.stringify(envClear.getCurrent().rules) === '[]');
-  assert('修复R1b-2: 采纳后无冗余上传且快照对齐为空并记录同步时间(与R1-2一致)', envClear.calls.filter((c) => c.method === 'PUT').length === 0 && JSON.stringify(envClear.store.get(KEYS.WEBDAV_SYNC_SNAPSHOT_KEY)) === '[]' && envClear.store.get(KEYS.WEBDAV_LAST_SYNC_KEY) > 0);
+  const envRescue = makeSyncEnv({ cloudText: scriptedEmpty, localRules: kept, localTime: 0, syncConfig: false });
+  envRescue.setCurrent({ rules: kept.slice(), enabled: true });
+  await envRescue.run(syncCfg);
+  const rescuePut = envRescue.calls.filter((c) => c.method === 'PUT');
+  assert('修复R1b-1(方案①): 无快照+脚本化空云端+本地有规则 → 救援上传, 本地规则不被清空', JSON.stringify(envRescue.getCurrent().rules.slice().sort()) === JSON.stringify(kept.slice().sort()) && rescuePut.length === 1 && rescuePut[0].data.indexOf('*://a.example.com/*') !== -1, JSON.stringify(envRescue.getCurrent().rules));
+  assert('修复R1b-2(方案①): 救援后快照对齐为本地规则(建立基线, 后续才走删除传播)', JSON.stringify(envRescue.store.get(KEYS.WEBDAV_SYNC_SNAPSHOT_KEY)) === JSON.stringify(kept));
+  const envAdopt = makeSyncEnv({ cloudText: scriptedEmpty, localRules: [], localTime: 0, syncConfig: false });
+  envAdopt.setCurrent({ rules: [], enabled: true });
+  await envAdopt.run(syncCfg);
+  assert('修复R1b-2b(方案①对照): 无快照+本地也无规则时仍采纳空云端且不冗余上传', JSON.stringify(envAdopt.getCurrent().rules) === '[]' && envAdopt.calls.filter((c) => c.method === 'PUT').length === 0);
+  const envAligned = makeSyncEnv({ cloudText: scriptedEmpty, localRules: [], localTime: 0, syncConfig: false, initialSnapshot: [] });
+  envAligned.setCurrent({ rules: [], enabled: true });
+  await envAligned.run(syncCfg);
+  assert('修复R1b-2c(对照): 有快照为空(已参与过清空)时本地已空 → 无冗余上传且快照仍为空', JSON.stringify(envAligned.getCurrent().rules) === '[]' && envAligned.calls.filter((c) => c.method === 'PUT').length === 0 && JSON.stringify(envAligned.store.get(KEYS.WEBDAV_SYNC_SNAPSHOT_KEY)) === '[]');
   const cloudRule = ['*://cloud.example.com/*'];
   const envUnion = makeSyncEnv({ cloudText: '# ScriptConfig:' + JSON.stringify({ syncedAt: 1000, rulesSyncedAt: 1000 }) + '\n' + cloudRule[0], localRules: kept, localTime: 1000, syncConfig: false });
   envUnion.setCurrent({ rules: kept.slice(), enabled: true });
@@ -1970,6 +1991,16 @@ return { adoptedNoop, snapshotNoop, adopted, cfg: currentConfig };
   const saveSeg = src.slice(src.indexOf("serh-subscription-import').onclick"), src.indexOf("serh-subscription-cancel').onclick"));
   assert('修复SUB-4: 保存仍先持久化全部编辑(含待删墓碑)再自动导入各行', saveSeg.includes('persistCurrentSubscriptions()') && saveSeg.includes('performSubscriptionForUrl('));
   assert('修复SUB-5: 持久化在订阅变更时同步刷新过滤引擎(正常关闭路径也生效)', /if\s*\(subsChanged\)\s*\{[^}]*forceReprocessAll\(\)/.test(extractFn(src, 'persistCurrentSubscriptions')));
+}
+
+// ==== [同步-161] 修复2回归: 坏JSON头行不再合并入库, 回传体不含坏行且头自愈 (原审查发现留档已反转) ====
+{
+  const kept = ['*://keep.example.com/*'];
+  const envBad = makeSyncEnv({ cloudText: '# ScriptConfig:{not json\n' + kept[0], localRules: kept.concat(['*://new-local.example.com/*']), localTime: 5000, syncConfig: false });
+  envBad.setCurrent({ rules: kept.concat(['*://new-local.example.com/*']), enabled: true });
+  await envBad.run(syncCfg);
+  const putBad = (envBad.calls.find((c) => c.method === 'PUT') || {}).data || '';
+  assert('同步-161(修复2): 云端坏JSON头行不再被当伪规则合并入库; 有真实变更上传时, 回传体不含坏行且以干净基础头开头(云端自愈)', JSON.stringify(envBad.getCurrent().rules) === JSON.stringify(kept.concat(['*://new-local.example.com/*'])) && !!putBad && !putBad.includes('{not json') && putBad.startsWith('# ScriptConfig:{"syncedAt":0,"rulesSyncedAt":'), { rules: envBad.getCurrent().rules, put: putBad });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

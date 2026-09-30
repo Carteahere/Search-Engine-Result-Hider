@@ -93,7 +93,7 @@ global.document = {
   }
 };
 
-const fns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'isEngineSite', 'getContainerSelector', 'isValidCssSelector', 'hasPseudoElement', 'validateUserSelectors', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'parseSelectorText', 'sameSelectorDef', 'diffSelectorDefFields', 'diffUserSelectors', 'pruneUserSelectors'].map((n) => extractFn(src, n));
+const fns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'isEngineSite', 'getContainerSelector', 'isValidCssSelector', 'hasPseudoElement', 'validateUserSelectors', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'normalizeMatchLiteral', 'parseSelectorText', 'sameSelectorDef', 'diffSelectorDefFields', 'diffUserSelectors', 'pruneUserSelectors'].map((n) => extractFn(src, n));
 
 // builtinSelectorOf 为 const 箭头函数, extractFn 提取不到, 按行原样提取以跟随源码
 const builtinSelectorOfLine = src.match(/const builtinSelectorOf = .+?;/);
@@ -957,7 +957,7 @@ check('选择器-162: map_resultExtraElements 为 WeakMap', /const map_resultExt
       const setTimeout = (fn, ms) => { timers.push({ fn, ms }); return timers.length; };
       ${retryFn}
       return { scheduleResultRetry, hasCount: (el) => _resultRetryCounts.has(el) };
-    `)({ observe(el) { el.observeCount = (el.observeCount || 0) + 1; } }, timers);
+    `)({ observe(el) { el.observeCount = (el.observeCount || 0) + 1; }, unobserve(el) { el.unobserveCount = (el.unobserveCount || 0) + 1; } }, timers);
     return { api, timers };
   }
   function makeRetryEl() {
@@ -976,7 +976,7 @@ check('选择器-162: map_resultExtraElements 为 WeakMap', /const map_resultExt
     api.scheduleResultRetry(el);
     check('选择器-164: 首次异常安排一次延迟重试', timers.length === 1 && timers[0].ms === Number(delayMatch[1]));
     timers[0].fn();
-    check('选择器-165: 重试触发后重新观察结果', el.observeCount === 1 && el.hasAttribute('data-observed') === false);
+    check('选择器-165(已修复): 重试触发后重新观察且保持 data-observed 不变量', el.observeCount === 1 && el.hasAttribute('data-observed') === true);
     check('选择器-166: 重试计数保留用于升级', api.hasCount(el));
   }
   {
@@ -1003,7 +1003,7 @@ check('选择器-162: map_resultExtraElements 为 WeakMap', /const map_resultExt
     api.scheduleResultRetry(el);
     check('选择器-169: 连续异常达到上限前不标记完成', timers.length === 3 && el.hasAttribute('data-blocker-processed') === false);
     api.scheduleResultRetry(el);
-    check('选择器-170: 超过上限停止重试并标记完成', timers.length === 3 && el.hasAttribute('data-blocker-processed') === true && !api.hasCount(el));
+    check('选择器-170(已修复): 超过上限停止重试并彻底放手(不再伪装成功, 交回扫描重试)', timers.length === 3 && el.hasAttribute('data-blocker-processed') === false && el.hasAttribute('data-observed') === false && el.unobserveCount === 1 && !api.hasCount(el));
   }
 }
 
@@ -1393,7 +1393,7 @@ await (async () => {
   const parseSelectorText = new Function(
     "const SUPPORTED_REGEX_FLAGS = 'imsu';\n" +
     "function t(key, params = {}) { return key; }\n" +
-    extractFn(src, 'getInvalidRegexFlags') + '\n' + extractFn(src, 'parseSelectorText') +
+    extractFn(src, 'getInvalidRegexFlags') + '\n' + extractFn(src, 'normalizeMatchLiteral') + '\n' + extractFn(src, 'parseSelectorText') +
     '\nreturn parseSelectorText;'
   )();
   // JSON 风格 \uXXXX 转义正常解码
@@ -1629,7 +1629,7 @@ await (async () => {
   const builtinSelectorOfLine2 = src.match(/const builtinSelectorOf = .+?;/)[0];
   const selStore = { current: undefined };
   const gmGet = (key, defaultValue) => (key === 'searchfilter_selectors' ? (selStore.current === undefined ? defaultValue : selStore.current) : defaultValue);
-  const selFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'parseSelectorText', 'sameSelectorDef', 'diffSelectorDefFields', 'diffUserSelectors'].map(n => extractFn(src, n));
+  const selFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'normalizeMatchLiteral', 'parseSelectorText', 'sameSelectorDef', 'diffSelectorDefFields', 'diffUserSelectors'].map(n => extractFn(src, n));
   const selApi = new Function('GM_getValue', 'storeRef', `
 const SELECTORS_KEY = 'searchfilter_selectors';
 const SUPPORTED_REGEX_FLAGS = 'imsu';
@@ -1773,18 +1773,41 @@ return { injectBlockButton };
     getAttribute: () => null,
     appendChild(el) { appended = el; }
   };
-  api.injectBlockButton(container, 'other', 'https://example.com/page', 'example.com');
+  api.injectBlockButton(container, 'other', 'example.com');
   check('选择器-230: 无标题元素容器仍注入屏蔽按钮且锚定容器', !!appended && appended.className === 'serh-quick-block');
 })();
 
-// ==== [复审S-*] 第二轮审查新发现留档 (仅断言当前行为) ====
+// ==== [复审S-*] 第二轮审查新发现留档 ====
 {
   const upSrc = extractFn(src, 'updatePickedColor');
-  check('复审S-1(新发现): 画布取色updatePickedColor只写展示元素(code-text/current-preview), 从不写hlcolor行输入, 保存仅读文本框(取色对配置零影响却提示已保存)', upSrc.includes('serh-hlcolor-code-text') && upSrc.includes('serh-hlcolor-current-preview') && !upSrc.includes('hlcolor-input'));
+  check('复审S-1(已由修复1解决): 画布取色updatePickedColor仍只写展示元素(code-text/current-preview), 缺陷"取色结果无法进入配置"经修复1的预览色块点击填入路径解决', upSrc.includes('serh-hlcolor-code-text') && upSrc.includes('serh-hlcolor-current-preview') && !upSrc.includes('hlcolor-input'));
   const rIdx = src.indexOf("getElementById('serh-hlcolor-reset')");
   const resetSrc = rIdx >= 0 ? src.slice(rIdx, src.indexOf("getElementById('serh-hlcolor-cancel')")) : '';
   check('复审S-2(已修复): 颜色重置仅回填输入框/预览与画布, 不直接persistConfig/forceReprocessAll(保存才落盘, 取消可放弃)', resetSrc.includes('defaults[i]') && !resetSrc.includes('persistConfig') && !resetSrc.includes('forceReprocessAll') && !resetSrc.includes('highlightColors ='));
   check('复审S-3(已修复): 颜色/选择器两处重置仅回填面板态并提示保存后生效, 选择器重置不再直接applyUserSelectors落盘', (src.match(/showToast\(t\('resetPending'\)/g) || []).length === 2 && !/serh-selector-reset'\)\.onclick[\s\S]{0,120}applyUserSelectors/.test(src) && src.includes('serializeSelectors(SELECTORS)'));
+}
+
+// ==== [修复1] 取色后点击 @1~5 预览色块自动填入对应输入框并刷新预览 ====
+{
+  const seg = src.slice(src.indexOf('function updatePreview'), src.indexOf("document.getElementById('serh-hlcolor-save')"));
+  const els = {};
+  const mk = (id, v) => { els[id] = { value: v || '', textContent: '#aabbcc', style: {}, handlers: {}, addEventListener(ev, fn) { this.handlers[ev] = fn; } }; };
+  for (let i = 1; i <= 5; i++) { mk(`serh-hlcolor-input-${i}`, i === 3 ? '#112233' : ''); mk(`serh-hlcolor-preview-${i}`); }
+  mk('serh-hlcolor-code-text');
+  new Function('document', seg)({ getElementById: (id) => els[id] || null });
+  els['serh-hlcolor-preview-3'].handlers.click();
+  check('修复1-1: 点击@3预览色块把取色器当前hex填入输入框并刷新该行预览', els['serh-hlcolor-input-3'].value === '#aabbcc' && els['serh-hlcolor-preview-3'].style.background === '#aabbcc');
+  els['serh-hlcolor-code-text'].textContent = 'nope';
+  els['serh-hlcolor-preview-4'].handlers.click();
+  check('修复1-2(对照): 取色值非合法hex时不填入', els['serh-hlcolor-input-4'].value === '');
+  check('修复1-3(对照): 未点击的行输入框不受影响', els['serh-hlcolor-input-1'].value === '' && els['serh-hlcolor-input-5'].value === '');
+  check('修复1-4: 预览色块CSS含pointer光标提示可点击', /#serh-hlcolor-panel \.serh-hlcolor-row \.serh-hlcolor-preview \{[^}]*cursor: pointer/.test(src));
+  const hintSeg = src.slice(src.indexOf("t('hlColorTitle')"), src.indexOf('serh-hlcolor-left'));
+  check('修复1-5: 高亮颜色标题下方有"点击色块快速保存"小字, 字体11px/颜色#718096与引擎选择器selectorHint一致, 文案走t()双语', /hlColorHint/.test(hintSeg) && /font-size:11px;color:#718096/.test(hintSeg) && /hlColorHint: '点击色块快速保存'/.test(src) && /hlColorHint: 'Click a swatch to apply it quickly\.'/.test(src));
+  const dotSeg = src.slice(src.indexOf('serh-hlcolor-picker-wrapper'), src.indexOf('function resizeCanvasToMatch'));
+  const upSrc2 = extractFn(src, 'updateIndicators') + src.slice(src.indexOf('function onSVMove'), src.indexOf('const bindCanvasDrag'));
+  check('修复1-6(当前行为): 取色板含sv圆圈指示器+右侧色相条含hue滑块, wrapper相对定位, 拖动/初始resize/重置三路径均同步指示器位置', /id="serh-hlcolor-sv-dot"/.test(dotSeg) && /id="serh-hlcolor-hue-dot"/.test(dotSeg) && /position:relative/.test(dotSeg) && /#serh-hlcolor-sv-dot \{ width: 13px !important; height: 13px !important; border-radius: 50% !important; \}/.test(src) && /#serh-hlcolor-hue-dot \{ width: 30px !important; height: 6px !important; border-radius: 3px !important; \}/.test(src) && /pointer-events: none !important/.test(src) && (upSrc2.match(/updateIndicators\(\)/g) || []).length >= 4 && /drawHueCanvas\(\); updateIndicators\(\)/.test(src) && /updatePickedColor\(\); updateIndicators\(\); showToast/.test(src));
+  check('修复1-7(当前行为): 取色器初始与重置后均回到#66CCFF(不再跟随高亮色1), 画布取色点/当前预览/code-text一致', /const defaultHex = '#66CCFF';/.test(src) && !src.includes("hexToRgb('#CE2029')") && /hexToRgb\(defaultHex\)/.test(src));
 }
 
 // ==== [选择器-231~232] 复审V: regexSourceToLiteralText改写裸斜杠 / 辅助面板不滤合成点击 (审查新发现, 以当前行为为准) ====

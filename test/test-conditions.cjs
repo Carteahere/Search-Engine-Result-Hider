@@ -432,7 +432,13 @@ assert('条件-193: name位于多键中间', pc7.meta.name === 'Multi List' && s
 const pc8 = m.parseRulesetContent('name: UB List\nrules:\n  - example.com\n  - \'*://*.example.com/*\'\n  - title/.*ad.*/i\n');
 assert('条件-194: YAML rules列表提取', pc8.meta.name === 'UB List' && pc8.lines.length === 3 && pc8.lines[0] === 'example.com' && pc8.lines[1] === '*://*.example.com/*' && pc8.lines[2] === 'title/.*ad.*/i');
 const pc9 = m.parseRulesetContent('rules:\n  - /a/i # trailing\n  # full comment\n  - example.com\n');
-assert('条件-195: YAML注释跳过', pc9.lines.length === 2 && pc9.lines[0] === '/a/i # trailing' && pc9.lines[1] === 'example.com');
+assert('条件-195(已修复): YAML块序列项的行尾注释剥离', pc9.lines.length === 2 && pc9.lines[0] === '/a/i' && pc9.lines[1] === 'example.com', pc9.lines);
+const pc9b = m.parseRulesetContent('rules:\n  - "a # b"\n  - c.com\n');
+assert('条件-195b: 块序列项引号内的#是内容不被剥', JSON.stringify(pc9b.lines) === JSON.stringify(['a # b', 'c.com']), pc9b.lines);
+const pc9c = m.parseRulesetContent('whitelist:\n  - keep.com # allow\n');
+assert('条件-195c: 白名单块序列项剥注释后再加@', JSON.stringify(pc9c.lines) === JSON.stringify(['@keep.com']), pc9c.lines);
+const pc9d = m.parseRulesetContent("rules:\n  - 'x # y' # note\n");
+assert('条件-195d: 单引号项注释剥离且引号内#保留', JSON.stringify(pc9d.lines) === JSON.stringify(['x # y']), pc9d.lines);
 const pc10 = m.parseRulesetContent('blacklist:\n  - *.example.com\nsubscriptions:\n  - url: https://x\n    enabled: true\n');
 assert('条件-196: blacklist键+后续段截断', pc10.lines.length === 1 && pc10.lines[0] === '*.example.com');
 const pc11 = m.parseRulesetContent('*://a.com/*\nrules:\n');
@@ -681,6 +687,7 @@ const fns = [
   'wildcardToRegex',
   'checkDynamicConditions',
   'matchDomainEntryType',
+  'isLocalEntry',
 ].map((n) => extractFn(src, n));
 
 const checkFn = extractNamed(src, 'function checkRuleMatchOptimized(');
@@ -1045,7 +1052,7 @@ assert('条件-361: 标题不匹配则host黑名单仍生效', isBlocked(doCheck
 // ==== [条件-401~405] 订阅YAML格式自动检测回归 (段键优先进入YAML; 首个合法规则行判定为纯文本并停止扫描; 纯文本不被杂键截断) ====
 await (async () => {
 const src2 = src;
-const fns2 = ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'splitHostAndPort', 'escapeHostPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'checkDynamicConditions', 'getSubdomainLevels', 'matchDomainEntryType', 'extractYamlRuleItems', 'parseRulesetContent', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule'].map((n) => extractFn(src2, n));
+const fns2 = ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'splitHostAndPort', 'escapeHostPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'checkDynamicConditions', 'getSubdomainLevels', 'matchDomainEntryType', 'extractYamlRuleItems', 'parseRulesetContent', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule'].map((n) => extractFn(src2, n));
 const consts3 = src2.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0];
 const lang3 = src2.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
 const env3 = new Function(consts3 + '\n' + lang3 + '\n' + fns2.join('\n') + `
@@ -1179,7 +1186,7 @@ assert('条件-405: 首行独立条件表达式按纯文本保留', nonEmpty(pco
 {
   const env2 = new Function(
     src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
-    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'stripRuleComment', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'parsePrefixedRegexRule', 'ruleToRegex', 'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateUrlWildcard'].map((n) => extractFn(src, n)).join('\n') +
+    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'stripRuleComment', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'parsePrefixedRegexRule', 'ruleToRegex', 'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateUrlWildcard'].map((n) => extractFn(src, n)).join('\n') +
     '\nconst window = { location: { hostname: "www.bing.com" } };' +
     '\nfunction getSearchEngine() { return "bing"; }' +
     '\nfunction getSearchCategory() { return "web"; }' +
@@ -1215,7 +1222,7 @@ return { validateCondition };`
 
   const envM = new Function(
     src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
-    ['toASCIIHostname', 'safeRegexTest', 'checkDynamicConditions'].map((n) => extractFn(src, n)).join('\n') + '\n' +
+    ['toASCIIHostname', 'safeRegexTest', 'checkDynamicConditions', 'isLocalEntry'].map((n) => extractFn(src, n)).join('\n') + '\n' +
     SERH_RAW_EXTRACT(src, 'getSubdomainLevels') + '\n' + SERH_RAW_EXTRACT(src, 'checkRuleMatchOptimized') +
     `\nconst subdomainCache = new Map(); function t(key) { return key; }
 const compiledRules = { domains: new Map(), urls: [], titles: [{ regex: /^$/, originalRule: 'title/^$/', source: '本地规则', isLocal: true }], texts: [], whitelistDomains: new Map(), whitelistUrlPatterns: [], whitelistTitlePatterns: [], whitelistTextPatterns: [], whitelistConditionalDomains: new Map(), whitelistConditionalRules: [], conditionalRules: [], conditionalDomains: new Map(), highlightDomains: new Map(), highlightUrls: [], highlightTitles: [], highlightTexts: [], highlightConditionalRules: [], highlightConditionalDomains: new Map() };
@@ -1242,7 +1249,7 @@ return { parseRuleWithConditions, evalCondAST };`
   const envN = new Function(
     src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
     src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0] + '\n' +
-    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateCondition', 'analyzeRule'].map((n) => extractFn(src, n)).join('\n') +
+    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateCondition', 'analyzeRule'].map((n) => extractFn(src, n)).join('\n') +
     `\nconst window = { location: { hostname: 'www.google.com' } };
 function getSearchEngine() { return 'google'; } function getSearchCategory() { return 'web'; }
 const currentConfig = { rules: [], debug: false, language: 'zh-CN' };
@@ -1274,7 +1281,7 @@ return { stripRuleComment, analyzeRule };`
 {
   const env7b = new Function(
     src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' + src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0] + '\n' +
-    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'encodeNonAscii', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'stripRuleComment', 'extractIfConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateCondition', 'analyzeRule'].map((n) => extractFn(src, n)).join('\n') +
+    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'encodeNonAscii', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'stripRuleComment', 'extractIfConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateCondition', 'analyzeRule'].map((n) => extractFn(src, n)).join('\n') +
     '\nconst window = { location: { hostname: "www.bing.com" } };' +
     '\nfunction getSearchEngine() { return "bing"; } function getSearchCategory() { return "web"; }' +
     '\nfunction t(key) { return key; }' +
@@ -1286,7 +1293,7 @@ return { stripRuleComment, analyzeRule };`
 {
   const env7c = new Function(
     src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
-    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'splitHostAndPort', 'escapeHostPart', 'wildcardToRegex', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'checkDynamicConditions', 'getSubdomainLevels', 'matchDomainEntryType', 'extractYamlRuleItems', 'parseRulesetContent', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule'].map((n) => extractFn(src, n)).join('\n') + `
+    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'splitHostAndPort', 'escapeHostPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'checkDynamicConditions', 'getSubdomainLevels', 'matchDomainEntryType', 'extractYamlRuleItems', 'parseRulesetContent', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule'].map((n) => extractFn(src, n)).join('\n') + `
 const window = { location: { hostname: 'www.google.com' } };
 function getSearchEngine() { return 'google'; } function getSearchCategory() { return 'web'; }
 function t(key) { return key; }
@@ -1300,7 +1307,7 @@ return { parseRulesetContent };`
   const pM7 = pc7('name: X\nmatches:\n- foo.com\n');
   assert('审查7-C4(新发现,当前行为): 仅含matches:的合法uBlacklist订阅解析为空规则集(lines:[]), 上游validRules=0按导入失败抛错且lastUpdate不更新→每小时及每次关面板重试', pM7.lines.length === 0 && pM7.meta.name === 'X');
   const pF7 = pc7('name: X\nrules: [\n  a.com,\n  b.com]\n');
-  assert('审查7-C5(新发现,当前行为): 多行flow列表闭合]与末元素同行时flowCloseAt找不到闭合, 整段回退纯文本(rules列表全部丢失)', nz7(pF7.lines).length === 4 && nz7(pF7.lines)[1] === 'rules: [');
+  assert('审查7-C5(已修复): 多行flow列表闭合]与末元素同行, 正确解析为rules列表', pF7.meta.name === 'X' && nz7(pF7.lines).length === 2 && nz7(pF7.lines)[0] === 'a.com' && nz7(pF7.lines)[1] === 'b.com');
 }
 {
   const tEnv7 = new Function(
@@ -1310,6 +1317,25 @@ return { parseRulesetContent };`
     '\nreturn { t };'
   )();
   assert('审查7-C6(新发现,当前行为): t()替换参数未转义$, 参数含"$&"时被replaceAll特殊模式吞成{part}(错误提示文案失真, 仅显示层)', tEnv7.t('condRegexError', { part: 'title/$&/i' }) === '条件正则无效: title/{part}/i');
+}
+
+// ==== [条件-418~420] 审查发现: 无引号值含括号截断 / IPv6 host 带端口失配 / title=// 静默编译 (仅断言当前行为) ====
+{
+  const envX = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
+    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'extractIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions'].map((n) => extractFn(src, n)).join('\n') +
+    '\nconst window = { location: { hostname: "www.google.com" } };' +
+    '\nfunction getSearchEngine() { return "google"; } function getSearchCategory() { return "web"; }' +
+    '\nreturn { parseRuleWithConditions, analyzeCondExpr, foldCondExpr, evalCondAST };'
+  )();
+  const cut = envX.parseRuleWithConditions('@if(path *= a)b)example.com');
+  const quoted = envX.parseRuleWithConditions('@if(path *= "a)b")example.com');
+  assert('条件-418(新发现,当前行为): 未加引号值含")"被截断为 path *= a 且残核 b)example.com 落入核心规则(保存时validateRule括号平衡检查多能拦截, 主要经导入等不验证路径入库)', cut.coreRule === 'b)example.com' && cut.dynamicConditions.length === 1 && cut.dynamicConditions[0].cond.val === 'a');
+  assert('条件-418(对照): 加引号后条件与核心规则正确分离', quoted.coreRule === 'example.com' && quoted.dynamicConditions.length === 1 && quoted.dynamicConditions[0].cond.val === 'a)b');
+  const evX = (cond, url) => { const { ast, errors } = envX.analyzeCondExpr(cond, 'google', 'www.google.com', 'web'); if (errors.length) return { errors }; const f = envX.foldCondExpr(ast); return f.type === 'const' ? { c: f.value } : { v: envX.evalCondAST(f, 't', url) }; };
+  assert('条件-419(新发现,当前行为): host = "[::1]" 对带端口IPv6 URL失配(hasPortInCond 启发式对值含":"改取含端口的u.host比较), 普通域名带端口不受影响', evX('host = "[::1]"', 'http://[::1]/x').v === true && evX('host = "[::1]"', 'http://[::1]:8080/x').v === false && evX('host = "a.com"', 'http://a.com:8080/x').v === true);
+  const slash = envX.parseRuleWithConditions('title=//');
+  assert('条件-420(新发现,当前行为): title=// 静默编译为字面量"//"等值条件而非按空正则报错', slash.standaloneExpr === true && slash.dynamicConditions.length === 1 && slash.dynamicConditions[0].cond.op === '=' && slash.dynamicConditions[0].cond.val === '//');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
