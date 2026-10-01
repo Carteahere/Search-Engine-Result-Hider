@@ -5,7 +5,7 @@
 [中文](README.md) | [English](README.en.md)
 
 Implements complex-rule search result blocking on browsers that **only support user script installation**.  
-Supports URL matching including uBlacklist basic rules, regex matching, title matching, whitelist matching, target result highlighting, `@if` conditional statements, result snippet matching, and allows for the addition of custom engines.  
+Supports URL matching including uBlacklist basic rules, regex matching, title matching, result snippet matching, target result highlighting, whitelist matching, `@if` conditional statements, and allows for the addition of custom engines.  
 Currently supported search engines: Bing, Google, Google Scholar, DuckDuckGo(ddg/lite), Yandex, Brave, Yahoo(&Japan)  
 
 Open and install using a browser that supports Tampermonkey / Greasemonkey scripts.  

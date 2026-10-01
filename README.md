@@ -5,7 +5,7 @@
 [中文](README.md) | [English](README.en.md)
 
 在**仅支持安装脚本**的浏览器上实现复杂规则屏蔽搜索结果功能  
-支持包括ublacklist基础规则在内的URL匹配、正则匹配、标题匹配、白名单匹配、高亮目标结果、`@if`附加判断条件、结果摘要(snippet)匹配，支持添加自定义引擎  
+支持包括ublacklist基础规则在内的URL匹配、正则匹配、标题匹配、结果摘要(snippet)匹配、高亮目标结果、白名单匹配、`@if`附加判断条件，支持添加自定义引擎  
 当前适配搜索引擎：Bing、Google、Google Scholar、DuckDuckGo(ddg/lite)、Yandex、Brave、Yahoo(&Japan)
 
 使用支持 Tampermonkey / Greasemonkey 脚本的浏览器打开安装  
