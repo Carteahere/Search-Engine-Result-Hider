@@ -59,11 +59,11 @@
 
 调试模式、规则自检报错说明见 [测试说明](Debug.md)
 
-简单示例：
+简单规则示例：
 | 规则 | 示例 |说明 |
 | --- | --- |--- |
 | URL | `*://*.example.com/*` | 屏蔽`example.com` |
-| 正则 | `/example\.(com\|net)/i` | 屏蔽`example`的`.com`/`.net`域名 |
+| 正则 | `/example\.(com\|net)/i` | 屏蔽`example.com`和`example.net` |
 | 标题 | `title/.*example.*/i` | 屏蔽标题含`example`的结果 |
 | 摘要 | `text/.*example.*/i` | 屏蔽网页描述内容(snippet)含`example`的结果 |
 | 高亮 | `@1*://*.example.com/*` | 给`example.com`加上高亮边框 |
