@@ -6,11 +6,11 @@
 
 在**仅支持安装脚本**的浏览器上实现复杂规则屏蔽搜索结果功能  
 支持包括ublacklist基础规则在内的URL匹配、正则匹配、标题匹配、白名单匹配、高亮目标结果、`@if`附加判断条件、结果摘要(snippet)匹配，支持添加自定义引擎  
-当前支持搜索引擎：Bing、Google、Google Scholar、DuckDuckGo(ddg/lite)、Yandex、Brave、Yahoo(&Japan)
+当前适配搜索引擎：Bing、Google、Google Scholar、DuckDuckGo(ddg/lite)、Yandex、Brave、Yahoo(&Japan)
 
 使用支持 Tampermonkey / Greasemonkey 脚本的浏览器打开安装  
 正式版 [Github](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [GreasyFork](https://update.greasyfork.org/scripts/552394/%E6%90%9C%E7%B4%A2%E5%BC%95%E6%93%8E%E7%BB%93%E6%9E%9C%E5%B1%8F%E8%94%BD%E5%99%A8.user.js)  
-精简版（移除规则订阅/webdav）[Lite](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite.user.js)  
+精简版（移除规则订阅/webdav）[Lite](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite.user.js)
 
 ### 1.2 当前功能：
 
@@ -41,7 +41,7 @@
 
 ### 1.4 关于订阅：
 
-1. 订阅更新同样后台运行，每12h拉取一次，支持UTF-8编码的纯文本远程链接如`https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt`；兼容`.yaml`uBlacklist列表格式（`name`/`rules`/`blacklist`/`whitelist`/`matches`项）
+1. 规则订阅更新同样后台运行，每12h拉取一次，支持UTF-8编码的纯文本远程链接如`https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt`；兼容`.yaml`uBlacklist列表格式（`name`/`rules`/`blacklist`/`whitelist`/`matches`项）
 2. 订阅规则在本地规则后追加应用，由于脚本可分配性能有限，规则总数建议不超过5w条避免手机爆炸🤳💥
 3. 脚本扩展有限不支持`##`DOM元素和uBO过滤等规则，通过订阅导入会自动过滤
 4. 订阅链接非github源时需要跨域请求权限，若有权限申请弹窗选`总是允许`
@@ -55,9 +55,20 @@
 
 ## 文档
 
-自定义引擎选择器、具体规则语法说明见 [规则说明](Rule-Explanation.md)
+具体规则语法、自定义引擎见 [规则说明](Rule-Explanation.md)
 
 调试模式、规则自检报错说明见 [测试说明](Debug.md)
+
+简单示例：
+| 规则 | 示例 |说明 |
+| --- | --- |--- |
+| URL | `*://*.example.com/*` | 屏蔽`example.com` |
+| 正则 | `/example\.(com\|net)/i` | 屏蔽`example`的`.com`/`.net`域名 |
+| 标题 | `title/.*example.*/i` | 屏蔽标题含`example`的结果 |
+| 摘要 | `text/.*example.*/i` | 屏蔽网页描述内容(snippet)含`example`的结果 |
+| 高亮 | `@1*://*.example.com/*` | 给`example.com`加上高亮边框 |
+| 白名单 | `@*://*.example.com/*` | 放行`example.com` |
+| `@if`附加条件 | `*://*.example.com/* @if(title *= "示例")` | 屏蔽`example.com`的标题中含`示例`的结果 |
 
 ## 截图
 

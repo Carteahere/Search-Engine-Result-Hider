@@ -41,7 +41,7 @@ Partial setting instructions:
 
 ### 1.4 About Subscriptions:
 
-1. Subscription updates also run in the background, fetching once every 12h. Supports UTF-8 encoding for plain text remote links such as `https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt`; compatible with `.yaml` uBlacklist list format (`name`/`rules`/`blacklist`/`whitelist`/`matches` fields).
+1. Rule subscription updates also run in the background, fetching once every 12h. Supports UTF-8 encoding for plain text remote links such as `https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt`; compatible with `.yaml` uBlacklist list format (`name`/`rules`/`blacklist`/`whitelist`/`matches` fields).
 2. Subscription rules are appended after local rules. Due to limited script-allocatable performance, keep the total number of rules under 50k to avoid mobile device performance issues.
 3. Script extensions are limited and do not support `##` DOM element or uBO filter rules; they are filtered out automatically on subscription import.
 4. If the subscription link is not a GitHub source, cross-origin request permission is required; if a permission prompt appears, select `Always allow`.
@@ -58,6 +58,17 @@ Partial setting instructions:
 For custom engine selectors and detailed rule syntax, see [Rule-Explanation](Rule-Explanation.en.md)
 
 For debug mode and rules detection error instructions, see [Debug](Debug.en.md)
+
+Simple Rule Explanation:
+| Type | Example | Explanation |
+| --- | --- |--- |
+| URL | `*://*.example.com/*` | block `example.com` |
+| regex | `/example\.(com\|net)/i` | block `example.com` and `example.net` |
+| title | `title/.*example.*/i` | block results whose title contains `example` |
+| snippet | `text/.*example.*/i` | block results whose page description (snippet) contains `example` |
+| highlight | `@1*://*.example.com/*` | adds a colored border to results from `example.com` |
+| whitelist | `@*://*.example.com/*` | allows `example.com` |
+| `@if` conditional statements | `*://*.example.com/* @if(title *= "keyword")` | block results from `example.com` whose title contains `keyword` |
 
 ## Screenshots
 
