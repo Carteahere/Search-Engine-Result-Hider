@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.5.4
+// @version      8.5.5
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -325,7 +325,7 @@
       enableFeature: 'Enable Feature', blockDomain: 'Block Domain', doubleConfirm: 'Double Confirm', showMatchedSource: 'Show Source',
       autoDark: 'Auto Dark', exportConfig: 'Export Config',
       showSubBtn: 'Sub Button', showSyncBtn: 'Sync Button',
-      settingsBtn: 'Settings', settingsPanelTitle: 'Script Settings',
+      settingsBtn: 'Setting', settingsPanelTitle: 'Script Settings',
       settingsSecBlock: 'One-click Block', settingsSecUI: 'Interface', settingsSecOther: 'Other',
       bubbleSize: 'Bubble:', blockRules: 'Block Rules:', sync: 'Sync',
       import: 'Import', export: 'Export', save: 'Save',
@@ -1668,7 +1668,7 @@
     validationCache.clear(); subdomainCache.clear(); if (ruleToRegex._memo) ruleToRegex._memo.clear(); if (parsePrefixedRegexRule._memo) parsePrefixedRegexRule._memo.clear();
     if (compileRuleRegex._memo) compileRuleRegex._memo.clear();
     compiledRules = newCompiledRules();
-    compiledRules.indexSignature = signature; const allRules = currentConfig.rules.concat(subscriptionRules); const subscriptions = getSubscriptions();
+    const allRules = currentConfig.rules.concat(subscriptionRules); const subscriptions = getSubscriptions();
     const localRuleCount = currentConfig.rules.length; const subscriptionSources = [];
     subscriptions.forEach((sub, idx) => {
       if (!sub.enabled || !Array.isArray(sub.rules)) return;
@@ -1677,6 +1677,7 @@
     while (subscriptionSources.length < subscriptionRules.length) subscriptionSources.push(t('localRule'));
 
     allRules.forEach((rule, ruleIndex) => {
+      if (typeof rule !== 'string') { if (currentConfig.debug) console.warn('非字符串规则项, 已跳过:', rule); return; }
       rule = stripRuleComment(rule.trim()); if (!rule) return; let ruleValid = true;
       try {
         ruleValid = validateRule(rule);
@@ -1829,6 +1830,7 @@
         if (currentConfig.debug) console.warn('规则预编译失败:', rule, e);
       }
     });
+    compiledRules.indexSignature = signature;
   }
 
   function cachedAnalyzeRule(rule) {
@@ -2761,8 +2763,8 @@
     requestAnimationFrame(processBatch);
   }
 
+  // 预留翻页高度
   const LAYOUT_CSS = `
-        /* 预留翻页高度 */
         body { min-height: 101vh !important; }
         #rcnt, #rso { min-height: 60vh; }
   `;
@@ -2771,7 +2773,6 @@
   function injectWidgetStyles() {
     if (widgetStylesInjected) return; widgetStylesInjected = true;
     GM_addStyle(`
-        /* 隔离 */
         [id^="serh-"]:not(button),
         #serh-settings-panel * {
             text-align: left !important; letter-spacing: normal !important; word-spacing: normal !important;
@@ -2780,7 +2781,6 @@
             font-style: normal !important; font-variant: normal !important;
         }
 
-        /* 面板共用样式 */
         .serh-window, .serh-window * {
             box-sizing: border-box !important;
         }
@@ -2848,7 +2848,6 @@
             text-align: center !important;
         }
 
-        /* 输入栏 */
         .serh-rules-container {
             display: flex; border: 1px solid #e2e8f0; border-radius: 4px; background: #f8fafc;
             height: 190px; margin-bottom: 3px; position: relative; overflow: hidden;
@@ -2891,7 +2890,6 @@
 
         #serh-stats-content::-webkit-scrollbar { width: 6px; }
 
-        /* 屏蔽按钮 */
         .serh-quick-block {
             position: absolute; cursor: pointer; z-index: 99; width: 24px; height: 24px;
             display: flex; align-items: center; justify-content: center;
@@ -2957,7 +2955,6 @@
             body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule { background: #1f2937; color: #6b7280; }
         }
 
-        /* 快速跳转 */
         .serh-scroll-btn {
             position: absolute; right: 7px; cursor: pointer; opacity: 0.5; font-size: 18px !important;
             line-height: 1 !important; user-select: none !important; transition: opacity 0.2s, transform 0.2s;
@@ -2968,7 +2965,6 @@
         .serh-scroll-btn:hover { opacity: 1; transform: scale(1.2); }
         .serh-quick-block:hover { transform: scale(1.1); opacity: 1; }
 
-        /* 隐藏按钮 */
         :is(.isv-r, .image-section, g-img, .is-extra-container) .serh-quick-block,
         :is(header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav, #extabar) .serh-quick-block { display: none !important; }
 
@@ -3315,7 +3311,6 @@
             }
         }
 
-        /* 滑条 */
         #serh-bubble-size-slider {
             flex: 1 1 0% !important; margin: 0 0 0 5px !important;
             height: 4px !important; min-height: 0 !important; max-height: none !important;
@@ -5405,7 +5400,7 @@
 
   // yaml解析
   function extractYamlRuleItems(lines) {
-    let hasSection = false; let inSection = false; let sectionKind = ''; let sectionIndent = -1; let name; let matchesItemCount = 0; const items = [];
+    let hasSection = false; let inSection = false; let sectionKind = ''; let sectionIndent = -1; let name; const items = [];
     const stripQ = (raw) => {
       const s = raw.trim();
       if (s.startsWith("'")) {
@@ -5514,22 +5509,14 @@
           hasSection = true;
           let payload = lines.slice(idx + 1, close.line).map((l) => l.trim()).filter(Boolean).join('\n');
           if (close.prefix) payload = payload ? payload + '\n' + close.prefix : close.prefix;
-          if (flowOpen.key !== 'matches') {
-            for (const part of splitFlowItems(payload)) pushYamlItem(part, flowOpen.key);
-          } else if (payload.trim()) {
-            matchesItemCount++;
-          }
+          for (const part of splitFlowItems(payload)) pushYamlItem(part, flowOpen.key);
           idx = close.line; continue;
         }
       }
       const flow = flowKeyOf(line);
       if (flow) {
         hasSection = true;
-        if (flow.key !== 'matches') {
-          for (const part of splitFlowItems(flow.payload)) pushYamlItem(part, flow.key);
-        } else if (flow.payload.trim()) {
-          matchesItemCount++;
-        }
+        for (const part of splitFlowItems(flow.payload)) pushYamlItem(part, flow.key);
         continue;
       }
       const match = listKeyOf(line);
@@ -5554,10 +5541,6 @@
       const currentIndent = line.search(/\S/); const isListItem = s.startsWith('-');
       if (!isListItem && (currentIndent <= sectionIndent || (sectionIndent === 0 && currentIndent === 0))) {
         inSection = false; sectionKind = ''; sectionIndent = -1; idx--; continue;
-      }
-
-      if (sectionKind === 'matches') {
-        if (isListItem) matchesItemCount++; continue;
       }
 
       if (/^-\s+/.test(s)) {
@@ -5587,11 +5570,11 @@
         }
       }
     }
-    if (!hasSection) return null; if (items.length) return { items, name }; if (matchesItemCount > 0) return { items: [], name }; return null;
+    if (!hasSection) return null; if (items.length) return { items, name }; return null;
   }
 
   function parseRulesetContent(content) {
-    let lines = String(content || '').replace(/^\uFEFF/, '').split('\n'); let meta = {}; let yamlPre = false; let isYaml = false; const firstContentIdx = lines.findIndex((l) => l.trim() !== '');
+    let lines = String(content || '').replace(/^\uFEFF/, '').split('\n'); let meta = {}; let isYaml = false; const firstContentIdx = lines.findIndex((l) => l.trim() !== '');
     if (firstContentIdx !== -1 && lines[firstContentIdx].trim() === '---') {
       const endIndex = lines.findIndex((l, i) => i > firstContentIdx && l.trim() === '---');
       if (endIndex !== -1) {
@@ -5602,7 +5585,7 @@
         if (/(?:^|\n)\s*(?:rules|blacklist|whitelist|matches)\s*:/i.test(head)) isYaml = true;
         else lines = lines.slice(endIndex + 1);
       } else {
-        isYaml = true; yamlPre = true;
+        isYaml = true;
       }
     }
     if (!isYaml) {
@@ -5616,10 +5599,9 @@
     }
     if (isYaml) {
       const yaml = extractYamlRuleItems(lines);
-      if (yaml) {
+      if (yaml && yaml.items.length) {
         if (meta.name === undefined && yaml.name) meta.name = yaml.name; return { lines: yaml.items, meta };
       }
-      if (!yamlPre) return { lines: [], meta };
     }
     return { lines, meta };
   }
@@ -6112,7 +6094,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         GM_setValue(SELECTORS_KEY, selectors); setSelectorSyncSnapshot(selectors); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite();
       }
     }
-    const trustedNow = await getTrustedNow(); let cloudTime = 0; const validCloudTimes = [getCloudModifiedTime(parsedHeader.config, 'rulesSyncedAt', trustedNow)].filter(v => v > 0);
+    const trustedNow = await getTrustedNow(parseHttpDateHeader(resp.responseHeaders)); let cloudTime = 0; const validCloudTimes = [getCloudModifiedTime(parsedHeader.config, 'rulesSyncedAt', trustedNow)].filter(v => v > 0);
     if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) && parsedHeader.config && (Object.keys(getSyncSettings(parsedHeader.config)).length || Array.isArray(parsedHeader.config.subscriptions))) {
       const cloudSettingsTime = getCloudModifiedTime(parsedHeader.config, 'settingsModifiedAt', trustedNow);
       if (cloudSettingsTime > 0) GM_setValue(SETTINGS_LAST_MODIFIED_KEY, cloudSettingsTime);
@@ -6420,7 +6402,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   function startBackgroundSync() {
     if (_syncIntervalIds.length) return;
     _syncIntervalIds = [
-      setInterval(checkAutoSubscription, 60 * 60 * 1000),
+      setInterval(() => checkAutoSubscription(), 60 * 60 * 1000),
       setInterval(checkAutoWebDAV, 60 * 60 * 1000)
     ];
     setTimeout(() => {
@@ -6595,12 +6577,15 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     });
 
     startBackgroundSync();
-    if (isEngineSite()) {
-      ensureEngineSiteSetup();
-    }
-    exposeDebugApi();
-
     registerMenu();
+    exposeDebugApi();
+    if (isEngineSite()) {
+      try {
+        ensureEngineSiteSetup();
+      } catch (e) {
+        console.error('[屏蔽] 引擎站点装配失败:', e);
+      }
+    }
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else setTimeout(init, 1000);

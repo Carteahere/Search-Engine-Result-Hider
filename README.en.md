@@ -8,8 +8,9 @@ Implements complex-rule search result blocking on browsers that **only support u
 Supports URL matching including uBlacklist basic rules, regex matching, title matching, whitelist matching, target result highlighting, `@if` conditional statements, result snippet matching, and allows for the addition of custom engines.  
 Currently supported search engines: Bing, Google, Google Scholar, DuckDuckGo(ddg/lite), Yandex, Brave, Yahoo(&Japan)  
 
-Install sources [Github](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [Greasy Fork](https://update.greasyfork.org/scripts/552394/%E6%90%9C%E7%B4%A2%E5%BC%95%E6%93%8E%E7%BB%93%E6%9E%9C%E5%B1%8F%E8%94%BD%E5%99%A8.user.js)  
-Open with a browser to install directly.
+Open and install using a browser that supports Tampermonkey / Greasemonkey scripts.  
+Full Version [Github](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [Greasy Fork](https://update.greasyfork.org/scripts/552394/%E6%90%9C%E7%B4%A2%E5%BC%95%E6%93%8E%E7%BB%93%E6%9E%9C%E5%B1%8F%E8%94%BD%E5%99%A8.user.js)  
+Without RuleSubscription / WebDAV Version [Lite](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite/Lite.user.js)
 
 ### 1.2 Features:
 
