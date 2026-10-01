@@ -10,7 +10,7 @@
 
 使用支持 Tampermonkey / Greasemonkey 脚本的浏览器打开安装  
 完整版 [Github](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [GreasyFork](https://update.greasyfork.org/scripts/552394/%E6%90%9C%E7%B4%A2%E5%BC%95%E6%93%8E%E7%BB%93%E6%9E%9C%E5%B1%8F%E8%94%BD%E5%99%A8.user.js)  
-无规则订阅/webdav版 [Lite](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite/Lite.user.js)  
+精简版（无规则订阅/webdav）[Lite](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite.user.js)  
 
 ### 1.2 当前功能：
 
