@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.5.5
+// @version      8.5.6
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了所有订阅/webdav相关内容。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了所有订阅/webdav相关内容。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version has removed all content related to Rule Subscriptions and WebDAV.
@@ -21,8 +21,8 @@
 // @grant        GM_unregisterMenuCommand
 // @grant        GM_deleteValue
 // @run-at       document-idle
-// @downloadURL  https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite/Lite.user.js
-// @updateURL    https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite/Lite.user.js
+// @downloadURL  https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite.user.js
+// @updateURL    https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite.user.js
 // ==/UserScript==
 
 (function() {
