@@ -21,7 +21,7 @@
 | 规则 | 说明 |
 | --- | --- |
 | `*://abc.example.com/*` | 匹配`abc.example.com` |
-| `*://*.example.com/*` | 匹配`example.com`及其所有子域名 |
+| `*://*.example.com/*` | 匹配`example.com`及其子域名 |
 | `*://*.example.com/path/*` | 匹配`example.com`特定路径 |
 | `*://*.example.*` | 匹配`example.com`所有顶级/二级域名 |
 | `example.com` | 等效`*://*.example.com/*`，只支持域名识别且仅用于脚本的简单写法，对于需要同时在ublacklist使用的规则必须加`*://*.`前缀 |
@@ -83,7 +83,7 @@ URL通配规则按匹配模式语义从URL开头匹配，主机通配`*`不跨�
 3. `!` 取反的是条件本身，如 `!(title *= "关键词")` 会命中无标题的结果
 4. 条件表达式可单独使用，如 `host $= ".example.com"`、`path *= "/download/"`，对所有搜索结果生效
 5. 属性值支持省略引号，如 `@if($site=google)`、`@if(scheme=https)` 等无空格值可直接裸写 
-6. 搜索引擎ID同**2.9 自定义选择器**
+6. `$site`搜索引擎ID同 **2.9 自定义选择器**
 
 **`@if` 支持条件：**
 

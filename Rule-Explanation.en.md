@@ -83,7 +83,7 @@ Notes:
 3. `!` negates the condition itself, e.g. `!(title *= "keyword")` matches results without a title.
 4. Condition expressions can be used standalone, e.g. `host $= ".example.com"`, `path *= "/download/"`, applying to all search results.
 5. Quotes can be omitted for attribute values; space-free values such as `@if($site=google)`, `@if(scheme=https)` can be written bare.
-6. Search engine IDs are the same as in **2.9 Custom Selectors**.
+6. `$site` search engine IDs are the same as in **2.9 Custom Selectors**.
 
 **Conditions supported by `@if`:**
 
