@@ -11,7 +11,7 @@
 // @author       南雪莲
 // @homepageURL  https://greasyfork.org/zh-CN/scripts/552394
 // @homepageURL  https://github.com/Carteahere/Search-Engine-Result-Hider
-// @license       GPL-3.0
+// @license      GPL-3.0
 // @match        *://*/*
 // @noframes
 // @grant        GM_setValue
@@ -278,7 +278,7 @@
       invalidRegexFlags: '正则 flags 无效: {flags}',
       emptyIfCondition: '@if() 条件不能为空', unknownIfCondition: '未知 @if 条件: {part}',
       condExprError: '@if 表达式语法错误: {part}',
-      invalidUrlWildcard: 'URL 通配符格式无效: {rule}',
+      invalidUrlWildcard: 'URL 通配符格式无效: {rule}', elementRuleUnsupported: '不支持元素规则',
       menuCustomSelectors: '🖋️ 自定义引擎', selectorPanelTitle: '引擎选择器',
       selectorHint: '如果不知道有什么用，请勿修改。',
       selectorJsonError: '解析失败，请检查格式',
@@ -329,7 +329,7 @@
       invalidRegexFlags: 'Invalid regular expression flags: {flags}',
       emptyIfCondition: '@if() condition cannot be empty', unknownIfCondition: 'Unknown @if condition: {part}',
       condExprError: 'Syntax error in @if expression: {part}',
-      invalidUrlWildcard: 'Invalid URL wildcard format: {rule}',
+      invalidUrlWildcard: 'Invalid URL wildcard format: {rule}', elementRuleUnsupported: 'Element rules are not supported',
       menuCustomSelectors: '🖋️ Custom Engine', selectorPanelTitle: 'Engine Selectors',
       selectorHint: 'If you don\'t know what it is for, do not modify it.',
       selectorJsonError: 'Failed to parse, check the format',
@@ -358,7 +358,7 @@
   function t(key, params = {}) {
     const lang = currentConfig.language; const texts = LANG_TEXTS[lang] || LANG_TEXTS['zh-CN']; let text = texts[key] || key;
     for (const [k, v] of Object.entries(params)) {
-      text = text.replaceAll(`{${k}}`, v);
+      text = text.replaceAll(`{${k}}`, () => v);
     }
     return text;
   }
@@ -375,7 +375,6 @@
     }
 
     const panel = document.getElementById('serh-hlcolor-panel') ||
-      document.getElementById('serh-hlcolor-panel') ||
       document.getElementById('serh-selector-panel') ||
       document.getElementById('serh-settings-panel') ||
       document.getElementById('serh-panel');
@@ -931,9 +930,10 @@
     const leafParser = (text) => {
       const trimmed = text.trim();
       const regexLeafFlags = (() => {
-        const m = trimmed.match(/^(?:title|url|host|path|scheme)\s*(?:=\~\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i); return m ? m[2] : null;
+        const m = trimmed.match(/^(?:title|url|host|path|scheme)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i); if (!m) return null;
+        const seg = m[2] || ''; return isUniqueFlagsStr(seg) ? seg.toLowerCase() : (isFlagsCandidateError(seg) ? seg : '');
       })();
-      if (regexLeafFlags !== null && getInvalidRegexFlags(regexLeafFlags)) {
+      if (regexLeafFlags && getInvalidRegexFlags(regexLeafFlags)) {
         errors.push({ kind: 'flags', part: regexLeafFlags }); return { type: 'const', value: false };
       }
       try {
@@ -1086,7 +1086,8 @@
     }
 
     const eqRe = trimmed.match(/^(title|url|host|path|scheme)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
-    const eqReOk = eqRe && !getInvalidRegexFlags(eqRe[3] || '') && String(eqRe[2] || '').trim();
+    const eqSeg = eqRe ? String(eqRe[3] || '') : ''; const eqFlags = eqRe && isUniqueFlagsStr(eqSeg) ? eqSeg.toLowerCase() : '';
+    const eqReOk = eqRe && !getInvalidRegexFlags(eqFlags) && (eqFlags || !eqSeg || (!/^(title|url|host|path|scheme)\s*=/i.test(trimmed) && !isFlagsCandidateError(eqSeg))) && (String(eqRe[2] || '').trim() || eqSeg);
     const strMatch = eqReOk ? null : trimmed.match(/^(title|url|host|path|scheme)\s*(\^=|\$=|\*=|=|:)\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s"']+))\s*i?\s*$/i);
     if (strMatch) {
       if (strMatch[5] !== undefined && strMatch[5].startsWith('~')) return { matched: false }; const op = strMatch[2] === ':' ? '=' : strMatch[2];
@@ -1096,8 +1097,12 @@
 
     const reMatch = trimmed.match(/^(title|url|host|path|scheme)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
     if (reMatch) {
-      const condType = reMatch[1].toLowerCase(); let flags = String(reMatch[3] || '').toLowerCase(); if (getInvalidRegexFlags(flags)) return { matched: false };
-      if (!String(reMatch[2] || '').trim()) return { matched: false }; return { matched: true, dynamic: { type: condType, op: '=~', regex: new RegExp(reMatch[2], flags) } };
+      const condType = reMatch[1].toLowerCase(); const seg = String(reMatch[3] || ''); const flags = isUniqueFlagsStr(seg) ? seg.toLowerCase() : '';
+      const shorthand = !/^(title|url|host|path|scheme)\s*=/i.test(trimmed);
+      if (flags) { if (getInvalidRegexFlags(flags)) return { matched: false }; }
+      else if (shorthand ? isFlagsCandidateError(seg) : seg !== '') return { matched: false };
+      if (!String(reMatch[2] || '').trim()) return { matched: false };
+      return { matched: true, dynamic: { type: condType, op: '=~', regex: new RegExp(flags || !seg ? reMatch[2] : reMatch[2] + '/' + seg, flags) } };
     }
 
     return { matched: false };
@@ -1111,6 +1116,8 @@
     }
     return [...new Set(invalid)].join('');
   }
+  function isUniqueFlagsStr(seg) { const s = String(seg || '').toLowerCase(); return /^[imsu]+$/.test(s) && new Set(s).size === s.length; }
+  function isFlagsCandidateError(seg) { seg = String(seg || ''); return /^[gy]+$/i.test(seg) || (seg.length <= 2 && /^[gyimsu]+$/i.test(seg) && /[gy]/i.test(seg)); }
 
   function validateUrlWildcard(rule) {
     if (!rule || /[<>"']/.test(rule) || /\s/.test(rule)) return false; if (rule.startsWith('|') || rule.startsWith('@@')) return false; if (rule.includes('^')) return false;
@@ -1277,6 +1284,7 @@
       return { valid: errors.length === 0, errors, warnings };
     }
 
+    if (isElementRuleLine(ruleToCheck)) { errors.push(t('elementRuleUnsupported')); return { valid: false, errors, warnings }; }
     if (looksLikeCondExpr(ruleToCheck)) {
       const r = validateCondition(ruleToCheck); errors.push(...r.errors); warnings.push(...r.warnings); return { valid: errors.length === 0, errors, warnings };
     }
@@ -1308,7 +1316,7 @@
         if (invalidFlags) {
           errors.push(t('invalidRegexFlags', { flags: invalidFlags })); return { valid: false, errors, warnings };
         }
-        if (flagsCandidate && (/^[gy]+$/i.test(flagsCandidate) || (flagsCandidate.length <= 2 && /^[gyimsu]+$/i.test(flagsCandidate) && /[gy]/i.test(flagsCandidate)))) {
+        if (flagsCandidate && isFlagsCandidateError(flagsCandidate)) {
           errors.push(t('invalidRegexFlags', { flags: getInvalidRegexFlags(flagsCandidate) })); return { valid: false, errors, warnings };
         }
         new RegExp(pattern, String(flags || '').toLowerCase());
@@ -1575,7 +1583,6 @@
     if (compileRuleRegex._memo) compileRuleRegex._memo.clear();
     compiledRules = newCompiledRules();
     const allRules = currentConfig.rules;
-    const localRuleCount = currentConfig.rules.length;
 
     allRules.forEach((rule, ruleIndex) => {
       if (typeof rule !== 'string') { if (currentConfig.debug) console.warn('非字符串规则项, 已跳过:', rule); return; }
@@ -2323,11 +2330,7 @@
     restoreResultExtraElements(result); _hrefUrlCache.delete(result); _resultContentCache.delete(result); _resultRetryCounts.delete(result); result.removeAttribute('data-blocker-processed');
     result.removeAttribute('data-is-blocked'); result.removeAttribute('data-is-highlighted'); result.removeAttribute('data-highlight-n'); clearMatchedData(result);
     result.classList.remove('serh-blocked-visible'); result.style.outline = ''; result.style.outlineOffset = ''; const origDisplay = result.getAttribute('data-serh-orig-display');
-    if (origDisplay !== null) {
-      result.style.display = origDisplay; result.removeAttribute('data-serh-orig-display');
-    } else {
-      result.style.display = '';
-    }
+    if (origDisplay !== null) { result.style.display = origDisplay; result.removeAttribute('data-serh-orig-display'); }
     if (result.parentElement && result.parentElement.dataset.blockerYandexParent) {
       const parent = result.parentElement;
       const stillHasBlockedHidden = Array.from(parent.children).some(el =>
@@ -3796,7 +3799,7 @@
       });
     }
 
-    const closeZoneSelector = '#serh-status, #serh-hlcolor-panel, #serh-hlcolor-popup, #serh-selector-panel, #serh-block-confirm-dialog, #serh-settings-panel, .serh-quick-block';
+    const closeZoneSelector = '#serh-status, #serh-hlcolor-panel, #serh-selector-panel, #serh-block-confirm-dialog, #serh-settings-panel, .serh-quick-block';
     const isPanelZone = (target) => panel.contains(target) || !!(target.closest && target.closest(closeZoneSelector)); let pressStartedInside = false;
     const pressHandler = (e) => {
       if (e.isTrusted === false) return; pressStartedInside = isPanelZone(e.target);
@@ -4591,7 +4594,7 @@
         } catch (e) {
           if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[配置头] 配置头解析失败:', e);
         }
-          headerLineIndexes.add(i); if (!config) rawScriptConfig = null;
+          if (config || /^\s*\x7B/.test(line.substring('# ScriptConfig:'.length))) headerLineIndexes.add(i); if (!config) rawScriptConfig = null;
       } else if (line.startsWith('# Selectors:')) {
         rawSelectors = line;
         try {
@@ -4599,7 +4602,7 @@
         } catch (e) {
           if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[配置头] 选择器头解析失败:', e);
         }
-          headerLineIndexes.add(i); if (!selectors) rawSelectors = null;
+          if (selectors || /^\s*\x7B/.test(line.substring('# Selectors:'.length))) headerLineIndexes.add(i); if (!selectors) rawSelectors = null;
       } else if (!line.startsWith('#')) {
         break;
       }
@@ -4780,7 +4783,7 @@
       _searchForm.removeEventListener('submit', _searchFormHandler);
     }
     _searchForm = null; _searchFormHandler = null; document.querySelectorAll('.serh-quick-block').forEach(btn => btn.remove());
-    const confirmPanel = document.getElementById('serh-block-confirm-dialog'); if (confirmPanel) confirmPanel.remove(); restoreAllHiddenParents();
+    const confirmPanel = document.getElementById('serh-block-confirm-dialog'); if (confirmPanel) confirmPanel.remove(); if (_blockConfirmOutsideHandler) { document.removeEventListener('click', _blockConfirmOutsideHandler, true); _blockConfirmOutsideHandler = null; } restoreAllHiddenParents();
     document.querySelectorAll('[data-observed]').forEach(el => {
       resultObserver.unobserve(el); el.removeAttribute('data-observed'); resetResultStyles(el);
     });
