@@ -94,3 +94,4 @@ Error output
 | Invalid condition regex: {part} | `@if(title =~ /(/)` | The `=~` regex inside `@if` is itself invalid | Fix the regex |
 | Syntax error in `@if` expression: {part} | `@if(title *= )` | Missing operand, incomplete parenthesis grouping, etc. | Complete the expression |
 | Invalid URL rule | Wildcard rule fails to compile into a regex | Internal wildcard conversion exception | Simplify the rule structure and retry |
+| Element rules are not supported | `example.com##div.x` |  Rule contains DOM/uBO rules such as `##`/`#@#` | Delete corresponding rule |

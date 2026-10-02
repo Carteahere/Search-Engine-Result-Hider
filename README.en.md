@@ -48,7 +48,7 @@ Partial setting instructions:
 
 ### 1.5 Other:
 
-1. Automatic redirect removal engines: Bing, Google, Google Scholar, DuckDuckGo, Yahoo
+1. Automatically remove redirects: Bing, Google, Google Scholar, DuckDuckGo, Yahoo
 2. Rule priority: Local whitelist > Local blacklist > Subscription whitelist > Subscription blacklist
 3. Comment line format: `# + space + content` and cannot be repeated, otherwise the content under the same comment line will be merged during synchronization; ⬆️/⬇️ jump to the previous/next comment line; when on the first line or first comment line, ⬆️ jumps to the last line.
 4. To avoid cross-page data conflicts, do not open panel editing rules on multiple tabs at the same time, and pause synchronization when opening the panel.
