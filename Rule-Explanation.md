@@ -24,7 +24,7 @@
 | `*://*.example.com/*` | 匹配`example.com`及其子域名 |
 | `*://*.example.com/path/*` | 匹配`example.com`特定路径 |
 | `*://*.example.*` | 匹配`example.com`所有顶级/二级域名 |
-| `example.com` | 等效`*://*.example.com/*`，只支持域名识别且仅用于脚本的简单写法，对于需要同时在ublacklist使用的规则必须加`*://*.`前缀 |
+| `example.com` | 等效`*://*.example.com/*`的简单写法，大多数情况下建议加`*://*.`前缀 |
 
 URL通配规则按匹配模式语义从URL开头匹配，主机通配`*`不跨越路径，`*.`前缀同时匹配裸域；中文等 IDN 域名与 punycode（如`例子.com`与`xn--fsqu00a.com`）视为同一主机
 

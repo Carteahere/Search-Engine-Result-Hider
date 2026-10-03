@@ -6,11 +6,13 @@
 
 Implements complex-rule search result blocking on browsers that **only support user script installation**.  
 Supports URL matching including uBlacklist basic rules, regex matching, title matching, result snippet matching, target result highlighting, whitelist matching, `@if` conditional statements, and allows for the addition of custom engines.  
-Currently supported search engines: Bing, Google, Google Scholar, DuckDuckGo(ddg/lite), Yandex, Brave, Yahoo(&Japan)  
+Currently supported search engines:  
+Bing, Google, Google Scholar, DuckDuckGo(ddg/lite), Yandex, Brave, Yahoo(&Japan)  
 
+**Install:**  
 Open and install using a browser that supports Tampermonkey / Greasemonkey scripts.  
 Release Version [Github](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [Greasy Fork](https://update.greasyfork.org/scripts/552394/%E6%90%9C%E7%B4%A2%E5%BC%95%E6%93%8E%E7%BB%93%E6%9E%9C%E5%B1%8F%E8%94%BD%E5%99%A8.user.js)  
-Lite Version (Remove Subscription / WebDAV ) [Lite](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite.user.js)
+Lite Version (Remove Subscription / WebDAV) [Lite](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite.user.js)
 
 ### 1.2 Features:
 
@@ -27,28 +29,29 @@ Lite Version (Remove Subscription / WebDAV ) [Lite](https://raw.githubuserconten
 ┗ Custom engine
 
 Partial setting instructions:
-1. Panel Center: Enabled by default; when disabled, it displays in the four corners of the screen based on the floating bubble's position.
-2. Export Config: Disabled by default, when enabled, export TXT with ` # ScriptConfig: {...} ` script configuration attached.
-3. Show Source: Enabled by default; when disabled, the rules that match the blocked results will not be shown on it.
+1. Show Source: Enabled by default, when disabled, the rules that match the blocked results will not be shown on it.
+2. Folding mode: Disabled by default, when enabled, blocked results will show titles only.
+3. Export Config: Disabled by default, when enabled, export TXT with script configuration attached.
 4. Bubble Action: Open the panel by default; after toggling, tap shows/hides blocked results, long press opens the panel, and clicking the block button for blocked results again removes the block.
 
 ### 1.3 About WebDAV:
 
-1. Auto-sync runs in the background, 3-Way Merge Sync once every 1h, manual upload/download is mandatory overwrite, script config/custom selector synchronization switch independent.
+1. Auto-sync runs in the background, 3-Way Merge Sync once every 1h, manual upload/download is mandatory overwrite, script config/custom engine synchronization switch independent.
 2. Address only supports **https** and full paths, e.g., Nutstore `https://dav.jianguoyun.com/dav/your_folder/`; the folder is created automatically if it does not exist, after changing the file name such as `rules.txt` need to manually upload and overwrite it once.
 3. Tampermonkey lacks a secure storage API, so passwords can only be saved using local obfuscation; for security reasons, you must use a dedicated application password.
 4. To ensure the accuracy of the timestamp during synchronization, the timeapi/akamai/cloudflare timing point will be automatically accessed once. If the access fails, the webdav date timestamp will be used by default.
 
 ### 1.4 About Subscriptions:
 
-1. Rule subscription updates also run in the background, fetching once every 12h. Supports UTF-8 encoding for plain text remote links such as [rules.txt](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt) ; compatible with `.yaml` uBlacklist list format (`name`/`rules`/`blacklist`/`whitelist`/`matches` fields).
-2. Subscription rules are appended after local rules. Due to limited script-allocatable performance, keep the total number of rules under 50k to avoid mobile device performance issues.
-3. Script extensions are limited and do not support `##` DOM element or uBO filter rules; they are filtered out automatically on subscription import.
+1. Rule subscription updates also run in the background, fetching once every 12h. Supports UTF-8 encoding for plain text remote links such as [rules.txt](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt) , subscription rules are appended after local rules. 
+2. Compatible with `.yaml` uBlacklist list format (`name`/`rules`/`blacklist`/`whitelist`/`matches` fields).
+3. Script extensions are limited and do not support `##`/`#@#` DOM/uBO rules, they are filtered out automatically on subscription import.
 4. If the subscription link is not a GitHub source, cross-origin request permission is required; if a permission prompt appears, select `Always allow`.
 
 ### 1.5 Other:
 
-1. Automatically remove redirects: Bing, Google, Google Scholar, DuckDuckGo, Yahoo
+1. Automatically remove redirects for the following engines, with an option to toggle in settings:  
+Bing, Google, Google Scholar, DuckDuckGo, Yahoo
 2. Rule priority: Local whitelist > Local blacklist > Subscription whitelist > Subscription blacklist
 3. Comment line format: `# + space + content` and cannot be repeated, otherwise the content under the same comment line will be merged during synchronization; ⬆️/⬇️ jump to the previous/next comment line; when on the first line or first comment line, ⬆️ jumps to the last line.
 4. To avoid cross-page data conflicts, do not open panel editing rules on multiple tabs at the same time, and pause synchronization when opening the panel.
