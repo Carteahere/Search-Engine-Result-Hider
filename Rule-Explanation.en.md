@@ -83,7 +83,7 @@ Notes:
 3. `!` negates the condition itself, e.g. `!(title *= "keyword")` matches results without a title.
 4. Condition expressions can be used standalone, e.g. `host $= ".example.com"`, `path *= "/download/"`, applying to all search results.
 5. Quotes can be omitted for attribute values; space-free values such as `@if($site=google)`, `@if(scheme=https)` can be written bare.
-6. `$site` search engine IDs are the same as in **2.9 Custom Selectors**.
+6. `$site` search engine IDs are the same as in **2.9 Custom Engine**.
 
 **Conditions supported by `@if`:**
 
@@ -127,9 +127,9 @@ Notes:
 | `host $= ".example.com" & path *= "/download/"` | Block results under `example.com` whose path contains `/download/` |
 | `@1 path $= ".pdf"` | Highlight results whose URL path ends with `.pdf` |
 
-### 2.9 Custom Selectors:
+### 2.9 Custom Engine:
 
-Open the edit panel via script manager menu `🖋️ Custom Selectors` (JS format, same structure as built-in [SELECTORS](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js)).
+Open the edit panel via script manager menu `🖋️ Custom Engine` (JS format, same structure as built-in [SELECTORS](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js)).
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -138,8 +138,8 @@ Open the edit panel via script manager menu `🖋️ Custom Selectors` (JS forma
 | `links` | string \| string\[\] | Optional, link selector, defaults to `a[href]` |
 | `titles` | string \| string\[\] | Optional, title selector |
 | `snippets` | string \| string\[\] | Optional, snippet selector list |
-| `extraElements` | string\[\] | Optional, array of relative CSS selectors starting from each result container to pick associated elements; these elements are hidden, expanded, and restored together with the result, and are also used for fallback snippet extraction; also available to custom engines |
-| `disabled` | boolean | Optional, `true` disables the engine (built-ins included); alias `disable`; writing `disabled: false` (or `disable: false`) alone restores the built-in |
+| `extraElements` | string\[\] | Optional, array of relative CSS selectors starting from each result container to pick associated elements; these elements are hidden, expanded, and restored together with the result, and are also used for fallback snippet extraction. |
+| `disabled` | boolean | Optional, alias `disable`, `disabled: true` disables the engine, writing `disabled: false` (or `disable: false`) alone restores the built-in. |
 
 **Examples:**
 

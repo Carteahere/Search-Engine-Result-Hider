@@ -83,7 +83,7 @@ URL通配规则按匹配模式语义从URL开头匹配，主机通配`*`不跨�
 3. `!` 取反的是条件本身，如 `!(title *= "关键词")` 会命中无标题的结果
 4. 条件表达式可单独使用，如 `host $= ".example.com"`、`path *= "/download/"`，对所有搜索结果生效
 5. 属性值支持省略引号，如 `@if($site=google)`、`@if(scheme=https)` 等无空格值可直接裸写 
-6. `$site`搜索引擎ID同 **2.9 自定义选择器**
+6. `$site`搜索引擎ID同 **2.9 自定义引擎**
 
 **`@if` 支持条件：**
 
@@ -127,9 +127,9 @@ URL通配规则按匹配模式语义从URL开头匹配，主机通配`*`不跨�
 | `host $= ".example.com" & path *= "/download/"` | 屏蔽`example.com`下路径含`/download/`的结果 |
 | `@1 path $= ".pdf"` | 高亮URL路径以`.pdf`结尾的结果 |
 
-### 2.9 自定义选择器：
+### 2.9 自定义引擎：
 
-通过脚本管理器菜单 `🖋️ 自定义选择器` 打开编辑面板（JS 格式，与内置 [SELECTORS](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js) 结构一致）
+通过脚本管理器菜单 `🖋️ 自定义引擎` 打开编辑面板（JS 格式，与内置 [SELECTORS](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js) 结构一致）
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -138,8 +138,8 @@ URL通配规则按匹配模式语义从URL开头匹配，主机通配`*`不跨�
 | `links` | string \| string\[\] | 可选，链接选择器，默认 `a[href]` |
 | `titles` | string \| string\[\] | 可选，标题选择器列表 |
 | `snippets` | string \| string\[\] | 可选，摘要选择器列表 |
-| `extraElements` | string\[\] | 可选，CSS 相对选择器数组，以每个结果容器为起点选出关联元素；这些元素随结果同步隐藏、展开和恢复，也用于摘要后备提取；自定义引擎同样可用 |
-| `disabled` | boolean | 可选，`true` 停用该引擎，内置引擎同样适用；别名 `disable`，单独写 `disabled: false`（或 `disable: false`）恢复内置 |
+| `extraElements` | string\[\] | 可选，CSS 相对选择器数组，以每个结果容器为起点选出关联元素，这些元素随结果同步隐藏、展开和恢复，也用于摘要后备提取 |
+| `disabled` | boolean | 可选，别名 `disable`，`disabled: true` 停用该引擎，`disabled: false`（或 `disable: false`）恢复内置 |
 
 **示例：**
 
