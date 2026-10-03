@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const scriptDir = path.join(__dirname, '..');
-const scriptFiles = fs.readdirSync(scriptDir).filter((name) => name.endsWith('.js') && !name.includes('lite')).sort();
+const scriptFiles = fs.readdirSync(scriptDir).filter((name) => name.endsWith('.js') && !name.toLowerCase().includes('lite')).sort();
 if (!scriptFiles.length) throw new Error('no .js script found in ' + scriptDir);
 const file = path.join(scriptDir, scriptFiles[0]);
 console.log('Testing', file);
@@ -28,7 +28,7 @@ function extractFn(text, fnName) {
   const prelude = [];
   if (!['findBalancedParenEnd', 'scanRuleString', 'encodeNonAscii'].includes(fnName)) {
     if (/scanRuleString\(|RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_[AB]\b/.test(fn)) {
-      prelude.push(text.split('\n').filter(line => /^\s*const (?:RULE_\w+|REGEX_CTX_[AB]) =/.test(line)).map(line => line.replace('const ', 'var ')).join('\n'), rawExtract(text, 'findBalancedParenEnd'), rawExtract(text, 'scanRuleString'));
+      prelude.push(text.split('\n').filter(line => /^\s*const (?:RULE_\w+|REGEX_CTX_[AB]) =/.test(line)).map(line => line.replace('const ', 'var ')).join('\n'), rawExtract(text, 'findBalancedParenEnd'), rawExtract(text, 'scanRuleString'), rawExtract(text, 'isBadRegexTail'));
     }
     if (/encodeNonAscii\(/.test(fn)) prelude.push(rawExtract(text, 'encodeNonAscii'));
     if (/isUniqueFlagsStr\(|isFlagsCandidateError\(/.test(fn)) prelude.push(['isUniqueFlagsStr', 'isFlagsCandidateError'].map(n => rawExtract(text, n)).join('\n'));
@@ -1212,6 +1212,12 @@ for (const [i, [loc, expected]] of catCases.entries()) {
   assert(`选择器-191-${i + 1}: category ${loc.hostname}${loc.pathname}${loc.search} -> ${expected}`, got === expected);
 }
 
+// ---- 审查11-S1(待修复): Yahoo Japan 图片垂直 /image 单数路径未识别分类(退回web, $category=images规则失效) ----
+assert('审查11-S1(待修复): Yahoo Japan /image/search 应识别为images', (() => {
+  const loc = { hostname: 'search.yahoo.co.jp', pathname: '/image/search', search: '?p=x' };
+  return factory({ location: loc }, selectors).getSearchCategory(loc) === 'images';
+})());
+
 // ---- 全站注入与引擎站门控一致性 ----
 // 引擎站/别名站命中与普通站/攻击域不命中 各留代表
 const hosts = [
@@ -1476,6 +1482,7 @@ await (async () => {
     const root = makeTreeEl('body', '');
     const fns = new Function('doc', `
       let showHiddenResults = ${!!showHidden};
+      function blockedShown() { return showHiddenResults; }
       const _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap();
       const map_resultExtraElements = new WeakMap();
       function getResultExtraElements() { return []; }
@@ -1490,6 +1497,7 @@ await (async () => {
       ${extractFn(src, 'clearMatchedData')}
       ${extractFn(src, 'removeMatchedRuleLabel')}
       ${extractFn(src, 'restoreResultExtraElements')}
+      ${extractFn(src, 'restoreResultCollapse')}
       const document = { querySelectorAll: (s) => doc.querySelectorAll(s) };
       return { saveOriginalDisplay, googleResultBlocks, visibleUnblocked, hideParentIfNoVisibleSiblings, resetResultStyles, restoreParentDisplay, restoreAllHiddenParents, reconcileHiddenParents };
     `)(root);
@@ -1819,6 +1827,76 @@ return { injectBlockButton };
 // ---- 选择器-233~234: 关闭回调恒假守卫死代码移除 / no-op调用清理 ----
   check('选择器-233(修复17验证): showConfigPanel关闭回调恒假守卫死代码已移除, fadeOutAndRemovePanel无回调直调', !src.includes('window._panelCloseHandler !== closeHandler') && src.includes('fadeOutAndRemovePanel(panel);'));
   check('选择器-234(死代码清理): restoreResultExtraElements三处无参no-op调用已移除(仅保留resetResultStyles内的带参调用)', !src.includes('restoreResultExtraElements()') && /restoreResultExtraElements\(result\)/.test(src));
+
+// ---- 选择器-235(修复PK): 设置面板复选框映射补齐3键, 远程配置应用后开关同步刷新 ----
+  check('选择器-235(修复PK): SETTINGS_PANEL_CHECKBOXES含show-source/show-sub-btn/show-sync-btn三键', /'serh-set-show-source':\s*'showMatchedSource'/.test(src) && /'serh-set-show-sub-btn':\s*'showSubBtn'/.test(src) && /'serh-set-show-sync-btn':\s*'showSyncBtn'/.test(src));
+  check('选择器-236(修复PK): applyConfigToMainPanel末尾调用applySubSyncBtnVisibility使按钮可见性同步', /applyDarkModeClass\(\); applySubSyncBtnVisibility\(\);/.test(src));
+
+// ---- 选择器-237~242: 折叠模式只保留标题路径(新版Bing布局下来源链接块/描述/深层链接全部隐藏) ----
+{
+  function matchSimple(el, s) { return s === el.tag || (s.startsWith('.') && (el.cls === s.slice(1) || el._classes.has(s.slice(1)))) || (el.cls && s === el.tag + '.' + el.cls); }
+  function mkCollapseEl(tag, cls, parent, text) {
+    const el = {
+      tag, cls: cls || '', children: [], parentElement: parent || null, _classes: new Set(),
+      textContent: text || '',
+      contains(other) { if (other === this) return true; return this.children.some((c) => c.contains(other)); },
+      walk() { const out = []; const rec = (n) => n.children.forEach((c) => { out.push(c); rec(c); }); rec(this); return out; },
+      querySelector(sel) { return this.querySelectorAll(sel)[0] || null; },
+      querySelectorAll(sel) {
+        const parts = String(sel).trim().split(/\s+/);
+        return this.walk().filter((e) => {
+          let node = e;
+          for (let i = parts.length - 1; i >= 0; i--) {
+            if (!node || !matchSimple(node, parts[i])) return false;
+            node = node.parentElement;
+          }
+          return true;
+        });
+      }
+    };
+    el.classList = { add: (c) => el._classes.add(c), remove: (c) => el._classes.delete(c), contains: (c) => el._classes.has(c) };
+    if (parent) parent.children.push(el);
+    return el;
+  }
+  const collapseEnv = new Function(`
+    const SELECTORS = { other: { titles: [] } };
+    function getSelectors() {
+      return { bing: { titles: ['h2 a', 'a h2', '.b_title'], snippets: ['.b_caption p'] }, lite: { titles: ['.result-link'] }, other: SELECTORS.other };
+    }
+    ${extractFn(src, 'getResultTitleElement')}
+    ${extractFn(src, 'applyResultCollapse')}
+    ${extractFn(src, 'restoreResultCollapse')}
+    return { getResultTitleElement, applyResultCollapse, restoreResultCollapse };
+  `)();
+
+  // 新版Bing布局: li.b_algo > div.b_tpcn(来源链接块) + h2 > a > strong(标题) + div.b_caption > p(描述)
+  const li = mkCollapseEl('li', 'b_algo');
+  const tpcn = mkCollapseEl('div', 'b_tpcn', li, 'Githubhttps://github.com');
+  const h2 = mkCollapseEl('h2', '', li);
+  const a = mkCollapseEl('a', '', h2, 'GitHub keeps you ahead');
+  mkCollapseEl('strong', '', a, 'GitHub');
+  const cap = mkCollapseEl('div', 'b_caption', li);
+  mkCollapseEl('p', 'b_lineclamp2', cap, '2026年8月24日 · Whether you are scaling');
+
+  check('选择器-237: getResultTitleElement按titles顺序返回首个非空标题元素(h2 a)', collapseEnv.getResultTitleElement(li, 'bing') === a);
+  collapseEnv.applyResultCollapse(li, 'bing');
+  check('选择器-238: 折叠后仅标题路径外的兄弟子树(来源链接块/描述)被打隐藏标记, 标题路径与容器自身不打标', tpcn._classes.has('serh-collapse-hide') && cap._classes.has('serh-collapse-hide') && !h2._classes.has('serh-collapse-hide') && !a._classes.has('serh-collapse-hide') && !li._classes.has('serh-collapse-hide'));
+  collapseEnv.restoreResultCollapse(li);
+  check('选择器-239: 还原后容器内所有隐藏标记移除', !tpcn._classes.has('serh-collapse-hide') && !cap._classes.has('serh-collapse-hide'));
+
+  const noTitle = mkCollapseEl('div', 'other');
+  const noTitleChild = mkCollapseEl('div', 'inner', noTitle);
+  collapseEnv.applyResultCollapse(noTitle, 'bing');
+  check('选择器-240(对照): 找不到标题元素时不打任何标记(由snippet/extra隐藏规则兜底)', !noTitleChild._classes.has('serh-collapse-hide') && !noTitle._classes.has('serh-collapse-hide'));
+
+  const li2 = mkCollapseEl('li', 'b_algo');
+  const tpcn2 = mkCollapseEl('div', 'b_tpcn', li2, 'example.comhttps://example.com');
+  const title2 = mkCollapseEl('a', 'result-link', li2, '示例标题');
+  collapseEnv.applyResultCollapse(li2, 'lite');
+  check('选择器-241: 标题为容器直接子级时, 其余同级子树同样隐藏', tpcn2._classes.has('serh-collapse-hide') && !title2._classes.has('serh-collapse-hide'));
+
+  check('选择器-242: 折叠CSS含serh-collapse-hide规则; processSingleResult折叠分支与toggleHiddenResults收起分支调用applyResultCollapse, 展开/复位路径调用restoreResultCollapse', /body\.serh-collapse-on \.serh-blocked-collapsed \.serh-collapse-hide \{ display: none !important; \}/.test(src) && /result\.classList\.add\('serh-blocked-collapsed'\);\s*applyResultCollapse\(result, engine\);/.test(src) && /applyResultCollapse\(el, getSearchEngine\(\)\);/.test(src) && (src.match(/restoreResultCollapse\(/g) || []).length >= 5);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

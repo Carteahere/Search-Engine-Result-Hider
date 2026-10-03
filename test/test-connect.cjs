@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const scriptDir = path.join(__dirname, '..');
-const scriptFiles = fs.readdirSync(scriptDir).filter((name) => name.endsWith('.js') && !name.includes('lite')).sort();
+const scriptFiles = fs.readdirSync(scriptDir).filter((name) => name.endsWith('.js') && !name.toLowerCase().includes('lite')).sort();
 if (!scriptFiles.length) throw new Error('no .js script found in ' + scriptDir);
 const file = path.join(scriptDir, scriptFiles[0]);
 console.log('Testing', file);
@@ -49,10 +49,10 @@ function extractFn(text, fnName) {
   }
   const rawExtract = (t, name) => { const ridx = t.indexOf('function ' + name + '('); const ropen = t.indexOf('{', t.indexOf(') {', ridx)); let rdepth = 0; let ri = ropen; for (; ri < t.length; ri++) { if (t[ri] === '{') rdepth++; else if (t[ri] === '}') { rdepth--; if (rdepth === 0) break; } } return t.slice(ridx, ri + 1); };
   const body = text.slice(idx, i + 1);
-  const dependencies = { stripRuleComment: ['scanRuleString'], findIfOccurrences: ['scanRuleString'], extractBalancedParens: ['findBalancedParenEnd'], scanRuleString: ['findBalancedParenEnd'], buildSyncPayload: ['getSyncSettings'] };
+  const dependencies = { stripRuleComment: ['scanRuleString'], findIfOccurrences: ['scanRuleString'], extractBalancedParens: ['findBalancedParenEnd'], scanRuleString: ['findBalancedParenEnd', 'isBadRegexTail'], buildSyncPayload: ['getSyncSettings'] };
   const scanDeps = !['findBalancedParenEnd', 'scanRuleString'].includes(fnName) && /scanRuleString\(|RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_[AB]\b/.test(body);
   const consts = text.split('\n').filter(line => /^\s*const (?:RULE_\w+|REGEX_CTX_[AB]) =/.test(line)).map(line => line.replace('const ', 'var ')).join('\n') + '\n';
-  const prelude = (scanDeps ? consts + rawExtract(text, 'findBalancedParenEnd') + '\n' + rawExtract(text, 'scanRuleString') + '\n' : '') + (fnName !== 'encodeNonAscii' && /encodeNonAscii\(/.test(body) ? rawExtract(text, 'encodeNonAscii') + '\n' : '') + (!['isUniqueFlagsStr', 'isFlagsCandidateError'].includes(fnName) && /isUniqueFlagsStr\(|isFlagsCandidateError\(/.test(body) ? ['isUniqueFlagsStr', 'isFlagsCandidateError'].map(n => rawExtract(text, n)).join('\n') + '\n' : '');
+  const prelude = (scanDeps ? consts + rawExtract(text, 'findBalancedParenEnd') + '\n' + rawExtract(text, 'scanRuleString') + '\n' + rawExtract(text, 'isBadRegexTail') + '\n' : '') + (fnName !== 'encodeNonAscii' && /encodeNonAscii\(/.test(body) ? rawExtract(text, 'encodeNonAscii') + '\n' : '') + (!['isUniqueFlagsStr', 'isFlagsCandidateError'].includes(fnName) && /isUniqueFlagsStr\(|isFlagsCandidateError\(/.test(body) ? ['isUniqueFlagsStr', 'isFlagsCandidateError'].map(n => rawExtract(text, n)).join('\n') + '\n' : '');
   return prelude + (dependencies[fnName] || []).map(n => extractFn(text, n)).join('\n') + '\n' + body;
 }
 
@@ -270,6 +270,7 @@ function makeAdoptEnv({ storedConfig, memoryConfig, panelOpen }) {
     const CONFIG_KEY = ${JSON.stringify(KEYS.CONFIG_KEY)};
     const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
     function forceReprocessAll() { state.reprocess++; }
+    function applyCollapseMode() {}
     ${syncEnvPrelude}
     ${extractFn(src, 'normalizeConfig')}
     ${extractFn(src, 'adoptStoredConfigIfNewer')}
@@ -668,6 +669,13 @@ rules:
   assert('同步-072b(修复2): 损坏 Selectors 行同样剔除且 rawSelectors 置空, 好头不受影响', brokenSel.restLines.join('|') === '*://a.com/*' && brokenSel.rawSelectors === null && brokenSel.config.syncedAt === 1);
 }
 
+// ---- 审查11-C1(待修复): 注释块内形如同步头的用户注释行会覆盖真头并被吞出正文 ----
+{
+  const parse2 = new Function(extractFn(src, 'parseSyncHeader') + '\nreturn parseSyncHeader;')();
+  const mixed = parse2('# ScriptConfig: {"enabled":true,"syncedAt":9}\n# ScriptConfig: {"enabled":false}\n# 我的分组\n*://a.com/*');
+  assert('审查11-C1(待修复): 后部伪头不应覆盖真头, 且用户注释行应保留在正文(现: 覆盖+吞行并随合并持久化)', mixed.config && mixed.config.enabled === true && mixed.restLines.join('|').includes('ScriptConfig: {"enabled":false}'), { enabled: mixed.config && mixed.config.enabled, rest: mixed.restLines });
+}
+
 // 网关 200 + JSON/纯文本错误页不被当作规则写入本地, 也不回传云端
 {
   const garbageBodies = [
@@ -950,7 +958,7 @@ assert('面板-009: 屏蔽按钮的引擎域名守卫位于!isBlocked分支内',
   let stored = { ...saved };
   const ui = new Function('passwordInput', 'togglePasswordBtn', 'urlInput', 'usernameInput', 'GM_getValue', 'GM_setValue', `
     const WEBDAV_KEY = 'webdav';
-    const t = k => k === 'webdavPasswordSaved' ? '已保存密码，输入以更换' : k;
+    const t = k => k === 'webdavPasswordSaved' ? '已保存密码，输入新密码以替换' : k;
     ${extractFn(src, 'webdavRandomBytes')}
     ${extractFn(src, 'webdavBytesToB64')}
     ${extractFn(src, 'webdavB64ToBytes')}
@@ -964,7 +972,7 @@ assert('面板-009: 屏蔽按钮的引擎域名守卫位于!isBlocked分支内',
     return { update: updateWebDAVPasswordState, save: saveSuccessfulWebDAVConfig, load: loadWebDAVConfig, obf: obfuscateWebDAVPassword, deobf: deobfuscateWebDAVPassword };
   `)(passwordInput, togglePasswordBtn, urlInput, usernameInput, () => stored, (key, value) => { stored = value; });
   ui.update();
-  assert('同步-102: 已保存密码仅显示占位提示', passwordInput.value === '' && passwordInput.placeholder === '已保存密码，输入以更换');
+  assert('同步-102: 已保存密码仅显示占位提示', passwordInput.value === '' && passwordInput.placeholder === '已保存密码，输入新密码以替换');
   passwordInput.value = 'replacement';
   ui.update();
   assert('同步-104: 输入后显示显隐按钮', togglePasswordBtn.style.display === 'flex');
@@ -1301,6 +1309,21 @@ await (async () => {
   assert('审查D-5: 双方独有选择器都保留', !!r1.localOnly && !!r1.cloudOnly);
   const r2 = merge(base, local, { bing: cloud.bing, cloudOnly: cloud.cloudOnly });
   assert('审查D-6: 云端删除的选择器传播删除', !r2.yahoo);
+}
+
+// 修复S3: mergeSelectors3Way 删除vs修改按配置规则时间戳仲裁
+{
+  const merge = new Function(`
+    ${extractFn(src, 'mergeSelectors3Way')}
+    return mergeSelectors3Way;
+  `)();
+  const base = { bing: { containers: '.old' } };
+  assert('修复S3-1: 本地删除+云端修改且本地规则时间较新时删除赢', merge(base, {}, { bing: { containers: '.new-cloud' } }, true).bing === undefined);
+  assert('修复S3-2: 本地删除+云端修改且云端规则时间较新时修改保留', merge(base, {}, { bing: { containers: '.new-cloud' } }, false).bing.containers === '.new-cloud');
+  assert('修复S3-3: 云端删除+本地修改且本地规则时间较新时修改保留', merge(base, { bing: { containers: '.new-local' } }, {}, true).bing.containers === '.new-local');
+  assert('修复S3-4: 云端删除+本地修改且云端规则时间较新时删除赢', merge(base, { bing: { containers: '.new-local' } }, {}, false).bing === undefined);
+  assert('修复S3-5(对照): 存活侧未修改时纯删除仍传播', merge(base, {}, { bing: { containers: '.old' } }, false).bing === undefined && merge(base, { bing: { containers: '.old' } }, {}, true).bing === undefined);
+  assert('修复S3-6: 自动同步调用点以本地/云端规则时间戳仲裁', src.includes('mergeSelectors3Way(getSelectorSyncSnapshot(), getUserSelectors(), cloudSelectors, localTime > cloudTime)'));
 }
 
 // 审查D-17: 云端头没有选择器字段时不三方合并, 保留本地并上传

@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const scriptDir = path.join(__dirname, '..');
-const scriptFiles = fs.readdirSync(scriptDir).filter((name) => name.endsWith('.js') && !name.includes('lite')).sort();
+const scriptFiles = fs.readdirSync(scriptDir).filter((name) => name.endsWith('.js') && !name.toLowerCase().includes('lite')).sort();
 if (!scriptFiles.length) throw new Error('no .js script found in ' + scriptDir);
 const file = path.join(scriptDir, scriptFiles[0]);
 console.log('Testing', file);
@@ -27,7 +27,7 @@ const SERH_RAW_EXTRACT = (text, fnName) => {
 };
 const SERH_FN_DEPS = ((text) => {
   const consts = text.match(/const (?:RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_A|REGEX_CTX_B) = [^\n]+;/g).join('\n').replace(/\bconst\b/g, 'var');
-  return consts + '\n' + ['findBalancedParenEnd', 'scanRuleString', 'encodeNonAscii'].map((n) => SERH_RAW_EXTRACT(text, n)).join('\n');
+  return consts + '\n' + ['findBalancedParenEnd', 'isBadRegexTail', 'scanRuleString', 'encodeNonAscii'].map((n) => SERH_RAW_EXTRACT(text, n)).join('\n');
 })(src);
 const SERH_FLAG_HELPERS = ['isUniqueFlagsStr', 'isFlagsCandidateError'].map((n) => SERH_RAW_EXTRACT(src, n)).join('\n');
 const SERH_EL_HELPERS = ['isCondExprCore', 'looksLikeCondExpr', 'isScriptRuleLine', 'isElementRuleLine'].map((n) => SERH_RAW_EXTRACT(src, n)).join('\n');
@@ -547,9 +547,18 @@ function t(key, params = {}) {
   return text;
 }
 ${fns.join('\n')}
-return { findIfOccurrences, extractIfConditions, stripIfConditions, extractBalancedParens, validateRule };
+return { findIfOccurrences, extractIfConditions, stripIfConditions, extractBalancedParens, validateRule, stripRuleComment, analyzeRule };
 `;
 const api = new Function(moduleBody)();
+
+const zzb2 = String.fromCharCode(92);
+assert('条件-430(修复SC): @if组后title/正则体首字符为转义斜杠不再错位截断', api.validateRule('@if(site=x.com) title/' + zzb2 + '/foo #bar/') === true);
+assert('条件-431(修复SC): 前缀正则体内#注释不剥离(对齐解析器最后斜杠语义)', api.stripRuleComment('title/a/b # c/') === 'title/a/b # c/');
+assert('条件-432(修复SC对照): 前缀正则行尾注释仍剥离', api.stripRuleComment('title/abc/ # 注释') === 'title/abc/');
+assert('条件-433(修复SC对照): 带flags前缀正则行尾注释仍剥离', api.stripRuleComment('title/abc/i # note') === 'title/abc/i');
+assert('条件-434(修复SC对照): 注释含斜杠仍剥离', api.stripRuleComment('title/abc/ # 注释 /x/') === 'title/abc/' && api.stripRuleComment('title/abc/ # https://x.com/a') === 'title/abc/');
+assert('条件-435(修复SC): @if组后体内#前缀正则保留', api.stripRuleComment('@if(x) title/a/b # c/') === '@if(x) title/a/b # c/' && api.validateRule('title/a/b # c/') === true);
+assert('条件-436(对照): @if简写正则3字符flags(gim)识别为合法条件', api.validateRule('@if(title/abc/gim)') === true && api.validateRule('@if(title/abc/im)') === true);
 
 
 // ---- @if 括号提取 ----

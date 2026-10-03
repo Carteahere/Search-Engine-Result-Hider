@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const scriptDir = path.join(__dirname, '..');
-const scriptFiles = fs.readdirSync(scriptDir).filter((name) => name.endsWith('.js') && !name.includes('lite')).sort();
+const scriptFiles = fs.readdirSync(scriptDir).filter((name) => name.endsWith('.js') && !name.toLowerCase().includes('lite')).sort();
 if (!scriptFiles.length) throw new Error('no .js script found in ' + scriptDir);
 const file = path.join(scriptDir, scriptFiles[0]);
 console.log('Testing', file);
@@ -27,7 +27,7 @@ const SERH_RAW_EXTRACT = (text, fnName) => {
 };
 const SERH_FN_DEPS = ((text) => {
   const consts = text.match(/const (?:RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_A|REGEX_CTX_B) = [^\n]+;/g).join('\n').replace(/\bconst\b/g, 'var');
-  return consts + '\n' + ['findBalancedParenEnd', 'scanRuleString', 'encodeNonAscii'].map((n) => SERH_RAW_EXTRACT(text, n)).join('\n');
+  return consts + '\n' + ['findBalancedParenEnd', 'isBadRegexTail', 'scanRuleString', 'encodeNonAscii'].map((n) => SERH_RAW_EXTRACT(text, n)).join('\n');
 })(src);
 const SERH_FLAG_HELPERS = ['isUniqueFlagsStr', 'isFlagsCandidateError'].map((n) => SERH_RAW_EXTRACT(src, n)).join('\n');
 const SERH_EL_HELPERS = ['isCondExprCore', 'looksLikeCondExpr', 'isScriptRuleLine', 'isElementRuleLine'].map((n) => SERH_RAW_EXTRACT(src, n)).join('\n');
@@ -174,13 +174,27 @@ assert('规则-076: 未闭合正则 /foo 编译报错(与校验口径一致)', (
   try { api.compileRuleRegex('/foo'); return false; } catch (e) { return true; }
 })());
 
+// ---- 审查11(待修复): 本轮审查新发现, 修复后翻转 ----
+assert('审查11-R1(待修复): 尾缀重复flags(ii/ss)应判为flags错误(与 /x/ii 前导形式口径一致), 现静默并入pattern按字面量匹配', (() => {
+  const ice = new Function(extractFn(src, 'isFlagsCandidateError') + '\nreturn isFlagsCandidateError;')();
+  return ice('ii') === true && ice('ss') === true;
+})());
+assert('审查11-R2(待修复): 尾点FQDN口径不一致 — 快路径剥尾点而正则路径不剥, 带路径规则对 example.com. 漏匹配', (() => {
+  const ta = new Function(extractFn(src, 'hostLabelToASCII') + '\n' + extractFn(src, 'toASCIIHostname') + '\nreturn toASCIIHostname;')();
+  return ta('example.com.') === 'example.com' && match('*://*.example.com/path/*', 'https://example.com./path/x');
+})());
+assert('审查11-R3(待修复): 路径多星编译为 .*串联指数回溯正则且 validateUrlWildcard 放行 — 6星规则对不匹配URL应快速失败', (() => {
+  const re = new RegExp(api.wildcardToRegex('*://a.com/*x*x*x*x*x*y'));
+  const t0 = Date.now(); api.safeRegexTest(re, 'https://a.com/' + 'x'.repeat(46) + 'z'); return Date.now() - t0 < 80;
+})());
+
 // 主机非前缀星号不跨点（*.example.* 只匹配到二级+顶级域）
 assert('规则-077: *.example.* 匹配主域', match('*://*.example.*/*', 'https://example.com/'));
 assert('规则-078: *.example.* 匹配子域', match('*://*.example.*/*', 'https://a.example.com/'));
 assert('规则-079: *.example.* 带路径不匹配多段后缀', !match('*://*.example.*/*', 'https://example.com.evil.net/'));
 assert('规则-081: example.* 不匹配多段后缀', !match('*://example.*/*', 'https://example.com.evil.net/'));
 assert('规则-082: 中部主机星号不跨点', !match('*://mail.*.com/*', 'https://mail.a.b.com/') && match('*://mail.*.com/*', 'https://mail.a.com/'));
-assert('规则-083: 整体主机星号匹配单个主机标签', match('*://*/x/*', 'https://any.host.com/x/1') === false && match('*://*/x/*', 'https://host/x/1'));
+assert('规则-083: 整体主机星号匹配多标签主机但不跨路径', match('*://*/x/*', 'https://any.host.com/x/1') && match('*://*/x/*', 'https://host/x/1') && !match('*://*/x/*', 'https://any.host.com/y/1'));
 assert('规则-085: 端口通配不跨越路径', !match('*://example.com:*/y', 'https://example.com:80/x/y'));
 assert('规则-086: 端口通配匹配端口段内容', match('*://example.com:*/y', 'https://example.com:8080/y'));
 assert('规则-088: 端口通配不跨越冒号至主机', !match('*://example.com:*/y', 'https://example.com/x/y'));
@@ -741,6 +755,11 @@ function createEnv() {
     function getDefaultConfig() { return { rules: [], enabled: true, language: 'zh-CN', showBubble: true, bubbleSize: 30, debug: false, subscriptionAutoUpdate: false, exportConfig: false, highlightColors: {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'} }; }
     function persistConfig(mark) { hooks.persistCalls = (hooks.persistCalls || 0) + 1; hooks.persistMark = mark; GM_setValue('searchfilter_blocker', currentConfig); }
     function applyConfigToMainPanel() { hooks.applyCalls = (hooks.applyCalls || 0) + 1; }
+    const SELECTORS_KEY = 'searchfilter_selectors';
+    let _selectorStoreSignature = null;
+    function getSelectorStoreSignature() { return 'sig'; }
+    function resetSelectorCache() { hooks.resetSelectorCalls = (hooks.resetSelectorCalls || 0) + 1; }
+    function refreshEngineSite() { hooks.refreshCalls = (hooks.refreshCalls || 0) + 1; }
     ${cfgDefaults}
     ${defHl}
     ${normalizeConfigFn}
@@ -820,6 +839,24 @@ await (async () => {
     fakeInput.onchange({ target: fakeInput });
     const saved = env.hooks.written[0] && env.hooks.written[0].val;
     assert('审查3-T4: 导入只覆盖头里出现的键，未出现的订阅自动更新保持本地开启，颜色按键合并', !!saved && saved.subscriptionAutoUpdate === true && saved.exportConfig === true && saved.highlightColors[1] === '#112233' && saved.highlightColors[2] === '#FF8C00' && saved.rules.join() === 'rule1', saved);
+  }
+
+  // 9. TXT导入读取 # Selectors 头并应用选择器
+  {
+    const { env, api, fakeInput } = createEnv();
+    api.importRulesFromFile();
+    fakeInput.files = [{ _content: '# Selectors: {"bing":{"containers":".x"}}\n# ScriptConfig: {"language":"en-US"}\nrule1' }];
+    fakeInput.onchange({ target: fakeInput });
+    assert('修复IM-1: TXT导入应用# Selectors头选择器并刷新引擎, ScriptConfig设置照常落盘', env.hooks.written.length === 2 && env.hooks.written[0].key === 'searchfilter_selectors' && env.hooks.written[0].val.bing.containers === '.x' && env.hooks.written[1].val.language === 'en-US' && env.hooks.refreshCalls === 1);
+  }
+
+  // 10. 仅 ScriptConfig 内嵌 selectors(无# Selectors行)仍不随导入
+  {
+    const { env, api, fakeInput } = createEnv();
+    api.importRulesFromFile();
+    fakeInput.files = [{ _content: '# ScriptConfig: {"selectors":{"bing":{"match":"a"}}}\nrule1' }];
+    fakeInput.onchange({ target: fakeInput });
+    assert('修复IM-2(对照): 无# Selectors行时内嵌selectors不应用, 行为同修复IM-1前', env.hooks.written.length === 1 && env.hooks.written[0].key === 'searchfilter_blocker' && env.hooks.refreshCalls === undefined);
   }
 
 })();
@@ -1106,7 +1143,7 @@ await (async () => {
 {
   const rudApi = new Function(
     ['decodeRedirectTarget', 'decodeBingCkTarget', 'unwrapRedirectUrl', 'getCleanUrl', 'toASCIIUrl', 'resolveUrlDomain'].map((n) => extractFn(src, n)).join('\n') +
-    '\nconst toASCIIHostname = (h) => h;\nreturn { resolveUrlDomain };'
+    '\nconst toASCIIHostname = (h) => h;\nconst currentConfig = { removeRedirects: true };\nreturn { resolveUrlDomain };'
   )();
   const viaRedirect = rudApi.resolveUrlDomain({ href: 'https://www.google.com/url?q=https%3A%2F%2Fexample.com%2F%E4%B8%AD%E6%96%87%2Fx' });
   assert('修复A-9: 重定向解包后URL路径归一为百分号编码', viaRedirect.url === 'https://example.com/%E4%B8%AD%E6%96%87/x' && viaRedirect.domain === 'example.com');
@@ -1563,6 +1600,7 @@ return { buildRuleIndex, checkRuleMatchOptimized, compileRuleRegex, safeRegexTes
     const link = { href: 'https://example.com/page' };
     new Function('result', 'link', 'matchResult', `
       const showHiddenResults = false;
+      function blockedShown() { return showHiddenResults; }
       const currentConfig = { enabled: true, showBlockBtn: false, highlightColors: { 2: '#123456' } };
       function getSearchEngine() { return 'other'; }
       function getResultLink() { return link; }
