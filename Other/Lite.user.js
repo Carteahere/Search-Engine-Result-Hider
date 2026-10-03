@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.5.6
+// @version      8.6.0
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了所有订阅/webdav相关内容。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了所有订阅/webdav相关内容。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version has removed all content related to Rule Subscriptions and WebDAV.
@@ -38,7 +38,7 @@
   const RESULT_RETRY_LIMIT = 3, RESULT_RETRY_DELAY = 200;
 
   // 默认配置
-  const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', autoDark: true, exportConfig: false, language: 'zh-CN' };
+  const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', autoDark: true, exportConfig: false, collapseMode: false, removeRedirects: true, language: 'zh-CN' };
   const DEFAULT_HIGHLIGHT_COLORS = {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'};
   function getDefaultConfig() {
     return {
@@ -144,14 +144,13 @@
 
   const builtinSelectorOf = (key) => (SELECTORS[key] && typeof SELECTORS[key] === 'object') ? SELECTORS[key] : {};
   function mergeSelectorDef(def, base) {
+    const links = def.links !== undefined ? (Array.isArray(def.links) ? normalizeSelectorList(def.links) : (typeof def.links === 'string' && def.links ? def.links : 'a[href]')) : (base.links || 'a[href]');
     return {
       containers: typeof def.containers === 'string' ? def.containers : (base.containers || ''),
       titles: def.titles !== undefined ? normalizeSelectorList(def.titles) : (base.titles || []),
       snippets: def.snippets !== undefined ? normalizeSelectorList(def.snippets) : (base.snippets || []),
       extraElements: def.extraElements !== undefined ? normalizeSelectorList(def.extraElements) : (base.extraElements || []),
-      links: def.links !== undefined
-        ? (Array.isArray(def.links) ? normalizeSelectorList(def.links) : (typeof def.links === 'string' && def.links ? def.links : 'a[href]'))
-        : (base.links || 'a[href]')
+      links: links.length ? links : 'a[href]'
     };
   }
 
@@ -240,9 +239,9 @@
     'zh-CN': {
       disableBlock: '临时禁用', showCount: '显示数量', debugMode: '调试模式',
       enableFeature: '启用功能', blockDomain: '屏蔽域名', doubleConfirm: '二次确认', showMatchedSource: '来源显示',
-      autoDark: '自动深色', exportConfig: '导出配置',
+      autoDark: '自动深色', exportConfig: '导出配置', collapseMode: '折叠模式', collapseModeHint: '开启后屏蔽结果只显示标题',
       settingsBtn: '设置', settingsPanelTitle: '脚本设置',
-      settingsSecBlock: '一键屏蔽', settingsSecUI: '界面显示', settingsSecOther: '其他设置',
+      settingsSecBlock: '一键屏蔽', settingsSecUI: '界面显示', settingsSecOther: '其他设置', removeRedirects: '去除重定向',
       bubbleSize: '悬浮球:', blockRules: '屏蔽规则:',
       import: '导入', export: '导出', save: '保存',
       stats: '统计', close: '关闭', cancel: '取消',
@@ -291,9 +290,9 @@
     'en': {
       disableBlock: 'Disable Block', showCount: 'Show Count', debugMode: 'Debug Mode',
       enableFeature: 'Enable Feature', blockDomain: 'Block Domain', doubleConfirm: 'Double Confirm', showMatchedSource: 'Show Source',
-      autoDark: 'Auto Dark', exportConfig: 'Export Config',
-      settingsBtn: 'Setting', settingsPanelTitle: 'Script Settings',
-      settingsSecBlock: 'One-click Block', settingsSecUI: 'Interface', settingsSecOther: 'Other',
+      autoDark: 'Auto Dark', exportConfig: 'Export Config', collapseMode: 'Collapse Mode', collapseModeHint: 'Blocked results will show titles only',
+      settingsBtn: 'Settings', settingsPanelTitle: 'Script Settings',
+      settingsSecBlock: 'One-click Block', settingsSecUI: 'Interface', settingsSecOther: 'Other', removeRedirects: 'Remove redirects',
       bubbleSize: 'Bubble:', blockRules: 'Block Rules:',
       import: 'Import', export: 'Export', save: 'Save',
       stats: 'Stats', close: 'Close', cancel: 'Cancel',
@@ -414,6 +413,14 @@
   const REGEX_CTX_A = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*=~$/i;
   const REGEX_CTX_B = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)$/i;
 
+  function isBadRegexTail(s) {
+    if (!RULE_PREFIX_REGEX_RE.test(s)) return false;
+    let last = -1;
+    for (let j = RULE_PREFIX_RE.exec(s)[0].length; j < s.length; j++) { if (s[j] === '\\') { j++; continue; } if (s[j] === '/') last = j; }
+    const tail = last === -1 ? '' : s.slice(last + 1);
+    return tail !== '' && !/^[imsu]*$/i.test(tail);
+  }
+
   function scanRuleString(str, mode) {
     const strip = mode === 'strip';
     const n = str.length;
@@ -423,10 +430,10 @@
       i++; while (i < n && /\d/.test(str[i])) i++; while (i < n && /\s/.test(str[i])) i++;
     }
     let inRE = false, inReClass = false, inSQ = false, inDQ = false;
-    let ifDepth = 0, atIf = false, justClosedIf = false;
+    let ifDepth = 0, atIf = false, justClosedIf = false, pfxStart = -1;
     const body = str.slice(i);
     if (RULE_LEADING_REGEX_RE.test(body)) { i += 1; inRE = true; }
-    else if (RULE_PREFIX_REGEX_RE.test(body)) { i += RULE_PREFIX_RE.exec(body)[0].length; inRE = true; }
+    else if (RULE_PREFIX_REGEX_RE.test(body)) { pfxStart = i; i += RULE_PREFIX_RE.exec(body)[0].length; inRE = true; }
     const occurrences = [];
     for (; i < n; i++) {
       const ch = str[i];
@@ -455,7 +462,7 @@
         justClosedIf = false;
         if (ch === '/') { inRE = true; continue; }
         const prefixM = RULE_PREFIX_RE.exec(str.slice(i));
-        if (prefixM) { i += prefixM[0].length; inRE = true; continue; }
+        if (prefixM) { pfxStart = i; i += prefixM[0].length - 1; inRE = true; continue; }
       }
       if (ch === '@' && str.substr(i, 3).toLowerCase() === '@if') {
         const prevChar = i > 0 ? str[i - 1] : '';
@@ -481,6 +488,7 @@
           const prev = str[i - 1];
           if (prev === undefined || /\s/.test(prev)) {
             let end = i; while (end > 0 && /\s/.test(str[end - 1])) end--;
+            if (pfxStart !== -1 && isBadRegexTail(str.slice(pfxStart, end)) && !isBadRegexTail(str.slice(pfxStart))) continue;
             return { stripped: str.slice(0, end), occurrences };
           }
         }
@@ -1304,8 +1312,8 @@
           errors.push(t('invalidRegexFlags', { flags: invalidFlags })); return { valid: false, errors, warnings };
         }
         new RegExp(pattern, String(flags || '').toLowerCase());
-      } else if (ruleToCheck.startsWith('text/') || ruleToCheck.startsWith('title/')) {
-        const prefixLen = ruleToCheck.startsWith('title/') ? 6 : 5; const { pattern, flags, flagsCandidate, unclosed } = parsePrefixedRegexRule(ruleToCheck, prefixLen);
+      } else if (/^(?:text|title)\//i.test(ruleToCheck)) {
+        const prefixLen = /^title\//i.test(ruleToCheck) ? 6 : 5; const { pattern, flags, flagsCandidate, unclosed } = parsePrefixedRegexRule(ruleToCheck, prefixLen);
         if (unclosed) {
           errors.push(t('regexError')); return { valid: false, errors, warnings };
         }
@@ -1327,7 +1335,7 @@
         new RegExp(wildcardToRegex(ruleToCheck), 'i');
       }
     } catch (e) {
-      errors.push((ruleToCheck.startsWith('/') || ruleToCheck.startsWith('text/') || ruleToCheck.startsWith('title/')) ? t('regexError') : t('urlError'));
+      errors.push((ruleToCheck.startsWith('/') || /^(?:text|title)\//i.test(ruleToCheck)) ? t('regexError') : t('urlError'));
     }
 
     return { valid: errors.length === 0, errors, warnings };
@@ -1403,7 +1411,7 @@
         if (isHost && i > 0 && part[i - 1] === '.') {
           out += (i === part.length - 1) ? '[^./]*(?:\\.[^./]*)?' : '[^./]*';
         } else if (isHost) {
-          out += '[^./]*';
+          out += part === '*' ? '[^/]*' : '[^./]*';
         } else {
           out += starPattern;
         }
@@ -1481,14 +1489,12 @@
 
   function ruleToRegex(rule) {
     let memo = ruleToRegex._memo; if (!memo) memo = ruleToRegex._memo = new Map(); if (memo.has(rule)) return memo.get(rule); let out; if (rule.startsWith('.')) rule = '*' + rule;
-    if (!rule.startsWith('/') && !rule.startsWith('title/') && !rule.startsWith('text/') &&
+    if (!rule.startsWith('/') && !/^title\//i.test(rule) && !/^text\//i.test(rule) &&
       !rule.includes('*') && !rule.includes('://') && !rule.startsWith('.')) {
-      if (rule.includes('.') && !rule.includes('/') && !/\s/.test(rule)) {
-        const queryMatch = rule.match(/^([^?#]+)([?#].*)$/);
-        if (queryMatch) {
-          rule = '*://*.' + queryMatch[1] + '/' + queryMatch[2];
-        } else {
-          rule = '*://*.' + rule + '/*';
+      if (rule.includes('.') && !/\s/.test(rule)) {
+        const restMatch = rule.match(/^([^\/?#]+)([\/?#].*)?$/);
+        if (restMatch && restMatch[1].includes('.')) {
+          rule = restMatch[2] ? '*://*.' + restMatch[1] + (restMatch[2].startsWith('/') ? restMatch[2] : '/' + restMatch[2]) : '*://*.' + rule + '/*';
         }
       }
     }
@@ -1498,11 +1504,11 @@
       return out;
     }
 
-    if (rule.startsWith('title/')) {
+    if (/^title\//i.test(rule)) {
       out = parsePrefixedRegexRule(rule, 6); memo.set(rule, out); return out;
     }
 
-    if (rule.startsWith('text/')) {
+    if (/^text\//i.test(rule)) {
       out = parsePrefixedRegexRule(rule, 5); memo.set(rule, out); return out;
     }
 
@@ -1523,7 +1529,7 @@
     if (bareWildcard) {
       const domain = normalizeHostCandidate(bareWildcard[1]); if (domain) return { domain, domainType: 'wildcard' };
     }
-    if (!pattern.startsWith('/') && !pattern.startsWith('title/') && !pattern.startsWith('text/') &&
+    if (!pattern.startsWith('/') && !/^title\//i.test(pattern) && !/^text\//i.test(pattern) &&
       !pattern.includes('*') && !pattern.includes('://') && !pattern.startsWith('.')) {
       if (pattern.includes('.') && !/\s/.test(pattern) && !pattern.includes('/') &&
         !pattern.includes(':') && !pattern.includes('?') && !pattern.includes('#')) {
@@ -1557,9 +1563,9 @@
     }
     if (coreRule.startsWith('/') && coreRule.lastIndexOf('/') > 0) {
       type = 'regex'; const r = ruleToRegex(coreRule); pattern = r.pattern; flags = r.flags;
-    } else if (coreRule.startsWith('title/')) {
+    } else if (/^title\//i.test(coreRule)) {
       type = 'title'; const r = ruleToRegex(coreRule); if (r.unclosed) throw new Error('Unbalanced regex'); pattern = r.pattern; flags = r.flags;
-    } else if (coreRule.startsWith('text/')) {
+    } else if (/^text\//i.test(coreRule)) {
       type = 'text'; const r = parsePrefixedRegexRule(coreRule, 5); if (r.unclosed) throw new Error('Unbalanced regex'); pattern = r.pattern; flags = r.flags;
     } else {
       type = 'url'; const r = ruleToRegex(coreRule); pattern = r.pattern; flags = r.flags;
@@ -1708,7 +1714,7 @@
         return;
       }
 
-      if (!coreRule.startsWith('/') && !coreRule.startsWith('text/') && !coreRule.startsWith('title/')) {
+      if (!coreRule.startsWith('/') && !/^text\//i.test(coreRule) && !/^title\//i.test(coreRule)) {
         const dm = matchSimpleDomain(coreRule);
         if (dm) {
           ruleObj.type = 'domain'; ruleObj.domain = dm.domain; ruleObj.domainType = dm.domainType;
@@ -1910,12 +1916,9 @@
             const starMatch = url.match(/\/\*-?(https?(?::|%3A)[\s\S]*)$/i); if (starMatch && starMatch[1]) next = decodeRedirectTarget(starMatch[1]);
           }
           if (!next) {
-            const candidateParams = ['ru', 'u', 'url', 'target', 'dest', 'dst', 'r'];
-            for (const param of candidateParams) {
-              const val = urlObj.searchParams.get(param);
-              if (val) {
-                next = decodeRedirectTarget(val); if (next) break;
-              }
+            const tryParam = (p) => { const v = urlObj.searchParams.get(p); if (v) next = decodeRedirectTarget(v); return !!next; };
+            if (!tryParam('ru') && /^\/(?:r|rd)(?:\/|$)|ru=/i.test(path)) {
+              for (const p of ['u', 'url', 'target', 'dest', 'dst', 'r']) { if (tryParam(p)) break; }
             }
           }
         }
@@ -1932,7 +1935,7 @@
   }
 
   function resolveUrlDomain(link) {
-    const rawUrl = getCleanUrl(link); let url = toASCIIUrl(rawUrl) || rawUrl; let domain = '';
+    const rawUrl = currentConfig.removeRedirects === false ? (link && link.href) || '' : getCleanUrl(link); let url = toASCIIUrl(rawUrl) || rawUrl; let domain = '';
     try {
       domain = toASCIIHostname(new URL(url).hostname);
     } catch (e) {}
@@ -2018,6 +2021,26 @@
     }
   }
 
+  function restoreResultCollapse(result) {
+    if (!result || typeof result.querySelectorAll !== 'function') return;
+    result.querySelectorAll('.serh-collapse-hide').forEach(el => el.classList.remove('serh-collapse-hide'));
+  }
+
+  // 折叠模式
+  function applyResultCollapse(result, engine) {
+    restoreResultCollapse(result);
+    const titleEl = getResultTitleElement(result, engine);
+    if (!titleEl || (result.contains && !result.contains(titleEl))) return;
+    let node = titleEl;
+    while (node && node !== result) {
+      const parent = node.parentElement; if (!parent) break;
+      for (const child of parent.children) {
+        if (child !== node && !child.contains(titleEl)) child.classList.add('serh-collapse-hide');
+      }
+      node = parent;
+    }
+  }
+
   function getResultLink(result, engine) {
     const linkSelectors = (getSelectors()[engine] || SELECTORS.other).links; let foundEl = null;
     if (Array.isArray(linkSelectors)) {
@@ -2077,6 +2100,19 @@
 
   function getResultTitle(result, engine) {
     return getResultText(result, (getSelectors()[engine] || SELECTORS.other).titles);
+  }
+
+  function getResultTitleElement(result, engine) {
+    const selectors = (getSelectors()[engine] || SELECTORS.other).titles;
+    if (!Array.isArray(selectors)) return null;
+    for (let selector of selectors) {
+      let elem = null;
+      try {
+        elem = result.querySelector(selector);
+      } catch (e) { continue; }
+      if (elem && elem.textContent && elem.textContent.trim()) return elem;
+    }
+    return null;
   }
 
   function ensurePositioned(el) {
@@ -2319,17 +2355,21 @@
     return el.style.display !== 'none' && el.getAttribute('data-is-blocked') !== 'true';
   }
 
+  function blockedShown() {
+    return showHiddenResults || currentConfig.collapseMode === true;
+  }
+
   function hideParentIfNoVisibleSiblings(parent, children, attr) {
     const hasVisible = Array.from(children).some(visibleUnblocked);
     if (!hasVisible) {
-      saveOriginalDisplay(parent); parent.style.display = showHiddenResults ? '' : 'none'; parent.setAttribute(attr, 'true');
+      saveOriginalDisplay(parent); parent.style.display = blockedShown() ? '' : 'none'; parent.setAttribute(attr, 'true');
     }
   }
 
   function resetResultStyles(result) {
-    restoreResultExtraElements(result); _hrefUrlCache.delete(result); _resultContentCache.delete(result); _resultRetryCounts.delete(result); result.removeAttribute('data-blocker-processed');
+    restoreResultExtraElements(result); restoreResultCollapse(result); _hrefUrlCache.delete(result); _resultContentCache.delete(result); _resultRetryCounts.delete(result); result.removeAttribute('data-blocker-processed');
     result.removeAttribute('data-is-blocked'); result.removeAttribute('data-is-highlighted'); result.removeAttribute('data-highlight-n'); clearMatchedData(result);
-    result.classList.remove('serh-blocked-visible'); result.style.outline = ''; result.style.outlineOffset = ''; const origDisplay = result.getAttribute('data-serh-orig-display');
+    result.classList.remove('serh-blocked-visible'); result.classList.remove('serh-blocked-collapsed'); result.style.outline = ''; result.style.outlineOffset = ''; const origDisplay = result.getAttribute('data-serh-orig-display');
     if (origDisplay !== null) { result.style.display = origDisplay; result.removeAttribute('data-serh-orig-display'); }
     if (result.parentElement && result.parentElement.dataset.blockerYandexParent) {
       const parent = result.parentElement;
@@ -2349,11 +2389,11 @@
       const parentOrig = googleParent.getAttribute('data-serh-orig-display');
       if (stillHasBlockedHidden) {
         googleParent.style.display = 'none';
-      } else {
+      } else if (googleParent.getAttribute('data-is-blocked') !== 'true') {
         googleParent.style.display = parentOrig !== null ? parentOrig : ''; googleParent.removeAttribute('data-blocker-google-parent'); googleParent.removeAttribute('data-serh-orig-display');
       }
     }
-    removeMatchedRuleLabel(result);
+    removeMatchedRuleLabel(result); if (!result.querySelector('.serh-quick-block')) result.style.position = '';
   }
 
   function restoreParentDisplay(parent) {
@@ -2369,10 +2409,10 @@
     document.querySelectorAll('[data-blocker-yandex-parent]').forEach(parent => {
       const hasVisibleUnblocked = Array.from(parent.children).some(el =>
         el.style.display !== 'none' && el.getAttribute('data-is-blocked') !== 'true');
-      if (hasVisibleUnblocked) restoreParentDisplay(parent);
+      if (hasVisibleUnblocked && parent.getAttribute('data-is-blocked') !== 'true') restoreParentDisplay(parent);
     });
     document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
-      if (googleResultBlocks(parent).some(visibleUnblocked)) restoreParentDisplay(parent);
+      if (parent.getAttribute('data-is-blocked') !== 'true' && googleResultBlocks(parent).some(visibleUnblocked)) restoreParentDisplay(parent);
     });
   }
 
@@ -2434,7 +2474,7 @@
       result.setAttribute('data-is-highlighted', 'true'); result.setAttribute('data-highlight-n', matchHL);
     }
     if (matchResult && matchResult.blocked) {
-      _resultRetryCounts.delete(result); saveOriginalDisplay(result); result.style.display = showHiddenResults ? '' : 'none'; setResultExtraElementsVisible(result, showHiddenResults);
+      _resultRetryCounts.delete(result); saveOriginalDisplay(result); result.style.display = blockedShown() ? '' : 'none'; setResultExtraElementsVisible(result, showHiddenResults);
       result.setAttribute('data-blocker-processed', 'true'); result.setAttribute('data-is-blocked', 'true');
 
       if (engine === 'yandex') {
@@ -2446,15 +2486,21 @@
       }
 
       result.dataset.matchedRule = matchResult.rule || ''; result.dataset.matchedSource = matchResult.source || '';
-      if (showHiddenResults) {
-        result.classList.add('serh-blocked-visible'); if (currentConfig.showBlockBtn) injectBlockButton(result, engine, domain); addMatchedRuleLabel(result);
+      if (blockedShown()) {
+        if (showHiddenResults) {
+          result.classList.add('serh-blocked-visible');
+          if (currentConfig.showBlockBtn) injectBlockButton(result, engine, domain); addMatchedRuleLabel(result);
+        } else {
+          result.classList.add('serh-blocked-collapsed');
+          applyResultCollapse(result, engine);
+        }
       }
       return true;
     }
 
     if (matchHL) {
       _resultRetryCounts.delete(result); saveOriginalDisplay(result); result.style.display = '';
-      result.classList.remove('serh-blocked-visible'); result.setAttribute('data-blocker-processed', 'true'); result.removeAttribute('data-is-blocked'); clearMatchedData(result);
+      result.classList.remove('serh-blocked-visible'); result.classList.remove('serh-blocked-collapsed'); result.setAttribute('data-blocker-processed', 'true'); result.removeAttribute('data-is-blocked'); clearMatchedData(result);
       if (currentConfig.showBlockBtn) injectBlockButton(result, engine, domain);
       return false;
     }
@@ -3353,9 +3399,9 @@
   function toggleHiddenResults() {
     showHiddenResults = !showHiddenResults;
     document.querySelectorAll('[data-is-blocked="true"]').forEach(el => {
-      saveOriginalDisplay(el); if (showHiddenResults) restoreOriginalDisplay(el); else el.style.display = 'none'; setResultExtraElementsVisible(el, showHiddenResults);
+      saveOriginalDisplay(el); if (showHiddenResults) restoreOriginalDisplay(el); else el.style.display = blockedShown() ? '' : 'none'; setResultExtraElementsVisible(el, showHiddenResults);
       if (showHiddenResults) {
-        el.classList.add('serh-blocked-visible'); const engine = getSearchEngine(); const link = getResultLink(el, engine);
+        el.classList.remove('serh-blocked-collapsed'); el.classList.add('serh-blocked-visible'); restoreResultCollapse(el); const engine = getSearchEngine(); const link = getResultLink(el, engine);
         if (link && link.href && currentConfig.showBlockBtn) {
           const { domain } = resolveUrlDomain(link);
           if (!el.querySelector('.serh-quick-block')) {
@@ -3363,8 +3409,13 @@
           }
         }
         addMatchedRuleLabel(el);
+      } else if (currentConfig.collapseMode === true) {
+        el.classList.remove('serh-blocked-visible'); el.classList.add('serh-blocked-collapsed');
+        const btn = el.querySelector('.serh-quick-block'); if (btn) btn.remove();
+        removeMatchedRuleLabel(el);
+        applyResultCollapse(el, getSearchEngine());
       } else {
-        el.classList.remove('serh-blocked-visible'); removeMatchedRuleLabel(el);
+        el.classList.remove('serh-blocked-visible'); el.classList.remove('serh-blocked-collapsed'); restoreResultCollapse(el); removeMatchedRuleLabel(el);
       }
     });
     if (showHiddenResults) {
@@ -3399,17 +3450,45 @@
   }
 
   const SETTINGS_PANEL_CHECKBOXES = {
+    'serh-set-remove-redirects': 'removeRedirects',
     'serh-set-show-block-btn': 'showBlockBtn',
     'serh-set-block-domain': 'blockDomain', 'serh-set-block-confirm': 'blockConfirm',
+    'serh-set-show-source': 'showMatchedSource',
     'serh-set-show-bubble': 'showBubble', 'serh-set-show-count': 'showCount',
     'serh-set-panel-centered': 'panelCentered', 'serh-set-auto-dark': 'autoDark',
     'serh-set-disable-block': 'enabled', 'serh-set-debug': 'debug',
-    'serh-set-error-detection': 'errorDetection', 'serh-set-export-config': 'exportConfig'
+    'serh-set-error-detection': 'errorDetection', 'serh-set-export-config': 'exportConfig', 'serh-set-collapse-mode': 'collapseMode'
   };
   const INVERTED_SETTINGS_CHECKBOXES = new Set(['serh-set-disable-block']);
 
   function applyDarkModeClass() {
     if (document.body) document.body.classList.toggle('serh-dark-on', currentConfig.autoDark !== false);
+  }
+
+  let _collapseStyleEl = null;
+
+  function buildCollapseCss() {
+    const seen = new Set(); const rules = [];
+    rules.push('body.serh-collapse-on .serh-blocked-collapsed .serh-collapse-hide { display: none !important; }');
+    for (const def of Object.values(getSelectors())) {
+      for (const sel of [...(def.snippets || []), ...(def.extraElements || [])]) {
+        if (typeof sel !== 'string' || !sel.trim() || seen.has(sel)) continue; seen.add(sel);
+        rules.push(`body.serh-collapse-on .serh-blocked-collapsed ${sel} { display: none !important; }`);
+      }
+    }
+    return rules.join('\n');
+  }
+
+  function ensureCollapseStyle() {
+    const css = buildCollapseCss();
+    if (_collapseStyleEl && _collapseStyleEl.isConnected) { _collapseStyleEl.textContent = css; return; }
+    _collapseStyleEl = document.createElement('style'); _collapseStyleEl.setAttribute('data-serh', 'collapse');
+    _collapseStyleEl.textContent = css; (document.head || document.documentElement).appendChild(_collapseStyleEl);
+  }
+
+  function applyCollapseMode() {
+    if (document.body) document.body.classList.toggle('serh-collapse-on', currentConfig.collapseMode === true);
+    ensureCollapseStyle();
   }
 
   function applyConfigToMainPanel() {
@@ -3600,9 +3679,9 @@
           ruleType = t('highlightRules');
         } else if (/@if\s*\(/i.test(rule) || looksLikeCondExpr(rule.replace(/^@\d+\s+/, '').replace(/^@/, ''))) {
           ruleType = t('statsCompound');
-        } else if (rule.startsWith('title/')) {
+        } else if (/^title\//i.test(rule)) {
           ruleType = t('titleRule');
-        } else if (rule.startsWith('text/')) {
+        } else if (/^text\//i.test(rule)) {
           ruleType = t('textRule');
         } else if (rule.startsWith('/')) {
           ruleType = t('regexRule');
@@ -3839,10 +3918,12 @@
     if (panel) panel._initialRules = [...finalRules]; if (backgroundNewRules.length > 0) syncRulesTextarea();
     if (showHiddenResults) {
       showHiddenResults = false;
-      document.querySelectorAll('[data-is-blocked="true"]').forEach(el => {
-        el.style.display = 'none'; el.classList.remove('serh-blocked-visible'); setResultExtraElementsVisible(el, false); removeMatchedRuleLabel(el);
-      });
-      document.querySelectorAll('[data-blocker-google-parent], [data-blocker-yandex-parent]').forEach(parent => { parent.style.display = 'none'; });
+      if (currentConfig.collapseMode !== true) {
+        document.querySelectorAll('[data-is-blocked="true"]').forEach(el => {
+          el.style.display = 'none'; el.classList.remove('serh-blocked-visible'); el.classList.remove('serh-blocked-collapsed'); setResultExtraElementsVisible(el, false); removeMatchedRuleLabel(el); restoreResultCollapse(el);
+        });
+        document.querySelectorAll('[data-blocker-google-parent], [data-blocker-yandex-parent]').forEach(parent => { parent.style.display = 'none'; });
+      }
     }
     forceReprocessAll();
   }
@@ -3893,12 +3974,16 @@
             ])}
             ${settingsHeader('settingsSecOther')}
             ${settingsRow([
+              { id: 'serh-set-remove-redirects', labelKey: 'removeRedirects', checked: currentConfig.removeRedirects !== false },
+              { id: 'serh-set-error-detection', labelKey: 'menuErrorDetection', checked: currentConfig.errorDetection !== false }
+            ])}
+            ${settingsRow([
               { id: 'serh-set-disable-block', labelKey: 'disableBlock', checked: currentConfig.enabled === false },
               { id: 'serh-set-debug', labelKey: 'debugMode', checked: currentConfig.debug === true }
             ])}
             ${settingsRow([
-              { id: 'serh-set-error-detection', labelKey: 'menuErrorDetection', checked: currentConfig.errorDetection !== false },
-              { id: 'serh-set-export-config', labelKey: 'exportConfig', checked: currentConfig.exportConfig === true }
+              { id: 'serh-set-export-config', labelKey: 'exportConfig', checked: currentConfig.exportConfig === true },
+              { id: 'serh-set-collapse-mode', labelKey: 'collapseMode', checked: currentConfig.collapseMode === true }
             ])}
             <div style="display: flex; gap: 8px; margin: 0; padding: 0;">
                 <div style="flex: 1; min-width: 0; margin: 0; padding: 0;">
@@ -3926,6 +4011,7 @@
     };
 
     const settingsDefs = [
+      { id: 'serh-set-remove-redirects', key: 'removeRedirects', apply: () => { forceReprocessAll(); } },
       { id: 'serh-set-show-block-btn', key: 'showBlockBtn', apply: () => { forceReprocessAll(); } },
       { id: 'serh-set-block-domain', key: 'blockDomain', apply: null },
       { id: 'serh-set-block-confirm', key: 'blockConfirm', apply: null },
@@ -3944,6 +4030,10 @@
       { id: 'serh-set-debug', key: 'debug', apply: () => { exposeDebugApi(); } },
       { id: 'serh-set-error-detection', key: 'errorDetection', apply: () => {
         updateLineNumbers(); const statsPanel = document.getElementById('serh-stats-panel'); if (statsPanel && statsPanel.style.display === 'flex') updateStatsContent();
+      } },
+      { id: 'serh-set-collapse-mode', key: 'collapseMode', apply: () => {
+        applyCollapseMode(); forceReprocessAll();
+        if (currentConfig.collapseMode === true) showToast(t('collapseModeHint'), 'info');
       } },
       { id: 'serh-set-export-config', key: 'exportConfig', apply: null }
     ];
@@ -4588,21 +4678,17 @@
     for (let i = 0; i < Math.min(lines.length, 50); i++) {
       const line = lines[i]; if (!line.trim()) continue;
       if (line.startsWith('# ScriptConfig:')) {
-        rawScriptConfig = line;
-        try {
-          config = JSON.parse(line.substring('# ScriptConfig:'.length));
-        } catch (e) {
-          if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[配置头] 配置头解析失败:', e);
+        const payload = line.substring('# ScriptConfig:'.length).trim(); let parsed = null;
+        if (/^[\x7B\x5B]/.test(payload)) {
+          try { parsed = JSON.parse(payload); } catch (e) { if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[配置头] 配置头解析失败:', e); }
         }
-          if (config || /^\s*\x7B/.test(line.substring('# ScriptConfig:'.length))) headerLineIndexes.add(i); if (!config) rawScriptConfig = null;
+        if (parsed) { config = parsed; rawScriptConfig = line; headerLineIndexes.add(i); } else if (payload.startsWith('\x7B')) headerLineIndexes.add(i);
       } else if (line.startsWith('# Selectors:')) {
-        rawSelectors = line;
-        try {
-          selectors = JSON.parse(line.substring('# Selectors:'.length));
-        } catch (e) {
-          if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[配置头] 选择器头解析失败:', e);
+        const payload = line.substring('# Selectors:'.length).trim(); let parsed = null;
+        if (/^[\x7B\x5B]/.test(payload)) {
+          try { parsed = JSON.parse(payload); } catch (e) { if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[配置头] 选择器头解析失败:', e); }
         }
-          if (selectors || /^\s*\x7B/.test(line.substring('# Selectors:'.length))) headerLineIndexes.add(i); if (!selectors) rawSelectors = null;
+        if (parsed) { selectors = parsed; rawSelectors = line; headerLineIndexes.add(i); } else if (payload.startsWith('\x7B')) headerLineIndexes.add(i);
       } else if (!line.startsWith('#')) {
         break;
       }
@@ -4632,6 +4718,10 @@
       const parsedHeader = parseSyncHeader(content);
       const headerConfig = parsedHeader.config;
       if (headerConfig && typeof headerConfig === 'object' && !Array.isArray(headerConfig)) {
+        const headerSelectors = parsedHeader.rawSelectors ? headerConfig.selectors : null;
+        if (headerSelectors && typeof headerSelectors === 'object' && !Array.isArray(headerSelectors)) {
+          GM_setValue(SELECTORS_KEY, headerSelectors); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite();
+        }
         const settings = getSyncSettings(headerConfig);
         if (Object.keys(settings).length > 0) {
           const next = Object.assign({}, currentConfig); const colors = settings.highlightColors;
@@ -4824,11 +4914,11 @@
   }
 
   function checkExternalConfigChange() {
-    if (document.getElementById('serh-panel')) return false; if (!adoptStoredConfigIfNewer()) return false; forceReprocessAll(); return true;
+    if (document.getElementById('serh-panel')) return false; if (!adoptStoredConfigIfNewer()) return false; applyCollapseMode(); forceReprocessAll(); return true;
   }
 
   function init() {
-    applyDarkModeClass(); pruneUserSelectors(); _selectorStoreSignature = getSelectorStoreSignature();
+    applyDarkModeClass(); applyCollapseMode(); pruneUserSelectors(); _selectorStoreSignature = getSelectorStoreSignature();
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         checkExternalSelectorChange(); checkExternalConfigChange();
