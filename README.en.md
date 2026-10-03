@@ -18,15 +18,15 @@ Lite Version (Remove Subscription / WebDAV) [Lite](https://raw.githubusercontent
 
 - Basic/advanced syntax matching results
 - Matched rule statistics and debug output
-- Import/export rules to TXT
+- Import/export rules
 - Rule error detection
-- Rule subscription
 - One-click blocking
+- Rule subscription
 - WebDAV sync
 - Script manager menu  
 ┣ Open panel  
-┣ Custom highlight colors  
-┗ Custom engine
+┣ Custom engine  
+┗ Custom highlight colors
 
 Partial setting instructions:
 1. Show Source: Enabled by default, when disabled, the rules that match the blocked results will not be shown on it.
