@@ -58,7 +58,7 @@ Bing, Google, Google Scholar, DuckDuckGo, Yahoo
 
 ## Docs
 
-For detailed rule syntax custom and engine selectors, see [Rule-Explanation](Rule-Explanation.en.md)
+For detailed rule syntax custom and custom engine, see [Rule-Explanation](Rule-Explanation.en.md)
 
 For debug mode and rules detection error instructions, see [Debug](Debug.en.md)
 
