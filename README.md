@@ -11,7 +11,7 @@ Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Yahoo(&Jap
 
 **安装：**  
 使用支持 Tampermonkey / Greasemonkey 脚本的浏览器打开安装  
-正式版 [Github](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [GreasyFork](https://update.greasyfork.org/scripts/552394/%E6%90%9C%E7%B4%A2%E5%BC%95%E6%93%8E%E7%BB%93%E6%9E%9C%E5%B1%8F%E8%94%BD%E5%99%A8.user.js) | [脚本猫](https://scriptcat.org/zh-CN/script-show-page/8237)  
+正式版 [Github自动更新](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [GreasyFork](https://greasyfork.org/zh-CN/scripts/552394) | [脚本猫](https://scriptcat.org/zh-CN/script-show-page/8237)  
 精简版（移除规则订阅/webdav）[Lite](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite.user.js)
 
 ### 1.2 当前功能：
