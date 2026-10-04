@@ -156,7 +156,7 @@ bing: {disabled: true},
 
 **说明：**
 
-1. 内置引擎ID：`google`、`google_scholar`、`bing`、`duckduckgo_lite`、`duckduckgo`、`yandex`、`brave`、`yahoo`（`ddg` 与 `yahoo-japan` 仅作为 `@if($site=)` 条件规则简写别名，lite 使用独立 ID `duckduckgo_lite` ）
+1. 内置引擎ID：`google`、`google_scholar`、`bing`、`duckduckgo_lite`、`duckduckgo`、`yandex`、`brave`、`yahoo`、`so360`、`sogou`、`toutiao`、`quark`（在`@if($site=)`中，`ddg`是`duckduckgo`别名，`yahoo-japan`是`yahoo`别名）
 2. 自定义引擎支持 `$site = "引擎ID"` 条件以及屏蔽/高亮/白名单规则，`titles`/`snippets` 可省略
 3. 引擎ID仅允许字母/数字/`_`/`-`，`other` 为保留键不可写，与内置引擎同ID或站点重叠时会覆盖内置选择器，如匹配 `cn.bing.com` 时将优先于内置 `bing` 命中
 4. 优先级：自定义选择器 > 内置选择器，改回内置值或重置可恢复跟随脚本更新

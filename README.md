@@ -7,7 +7,7 @@
 在仅支持安装脚本的浏览器上实现复杂规则屏蔽搜索结果功能  
 兼容uBlacklist基础规则，支持URL匹配、正则匹配、标题匹配、结果摘要(snippet)匹配、高亮目标结果、白名单匹配、`@if`附加判断条件，以及添加**自定义引擎**  
 当前适配搜索引擎：  
-Bing、Google、Google Scholar、DuckDuckGo(ddg/lite)、Yandex、Brave、Yahoo(&Japan)
+Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Yahoo(&Japan)、360搜索、搜狗、头条搜索、夸克(&神马)
 
 **安装：**  
 使用支持 Tampermonkey / Greasemonkey 脚本的浏览器打开安装  
@@ -50,8 +50,7 @@ Bing、Google、Google Scholar、DuckDuckGo(ddg/lite)、Yandex、Brave、Yahoo(&
 
 ### 1.5 其他：
 
-1. 对以下引擎自动去除重定向，可在设置内开关：  
-Bing、Google、Google Scholar、DuckDuckGo、Yahoo
+1. 对部分引擎自动去除重定向，可在设置内开关
 2. 规则优先级：本地白名单 > 本地黑名单 > 订阅白名单 > 订阅黑名单
 3. 注释行格式`#+空格+内容`，不可重复否则同步时会合并同注释行下内容；⬆️/⬇️功能为移动到上一个/下一个注释行，在第一行或第一个注释行时⬆️会跳到最后一行
 4. 为避免跨页数据冲突，请勿在多个标签页同时打开面板编辑规则，打开面板时暂停同步

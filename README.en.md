@@ -7,7 +7,7 @@
 Implements complex-rule search result blocking on browsers that only support user script installation.  
 Compatible with uBlacklist basic rules, supports URL matching, regular expression matching, title matching, result snippet matching, highlighting target results, whitelist matching, `@if` additional judgment conditions, and adding **custom engines**.  
 Currently supported search engines:  
-Bing, Google, Google Scholar, DuckDuckGo(ddg/lite), Yandex, Brave, Yahoo(&Japan)  
+Bing, Google, Google Scholar, DuckDuckGo(&lite), Yandex, Brave, Yahoo(&Japan), 360 Search, Sogou, Toutiao、Quark(&Shenma)
 
 **Install:**  
 Open and install using a browser that supports Tampermonkey / Greasemonkey scripts.  
@@ -50,8 +50,7 @@ Partial setting instructions:
 
 ### 1.5 Other:
 
-1. Automatically remove redirects for the following engines, with an option to toggle in settings:  
-Bing, Google, Google Scholar, DuckDuckGo, Yahoo
+1. Redirections will be automatically removed for some engines, and can be toggled on or off in the settings.
 2. Rule priority: Local whitelist > Local blacklist > Subscription whitelist > Subscription blacklist
 3. Comment line format: `#+[space]+text` and cannot be repeated, otherwise the content under the same comment line will be merged during synchronization; ⬆️/⬇️ jump to the previous/next comment line; when on the first line or first comment line, ⬆️ jumps to the last line.
 4. To avoid cross-page data conflicts, do not open panel editing rules on multiple tabs at the same time, and pause synchronization when opening the panel.
