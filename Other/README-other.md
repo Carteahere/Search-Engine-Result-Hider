@@ -2,7 +2,8 @@
 
 ### 1.1 简介
 
-**详细信息见 [Github](https://github.com/Carteahere/Search-Engine-Result-Hider)**  
+**详细信息见 [Github](https://github.com/Carteahere/Search-Engine-Result-Hider)**
+
 在仅支持安装脚本的浏览器上实现复杂规则屏蔽搜索结果功能  
 兼容uBlacklist基础规则，支持URL匹配、正则匹配、标题匹配、结果摘要(snippet)匹配、高亮目标结果、白名单匹配、`@if`附加判断条件，以及添加**自定义引擎**  
 当前适配搜索引擎：  
@@ -49,7 +50,7 @@ Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Yahoo(&Jap
 3. 注释行格式`#+空格+内容`，不可重复否则同步时会合并同注释行下内容；⬆️/⬇️功能为移动到上一个/下一个注释行，在第一行或第一个注释行时⬆️会跳到最后一行
 4. 为避免跨页数据冲突，请勿在多个标签页同时打开面板编辑规则，打开面板时暂停同步
 
-规则简单示例：
+**规则简单示例：**
 
 | 规则 | 示例 |说明 |
 | --- | --- |--- |

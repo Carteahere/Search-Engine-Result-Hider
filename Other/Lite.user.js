@@ -3530,7 +3530,7 @@
   }
 
   function getSyncSettings(config) {
-    const { rules, bubbleState, bubbleSize, selectors, subscriptions, syncedAt, rulesSyncedAt, settingsModifiedAt, tombstones, ruleAddedTimes, subscriptionTombstones, ...settings } = config || {};
+    const { rules, bubbleState, bubbleSize, selectors, subscriptions, syncedAt, rulesSyncedAt, settingsModifiedAt, selectorsSyncedAt, tombstones, ruleAddedTimes, subscriptionTombstones, ...settings } = config || {};
     return settings;
   }
 
