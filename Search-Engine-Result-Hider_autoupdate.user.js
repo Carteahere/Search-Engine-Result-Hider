@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.6.0
+// @version      8.6.1
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -44,7 +44,7 @@
   const SUBSCRIPTION_URL_KEY = 'searchfilter_subscription_url', SUBSCRIPTION_LAST_UPDATE_KEY = 'searchfilter_subscription_last_update';
   const SUBSCRIPTION_RULES_KEY = 'searchfilter_subscription_rules', SUBSCRIPTIONS_KEY = 'searchfilter_subscriptions';
   const WEBDAV_LAST_SYNC_KEY = 'searchfilter_webdav_last_sync', LOCAL_LAST_MODIFIED_KEY = 'searchfilter_local_last_modified';
-  const SETTINGS_LAST_MODIFIED_KEY = 'searchfilter_settings_last_modified';
+  const SETTINGS_LAST_MODIFIED_KEY = 'searchfilter_settings_last_modified', SELECTORS_LAST_MODIFIED_KEY = 'searchfilter_selectors_last_modified';
   const WEBDAV_AUTO_SYNC_KEY = 'searchfilter_webdav_auto_sync', WEBDAV_SYNC_CONFIG_KEY = 'searchfilter_webdav_sync_config';
   const WEBDAV_SYNC_SELECTORS_KEY = 'searchfilter_webdav_sync_selectors', WEBDAV_SYNC_SNAPSHOT_KEY = 'searchfilter_webdav_sync_snapshot';
   const SUBSCRIPTION_SYNC_SNAPSHOT_KEY = 'searchfilter_subscription_sync_snapshot'; const WEBDAV_LAST_SYNC_SELECTORS_KEY = 'searchfilter_webdav_last_sync_selectors'; const HL_STATS_REGEX = /^@\d+/;
@@ -143,6 +143,34 @@
       titles: ['h3', '.s-title', 'h2 a', 'a h2', '.b_title', '.title'],
       snippets: ['.sw-Card__description', '.sw-Card__snippet', '.sw-Text__body', 'p', '.b_caption p', '.b_snippet', '.b_paractl p'],
       links: ['h3 a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
+    },
+    so360: {
+      match: /^(?:www\.|m\.)?so\.com$/,
+      containers: 'li.res-list, div.res-list',
+      titles: ['h3.res-title a', 'h3 a', '.res-title', '.g-title a', '.g-title'],
+      snippets: ['.res-desc', '.mh-desc', '.summary'],
+      links: ['h3 a[href]', 'a.alink[href]', '.g-linkinfo a[href]', 'a[href]'],
+    },
+    sogou: {
+      match: /^(?:www\.|m\.|wap\.)?sogou\.com$/,
+      containers: 'div.vrwrap:has(h3), .reactResult, div.vrResult',
+      titles: ['h3.vr-title a', '.vr-title a', 'a[class*="saTitle"]', '.vr-title', 'h3.vr-tit', 'h3 a', 'h3'],
+      snippets: ['.space-txt', '.star-wiki', '.str_info', 'p.sa-text-clamp3', '[class*="saText"]'],
+      links: ['h3.vr-title a[href]', '.vr-title a[href]', 'a[class*="saTitle"][href]', 'h3 a[href]', 'a.citeLinkClass[href]', 'a[href]'],
+    },
+    toutiao: {
+      match: /^so\.toutiao\.com$/,
+      containers: '.result-content',
+      titles: ['.l-card-title a', '.l-card-title', '.cs-header a', 'a[href*="/search/jump"]'],
+      snippets: ['.l-paragraph', '.cs-card-content .text-regular', '.l-source', '.cs-source'],
+      links: ['a.l-card-title[href]', '.cs-header a[href]', 'a[href*="/search/jump"]', 'a[href]:not([href*="/search?"])'],
+    },
+    quark: {
+      match: /^(?:(?:quark|yz)\.)?(?:(?:www|m)\.)?sm\.cn$/,
+      containers: 'div.qk-card',
+      titles: ['.qk-title-text', '.qk-title', 'a.qk-link-wrapper'],
+      snippets: ['.qk-paragraph-text', '.qk-paragraph'],
+      links: ['a.qk-title a[href]', '.qk-title a[href]', 'a.qk-link-wrapper[href]', 'a[href]'],
     },
     other: {
       containers: '',
@@ -1536,6 +1564,7 @@
 
     function escapeHostPart(part) {
       const { host, port, hasPort } = splitHostAndPort(part); const escapedHost = escapeWildcardPart(host, true);
+      const dotTolerant = host.endsWith('*') ? '' : '\\.?';
       if (hasPort) {
         let out = '';
         for (let i = 0; i < port.length; i++) {
@@ -1548,9 +1577,9 @@
           if ('.+^${}()|[]\\'.includes(ch)) { out += '\\' + ch; continue; }
           out += ch;
         }
-        return escapedHost + out;
+        return escapedHost + dotTolerant + out;
       }
-      return escapedHost + '(?::\\d+)?';
+      return escapedHost + dotTolerant + '(?::\\d+)?';
     }
 
     let prefix = '^'; let hostIsFirst = false;
@@ -2000,7 +2029,8 @@
       /(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) ||
       /(?:^|\.)(?:duckduckgo\.com|ddg\.gg)$/i.test(host) ||
       /(?:^|\.)(?:[a-z]{2,6}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) ||
-      /(?:^|\.)(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i.test(host)
+      /(?:^|\.)(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i.test(host) ||
+      /(?:^|\.)(?:so\.com|sogou\.com|toutiao\.com)$/i.test(host)
       );
     };
     const seen = new Set();
@@ -2029,6 +2059,17 @@
               for (const p of ['u', 'url', 'target', 'dest', 'dst', 'r']) { if (tryParam(p)) break; }
             }
           }
+        } else if (/(?:^|\.)toutiao\.com$/i.test(host) && /^\/search\/jump\/?$/i.test(path)) {
+          next = decodeRedirectTarget(urlObj.searchParams.get('url'));
+          if (next) {
+            try {
+              const inner = new URL(next); const h5 = /(?:^|\.)toutiao\.com$/i.test(inner.hostname) ? inner.searchParams.get('h5_url') : ''; if (h5) next = decodeRedirectTarget(h5) || next;
+            } catch (_) {}
+          }
+        } else if (/(?:^|\.)so\.com$/i.test(host) && /^\/jump\/?$/i.test(path)) {
+          next = decodeRedirectTarget(urlObj.searchParams.get('u'));
+        } else if (/(?:^|\.)(?:so\.com|sogou\.com)$/i.test(host)) {
+          next = decodeRedirectTarget(urlObj.searchParams.get('url'));
         }
       } catch (_) {}
       if (!next || next === url) return url; let nextHost = '';
@@ -2039,11 +2080,38 @@
   }
 
   function getCleanUrl(link) {
-    if (!link || !link.href) return ''; return unwrapRedirectUrl(link.href);
+    if (!link || !link.href) return '';
+    let attr = '';
+    if (typeof link.getAttribute === 'function') {
+      attr = link.getAttribute('data-mdurl') || link.getAttribute('data-url') || link.getAttribute('linkurl') || '';
+      if (!attr) {
+        try {
+          const box = typeof link.closest === 'function' ? link.closest('.res-list, .vrwrap') : null;
+          const el = box && typeof box.querySelector === 'function' ? box.querySelector('[data-mdurl], [data-url]') : null;
+          if (el && typeof el.getAttribute === 'function') attr = el.getAttribute('data-mdurl') || el.getAttribute('data-url') || '';
+        } catch (_) {}
+      }
+    }
+    if (attr) attr = /^\/\/\S/.test(String(attr)) ? 'https:' + String(attr) : String(attr);
+    if (/^https?:\/\/\S+$/i.test(attr) && attr !== link.href) return unwrapRedirectUrl(attr);
+    return unwrapRedirectUrl(link.href);
   }
 
   function resolveUrlDomain(link) {
-    const rawUrl = currentConfig.removeRedirects === false ? (link && link.href) || '' : getCleanUrl(link); let url = toASCIIUrl(rawUrl) || rawUrl; let domain = '';
+    const rawHref = (link && link.href) || '';
+    const keepRaw = currentConfig.removeRedirects === false;
+    let rawUrl = keepRaw ? rawHref : getCleanUrl(link);
+    if (keepRaw && rawHref && typeof isEngineSelfDomain === 'function') {
+      try {
+        const rawHost = toASCIIHostname(new URL(toASCIIUrl(rawHref)).hostname).toLowerCase();
+        if (rawHost && isEngineSelfDomain(rawHost)) {
+          const cleaned = toASCIIUrl(getCleanUrl(link)) || rawHref;
+          const cleanedHost = toASCIIHostname(new URL(cleaned).hostname).toLowerCase();
+          if (cleanedHost && !isEngineSelfDomain(cleanedHost)) rawUrl = cleaned;
+        }
+      } catch (_) {}
+    }
+    let url = toASCIIUrl(rawUrl) || rawUrl; let domain = '';
     try {
       domain = toASCIIHostname(new URL(url).hostname);
     } catch (e) {}
@@ -2352,6 +2420,23 @@
     };
   }
 
+  function isEngineSelfDomain(targetDomain) {
+    const currentHost = String(window.location.hostname || '').toLowerCase();
+    const target = String(targetDomain || '').toLowerCase();
+    if (!target || !currentHost) return false;
+    if (target === currentHost || target.endsWith('.' + currentHost)) return true;
+    let engineMatch = null;
+    try {
+      const def = getSelectors()[getSearchEngine()];
+      const m = def && def.match;
+      if (m instanceof RegExp) engineMatch = m;
+      else if (typeof m === 'string' && m) { try { engineMatch = new RegExp(m); } catch (_) {} }
+    } catch (_) {}
+    if (engineMatch && engineMatch.test(target)) return true;
+    if (!currentHost.endsWith('.' + target)) return false;
+    return !engineMatch;
+  }
+
   function injectBlockButton(result, engine, domain) {
     if (!domain) return; if (result.closest('header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav')) return;
     if (engine === 'google') {
@@ -2385,8 +2470,8 @@
       e.preventDefault(); e.stopPropagation();
 
       if (!isBlocked) {
-        const currentHost = String(window.location.hostname || '').toLowerCase(); const targetDomain = String(domain || '').toLowerCase();
-        if (targetDomain && (currentHost === targetDomain || currentHost.endsWith('.' + targetDomain) || targetDomain.endsWith('.' + currentHost))) {
+        const targetDomain = String(domain || '').toLowerCase();
+        if (isEngineSelfDomain(targetDomain)) {
           showToast(t('cannotBlockCurrentSite', { domain: targetDomain }), 'error'); return;
         }
       }
@@ -2766,6 +2851,10 @@
           getContainerSelector,
           getSubdomainLevels,
           checkRuleMatchOptimized,
+          unwrapRedirectUrl,
+          getCleanUrl,
+          resolveUrlDomain,
+          getResultLink,
           forceReprocessAll
         };
       } else if (window.__SERH_DEBUG__) {
@@ -3651,7 +3740,7 @@
   }
 
   function getSyncSettings(config) {
-    const { rules, bubbleState, bubbleSize, selectors, subscriptions, syncedAt, rulesSyncedAt, settingsModifiedAt, tombstones, ruleAddedTimes, subscriptionTombstones, ...settings } = config || {};
+    const { rules, bubbleState, bubbleSize, selectors, subscriptions, syncedAt, rulesSyncedAt, settingsModifiedAt, selectorsSyncedAt, tombstones, ruleAddedTimes, subscriptionTombstones, ...settings } = config || {};
     return settings;
   }
 
@@ -3659,6 +3748,10 @@
     const saved = GM_getValue(SETTINGS_LAST_MODIFIED_KEY, null); if (typeof saved === 'number' && Number.isFinite(saved) && saved > 0) return saved;
     const legacy = GM_getValue(LOCAL_LAST_MODIFIED_KEY, 0); const time = typeof legacy === 'number' && Number.isFinite(legacy) && legacy > 0 ? legacy : 0;
     if (time > 0) GM_setValue(SETTINGS_LAST_MODIFIED_KEY, time); return time;
+  }
+
+  function getSelectorsModifiedTime() {
+    const saved = GM_getValue(SELECTORS_LAST_MODIFIED_KEY, 0); return typeof saved === 'number' && Number.isFinite(saved) && saved > 0 ? saved : 0;
   }
 
   function persistConfig(updateModifiedTime = false) {
@@ -3745,7 +3838,7 @@
     if (textarea && Array.isArray(currentConfig.rules)) {
       textarea.value = currentConfig.rules.join('\n'); updateLineNumbers();
     }
-    applyDarkModeClass(); applySubSyncBtnVisibility();
+    applyDarkModeClass(); applyCollapseMode(); applySubSyncBtnVisibility();
   }
 
   function collectMainPanelConfigState() {
@@ -4897,7 +4990,7 @@
     });
 
     const applyUserSelectors = (config) => {
-      GM_setValue(SELECTORS_KEY, diffUserSelectors(config)); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite(); markLocalModifiedTime();
+      GM_setValue(SELECTORS_KEY, diffUserSelectors(config)); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite(); markLocalModifiedTime(); markLocalModifiedTime(SELECTORS_LAST_MODIFIED_KEY);
       if (typeof triggerWebDAVSyncDelayed === 'function') {
         triggerWebDAVSyncDelayed(5000);
       }
@@ -5116,7 +5209,7 @@
   function extractValidCloudTimes(cloudConfig, trustedNow) {
     const times = []; const limit = trustedNow + WEBDAV_TIME_TOLERANCE;
     if (cloudConfig && typeof cloudConfig === 'object' && !Array.isArray(cloudConfig)) {
-      [cloudConfig.syncedAt, cloudConfig.rulesSyncedAt, cloudConfig.settingsModifiedAt].forEach(v => {
+      [cloudConfig.syncedAt, cloudConfig.rulesSyncedAt, cloudConfig.settingsModifiedAt, cloudConfig.selectorsSyncedAt].forEach(v => {
         if (typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= limit) times.push(v);
       });
     }
@@ -5348,20 +5441,20 @@
     const lines = String(content || '').replace(/^\uFEFF/, '').split('\n'); let config = null; let selectors = null; let rawScriptConfig = null; let rawSelectors = null;
     const headerLineIndexes = new Set();
 
-    for (let i = 0; i < Math.min(lines.length, 50); i++) {
+    for (let i = 0; i < Math.min(lines.length, 10); i++) {
       const line = lines[i]; if (!line.trim()) continue;
       if (line.startsWith('# ScriptConfig:')) {
         const payload = line.substring('# ScriptConfig:'.length).trim(); let parsed = null;
         if (/^[\x7B\x5B]/.test(payload)) {
           try { parsed = JSON.parse(payload); } catch (e) { if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[WebDAV] 配置头解析失败:', e); }
         }
-        if (parsed) { config = parsed; rawScriptConfig = line; headerLineIndexes.add(i); } else if (payload.startsWith('\x7B')) headerLineIndexes.add(i);
+        if (parsed && !config) { config = parsed; rawScriptConfig = line; headerLineIndexes.add(i); } else if (payload.startsWith('\x7B') && !config) headerLineIndexes.add(i);
       } else if (line.startsWith('# Selectors:')) {
         const payload = line.substring('# Selectors:'.length).trim(); let parsed = null;
         if (/^[\x7B\x5B]/.test(payload)) {
           try { parsed = JSON.parse(payload); } catch (e) { if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[WebDAV] 选择器头解析失败:', e); }
         }
-        if (parsed) { selectors = parsed; rawSelectors = line; headerLineIndexes.add(i); } else if (payload.startsWith('\x7B')) headerLineIndexes.add(i);
+        if (parsed && !selectors) { selectors = parsed; rawSelectors = line; headerLineIndexes.add(i); } else if (payload.startsWith('\x7B') && !selectors) headerLineIndexes.add(i);
       } else if (!line.startsWith('#')) {
         break;
       }
@@ -5469,25 +5562,32 @@
     syncedAt = syncedAt || Date.now(); remotePreserved = remotePreserved || {}; let prefix = ''; const syncConfig = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false);
     const syncSelectors = GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false);
 
+    let remoteSelectorsSyncedAt = 0;
+    if (remotePreserved.rawScriptConfig) {
+      try {
+        const parsedRemote = JSON.parse(remotePreserved.rawScriptConfig.substring('# ScriptConfig:'.length));
+        if (parsedRemote && typeof parsedRemote.selectorsSyncedAt === 'number' && Number.isFinite(parsedRemote.selectorsSyncedAt)) remoteSelectorsSyncedAt = parsedRemote.selectorsSyncedAt;
+      } catch (_) {}
+    }
+    const selectorsSyncedAt = syncSelectors ? syncedAt : Math.max(getSelectorsModifiedTime(), remoteSelectorsSyncedAt);
+
     if (syncConfig) {
-      const payload = buildSyncPayload(remotePreserved.settingsModifiedAt ?? getSettingsModifiedTime()); payload.rulesSyncedAt = syncedAt; prefix += '# ScriptConfig:' + JSON.stringify(payload) + '\n';
+      const payload = buildSyncPayload(remotePreserved.settingsModifiedAt ?? getSettingsModifiedTime()); payload.rulesSyncedAt = syncedAt; payload.selectorsSyncedAt = selectorsSyncedAt; prefix += '# ScriptConfig:' + JSON.stringify(payload) + '\n';
     } else if (remotePreserved.rawScriptConfig) {
       let updatedHeader = remotePreserved.rawScriptConfig;
       try {
         const parsed = JSON.parse(updatedHeader.substring('# ScriptConfig:'.length));
         if (parsed && typeof parsed === 'object') {
-          parsed.rulesSyncedAt = syncedAt; updatedHeader = '# ScriptConfig:' + JSON.stringify(parsed);
+          parsed.rulesSyncedAt = syncedAt; parsed.selectorsSyncedAt = selectorsSyncedAt; updatedHeader = '# ScriptConfig:' + JSON.stringify(parsed);
         }
       } catch (_) {}
       prefix += updatedHeader + '\n';
     } else {
-      prefix += '# ScriptConfig:' + JSON.stringify({ syncedAt: 0, rulesSyncedAt: syncedAt }) + '\n';
+      prefix += '# ScriptConfig:' + JSON.stringify({ syncedAt: 0, rulesSyncedAt: syncedAt, selectorsSyncedAt: selectorsSyncedAt }) + '\n';
     }
 
     if (syncSelectors) {
       prefix += '# Selectors:' + JSON.stringify(getUserSelectors()) + '\n';
-    } else if (remotePreserved.rawSelectors) {
-      prefix += remotePreserved.rawSelectors + '\n';
     }
 
     return prefix + content;
@@ -5523,7 +5623,8 @@
       const m = line.match(/^(\s*)(rules|blacklist|whitelist|matches)\s*:\s*\[(.*)\]\s*(?:#.*)?$/i); return m ? { key: m[2].toLowerCase(), payload: m[3], open: false } : null;
     };
     const flowOpenOf = (line) => {
-      const m = line.match(/^(\s*)(rules|blacklist|whitelist|matches)\s*:\s*\[\s*(?:#.*)?$/i); return m ? { key: m[2].toLowerCase(), indent: m[1].length } : null;
+      const m = line.match(/^(\s*)(rules|blacklist|whitelist|matches)\s*:\s*\[(.*)$/i); if (!m || /\]\s*(?:#.*)?$/.test(m[3])) return null;
+      return { key: m[2].toLowerCase(), indent: m[1].length, payload: stripLineComment(m[3]) };
     };
     const flowCloseAt = (from) => {
       for (let j = from; j < lines.length; j++) {
@@ -5602,7 +5703,7 @@
         const close = flowCloseAt(idx + 1);
         if (close) {
           hasSection = true;
-          let payload = lines.slice(idx + 1, close.line).map((l) => l.trim()).filter(Boolean).join('\n');
+          let payload = [flowOpen.payload, ...lines.slice(idx + 1, close.line).map((l) => l.trim()).filter(Boolean)].filter(Boolean).join('\n');
           if (close.prefix) payload = payload ? payload + '\n' + close.prefix : close.prefix;
           for (const part of splitFlowItems(payload)) pushYamlItem(part, flowOpen.key);
           idx = close.line; continue;
