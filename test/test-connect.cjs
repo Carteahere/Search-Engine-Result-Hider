@@ -669,11 +669,13 @@ rules:
   assert('同步-072b(修复2): 损坏 Selectors 行同样剔除且 rawSelectors 置空, 好头不受影响', brokenSel.restLines.join('|') === '*://a.com/*' && brokenSel.rawSelectors === null && brokenSel.config.syncedAt === 1);
 }
 
-// ---- 审查11-C1(待修复): 注释块内形如同步头的用户注释行会覆盖真头并被吞出正文 ----
+// ---- 审查11-C1: 修复回归(首头优先, 伪头保留正文; 头部仅扫描前10行) ----
 {
   const parse2 = new Function(extractFn(src, 'parseSyncHeader') + '\nreturn parseSyncHeader;')();
   const mixed = parse2('# ScriptConfig: {"enabled":true,"syncedAt":9}\n# ScriptConfig: {"enabled":false}\n# 我的分组\n*://a.com/*');
-  assert('审查11-C1(待修复): 后部伪头不应覆盖真头, 且用户注释行应保留在正文(现: 覆盖+吞行并随合并持久化)', mixed.config && mixed.config.enabled === true && mixed.restLines.join('|').includes('ScriptConfig: {"enabled":false}'), { enabled: mixed.config && mixed.config.enabled, rest: mixed.restLines });
+  assert('审查11-C1(已修复): 后部伪头不覆盖真头, 用户注释行保留在正文', mixed.config && mixed.config.enabled === true && mixed.restLines.join('|').includes('ScriptConfig: {"enabled":false}'), { enabled: mixed.config && mixed.config.enabled, rest: mixed.restLines });
+  const late = parse2('# c\n# c\n# c\n# c\n# c\n# c\n# c\n# c\n# c\n# c\n# ScriptConfig: {"enabled":true}\n*://a.com/*');
+  assert('审查11-C1b(已修复): 头部仅扫描前10行, 第11行伪头按注释保留正文', late.config === null && late.rawScriptConfig === null && late.restLines.join('|').includes('ScriptConfig: {"enabled":true}'));
 }
 
 // 网关 200 + JSON/纯文本错误页不被当作规则写入本地, 也不回传云端
@@ -899,7 +901,8 @@ assert('面板-007: 主面板closeHandler与pressHandler均过滤合成事件(is
 assert('面板-008: 主面板外点关闭带按下起点防护且关闭时同步移除监听', src.includes('const closeZoneSelector') && src.includes('window._panelPressHandler') && src.includes("removeEventListener('pointerdown', window._panelPressHandler)"));
 
 // P2-3 修复回归: 引擎自身域名守卫仅拦截新建屏蔽, 被屏蔽结果的删除规则/白名单入口不再被拦截。
-assert('面板-009: 屏蔽按钮的引擎域名守卫位于!isBlocked分支内', /if \(!isBlocked\) \{\s*const currentHost = String\(window\.location\.hostname/.test(src));
+// 修复T: 守卫抽为 isEngineSelfDomain(引擎自家主机拦截, 父域如 toutiao.com 放行), 行为测试见 test-rules.cjs 规则-347~355
+assert('面板-009: 屏蔽按钮的引擎域名守卫位于!isBlocked分支内', /if \(!isBlocked\) \{\s*const targetDomain = String\(domain \|\| ''\)\.toLowerCase\(\);\s*if \(isEngineSelfDomain\(targetDomain\)\)/.test(src) && /function isEngineSelfDomain\(targetDomain\) \{/.test(src));
 
 // 正则/条件内部的 # 不能当作行尾注释参与去重。
 {

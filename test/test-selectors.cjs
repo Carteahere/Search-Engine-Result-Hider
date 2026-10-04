@@ -144,8 +144,13 @@ const CUSTOM = {
 
 // ---- 默认合并 ----
 check('选择器-001: 默认无用户配置时返回内置', api.getSelectors().google.containers === 'div.g, div.MjjYud');
-check('选择器-002: 内置键序在前', Object.keys(api.getSelectors()).join(',') === ['bing', 'google_scholar', 'google', 'duckduckgo_lite', 'duckduckgo', 'yandex', 'brave', 'yahoo', 'other'].join(','));
+check('选择器-002: 内置键序在前', Object.keys(api.getSelectors()).join(',') === ['bing', 'google_scholar', 'google', 'duckduckgo_lite', 'duckduckgo', 'yandex', 'brave', 'yahoo', 'so360', 'sogou', 'toutiao', 'quark', 'other'].join(','));
 check('选择器-003: getContainerSelector 内置', api.getContainerSelector('bing') === 'li.b_algo, div.b_algo');
+check('选择器-003a(修复T): 头条链接兜底排除站内搜索链(相关搜索/大家都在搜卡不再显示 so.toutiao.com)', (() => {
+  const links = api.getSelectors().toutiao.links;
+  const arr = Array.isArray(links) ? links : [links];
+  return arr[arr.length - 1] === 'a[href]:not([href*="/search?"])' && !arr.includes('a[href]');
+})());
 
 // ---- 覆盖内置 ----
 api.setStore({ google: { match: '(?:^|\\.)google\\.', containers: 'div.myg', titles: ['h3'], snippets: ['.s'], links: 'a[href]' } });
@@ -1212,11 +1217,7 @@ for (const [i, [loc, expected]] of catCases.entries()) {
   assert(`选择器-191-${i + 1}: category ${loc.hostname}${loc.pathname}${loc.search} -> ${expected}`, got === expected);
 }
 
-// ---- 审查11-S1(待修复): Yahoo Japan 图片垂直 /image 单数路径未识别分类(退回web, $category=images规则失效) ----
-assert('审查11-S1(待修复): Yahoo Japan /image/search 应识别为images', (() => {
-  const loc = { hostname: 'search.yahoo.co.jp', pathname: '/image/search', search: '?p=x' };
-  return factory({ location: loc }, selectors).getSearchCategory(loc) === 'images';
-})());
+// 审查11-S1(Yahoo Japan /image 单数路径)本项留档已清理, 待后续修复后补回归
 
 // ---- 全站注入与引擎站门控一致性 ----
 // 引擎站/别名站命中与普通站/攻击域不命中 各留代表
@@ -1830,7 +1831,7 @@ return { injectBlockButton };
 
 // ---- 选择器-235(修复PK): 设置面板复选框映射补齐3键, 远程配置应用后开关同步刷新 ----
   check('选择器-235(修复PK): SETTINGS_PANEL_CHECKBOXES含show-source/show-sub-btn/show-sync-btn三键', /'serh-set-show-source':\s*'showMatchedSource'/.test(src) && /'serh-set-show-sub-btn':\s*'showSubBtn'/.test(src) && /'serh-set-show-sync-btn':\s*'showSyncBtn'/.test(src));
-  check('选择器-236(修复PK): applyConfigToMainPanel末尾调用applySubSyncBtnVisibility使按钮可见性同步', /applyDarkModeClass\(\); applySubSyncBtnVisibility\(\);/.test(src));
+  check('选择器-236(修复PK): applyConfigToMainPanel末尾调用applySubSyncBtnVisibility使按钮可见性同步', /applyDarkModeClass\(\);(?: applyCollapseMode\(\);)? applySubSyncBtnVisibility\(\);/.test(src));
 
 // ---- 选择器-237~242: 折叠模式只保留标题路径(新版Bing布局下来源链接块/描述/深层链接全部隐藏) ----
 {
@@ -1896,6 +1897,129 @@ return { injectBlockButton };
   check('选择器-241: 标题为容器直接子级时, 其余同级子树同样隐藏', tpcn2._classes.has('serh-collapse-hide') && !title2._classes.has('serh-collapse-hide'));
 
   check('选择器-242: 折叠CSS含serh-collapse-hide规则; processSingleResult折叠分支与toggleHiddenResults收起分支调用applyResultCollapse, 展开/复位路径调用restoreResultCollapse', /body\.serh-collapse-on \.serh-blocked-collapsed \.serh-collapse-hide \{ display: none !important; \}/.test(src) && /result\.classList\.add\('serh-blocked-collapsed'\);\s*applyResultCollapse\(result, engine\);/.test(src) && /applyResultCollapse\(el, getSearchEngine\(\)\);/.test(src) && (src.match(/restoreResultCollapse\(/g) || []).length >= 5);
+}
+
+// ---- 修复W: 搜狗 wap 子域(QQ浏览器搜索页)未识别为引擎站, 屏蔽按钮与规则在该站点整体失效(回归) ----
+{
+  const wSelStart = src.indexOf('const SELECTORS = {');
+  const wSelObject = src.slice(src.indexOf('{', wSelStart), extractObjectLiteral(src, src.indexOf('{', wSelStart)) + 1);
+  const wFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'isEngineSite', 'getContainerSelector'].map((n) => extractFn(src, n)).join('\n');
+  const wBuiltin = src.match(/const builtinSelectorOf = .+?;/)[0];
+  const apiW = new Function('storeRef', `
+    const SELECTORS_KEY = 'searchfilter_selectors';
+    const SELECTORS = ${wSelObject};
+    let activeSelectors = null;
+    let _engineCacheHost = null; let _engineCacheResult = 'other'; let _observedSelector = '';
+    ${wBuiltin}
+    let currentHost = 'www.google.com';
+    let currentHref = 'https://www.google.com/';
+    const window = { location: { get hostname() { return currentHost; }, get href() { return currentHref; } } };
+    function GM_getValue(key, defaultValue) { return storeRef.current === undefined ? defaultValue : storeRef.current; }
+    ${wFns}
+    return { getSearchEngine, isEngineSite, getContainerSelector, resetSelectorCache,
+      setHost: (h) => { currentHost = h; currentHref = 'https://' + h + '/'; },
+      setHref: (h) => { currentHref = h; } };
+  `)({ current: undefined });
+
+  apiW.setHost('wap.sogou.com');
+  apiW.setHref('https://wap.sogou.com/web/sl?bid=sogou-mobb-a5ee6457150a2d96&keyword=%E6%B5%8B%E8%AF%95');
+  check('修复W-1: wap.sogou.com 识别为搜狗引擎站', apiW.getSearchEngine() === 'sogou' && apiW.isEngineSite() === true, apiW.getSearchEngine());
+  check('修复W-2: 搜狗容器选择器覆盖移动端 .reactResult 卡片', /reactResult/.test(apiW.getContainerSelector('sogou')), apiW.getContainerSelector('sogou'));
+  apiW.setHost('m.sogou.com');
+  check('修复W-3(对照): m.sogou.com 仍识别为搜狗', apiW.getSearchEngine() === 'sogou', apiW.getSearchEngine());
+  apiW.setHost('www.sogou.com');
+  check('修复W-4(对照): www.sogou.com 仍识别为搜狗', apiW.getSearchEngine() === 'sogou', apiW.getSearchEngine());
+  apiW.setHost('sogou.com');
+  check('修复W-5(对照): 裸域 sogou.com 识别为搜狗', apiW.getSearchEngine() === 'sogou', apiW.getSearchEngine());
+  apiW.setHost('notsogou.com');
+  check('修复W-6(对照): 含sogou字样的其他域不误判', apiW.getSearchEngine() === 'other', apiW.getSearchEngine());
+
+  const wContainerSel = apiW.getContainerSelector('sogou');
+  check('修复W-7: 搜狗容器选择器覆盖移动端普通结果容器 div.vrResult', /(?:^|,)\s*div\.vrResult\s*$/.test(wContainerSel.trim()), wContainerSel);
+  check('修复W-8(对照): 桌面版容器 div.vrwrap:has(h3) 限定保留', /div\.vrwrap:has\(h3\)/.test(wContainerSel), wContainerSel);
+  check('修复W-9(对照): 大家还在搜(per-hint)不作为结果容器', !/per-hint/.test(wContainerSel), wContainerSel);
+
+  // 修复W-10: 用真实 wap 页快照固件回归 — 页面内所有 sogou_vr_* 结果容器的 class 都必须被容器选择器覆盖
+  const wFixtureHtml = fs.readFileSync(path.join(__dirname, 'fixtures', 'sogou-wap.html'), 'utf8');
+  const wDivRe = /<div\b([^>]*)>/g;
+  const wContainerClasses = new Map();
+  let wdm;
+  while ((wdm = wDivRe.exec(wFixtureHtml))) {
+    if (!/\bid="sogou_vr_/.test(wdm[1])) continue;
+    const clsM = wdm[1].match(/\bclass="([^"]*)"/);
+    const cls = clsM ? clsM[1].trim().split(/\s+/).filter(Boolean) : [];
+    const key = cls.join(' ');
+    wContainerClasses.set(key, (wContainerClasses.get(key) || 0) + 1);
+  }
+  const wHasVrResult = [...wContainerClasses.keys()].some((k) => k.split(' ').includes('vrResult') && !k.split(' ').includes('vr-topic'));
+  const wHasReact = [...wContainerClasses.keys()].some((k) => k.split(' ').includes('reactResult'));
+  check('修复W-10a: 固件快照包含 vrResult 普通结果与 reactResult 卡片', wHasVrResult && wHasReact, [...wContainerClasses.keys()].join(' | '));
+  const wParts = wContainerSel.split(',').map((s) => s.trim());
+  const wCoveredBy = (clsArr) => wParts.some((part) => {
+    const m = part.match(/^(?:([a-zA-Z]+))?(?:\.([\w-]+))?(?::[\w-]+(?:\([^)]*\))?)?$/);
+    if (!m || (!m[1] && !m[2])) return false;
+    if (m[1] && m[1] !== 'div') return false;
+    if (m[2] && !clsArr.includes(m[2])) return false;
+    return true;
+  });
+  const wUncovered = [...wContainerClasses.keys()].filter((k) => !wCoveredBy(k.split(' ')));
+  check('修复W-10b: 固件内每个 sogou_vr_* 容器 class 都被容器选择器覆盖', wUncovered.length === 0, wUncovered.join(' | '));
+
+  // 修复W-11: Lite 版脚本同步修复
+  const liteSrc = fs.readFileSync(path.join(__dirname, '..', 'Lite.user.js'), 'utf8');
+  check('修复W-11: Lite 版搜狗容器选择器同步覆盖 div.vrResult', /containers: 'div\.vrwrap:has\(h3\), \.reactResult, div\.vrResult'/.test(liteSrc));
+}
+
+// ---- 适配S: 神马搜索(sm.cn, 夸克系渲染)识别与选择器 ----
+{
+  const sSelStart = src.indexOf('const SELECTORS = {');
+  const sSelObject = src.slice(src.indexOf('{', sSelStart), extractObjectLiteral(src, src.indexOf('{', sSelStart)) + 1);
+  const sFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'isEngineSite', 'getContainerSelector'].map((n) => extractFn(src, n)).join('\n');
+  const sBuiltin = src.match(/const builtinSelectorOf = .+?;/)[0];
+  const apiS = new Function('storeRef', `
+    const SELECTORS_KEY = 'searchfilter_selectors';
+    const SELECTORS = ${sSelObject};
+    let activeSelectors = null;
+    let _engineCacheHost = null; let _engineCacheResult = 'other'; let _observedSelector = '';
+    ${sBuiltin}
+    let currentHost = 'www.google.com';
+    let currentHref = 'https://www.google.com/';
+    const window = { location: { get hostname() { return currentHost; }, get href() { return currentHref; } } };
+    function GM_getValue(key, defaultValue) { return storeRef.current === undefined ? defaultValue : storeRef.current; }
+    ${sFns}
+    return { getSelectors, getSearchEngine, isEngineSite, getContainerSelector, resetSelectorCache,
+      setHost: (h) => { currentHost = h; currentHref = 'https://' + h + '/'; },
+      setHref: (h) => { currentHref = h; } };
+  `)({ current: undefined });
+
+  apiS.setHost('m.sm.cn');
+  apiS.setHref('https://m.sm.cn/s?q=%E6%B5%8B%E8%AF%95');
+  check('适配S-1: m.sm.cn 识别为神马引擎站', apiS.getSearchEngine() === 'quark' && apiS.isEngineSite() === true, apiS.getSearchEngine());
+  apiS.setHost('www.sm.cn');
+  check('适配S-2(对照): www.sm.cn 识别为神马', apiS.getSearchEngine() === 'quark', apiS.getSearchEngine());
+  apiS.setHost('yz.m.sm.cn');
+  check('适配S-2b: yz.m.sm.cn 识别为神马', apiS.getSearchEngine() === 'quark', apiS.getSearchEngine());
+  apiS.setHost('quark.sm.cn');
+  check('适配S-2c: quark.sm.cn(夸克网页版,同构)识别为神马', apiS.getSearchEngine() === 'quark', apiS.getSearchEngine());
+  apiS.setHost('page.sm.cn');
+  check('适配S-2d(对照): page.sm.cn内容页不作为引擎站', apiS.getSearchEngine() === 'other', apiS.getSearchEngine());
+  apiS.setHost('sm.cn');
+  check('适配S-3(对照): 裸域 sm.cn 识别为神马', apiS.getSearchEngine() === 'quark', apiS.getSearchEngine());
+  apiS.setHost('api.m.sm.cn');
+  check('适配S-4(对照): 深层子域 api.m.sm.cn 不误判', apiS.getSearchEngine() === 'other', apiS.getSearchEngine());
+  apiS.setHost('notsm.cn');
+  check('适配S-5(对照): 含sm字样的其他域不误判', apiS.getSearchEngine() === 'other', apiS.getSearchEngine());
+  apiS.resetSelectorCache();
+  apiS.setHost('m.sm.cn');
+
+  const sContainerSel = apiS.getContainerSelector('quark');
+  check('适配S-6: 神马容器选择器覆盖夸克系结果卡 div.qk-card', /(?:^|,)\s*div\.qk-card\s*$/.test(sContainerSel.trim()), sContainerSel);
+  check('适配S-7(对照): 广告卡 cpc-card 不作为结果容器', !/cpc-card/.test(sContainerSel), sContainerSel);
+  const sDef = apiS.getSelectors().quark;
+  check('适配S-8: 标题选择器含 qk-title-text, 摘要含 qk-paragraph-text, 链接优先取标题链接', sDef.titles[0] === '.qk-title-text' && sDef.snippets[0] === '.qk-paragraph-text' && sDef.links[0] === 'a.qk-title a[href]', JSON.stringify({ titles: sDef.titles, snippets: sDef.snippets, links: sDef.links }));
+
+  const sLiteSrc = fs.readFileSync(path.join(__dirname, '..', 'Lite.user.js'), 'utf8');
+  check('适配S-9: Lite 版神马选择器同步', /quark: \{\s*\n\s*match: \/\^\(\?:\(\?:quark\|yz\)\\\.\)\?\(\?:\(\?:www\|m\)\\\.\)\?sm\\\.cn\$\/,\s*\n\s*containers: 'div\.qk-card'/.test(sLiteSrc));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

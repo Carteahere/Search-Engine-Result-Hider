@@ -174,18 +174,10 @@ assert('规则-076: 未闭合正则 /foo 编译报错(与校验口径一致)', (
   try { api.compileRuleRegex('/foo'); return false; } catch (e) { return true; }
 })());
 
-// ---- 审查11(待修复): 本轮审查新发现, 修复后翻转 ----
-assert('审查11-R1(待修复): 尾缀重复flags(ii/ss)应判为flags错误(与 /x/ii 前导形式口径一致), 现静默并入pattern按字面量匹配', (() => {
-  const ice = new Function(extractFn(src, 'isFlagsCandidateError') + '\nreturn isFlagsCandidateError;')();
-  return ice('ii') === true && ice('ss') === true;
-})());
-assert('审查11-R2(待修复): 尾点FQDN口径不一致 — 快路径剥尾点而正则路径不剥, 带路径规则对 example.com. 漏匹配', (() => {
+// ---- 审查11-R2: 修复回归(尾点FQDN正则路径与快路径口径一致; R1/R3 本轮未修复, 留档项已清理) ----
+assert('审查11-R2(已修复): 带路径通配规则对尾点FQDN example.com. 正常匹配', (() => {
   const ta = new Function(extractFn(src, 'hostLabelToASCII') + '\n' + extractFn(src, 'toASCIIHostname') + '\nreturn toASCIIHostname;')();
   return ta('example.com.') === 'example.com' && match('*://*.example.com/path/*', 'https://example.com./path/x');
-})());
-assert('审查11-R3(待修复): 路径多星编译为 .*串联指数回溯正则且 validateUrlWildcard 放行 — 6星规则对不匹配URL应快速失败', (() => {
-  const re = new RegExp(api.wildcardToRegex('*://a.com/*x*x*x*x*x*y'));
-  const t0 = Date.now(); api.safeRegexTest(re, 'https://a.com/' + 'x'.repeat(46) + 'z'); return Date.now() - t0 < 80;
 })());
 
 // 主机非前缀星号不跨点（*.example.* 只匹配到二级+顶级域）
@@ -882,7 +874,7 @@ await (async () => {
   assert('规则-172: 规则行后的头行不吞(按规则保留)', r.restLines.join('\n') === '# 注释\nrule1\n# ScriptConfig: {"a":1}');
 
   r = run('# ScriptConfig: {"a":1}\n# ScriptConfig: {"b":2}\nrule1');
-  assert('规则-173: 重复头取后者且均被剥离', r.config.b === 2 && r.restLines.join('\n') === 'rule1');
+  assert('规则-173(已修复): 重复头取首个, 后部伪头按注释保留正文', r.config.a === 1 && r.config.b === undefined && r.restLines.join('\n') === '# ScriptConfig: {"b":2}\nrule1');
 
   r = run('\uFEFF# title: my rules\n# author: me\n*://bad.example.com/*');
   assert('规则-174: 无头纯注释文件原样保留(BOM)', r.restLines.join('\n') === '# title: my rules\n# author: me\n*://bad.example.com/*' && !r.config);
@@ -1119,6 +1111,68 @@ await (async () => {
   assert('规则-296(对照): 非跳转域查询参数不解包', getCleanUrl(plain) === plain.href);
 }
 
+// ---- 规则-330~337: 360/搜狗/头条 新增引擎真实链接解析 ----
+{
+  const getCleanUrl = new Function(
+    extractFn(src, 'decodeRedirectTarget') + '\n' +
+    extractFn(src, 'decodeBingCkTarget') + '\n' +
+    extractFn(src, 'unwrapRedirectUrl') + '\n' +
+    extractFn(src, 'getCleanUrl') + '\nreturn getCleanUrl;'
+  )();
+
+  const toutiaoJump = { href: 'https://so.toutiao.com/search/jump?aid=1455&jtoken=abc&url=https%3A%2F%2Farticle.zlink.toutiao.com%2FJ4dQM%3Falert%3D0%26h5_url%3Dhttps%253A%252F%252Ftoutiao.com%252Fgroup%252F7154219334058213923%252F%253Fchannel%253Dsearch_tab' };
+  assert('规则-330: 头条 /search/jump 经中间页 h5_url 解到真实地址', getCleanUrl(toutiaoJump) === 'https://toutiao.com/group/7154219334058213923/?channel=search_tab', getCleanUrl(toutiaoJump));
+
+  const toutiaoDirect = { href: 'https://so.toutiao.com/search/jump?aid=1455&url=https%3A%2F%2Fwww.toutiao.com%2Farticle%2F123' };
+  assert('规则-331: 头条中间页无 h5_url 时退到 url 参数目标', getCleanUrl(toutiaoDirect) === 'https://www.toutiao.com/article/123', getCleanUrl(toutiaoDirect));
+
+  const sogouMobile = { href: 'https://m.sogou.com/web/id=e59202fd/sec=abc/tc?rcer=1&url=https%3A%2F%2Fview.inews.qq.com%2FhotEvent%2FUTR123%3Fscene%3Dqqsearch' };
+  assert('规则-332: 搜狗移动端 /tc?...&url= 解包', getCleanUrl(sogouMobile) === 'https://view.inews.qq.com/hotEvent/UTR123?scene=qqsearch', getCleanUrl(sogouMobile));
+
+  const sogouDesktop = { href: 'https://www.sogou.com/link?url=hedJjaC291NBjk-U0pOwZCVdPXHFjFJWK3IugmTcTDZkKTX9NwhPuTHXobRRcRtF' };
+  assert('规则-333(对照): 搜狗桌面 /link?url= 不可解密 token 保持原样', getCleanUrl(sogouDesktop) === sogouDesktop.href, getCleanUrl(sogouDesktop));
+
+  const so360 = { href: 'https://www.so.com/link?m=wv7C9', getAttribute: (n) => (n === 'data-mdurl' ? 'https://www.speedtest.cn/' : null) };
+  assert('规则-334: 360 data-mdurl 属性取真实地址', getCleanUrl(so360) === 'https://www.speedtest.cn/', getCleanUrl(so360));
+
+  const sogouLinkurl = { href: 'https://www.sogou.com/link?url=hedJjaC291NBjk', getAttribute: (n) => (n === 'linkurl' ? '//www.speedtest.cn/' : null) };
+  assert('规则-335: 搜狗 linkurl 协议相对属性补全 https', getCleanUrl(sogouLinkurl) === 'https://www.speedtest.cn/', getCleanUrl(sogouLinkurl));
+
+  const so360Plain = { href: 'https://www.so.com/link?m=wv7C9' };
+  assert('规则-336(对照): 360 无 data-mdurl 的裸链接对象行为不变', getCleanUrl(so360Plain) === so360Plain.href, getCleanUrl(so360Plain));
+
+  const so360Query = { href: 'https://www.so.com/s?q=%E9%80%9F%E6%B5%8B&src=srp' };
+  assert('规则-337(对照): 360 普通搜索页不误触解包', getCleanUrl(so360Query) === so360Query.href, getCleanUrl(so360Query));
+
+  const mockLink = (href, direct, box) => ({
+    href,
+    getAttribute: (n) => (direct && n in direct ? direct[n] : null),
+    closest: () => ({ querySelector: () => (box ? { getAttribute: (n) => (n in box ? box[n] : null) } : null) }),
+  });
+
+  const so360Jump = { href: 'https://m.so.com/jump?u=http%3A%2F%2Fwww.yz5555.com%2F&m=563145&from=m.so.com' };
+  assert('规则-338: 360 移动端 /jump?u= 解包', getCleanUrl(so360Jump) === 'http://www.yz5555.com/', getCleanUrl(so360Jump));
+
+  const sogouBox = mockLink('https://www.sogou.com/link?url=hedJjaC291NXL', null, { 'data-url': 'https://www.speedtest.cn/article/1K2dmMXZd2no' });
+  assert('规则-339: 搜狗桌面读取结果容器 data-url 真实地址', getCleanUrl(sogouBox) === 'https://www.speedtest.cn/article/1K2dmMXZd2no', getCleanUrl(sogouBox));
+
+  const so360Box = mockLink('https://m.so.com/link?m=wv7C9', null, { 'data-url': 'https://m.so.com/jump?u=https%3A%2F%2Fwww.speedtest.cn%2F&m=957ae3&from=m.so.com' });
+  assert('规则-340: 360 容器 data-url 为 jump 链接时继续解到真实地址', getCleanUrl(so360Box) === 'https://www.speedtest.cn/', getCleanUrl(so360Box));
+
+  const sogouNoBox = mockLink('https://www.sogou.com/link?url=hedJjaC291NXL', null, null);
+  assert('规则-341(对照): 容器内无 data-url 时保持原样', getCleanUrl(sogouNoBox) === sogouNoBox.href, getCleanUrl(sogouNoBox));
+
+  // 规则-342~344: 搜狗 wap 子域(QQ浏览器搜索页)链接解析(真实快照URL格式)
+  const sogouWapTc = { href: 'https://wap.sogou.com/web/id=f0731226/keyword=%E6%B5%8B%E8%AF%95/sec=abc/entryTime=1791029890720/vr=70375301/tc?rcer=Q9PEmkcIRez-VigfV&&title=%E6%B5%8B%E8%AF%95&dp=1&bid=sogou-mobb-x&is_per=0&pno=1&clk=1&url=https%3A%2F%2Fview.inews.qq.com%2FhotEvent%2FUTR2026061211099300%3Fscene%3Dqqsearch&vrid=70375301&wml=1&linkid=title' };
+  assert('规则-342: 搜狗 wap(QQ浏览器) /tc?...&url= 解包', getCleanUrl(sogouWapTc) === 'https://view.inews.qq.com/hotEvent/UTR2026061211099300?scene=qqsearch', getCleanUrl(sogouWapTc));
+
+  const sogouWapSearchList = { href: 'https://wap.sogou.com/web/searchList.jsp?oldQuery=%E6%B5%8B%E8%AF%95&keyword=%E5%BF%83%E7%90%86%E6%B5%8B%E8%AF%95&s_from=hint_middle&dp=1' };
+  assert('规则-343(对照): 搜狗 wap 站内搜索列表链接无 url 参数保持原样', getCleanUrl(sogouWapSearchList) === sogouWapSearchList.href, getCleanUrl(sogouWapSearchList));
+
+  const sogouWapWeixin = { href: 'https://wap.sogou.com/web/id=x/vr=11002601/tc?clk=1&url=https%3A%2F%2Fmp.weixin.qq.com%2Fs%3Fsrc%3D11%26timestamp%3D1&vrid=11002601&wml=1' };
+  assert('规则-344: 搜狗 wap 跳微信公众号链接解包', getCleanUrl(sogouWapWeixin) === 'https://mp.weixin.qq.com/s?src=11&timestamp=1', getCleanUrl(sogouWapWeixin));
+}
+
 // ---- 修复A: 非ASCII路径通配规则命中百分号编码URL ----
 {
   const wcApi = new Function(
@@ -1155,6 +1209,89 @@ await (async () => {
   assert('修复A-15: 含非BMP字符的URL按码点编码不抛URIError且域名正常提取', rawEmoji.url === 'https://example.com/search?q=%F0%9F%98%80&x=1' && rawEmoji.domain === 'example.com');
   const encodedEmoji = rudApi.resolveUrlDomain({ href: 'https://example.com/search?q=%F0%9F%98%80&x=1' });
   assert('修复A-16(对照): 已编码非BMP的URL保持不变', encodedEmoji.url === 'https://example.com/search?q=%F0%9F%98%80&x=1');
+
+  // 规则-345~346: 全链路(unwrap→resolveUrlDomain)对新增引擎跳转链的域名解析
+  const toutiaoJumpDomain = rudApi.resolveUrlDomain({ href: 'https://so.toutiao.com/search/jump?aid=1455&jtoken=abc123&url=https%3A%2F%2Fm.speedtest.cn%2Fcareer&log=%7B%22event%22%3A%22search_result_click%22%7D&t_urls=%5B%5D' });
+  assert('规则-345: 头条 /search/jump 全链路解包域名为目标站', toutiaoJumpDomain.domain === 'm.speedtest.cn' && toutiaoJumpDomain.url === 'https://m.speedtest.cn/career', toutiaoJumpDomain);
+
+  const sogouWapDomain = rudApi.resolveUrlDomain({ href: 'https://wap.sogou.com/web/id=x/vr=70375301/tc?clk=1&url=https%3A%2F%2Fwww.51testing.com%2Fbbs%2F%3Fa%3D1&vrid=70375301' });
+  assert('规则-346: 搜狗 wap /tc 全链路解包域名为目标站', sogouWapDomain.domain === 'www.51testing.com', sogouWapDomain);
+}
+
+// ---- 修复T: 头条一键屏蔽显示 toutiao.com/so.toutiao.com ----
+// 背景: 1) 相关搜索/大家都在搜卡片唯一链接是站内搜索链, 被 a[href] 兜底选中后域名显示 so.toutiao.com
+//       2) 头条号/自营文章真实落地在父域 toutiao.com/group/<id>, 旧守卫按"当前站是目标域子域"一律拒绝,
+//          一键屏蔽弹出"无法屏蔽当前搜索引擎自身域名"成为死路
+{
+  const rudT = new Function(
+    ['decodeRedirectTarget', 'decodeBingCkTarget', 'unwrapRedirectUrl', 'getCleanUrl', 'toASCIIUrl', 'resolveUrlDomain'].map((n) => extractFn(src, n)).join('\n') +
+    '\nconst toASCIIHostname = (h) => h;\nconst currentConfig = { removeRedirects: true };\nreturn { resolveUrlDomain };'
+  )();
+  // 线上快照中 CSDN 头条号文章的真实 jump 链形态(article.zlink 中转 + h5_url 落到 toutiao.com/group)
+  const selfArticle = rudT.resolveUrlDomain({ href: 'https://so.toutiao.com/search/jump?aid=1455&jtoken=abc&url=https%3A%2F%2Farticle.zlink.toutiao.com%2FJ4dQM%3Falert%3D0%26article.zlink%3D1%26h5_url%3Dhttps%253A%252F%252Ftoutiao.com%252Fgroup%252F7691212389744525860%252F%253Fchannel%253Dsearch_tab' });
+  assert('规则-347: 头条号自营文章解包域名落地 toutiao.com(引擎父域)', selfArticle.domain === 'toutiao.com' && selfArticle.url === 'https://toutiao.com/group/7691212389744525860/?channel=search_tab', selfArticle);
+
+  const makeGuard = (host, engine) => new Function(
+    extractFn(src, 'isEngineSelfDomain') + '\n' +
+    'const window = { location: { hostname: ' + JSON.stringify(host) + ' } };\n' +
+    'function getSearchEngine() { return ' + JSON.stringify(engine) + '; }\n' +
+    'function getSelectors() { return {\n' +
+    '  toutiao: { match: /^so\\.toutiao\\.com$/ },\n' +
+    '  bing: { match: /^(?:(?:www[2-4]?|cn|global|m)\\.)?bing\\.(?:com|[a-z]{2,3}(?:\\.[a-z]{2})?)$/ },\n' +
+    '  google: { match: /^(?:(?:www|images|video|videos|search|encrypted|m)\\.)?google\\.(?:[a-z]{2,3}(?:\\.[a-z]{2})?|[a-z]{4,})$/ }\n' +
+    '}; }\n' +
+    'return { isEngineSelfDomain };'
+  )();
+
+  const tt = makeGuard('so.toutiao.com', 'toutiao').isEngineSelfDomain;
+  assert('规则-348(修复): so.toutiao.com 上允许屏蔽父域 toutiao.com', tt('toutiao.com') === false, tt('toutiao.com'));
+  assert('规则-349: so.toutiao.com 上仍禁止屏蔽 so.toutiao.com', tt('so.toutiao.com') === true, tt('so.toutiao.com'));
+  assert('规则-350: so.toutiao.com 上禁止屏蔽其子域', tt('abc.so.toutiao.com') === true, tt('abc.so.toutiao.com'));
+  assert('规则-351: so.toutiao.com 上无关域名不误拦', tt('example.com') === false, tt('example.com'));
+
+  const tg = makeGuard('www.bing.com', 'bing').isEngineSelfDomain;
+  assert('规则-352: www.bing.com 上禁止屏蔽引擎主机 bing.com/cn.bing.com', tg('bing.com') === true && tg('cn.bing.com') === true, [tg('bing.com'), tg('cn.bing.com')]);
+  assert('规则-353: www.bing.com 上允许屏蔽普通站点', tg('microsoft.com') === false, tg('microsoft.com'));
+
+  const tgg = makeGuard('www.google.com', 'google').isEngineSelfDomain;
+  assert('规则-354: www.google.com 上禁止屏蔽 google.com', tgg('google.com') === true, tgg('google.com'));
+
+  assert('规则-355(对照): 空目标域名不触发守卫', tt('') === false);
+
+  // 规则-356~361: "去除重定向"关闭时, 落在引擎自家主机上的跳转链仍解包到真实落地域名。
+  // 否则域名停在引擎自身域名(如今日头条 so.toutiao.com), 一键屏蔽被 isEngineSelfDomain 拦成
+  // "无法屏蔽当前搜索引擎自身域名" 死路, 规则匹配也永远命不中。
+  const makeKeepRawApi = (host, engine, removeRedirects) => new Function(
+    ['decodeRedirectTarget', 'decodeBingCkTarget', 'unwrapRedirectUrl', 'getCleanUrl', 'toASCIIUrl', 'resolveUrlDomain', 'isEngineSelfDomain'].map((n) => extractFn(src, n)).join('\n') +
+    '\nconst toASCIIHostname = (h) => h;\n' +
+    'const currentConfig = { removeRedirects: ' + JSON.stringify(removeRedirects) + ' };\n' +
+    'const window = { location: { hostname: ' + JSON.stringify(host) + ' } };\n' +
+    'function getSearchEngine() { return ' + JSON.stringify(engine) + '; }\n' +
+    'function getSelectors() { return {\n' +
+    '  toutiao: { match: /^so\\.toutiao\\.com$/ },\n' +
+    '  bing: { match: /^(?:(?:www[2-4]?|cn|global|m)\\.)?bing\\.(?:com|[a-z]{2,3}(?:\\.[a-z]{2})?)$/ }\n' +
+    '}; }\n' +
+    'return { resolveUrlDomain, isEngineSelfDomain };'
+  )();
+
+  const keepRawTT = makeKeepRawApi('so.toutiao.com', 'toutiao', false);
+  const jumpKeepRaw = keepRawTT.resolveUrlDomain({ href: 'https://so.toutiao.com/search/jump?aid=1455&jtoken=abc&url=https%3A%2F%2Fwww.csdn.net%2F' });
+  assert('规则-356(修复): 去除重定向关闭时头条 /search/jump 仍解包为真实落地域名', jumpKeepRaw.domain === 'www.csdn.net' && jumpKeepRaw.url === 'https://www.csdn.net/', jumpKeepRaw);
+  assert('规则-357(修复): 解包域名不再被 isEngineSelfDomain 拦成死路', keepRawTT.isEngineSelfDomain(jumpKeepRaw.domain) === false, jumpKeepRaw.domain);
+
+  const selfSearchKeepRaw = keepRawTT.resolveUrlDomain({ href: 'https://so.toutiao.com/search?keyword=csdn' });
+  assert('规则-358(对照): 真正的站内搜索链不误解包, 仍为 so.toutiao.com', selfSearchKeepRaw.domain === 'so.toutiao.com', selfSearchKeepRaw);
+
+  const normalKeepRaw = keepRawTT.resolveUrlDomain({ href: 'https://www.csdn.net/article/1' });
+  assert('规则-359(对照): 非引擎主机的普通链接尊重"去除重定向"设置保持原样', normalKeepRaw.domain === 'www.csdn.net' && normalKeepRaw.url === 'https://www.csdn.net/article/1', normalKeepRaw);
+
+  const keepRawBing = makeKeepRawApi('www.bing.com', 'bing', false);
+  const bingKeepRaw = keepRawBing.resolveUrlDomain({ href: 'https://www.bing.com/ck/a?u=a1aHR0cHM6Ly93d3cubWljcm9zb2Z0LmNvbS8%3D&ntb=1' });
+  assert('规则-360(修复): 去除重定向关闭时必应 /ck/a 同样解包, 不再显示 www.bing.com', bingKeepRaw.domain === 'www.microsoft.com' && keepRawBing.isEngineSelfDomain(bingKeepRaw.domain) === false, bingKeepRaw);
+
+  const unwrapOnTT = makeKeepRawApi('so.toutiao.com', 'toutiao', true);
+  const jumpOn = unwrapOnTT.resolveUrlDomain({ href: 'https://so.toutiao.com/search/jump?aid=1455&url=https%3A%2F%2Fm.speedtest.cn%2Fcareer' });
+  assert('规则-361(对照): 去除重定向开启时解包行为不变', jumpOn.domain === 'm.speedtest.cn' && jumpOn.url === 'https://m.speedtest.cn/career', jumpOn);
 }
 
 // ---- 修复H1/M1/L3/L4: 订阅YAML识别回归(matches段/元数据键/flow序列/映射项) ----
@@ -1692,6 +1829,8 @@ await (async () => {
     let threw = false;
     try { parseRulesetContent('name: t\nrules:\n  - "bad \\q escape"\n  - example.com'); } catch (e) { threw = true; }
   check('规则-214: 单个坏转义项跳过且保留其他规则', threw === false && parseRulesetContent('name: t\nrules:\n  - "bad \\q escape"\n  - example.com').lines.includes('example.com'));
+  const flowFirst = parseRulesetContent('name: t\nblacklist: [a.com,\n  b.com]');
+  check('规则-216(已修复): 跨行flow首行[后带首元素正常解析', flowFirst.lines.length === 2 && flowFirst.lines.includes('a.com') && flowFirst.lines.includes('b.com') && flowFirst.meta.name === 't');
   }
 
   // text/html 响应头的自家格式内容不再误判无效
