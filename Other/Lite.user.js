@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.6.0
+// @version      8.6.1
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了所有订阅/webdav相关内容。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了所有订阅/webdav相关内容。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version has removed all content related to Rule Subscriptions and WebDAV.
@@ -127,6 +127,34 @@
       titles: ['h3', '.s-title', 'h2 a', 'a h2', '.b_title', '.title'],
       snippets: ['.sw-Card__description', '.sw-Card__snippet', '.sw-Text__body', 'p', '.b_caption p', '.b_snippet', '.b_paractl p'],
       links: ['h3 a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
+    },
+    so360: {
+      match: /^(?:www\.|m\.)?so\.com$/,
+      containers: 'li.res-list, div.res-list',
+      titles: ['h3.res-title a', 'h3 a', '.res-title', '.g-title a', '.g-title'],
+      snippets: ['.res-desc', '.mh-desc', '.summary'],
+      links: ['h3 a[href]', 'a.alink[href]', '.g-linkinfo a[href]', 'a[href]'],
+    },
+    sogou: {
+      match: /^(?:www\.|m\.|wap\.)?sogou\.com$/,
+      containers: 'div.vrwrap:has(h3), .reactResult, div.vrResult',
+      titles: ['h3.vr-title a', '.vr-title a', 'a[class*="saTitle"]', '.vr-title', 'h3.vr-tit', 'h3 a', 'h3'],
+      snippets: ['.space-txt', '.star-wiki', '.str_info', 'p.sa-text-clamp3', '[class*="saText"]'],
+      links: ['h3.vr-title a[href]', '.vr-title a[href]', 'a[class*="saTitle"][href]', 'h3 a[href]', 'a.citeLinkClass[href]', 'a[href]'],
+    },
+    toutiao: {
+      match: /^so\.toutiao\.com$/,
+      containers: '.result-content',
+      titles: ['.l-card-title a', '.l-card-title', '.cs-header a', 'a[href*="/search/jump"]'],
+      snippets: ['.l-paragraph', '.cs-card-content .text-regular', '.l-source', '.cs-source'],
+      links: ['a.l-card-title[href]', '.cs-header a[href]', 'a[href*="/search/jump"]', 'a[href]:not([href*="/search?"])'],
+    },
+    quark: {
+      match: /^(?:(?:quark|yz)\.)?(?:(?:www|m)\.)?sm\.cn$/,
+      containers: 'div.qk-card',
+      titles: ['.qk-title-text', '.qk-title', 'a.qk-link-wrapper'],
+      snippets: ['.qk-paragraph-text', '.qk-paragraph'],
+      links: ['a.qk-title a[href]', '.qk-title a[href]', 'a.qk-link-wrapper[href]', 'a[href]'],
     },
     other: {
       containers: '',
@@ -1446,6 +1474,7 @@
 
     function escapeHostPart(part) {
       const { host, port, hasPort } = splitHostAndPort(part); const escapedHost = escapeWildcardPart(host, true);
+      const dotTolerant = host.endsWith('*') ? '' : '\\.?';
       if (hasPort) {
         let out = '';
         for (let i = 0; i < port.length; i++) {
@@ -1458,9 +1487,9 @@
           if ('.+^${}()|[]\\'.includes(ch)) { out += '\\' + ch; continue; }
           out += ch;
         }
-        return escapedHost + out;
+        return escapedHost + dotTolerant + out;
       }
-      return escapedHost + '(?::\\d+)?';
+      return escapedHost + dotTolerant + '(?::\\d+)?';
     }
 
     let prefix = '^'; let hostIsFirst = false;
@@ -1892,7 +1921,8 @@
       /(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) ||
       /(?:^|\.)(?:duckduckgo\.com|ddg\.gg)$/i.test(host) ||
       /(?:^|\.)(?:[a-z]{2,6}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) ||
-      /(?:^|\.)(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i.test(host)
+      /(?:^|\.)(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i.test(host) ||
+      /(?:^|\.)(?:so\.com|sogou\.com|toutiao\.com)$/i.test(host)
       );
     };
     const seen = new Set();
@@ -1921,6 +1951,17 @@
               for (const p of ['u', 'url', 'target', 'dest', 'dst', 'r']) { if (tryParam(p)) break; }
             }
           }
+        } else if (/(?:^|\.)toutiao\.com$/i.test(host) && /^\/search\/jump\/?$/i.test(path)) {
+          next = decodeRedirectTarget(urlObj.searchParams.get('url'));
+          if (next) {
+            try {
+              const inner = new URL(next); const h5 = /(?:^|\.)toutiao\.com$/i.test(inner.hostname) ? inner.searchParams.get('h5_url') : ''; if (h5) next = decodeRedirectTarget(h5) || next;
+            } catch (_) {}
+          }
+        } else if (/(?:^|\.)so\.com$/i.test(host) && /^\/jump\/?$/i.test(path)) {
+          next = decodeRedirectTarget(urlObj.searchParams.get('u'));
+        } else if (/(?:^|\.)(?:so\.com|sogou\.com)$/i.test(host)) {
+          next = decodeRedirectTarget(urlObj.searchParams.get('url'));
         }
       } catch (_) {}
       if (!next || next === url) return url; let nextHost = '';
@@ -1931,11 +1972,38 @@
   }
 
   function getCleanUrl(link) {
-    if (!link || !link.href) return ''; return unwrapRedirectUrl(link.href);
+    if (!link || !link.href) return '';
+    let attr = '';
+    if (typeof link.getAttribute === 'function') {
+      attr = link.getAttribute('data-mdurl') || link.getAttribute('data-url') || link.getAttribute('linkurl') || '';
+      if (!attr) {
+        try {
+          const box = typeof link.closest === 'function' ? link.closest('.res-list, .vrwrap') : null;
+          const el = box && typeof box.querySelector === 'function' ? box.querySelector('[data-mdurl], [data-url]') : null;
+          if (el && typeof el.getAttribute === 'function') attr = el.getAttribute('data-mdurl') || el.getAttribute('data-url') || '';
+        } catch (_) {}
+      }
+    }
+    if (attr) attr = /^\/\/\S/.test(String(attr)) ? 'https:' + String(attr) : String(attr);
+    if (/^https?:\/\/\S+$/i.test(attr) && attr !== link.href) return unwrapRedirectUrl(attr);
+    return unwrapRedirectUrl(link.href);
   }
 
   function resolveUrlDomain(link) {
-    const rawUrl = currentConfig.removeRedirects === false ? (link && link.href) || '' : getCleanUrl(link); let url = toASCIIUrl(rawUrl) || rawUrl; let domain = '';
+    const rawHref = (link && link.href) || '';
+    const keepRaw = currentConfig.removeRedirects === false;
+    let rawUrl = keepRaw ? rawHref : getCleanUrl(link);
+    if (keepRaw && rawHref && typeof isEngineSelfDomain === 'function') {
+      try {
+        const rawHost = toASCIIHostname(new URL(toASCIIUrl(rawHref)).hostname).toLowerCase();
+        if (rawHost && isEngineSelfDomain(rawHost)) {
+          const cleaned = toASCIIUrl(getCleanUrl(link)) || rawHref;
+          const cleanedHost = toASCIIHostname(new URL(cleaned).hostname).toLowerCase();
+          if (cleanedHost && !isEngineSelfDomain(cleanedHost)) rawUrl = cleaned;
+        }
+      } catch (_) {}
+    }
+    let url = toASCIIUrl(rawUrl) || rawUrl; let domain = '';
     try {
       domain = toASCIIHostname(new URL(url).hostname);
     } catch (e) {}
@@ -2244,6 +2312,23 @@
     };
   }
 
+  function isEngineSelfDomain(targetDomain) {
+    const currentHost = String(window.location.hostname || '').toLowerCase();
+    const target = String(targetDomain || '').toLowerCase();
+    if (!target || !currentHost) return false;
+    if (target === currentHost || target.endsWith('.' + currentHost)) return true;
+    let engineMatch = null;
+    try {
+      const def = getSelectors()[getSearchEngine()];
+      const m = def && def.match;
+      if (m instanceof RegExp) engineMatch = m;
+      else if (typeof m === 'string' && m) { try { engineMatch = new RegExp(m); } catch (_) {} }
+    } catch (_) {}
+    if (engineMatch && engineMatch.test(target)) return true;
+    if (!currentHost.endsWith('.' + target)) return false;
+    return !engineMatch;
+  }
+
   function injectBlockButton(result, engine, domain) {
     if (!domain) return; if (result.closest('header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav')) return;
     if (engine === 'google') {
@@ -2277,8 +2362,8 @@
       e.preventDefault(); e.stopPropagation();
 
       if (!isBlocked) {
-        const currentHost = String(window.location.hostname || '').toLowerCase(); const targetDomain = String(domain || '').toLowerCase();
-        if (targetDomain && (currentHost === targetDomain || currentHost.endsWith('.' + targetDomain) || targetDomain.endsWith('.' + currentHost))) {
+        const targetDomain = String(domain || '').toLowerCase();
+        if (isEngineSelfDomain(targetDomain)) {
           showToast(t('cannotBlockCurrentSite', { domain: targetDomain }), 'error'); return;
         }
       }
@@ -2658,6 +2743,10 @@
           getContainerSelector,
           getSubdomainLevels,
           checkRuleMatchOptimized,
+          unwrapRedirectUrl,
+          getCleanUrl,
+          resolveUrlDomain,
+          getResultLink,
           forceReprocessAll
         };
       } else if (window.__SERH_DEBUG__) {
@@ -3509,7 +3598,7 @@
     if (textarea && Array.isArray(currentConfig.rules)) {
       textarea.value = currentConfig.rules.join('\n'); updateLineNumbers();
     }
-    applyDarkModeClass();
+    applyDarkModeClass(); applyCollapseMode();
   }
 
   function syncRulesTextarea() {
@@ -4675,20 +4764,20 @@
     const lines = String(content || '').replace(/^\uFEFF/, '').split('\n'); let config = null; let selectors = null; let rawScriptConfig = null; let rawSelectors = null;
     const headerLineIndexes = new Set();
 
-    for (let i = 0; i < Math.min(lines.length, 50); i++) {
+    for (let i = 0; i < Math.min(lines.length, 10); i++) {
       const line = lines[i]; if (!line.trim()) continue;
       if (line.startsWith('# ScriptConfig:')) {
         const payload = line.substring('# ScriptConfig:'.length).trim(); let parsed = null;
         if (/^[\x7B\x5B]/.test(payload)) {
           try { parsed = JSON.parse(payload); } catch (e) { if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[配置头] 配置头解析失败:', e); }
         }
-        if (parsed) { config = parsed; rawScriptConfig = line; headerLineIndexes.add(i); } else if (payload.startsWith('\x7B')) headerLineIndexes.add(i);
+        if (parsed && !config) { config = parsed; rawScriptConfig = line; headerLineIndexes.add(i); } else if (payload.startsWith('\x7B') && !config) headerLineIndexes.add(i);
       } else if (line.startsWith('# Selectors:')) {
         const payload = line.substring('# Selectors:'.length).trim(); let parsed = null;
         if (/^[\x7B\x5B]/.test(payload)) {
           try { parsed = JSON.parse(payload); } catch (e) { if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[配置头] 选择器头解析失败:', e); }
         }
-        if (parsed) { selectors = parsed; rawSelectors = line; headerLineIndexes.add(i); } else if (payload.startsWith('\x7B')) headerLineIndexes.add(i);
+        if (parsed && !selectors) { selectors = parsed; rawSelectors = line; headerLineIndexes.add(i); } else if (payload.startsWith('\x7B') && !selectors) headerLineIndexes.add(i);
       } else if (!line.startsWith('#')) {
         break;
       }
