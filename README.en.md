@@ -11,7 +11,7 @@ Bing, Google, Google Scholar, DuckDuckGo(&lite), Yandex, Brave, Yahoo(&Japan), 3
 
 **Install:**  
 Open and install using a browser that supports Tampermonkey / Greasemonkey scripts.  
-Release Version [Github-AutoUpdate](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [GreasyFork](https://greasyfork.org/zh-CN/scripts/552394) | [ScriptCat](https://scriptcat.org/zh-CN/script-show-page/8237)  
+Release Version [Github-AutoUpdate](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [GreasyFork](https://greasyfork.org/en/scripts/552394) | [ScriptCat](https://scriptcat.org/zh-CN/script-show-page/8237)  
 Lite Version (Remove Subscription / WebDAV) [Lite](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite.user.js)
 
 ### 1.2 Features:
