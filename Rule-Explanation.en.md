@@ -138,8 +138,8 @@ Open the edit panel via script manager menu `🖋️ Custom Engine` (JS format, 
 | `links` | string \| string\[\] | Optional, link selector, defaults to `a[href]` |
 | `titles` | string \| string\[\] | Optional, title selector |
 | `snippets` | string \| string\[\] | Optional, snippet selector list |
-| `extraElements` | string\[\] | Optional, array of relative CSS selectors starting from each result container to pick associated elements; these elements are hidden, expanded, and restored together with the result, and are also used for fallback snippet extraction. |
-| `disabled` | boolean | Optional, alias `disable`, `disabled: true` disables the engine, writing `disabled: false` (or `disable: false`) alone restores the built-in. |
+| `extraElements` | string\[\] | Optional, array of relative CSS selectors starting from each result container to pick associated elements. |
+| `disabled` | boolean | Optional, alias `disable`, `disabled: true` disables the engine, writing `disabled: false` alone restores the built-in. |
 
 **Examples:**
 

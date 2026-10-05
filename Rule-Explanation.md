@@ -138,8 +138,8 @@ URL通配规则按匹配模式语义从URL开头匹配，主机通配`*`不跨�
 | `links` | string \| string\[\] | 可选，链接选择器，默认 `a[href]` |
 | `titles` | string \| string\[\] | 可选，标题选择器列表 |
 | `snippets` | string \| string\[\] | 可选，摘要选择器列表 |
-| `extraElements` | string\[\] | 可选，CSS 相对选择器数组，以每个结果容器为起点选出关联元素，这些元素随结果同步隐藏、展开和恢复，也用于摘要后备提取 |
-| `disabled` | boolean | 可选，别名 `disable`，`disabled: true` 停用该引擎，`disabled: false`（或 `disable: false`）恢复内置 |
+| `extraElements` | string\[\] | 可选，CSS 相对选择器数组，以结果容器为起点选出关联元素 |
+| `disabled` | boolean | 可选，别名 `disable`，`disabled: true` 停用该引擎，`disabled: false` 恢复内置 |
 
 **示例：**
 
