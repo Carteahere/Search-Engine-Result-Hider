@@ -69,10 +69,10 @@ Regex uses browser-supported JavaScript `RegExp` flags: `i`, `m`, `s`, `u` (`s` 
 | Rule | Description |
 | --- | --- |
 | `@N*://*.example.com/*` | Adds a colored border to results from `example.com` and its subdomains |
-| `@N title/.*example.*/` | Adds a colored border to results whose title contains `example` |
+| `@Ntitle/.*example.*/` | Adds a colored border to results whose title contains `example` |
 
 Notes:
-1. `@N` must be separated by a space from naked domain name rules, such as `@1example.com` which will be recognized as a whitelist rule (allowing `1example.com`)
+1. `@N` must be separated by a [space] from naked domain name rules, while other rules can ignore [space]. For example, `@1 example.com` is recognized normally, while `@1example.com` is recognized as a whitelist rule.
 2. Only 5 colors are supported, `@N` = `@1`–`@5`; open the custom color panel from the script menu
 
 ### 2.8 Composite Rules:
