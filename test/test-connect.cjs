@@ -66,7 +66,8 @@ const KEYS = {
   WEBDAV_LAST_SYNC_KEY: 'searchfilter_webdav_last_sync',
   WEBDAV_SYNC_SNAPSHOT_KEY: 'searchfilter_webdav_sync_snapshot',
   SUBSCRIPTION_SYNC_SNAPSHOT_KEY: 'searchfilter_subscription_sync_snapshot',
-  WEBDAV_LAST_SYNC_SELECTORS_KEY: 'searchfilter_webdav_last_sync_selectors'
+  WEBDAV_LAST_SYNC_SELECTORS_KEY: 'searchfilter_webdav_last_sync_selectors',
+  SELECTORS_LAST_MODIFIED_KEY: 'searchfilter_selectors_last_modified'
 };
 
 const baseSyncFns = [
@@ -92,7 +93,8 @@ const ruleValidateFns = [
   'validateCondition', 'analyzeRule', 'validateRule', 'isScriptRuleLine', 'isElementRuleLine',
 ];
 const syncFns = [...new Set(baseSyncFns.concat(ruleValidateFns))].map((n) => extractFn(src, n));
-const settingsTimePrelude = `const SETTINGS_LAST_MODIFIED_KEY = ${JSON.stringify(KEYS.SETTINGS_LAST_MODIFIED_KEY)};\n${extractFn(src, 'getSettingsModifiedTime')}`;
+// 补桩: 生产 buildUploadContent 依赖 getSelectorsModifiedTime, 沙箱需同步提供
+const settingsTimePrelude = `const SETTINGS_LAST_MODIFIED_KEY = ${JSON.stringify(KEYS.SETTINGS_LAST_MODIFIED_KEY)};\n${extractFn(src, 'getSettingsModifiedTime')}\nfunction getSelectorsModifiedTime(){ const t = GM_getValue(${JSON.stringify(KEYS.SELECTORS_LAST_MODIFIED_KEY)}, 0); return typeof t === 'number' && t > 0 ? t : getSettingsModifiedTime(); }`;
 const syncEnvPrelude = src.match(/const CFG_DEFAULTS = \{[^\n]+\};/)[0] + '\n' + src.match(/const DEFAULT_HIGHLIGHT_COLORS = \{[^\n]+\};/)[0] + '\n' + settingsTimePrelude;
 const langTextsSrc = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
 
@@ -249,6 +251,16 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   env.setCurrent({ rules: ['*://same.example.com/*'], enabled: true });
   await env.run(syncCfg);
   assert('同步-017: 时间戳相等时无操作', env.calls.filter((c) => c.method === 'PUT').length === 0 && env.getCurrent().enabled === true);
+}
+
+// 本地空选择器且云端无选择器头时不因 selectorsChanged 空转上传
+{
+  const cloud = { enabled: false, syncedAt: 1000 };
+  const cloudText = '# ScriptConfig:' + JSON.stringify(cloud) + '\n*://same.example.com/*';
+  const env = makeSyncEnv({ cloudText, localRules: ['*://same.example.com/*'], localTime: 1000, storedConfig: { rules: ['*://same.example.com/*'], enabled: true }, syncSelectors: true });
+  env.setCurrent({ rules: ['*://same.example.com/*'], enabled: true });
+  await env.run(syncCfg);
+  assert('修复U-4: 空选择器+云端无头不触发空转上传', env.calls.filter((c) => c.method === 'PUT').length === 0);
 }
 
 // 云端404 -> 上传本地规则
@@ -904,6 +916,19 @@ assert('面板-008: 主面板外点关闭带按下起点防护且关闭时同步
 // 修复T: 守卫抽为 isEngineSelfDomain(引擎自家主机拦截, 父域如 toutiao.com 放行), 行为测试见 test-rules.cjs 规则-347~355
 assert('面板-009: 屏蔽按钮的引擎域名守卫位于!isBlocked分支内', /if \(!isBlocked\) \{\s*const targetDomain = String\(domain \|\| ''\)\.toLowerCase\(\);\s*if \(isEngineSelfDomain\(targetDomain\)\)/.test(src) && /function isEngineSelfDomain\(targetDomain\) \{/.test(src));
 
+// 再次点击开关关闭面板时也要触发 beforeClose, 否则订阅面板未保存的编辑静默丢失。
+{
+  let created = null; const doc = { getElementById: () => created };
+  const openPanel = new Function('document', 'injectWidgetStyles', 'createPanel', 'bindOutsideClickClose', `${extractFn(src, 'openPanel')}\nreturn openPanel;`)(
+    doc, () => {}, () => ({ remove() { this.removed = true; } }), (panel, cb) => ({ closePanel: () => cb && cb() }));
+  let saved = 0; const opts = { beforeClose: () => { saved++; } };
+  const first = openPanel('serh-subscription-panel', opts);
+  assert('面板-010: 新建面板记录 beforeClose 供关闭路径复用', typeof first.panel._beforeClose === 'function');
+  created = first.panel;
+  openPanel('serh-subscription-panel', opts);
+  assert('面板-010b: 面板已存在分支触发 beforeClose(未保存编辑不再静默丢失)且清空回调', saved === 1 && first.panel.removed === true && first.panel._beforeClose === null);
+}
+
 // 正则/条件内部的 # 不能当作行尾注释参与去重。
 {
   const key = new Function(`${extractFn(src, 'stripRuleComment')}\n${extractFn(src, 'getRuleKey')}\nreturn getRuleKey;`)();
@@ -1113,6 +1138,7 @@ assert('面板-009: 屏蔽按钮的引擎域名守卫位于!isBlocked分支内',
     const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
     const GM_setValue = (k, v) => { store.set(k, v); };
     function getUserSelectors() { return {}; }
+    function getSelectorsModifiedTime() { return 0; }
     ${extractFn(src, 'buildUploadContent')}
     return { build: (content, at, preserved) => buildUploadContent(content, at, preserved) };
   `);
@@ -1122,6 +1148,26 @@ assert('面板-009: 屏蔽按钮的引擎域名守卫位于!isBlocked分支内',
   const lines = out.split('\n');
   assert('同步-124: 关闭配置同步时保留云端其他字段', lines[0].startsWith('# ScriptConfig:') && lines[0].includes('"enabled":false') && lines[0].includes('"rulesSyncedAt":9000'));
   assert('同步-125: 未开启选择器同步时原样保留云端选择器头', out.includes('# Selectors: {"foo":1}'));
+}
+
+// 空选择器不发布空对象, 云端有头时保留删除传播/修复丢头
+{
+  const store = new Map();
+  store.set(KEYS.WEBDAV_SYNC_SELECTORS_KEY, true);
+  const f = new Function('store', `
+    const WEBDAV_SYNC_CONFIG_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_CONFIG_KEY)};
+    const WEBDAV_SYNC_SELECTORS_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_SELECTORS_KEY)};
+    const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
+    function getUserSelectors() { return store.get('sel') || {}; }
+    function getSelectorsModifiedTime() { return 0; }
+    ${extractFn(src, 'buildUploadContent')}
+    return { build: (content, at, preserved) => buildUploadContent(content, at, preserved) };
+  `);
+  const env3 = f(store);
+  assert('修复U-1: 本地空选择器且云端无头时不发布空Selectors', !env3.build('r', 1000, {}).includes('# Selectors:'));
+  assert('修复U-2: 云端已有头时空选择器仍发布(删除传播)', env3.build('r', 1000, { rawSelectors: '# Selectors: {}' }).includes('# Selectors:{'));
+  store.set('sel', { mine: { match: '/x/', containers: '.r' } });
+  assert('修复U-3: 本地非空且云端无头时发布选择器(修复丢头)', env3.build('r', 1000, {}).includes('"mine"'));
 }
 
 {
@@ -1877,6 +1923,12 @@ assert('审查10-S3(已修复): closeZoneSelector豁免区不再引用#serh-hlco
   assert('审查W-9c: 跨行flow引号内的#是内容不被当注释(此前整个rules列表丢失)', JSON.stringify(flowQuoted.lines) === JSON.stringify(['a # b', 'c.com']), flowQuoted.lines);
   const flowQuotedSingle = api.parseRulesetContent('rules: ["a # b", c.com]\n');
   assert('审查W-9c(对照): 单行flow引号内#同样保留', JSON.stringify(flowQuotedSingle.lines) === JSON.stringify(['a # b', 'c.com']), flowQuotedSingle.lines);
+  const flowNextLine = api.parseRulesetContent('---\nname: My List\nrules:\n  - "*://a.com/*"\nmatches:\n  ["*://b.com/*", "*://c.com/*"]\n---\n');
+  assert('修复YAML-1: 键独占一行的流式列表不再静默丢规则', JSON.stringify(flowNextLine.lines) === JSON.stringify(['*://a.com/*', '*://b.com/*', '*://c.com/*']), flowNextLine.lines);
+  const flowNextLineOnly = api.parseRulesetContent('rules:\n  ["a.com", "b.com"]\n');
+  assert('修复YAML-2: 唯一结构是键独占一行流式列表时仍按YAML解析(不回退成整行跳过)', JSON.stringify(flowNextLineOnly.lines) === JSON.stringify(['a.com', 'b.com']), flowNextLineOnly.lines);
+  const flowNextLineBroken = api.parseRulesetContent('rules:\n  - a.com\n  ["broken\n  - b.com\n');
+  assert('修复YAML-3(对照): 未闭合的裸流式行不吞掉后续列表项', JSON.stringify(flowNextLineBroken.lines) === JSON.stringify(['a.com', 'b.com']), flowNextLineBroken.lines);
 }
 
 // ---- 审查4: 三方合并口径 / 大规则量合并性能 / 手动下载授时回退 / 面板暂停同步 ----

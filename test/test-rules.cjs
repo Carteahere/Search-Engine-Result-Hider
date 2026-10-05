@@ -443,6 +443,17 @@ assert('规则-121: @N 高亮 N 越界仍跳过', (() => {
   return !c.highlightDomains.has('fast9.com');
 })());
 
+// 修复H: @Ntitle/@Ntext 无空格识别为高亮
+api.setState(['@1title/abc/', '@2text/x.*/i'], []);
+api.buildRuleIndex();
+cr = api.getCR();
+assert('修复H-1: @1title/ 无空格识别为标题高亮', cr.highlightTitles.length === 1 && cr.whitelistUrlPatterns.length === 0 && cr.whitelistTitlePatterns.length === 0);
+assert('修复H-2: @2text/ 无空格识别为摘要高亮', cr.highlightTexts.length === 1);
+api.setState(['@1 title/abc/'], []);
+api.buildRuleIndex();
+cr = api.getCR();
+assert('修复H-3: 带空格写法行为不变', cr.highlightTitles.length === 1);
+
 // 修复回归: 索引入口跳过校验无效规则(校验与匹配口径统一)
 api.setState(['*://**.com/*', 'title/foo/gi', '/abc/gi', '/foo'], []);
 api.buildRuleIndex();
@@ -983,6 +994,8 @@ await (async () => {
   assert('规则-210: yahoo query ru= 参数解包', getCleanUrl(yahooQueryRu) === 'https://example.org/wiki');
   const yahooRdsig = { href: 'https://rdsig.yahoo.co.jp/RU=https%3A%2F%2Fexample.jp%2Fpage/RK=2' };
   assert('规则-210b: yahoo japan rdsig RU= 解包', getCleanUrl(yahooRdsig) === 'https://example.jp/page');
+  const yahooJpStar2 = { href: 'https://rd.yahoo.co.jp/search/web/result/**-https%3A%2F%2Fexample.jp%2Fpage' };
+  assert('修复R-1: yahoo japan 双星/**-解包', getCleanUrl(yahooJpStar2) === 'https://example.jp/page');
   const customEngineLink = { href: 'https://scholar.google.com/scholar_url?url=https%3A%2F%2Fpapers.example.com%2Fx' };
   assert('规则-211: 不依赖引擎ID仍解包', getCleanUrl(customEngineLink) === 'https://papers.example.com/x');
 })();

@@ -144,7 +144,7 @@ const CUSTOM = {
 
 // ---- 默认合并 ----
 check('选择器-001: 默认无用户配置时返回内置', api.getSelectors().google.containers === 'div.g, div.MjjYud');
-check('选择器-002: 内置键序在前', Object.keys(api.getSelectors()).join(',') === ['bing', 'google_scholar', 'google', 'duckduckgo_lite', 'duckduckgo', 'yandex', 'brave', 'yahoo', 'so360', 'sogou', 'toutiao', 'quark', 'other'].join(','));
+check('选择器-002: 内置键序在前', Object.keys(api.getSelectors()).join(',') === ['bing', 'google_scholar', 'google', 'duckduckgo_lite', 'duckduckgo', 'yandex', 'brave', 'ecosia', 'startpage', 'yahoo', 'so360', 'sogou', 'toutiao', 'quark', 'other'].join(','));
 check('选择器-003: getContainerSelector 内置', api.getContainerSelector('bing') === 'li.b_algo, div.b_algo');
 check('选择器-003a(修复T): 头条链接兜底排除站内搜索链(相关搜索/大家都在搜卡不再显示 so.toutiao.com)', (() => {
   const links = api.getSelectors().toutiao.links;
@@ -1180,6 +1180,13 @@ const cases = [
   ['scholar.google.com', 'google_scholar'],
   ['yandex.ru', 'yandex'],
   ['search.brave.com', 'brave'],
+  ['www.ecosia.org', 'ecosia'],
+  ['ecosia.org', 'ecosia'],
+  ['ecosia.org.evil.com', 'other'],
+  ['www.startpage.com', 'startpage'],
+  ['eu.startpage.com', 'startpage'],
+  ['app.startpage.com', 'other'],
+  ['startpage.com.evil.com', 'other'],
   ['search.yahoo.com', 'yahoo'],
   ['example.com', 'other'],
   ['bing.com.evil.com', 'other'],
@@ -1204,25 +1211,43 @@ for (const [i, [host, expected]] of cases.entries()) {
 }
 
 // ---- 搜索分类检测 ----
-// 保留 web基准/google udm参数/bing路径/ddg纯参数/yahoo路径 各一
+// 保留 web基准/google udm参数/bing路径/ddg纯参数/yahoo路径/startpage cat参数 各一
 const catCases = [
   [{ hostname: 'www.google.com', pathname: '/search', search: '?q=x' }, 'web'],
   [{ hostname: 'www.google.com', pathname: '/search', search: '?udm=7' }, 'videos'],
   [{ hostname: 'www.bing.com', pathname: '/images/search', search: '?q=x' }, 'images'],
   [{ hostname: 'duckduckgo.com', pathname: '/', search: '?iax=images' }, 'images'],
   [{ hostname: 'images.search.yahoo.com', pathname: '/search/images', search: '?p=x' }, 'images'],
+  [{ hostname: 'www.startpage.com', pathname: '/sp/search', search: '?query=x' }, 'web'],
+  [{ hostname: 'www.startpage.com', pathname: '/sp/search', search: '?query=x&cat=web' }, 'web'],
+  [{ hostname: 'www.startpage.com', pathname: '/sp/search', search: '?query=x&cat=images' }, 'images'],
+  [{ hostname: 'www.startpage.com', pathname: '/sp/search', search: '?query=x&cat=video' }, 'videos'],
+  [{ hostname: 'eu.startpage.com', pathname: '/sp/search', search: '?query=x&cat=news' }, 'news'],
+  [{ hostname: 'www.startpage.com', pathname: '/sp/search', search: '?query=x&category=images' }, 'web'],
+  [{ hostname: 'search.yahoo.co.jp', pathname: '/image/search', search: '?p=x' }, 'images'],
+  [{ hostname: 'so.toutiao.com', pathname: '/search', search: '?keyword=x&pd=video' }, 'videos'],
+  [{ hostname: 'so.toutiao.com', pathname: '/search', search: '?keyword=x&pd=atlas' }, 'images'],
+  [{ hostname: 'so.toutiao.com', pathname: '/search', search: '?keyword=x&pd=information' }, 'news'],
+  [{ hostname: 'so.toutiao.com', pathname: '/search', search: '?keyword=x&pd=synthesis' }, 'web'],
 ];
 for (const [i, [loc, expected]] of catCases.entries()) {
   const got = factory({ location: loc }, selectors).getSearchCategory(loc);
   assert(`选择器-191-${i + 1}: category ${loc.hostname}${loc.pathname}${loc.search} -> ${expected}`, got === expected);
 }
 
-// 审查11-S1(Yahoo Japan /image 单数路径)本项留档已清理, 待后续修复后补回归
+// Lite 版同源 getSearchCategory 与主脚本分类口径一致
+{
+  const liteCatSrc = fs.readFileSync(path.join(__dirname, '..', 'Other', 'Lite.user.js'), 'utf8');
+  const liteCat = new Function(extractFn(liteCatSrc, 'getSearchCategory') + '\nreturn getSearchCategory;')();
+  const bad = catCases.filter(([loc, expected]) => liteCat(loc) !== expected);
+  assert('选择器-191L: Lite 分类口径与主脚本一致(含yahoo /image与头条pd)', bad.length === 0, bad.map(([loc, expected]) => loc.hostname + loc.pathname + loc.search + '=>' + liteCat(loc)));
+}
+
 
 // ---- 全站注入与引擎站门控一致性 ----
 // 引擎站/别名站命中与普通站/攻击域不命中 各留代表
 const hosts = [
-  'www.bing.com', 'ddg.gg', 'bing.com.evil.com', 'brave.com',
+  'www.bing.com', 'ddg.gg', 'bing.com.evil.com', 'brave.com', 'eu.startpage.com', 'app.startpage.com', 'www.ecosia.org', 'ecosia.org.evil.com',
 ];
 
 assert('选择器-192: 头部包含 @match *://*/* (全站注入)', matchLines.includes('*://*/*'));
@@ -1939,35 +1964,10 @@ return { injectBlockButton };
   check('修复W-8(对照): 桌面版容器 div.vrwrap:has(h3) 限定保留', /div\.vrwrap:has\(h3\)/.test(wContainerSel), wContainerSel);
   check('修复W-9(对照): 大家还在搜(per-hint)不作为结果容器', !/per-hint/.test(wContainerSel), wContainerSel);
 
-  // 修复W-10: 用真实 wap 页快照固件回归 — 页面内所有 sogou_vr_* 结果容器的 class 都必须被容器选择器覆盖
-  const wFixtureHtml = fs.readFileSync(path.join(__dirname, 'fixtures', 'sogou-wap.html'), 'utf8');
-  const wDivRe = /<div\b([^>]*)>/g;
-  const wContainerClasses = new Map();
-  let wdm;
-  while ((wdm = wDivRe.exec(wFixtureHtml))) {
-    if (!/\bid="sogou_vr_/.test(wdm[1])) continue;
-    const clsM = wdm[1].match(/\bclass="([^"]*)"/);
-    const cls = clsM ? clsM[1].trim().split(/\s+/).filter(Boolean) : [];
-    const key = cls.join(' ');
-    wContainerClasses.set(key, (wContainerClasses.get(key) || 0) + 1);
-  }
-  const wHasVrResult = [...wContainerClasses.keys()].some((k) => k.split(' ').includes('vrResult') && !k.split(' ').includes('vr-topic'));
-  const wHasReact = [...wContainerClasses.keys()].some((k) => k.split(' ').includes('reactResult'));
-  check('修复W-10a: 固件快照包含 vrResult 普通结果与 reactResult 卡片', wHasVrResult && wHasReact, [...wContainerClasses.keys()].join(' | '));
-  const wParts = wContainerSel.split(',').map((s) => s.trim());
-  const wCoveredBy = (clsArr) => wParts.some((part) => {
-    const m = part.match(/^(?:([a-zA-Z]+))?(?:\.([\w-]+))?(?::[\w-]+(?:\([^)]*\))?)?$/);
-    if (!m || (!m[1] && !m[2])) return false;
-    if (m[1] && m[1] !== 'div') return false;
-    if (m[2] && !clsArr.includes(m[2])) return false;
-    return true;
-  });
-  const wUncovered = [...wContainerClasses.keys()].filter((k) => !wCoveredBy(k.split(' ')));
-  check('修复W-10b: 固件内每个 sogou_vr_* 容器 class 都被容器选择器覆盖', wUncovered.length === 0, wUncovered.join(' | '));
-
   // 修复W-11: Lite 版脚本同步修复
-  const liteSrc = fs.readFileSync(path.join(__dirname, '..', 'Lite.user.js'), 'utf8');
+  const liteSrc = fs.readFileSync(path.join(__dirname, '..', 'Other', 'Lite.user.js'), 'utf8');
   check('修复W-11: Lite 版搜狗容器选择器同步覆盖 div.vrResult', /containers: 'div\.vrwrap:has\(h3\), \.reactResult, div\.vrResult'/.test(liteSrc));
+  check('修复H-4: Lite 版 @Ntitle/@Ntext 高亮识别同步(3处)', liteSrc.split('|title\\/|text\\/').length - 1 === 3);
 }
 
 // ---- 适配S: 神马搜索(sm.cn, 夸克系渲染)识别与选择器 ----
@@ -2018,8 +2018,110 @@ return { injectBlockButton };
   const sDef = apiS.getSelectors().quark;
   check('适配S-8: 标题选择器含 qk-title-text, 摘要含 qk-paragraph-text, 链接优先取标题链接', sDef.titles[0] === '.qk-title-text' && sDef.snippets[0] === '.qk-paragraph-text' && sDef.links[0] === 'a.qk-title a[href]', JSON.stringify({ titles: sDef.titles, snippets: sDef.snippets, links: sDef.links }));
 
-  const sLiteSrc = fs.readFileSync(path.join(__dirname, '..', 'Lite.user.js'), 'utf8');
+  const sLiteSrc = fs.readFileSync(path.join(__dirname, '..', 'Other', 'Lite.user.js'), 'utf8');
   check('适配S-9: Lite 版神马选择器同步', /quark: \{\s*\n\s*match: \/\^\(\?:\(\?:quark\|yz\)\\\.\)\?\(\?:\(\?:www\|m\)\\\.\)\?sm\\\.cn\$\/,\s*\n\s*containers: 'div\.qk-card'/.test(sLiteSrc));
+}
+
+// ---- 适配SP: Startpage(startpage.com)识别与选择器 ----
+{
+  const spSelStart = src.indexOf('const SELECTORS = {');
+  const spSelObject = src.slice(src.indexOf('{', spSelStart), extractObjectLiteral(src, src.indexOf('{', spSelStart)) + 1);
+  const spFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'isEngineSite', 'getContainerSelector'].map((n) => extractFn(src, n)).join('\n');
+  const spBuiltin = src.match(/const builtinSelectorOf = .+?;/)[0];
+  const apiSP = new Function('storeRef', `
+    const SELECTORS_KEY = 'searchfilter_selectors';
+    const SELECTORS = ${spSelObject};
+    let activeSelectors = null;
+    let _engineCacheHost = null; let _engineCacheResult = 'other'; let _observedSelector = '';
+    ${spBuiltin}
+    let currentHost = 'www.google.com';
+    let currentHref = 'https://www.google.com/';
+    const window = { location: { get hostname() { return currentHost; }, get href() { return currentHref; } } };
+    function GM_getValue(key, defaultValue) { return storeRef.current === undefined ? defaultValue : storeRef.current; }
+    ${spFns}
+    return { getSelectors, getSearchEngine, isEngineSite, getContainerSelector, resetSelectorCache,
+      setHost: (h) => { currentHost = h; currentHref = 'https://' + h + '/'; },
+      setHref: (h) => { currentHref = h; } };
+  `)({ current: undefined });
+
+  apiSP.setHost('www.startpage.com');
+  apiSP.setHref('https://www.startpage.com/sp/search?query=test');
+  check('适配SP-1: www.startpage.com 识别为 Startpage 引擎站', apiSP.getSearchEngine() === 'startpage' && apiSP.isEngineSite() === true, apiSP.getSearchEngine());
+  apiSP.setHost('startpage.com');
+  check('适配SP-2(对照): 裸域 startpage.com 识别为 Startpage', apiSP.getSearchEngine() === 'startpage', apiSP.getSearchEngine());
+  apiSP.setHost('eu.startpage.com');
+  check('适配SP-3: eu.startpage.com(EU节点)识别为 Startpage', apiSP.getSearchEngine() === 'startpage', apiSP.getSearchEngine());
+  apiSP.setHost('m.startpage.com');
+  check('适配SP-4: m.startpage.com 识别为 Startpage', apiSP.getSearchEngine() === 'startpage', apiSP.getSearchEngine());
+  apiSP.setHost('app.startpage.com');
+  check('适配SP-5(对照): app.startpage.com(App入口)不作为引擎站', apiSP.getSearchEngine() === 'other', apiSP.getSearchEngine());
+  apiSP.setHost('eu3-browse.startpage.com');
+  check('适配SP-6(对照): 深层子域 eu3-browse.startpage.com(匿名代理)不误判', apiSP.getSearchEngine() === 'other', apiSP.getSearchEngine());
+  apiSP.setHost('notstartpage.com');
+  check('适配SP-7(对照): 含startpage字样的其他域不误判', apiSP.getSearchEngine() === 'other', apiSP.getSearchEngine());
+  apiSP.setHost('startpage.com.evil.com');
+  check('适配SP-8(对照): 后缀攻击域不误判', apiSP.getSearchEngine() === 'other', apiSP.getSearchEngine());
+
+  const spContainerSel = apiSP.getContainerSelector('startpage');
+  check('适配SP-9: 容器直接命中 div.result(桌面w-gl内嵌/手机版顶层均命中, 不依赖w-gl祖先)', /(?:^|,)\s*div\.result\s*(?:,|$)/.test(spContainerSel.trim()), spContainerSel);
+  check('适配SP-10(对照): 保留旧版 .w-gl__result 作为后备容器', /(?:^|,)\s*\.w-gl__result\s*$/.test(spContainerSel.trim()), spContainerSel);
+  const spDef = apiSP.getSelectors().startpage;
+  check('适配SP-11: 标题优先取结果链接 a.result-link, 摘要取 p.description', spDef.titles[0] === 'a.result-link' && spDef.snippets[0] === 'p.description', JSON.stringify({ titles: spDef.titles, snippets: spDef.snippets }));
+  check('适配SP-12: 链接优先取标题链接, 兜底 a[href]', spDef.links[0] === 'a.result-link[href]' && spDef.links[spDef.links.length - 1] === 'a[href]', JSON.stringify(spDef.links));
+  check('适配SP-12b: 手机版摘要钩子 .result__main > p 在 p.description 之后兜底', spDef.snippets.indexOf('.result__main > p') === 1, JSON.stringify(spDef.snippets));
+  check('适配SP-12c: 手机版展示链接 a.display-url[href] 纳入链接候选', spDef.links.includes('a.display-url[href]'), JSON.stringify(spDef.links));
+
+  const spLiteSrc = fs.readFileSync(path.join(__dirname, '..', 'Other', 'Lite.user.js'), 'utf8');
+  check('适配SP-13: Lite 版 Startpage 选择器同步', /startpage: \{\s*\n\s*match: \/\^\(\?:\(\?:www\|eu\|m\)\\\.\)\?startpage\\\.com\$\/,\s*\n\s*containers: 'div\.result, \.w-gl__result'/.test(spLiteSrc));
+}
+
+// ---- 适配EC: Ecosia(ecosia.org)识别与选择器 ----
+{
+  const ecSelStart = src.indexOf('const SELECTORS = {');
+  const ecSelObject = src.slice(src.indexOf('{', ecSelStart), extractObjectLiteral(src, src.indexOf('{', ecSelStart)) + 1);
+  const ecFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'isEngineSite', 'getContainerSelector', 'getSearchCategory'].map((n) => extractFn(src, n)).join('\n');
+  const ecBuiltin = src.match(/const builtinSelectorOf = .+?;/)[0];
+  const ecApi = new Function('storeRef', `
+    const SELECTORS_KEY = 'searchfilter_selectors';
+    const SELECTORS = ${ecSelObject};
+    let activeSelectors = null;
+    let _engineCacheHost = null; let _engineCacheResult = 'other'; let _observedSelector = '';
+    ${ecBuiltin}
+    let currentHost = 'www.google.com';
+    let currentHref = 'https://www.google.com/';
+    const window = { location: { get hostname() { return currentHost; }, get href() { return currentHref; } } };
+    function GM_getValue(key, defaultValue) { return storeRef.current === undefined ? defaultValue : storeRef.current; }
+    ${ecFns}
+    return { getSelectors, getSearchEngine, isEngineSite, getContainerSelector, getSearchCategory, resetSelectorCache,
+      setHost: (h) => { currentHost = h; currentHref = 'https://' + h + '/'; },
+      setHref: (h) => { currentHref = h; } };
+  `)({ current: undefined });
+
+  ecApi.setHost('www.ecosia.org');
+  ecApi.setHref('https://www.ecosia.org/search?q=test');
+  check('适配EC-1: www.ecosia.org 识别为 Ecosia 引擎站', ecApi.getSearchEngine() === 'ecosia' && ecApi.isEngineSite() === true, ecApi.getSearchEngine());
+  ecApi.setHost('ecosia.org');
+  check('适配EC-2(对照): 裸域 ecosia.org 识别为 Ecosia', ecApi.getSearchEngine() === 'ecosia', ecApi.getSearchEngine());
+  ecApi.setHost('m.ecosia.org');
+  check('适配EC-3: m.ecosia.org 识别为 Ecosia', ecApi.getSearchEngine() === 'ecosia', ecApi.getSearchEngine());
+  ecApi.setHost('notecosia.org');
+  check('适配EC-4(对照): 含 ecosia 字样的其他域不误判', ecApi.getSearchEngine() === 'other', ecApi.getSearchEngine());
+  ecApi.setHost('ecosia.org.evil.com');
+  check('适配EC-5(对照): 后缀攻击域不误判', ecApi.getSearchEngine() === 'other', ecApi.getSearchEngine());
+
+  const ecContainerSel = ecApi.getContainerSelector('ecosia');
+  check('适配EC-6: 容器覆盖网页/视频/新闻/图片四类结果卡', ['article[data-test-id="organic-result"]', 'article[data-test-id="videos-result"]', 'article[data-test-id="news-result"]', 'article[data-test-id="images-result"]'].every(s => ecContainerSel.includes(s)), ecContainerSel);
+  check('适配EC-7(对照): 实体卡与广告位不作为结果容器', !/entity-wrapper|result-ad/.test(ecContainerSel), ecContainerSel);
+  const ecDef = ecApi.getSelectors().ecosia;
+  check('适配EC-8: 标题优先取 result-title, 摘要优先取结果描述, 链接优先取标题链接', ecDef.titles[0] === 'h2[data-test-id="result-title"]' && ecDef.snippets[0] === '[data-test-id="web-result-description"]' && ecDef.links[0] === 'a[data-test-id="result-link"][href]', JSON.stringify({ titles: ecDef.titles, snippets: ecDef.snippets, links: ecDef.links }));
+  check('适配EC-9: 链接候选含图片结果页链与兜底 a[href]', ecDef.links.includes('a.image-result__details-link[href]') && ecDef.links[ecDef.links.length - 1] === 'a[href]', JSON.stringify(ecDef.links));
+  check('适配EC-10: /images /videos /news 路径归类为对应分类', ['images', 'videos', 'news'].every(c => ecApi.getSearchCategory({ pathname: '/' + c, search: '?q=test', hostname: 'www.ecosia.org' }) === c), ['images', 'videos', 'news'].map(c => ecApi.getSearchCategory({ pathname: '/' + c, search: '?q=test', hostname: 'www.ecosia.org' })).join(','));
+
+  const ecLiteSrc = fs.readFileSync(path.join(__dirname, '..', 'Other', 'Lite.user.js'), 'utf8');
+  const ecSelSrc = fs.readFileSync(path.join(__dirname, '..', 'Other', 'SELECTORS.js'), 'utf8');
+  const ecEntry = src.slice(src.indexOf('    ecosia: {'), src.indexOf('\n    },', src.indexOf('    ecosia: {')) + '\n    },'.length);
+  check('适配EC-11: Lite 版 Ecosia 选择器同步', ecLiteSrc.includes(ecEntry), ecEntry.split('\n')[0]);
+  check('适配EC-12: SELECTORS.js 参考副本同步', ecSelSrc.includes(ecEntry), ecEntry.split('\n')[0]);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

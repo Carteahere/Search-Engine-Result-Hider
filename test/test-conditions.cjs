@@ -453,6 +453,10 @@ const pc14 = m.parseRulesetContent('blacklist:\n  - a.com\nrules:\n  - b.com\n')
 assert('条件-200: 连续两个list键均提取', pc14.lines.length === 2 && pc14.lines[0] === 'a.com' && pc14.lines[1] === 'b.com');
 const pc15 = m.parseRulesetContent('---\nname: Block Sample\nhomepage: https://x\n---\ntitle: A\nurl: https://www.a.com/\nmatches:\n  - *://*.a.com/*\n\ntitle: B\nmatches:\n  - /re\\.com/\n');
 assert('条件-201(修复1/2回归): uBlacklist matches段与rules段同等导入', pc15.meta.name === 'Block Sample' && pc15.lines.length === 2 && pc15.lines[0] === '*://*.a.com/*' && pc15.lines[1] === '/re\\.com/');
+const pcCrlf = m.parseRulesetContent('name: X\r\nrules: [\r\n  a.com,\r\n  b.com\r\n]\r\n');
+assert('条件-201b(修复Y): CRLF多行flow正常解析', pcCrlf.meta.name === 'X' && pcCrlf.lines.length === 2 && pcCrlf.lines[0] === 'a.com' && pcCrlf.lines[1] === 'b.com');
+const pcCrlf2 = m.parseRulesetContent('rules: [a.com, b.com] # c\r\n');
+assert('条件-201c(修复Y): CRLF单行flow带尾注释', pcCrlf2.lines.length === 2 && pcCrlf2.lines[0] === 'a.com' && pcCrlf2.lines[1] === 'b.com');
 // 注: 条件-198(引号列表项变形)/202(matches段无frontmatter变形) 与 条件-194/201 同路径, 合并删除
 
 r = condExpr('title *= "KW" i', 'google');
@@ -813,6 +817,8 @@ assert('条件-312: 残缺表达式无效', m.analyzeRule('host $= ').valid === 
 assert('条件-315: 仅@if行有效', m.analyzeRule('@if(path *= "/download/")').valid === true);
 assert('条件-316: 空@if仍无效', m.analyzeRule('@if()').valid === false);
 assert('条件-318: 高亮越界仍无效', m.analyzeRule('@9 host $= ".example.com"').valid === false);
+assert('条件-318b(修复H): @1title/ 无空格自检有效', m.analyzeRule('@1title/abc/').valid === true);
+assert('条件-318c(修复H): @9text/ 越界仍无效', m.analyzeRule('@9text/abc/').valid === false);
 assert('条件-319: 复合旧写法仍有效', m.analyzeRule('*://*.example.com/* @if(title *= "kw")').valid === true);
 assert('条件-321: $category独立表达式有效', m.analyzeRule('$category = "images"').valid === true);
 assert('条件-323: 高亮+白名单表达式有效', m.analyzeRule('@1 @host $= ".example.com"').valid === true);
