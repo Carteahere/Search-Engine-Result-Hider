@@ -43,7 +43,7 @@ Partial setting instructions:
 
 ### 1.4 About Subscriptions:
 
-1. Rule subscription updates also run in the background, fetching once every 12h. Supports UTF-8 encoding for plain text remote links such as [rules.txt](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt) , subscription rules are appended after local rules. 
+1. Rule subscription updates also run in the background, fetching once every 12h. It supports plain text remote links encoded in `UTF-8` such as [rules.txt](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt) , subscription rules are appended after local rules. 
 2. Compatible with `.yaml` uBlacklist list format (`name`/`rules`/`blacklist`/`whitelist`/`matches` fields).
 3. Script extensions are limited and do not support `##`/`#@#` DOM/uBO rules, they are filtered out automatically on subscription import.
 4. If the subscription link is not a GitHub source, cross-origin request permission is required; if a permission prompt appears, select `Always allow`.
