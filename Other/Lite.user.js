@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.6.1
+// @version      8.6.2
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了所有订阅/webdav相关内容。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了所有订阅/webdav相关内容。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version has removed all content related to Rule Subscriptions and WebDAV.
@@ -32,12 +32,10 @@
   let _searchForm = null, _searchFormHandler = null, _urlChangeHandler = null;
   let _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap(); const _hrefChangedContainers = new Set(), _contentChangedContainers = new Set();
 
-  // 配置存储键
   const CONFIG_KEY = 'searchfilter_blocker', SELECTORS_KEY = 'searchfilter_selectors';
   const HL_STATS_REGEX = /^@\d+/;
   const RESULT_RETRY_LIMIT = 3, RESULT_RETRY_DELAY = 200;
 
-  // 默认配置
   const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', autoDark: true, exportConfig: false, collapseMode: false, removeRedirects: true, language: 'zh-CN' };
   const DEFAULT_HIGHLIGHT_COLORS = {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'};
   function getDefaultConfig() {
@@ -69,7 +67,6 @@
   }
   let showHiddenResults = false;
 
-  // 选择器
   const SELECTORS = {
     bing: {
       match: /^(?:(?:www[2-4]?|cn|global|m)\.)?bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
@@ -120,6 +117,20 @@
       titles: ['.title', '.snippet-title', '.img-title'],
       snippets: ['.generic-snippet .content', '.generic-snippet', '.line-clamp-dynamic', '.snippet-description', '.description'],
       links: ['a[href]'],
+    },
+    ecosia: {
+      match: /^(?:(?:www|m)\.)?ecosia\.org$/,
+      containers: 'article[data-test-id="organic-result"], article[data-test-id="videos-result"], article[data-test-id="news-result"], article[data-test-id="images-result"]',
+      titles: ['h2[data-test-id="result-title"]', '.result-title__heading', 'h2.image-result__details-title', 'h2'],
+      snippets: ['[data-test-id="web-result-description"]', '[data-test-id="news-result-description"]', '.web-result__description', '.news-result__description', '.video-result__description', '.result__description'],
+      links: ['a[data-test-id="result-link"][href]', 'a.image-result__details-link[href]', 'a.image-result__link[href]', 'a[href]'],
+    },
+    startpage: {
+      match: /^(?:(?:www|eu|m)\.)?startpage\.com$/,
+      containers: 'div.result, .w-gl__result',
+      titles: ['a.result-link', 'h2.wgl-title', 'a.wgl-site-title', '.w-gl__result-title'],
+      snippets: ['p.description', '.result__main > p', '.w-gl__description'],
+      links: ['a.result-link[href]', 'a.wgl-site-title[href]', 'a.wgl-display-url[href]', 'a.display-url[href]', '.w-gl__result-title[href]', 'a[href]'],
     },
     yahoo: {
       match: /^(?:[a-z]{2,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
@@ -250,9 +261,18 @@
         const u = new URL(loc.href); if (!path) path = u.pathname.toLowerCase(); if (!search) search = u.search.toLowerCase();
       } catch (e) {}
     }
-    if (/^images\./.test(host) || /(?:^|\/)images(?:\/|$)/.test(path) || /[?&](?:tbm=isch|udm=2|iax?=images)(?:&|$)/.test(search)) return 'images';
+    if (/^images\./.test(host) || /(?:^|\/)images?(?:\/|$)/.test(path) || /[?&](?:tbm=isch|udm=2|iax?=images)(?:&|$)/.test(search)) return 'images';
     if (/^videos?\./.test(host) || /(?:^|\/)videos?(?:\/|$)/.test(path) || /[?&](?:tbm=vid|udm=7|iax?=videos)(?:&|$)/.test(search)) return 'videos';
-    if (/^news\./.test(host) || /(?:^|\/)news(?:\/|$)/.test(path) || /[?&](?:tbm=nws|udm=12|iax?=news)(?:&|$)/.test(search)) return 'news'; return 'web';
+    if (/^news\./.test(host) || /(?:^|\/)news(?:\/|$)/.test(path) || /[?&](?:tbm=nws|udm=12|iax?=news)(?:&|$)/.test(search)) return 'news';
+    if (/(?:^|\.)toutiao\.com$/.test(host)) {
+      const pd = (search.match(/[?&]pd=([a-z_]+)(?:&|$)/) || [])[1] || '';
+      if (pd === 'atlas') return 'images'; if (pd === 'information') return 'news'; if (pd.indexOf('video') !== -1) return 'videos';
+    }
+    if (/(?:^|\.)startpage\.com$/.test(host)) {
+      const cat = (search.match(/[?&]cat=([a-z]+)(?:&|$)/) || [])[1] || '';
+      if (cat === 'images' || cat === 'video' || cat === 'news') return cat === 'video' ? 'videos' : cat;
+    }
+    return 'web';
   }
 
   function getContainerSelector(engine) {
@@ -368,7 +388,6 @@
     }
   };
 
-  // Map
   function newCompiledRules() {
     return {
       domains: new Map(), urls: [], titles: [], texts: [],
@@ -390,7 +409,6 @@
     return text;
   }
 
-  // 统一调用开始
   function escHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
@@ -723,11 +741,13 @@
     const existing = document.getElementById(id);
     if (existing) {
       if (typeof existing._cleanupClick === 'function') existing._cleanupClick();
+      if (typeof existing._beforeClose === 'function') { try { existing._beforeClose(); } catch (err) { console.error('[面板] 关闭前回调失败:', err); } existing._beforeClose = null; }
       if (onExisting) onExisting(existing);
       existing.remove();
       return null;
     }
     const panel = createPanel(id, width, padding);
+    panel._beforeClose = typeof beforeClose === 'function' ? beforeClose : null;
     return { panel, closePanel: bindClose ? bindOutsideClickClose(panel, beforeClose) : null };
   }
 
@@ -924,7 +944,6 @@
     flushLeaf(); if (inSQ || inDQ || inRE || leafParens !== 0) return { error: true, tokens }; return { error: false, tokens };
   }
 
-  // 递归下降解析
   function parseCondExprTokens(tokens, leafParser, errors) {
     let pos = 0; const peek = () => tokens[pos]; const next = () => tokens[pos++];
     const syntaxError = () => {
@@ -1280,7 +1299,7 @@
 
     let ruleToCheck = rule.trim(); if (ruleToCheck.startsWith('#')) return { valid: true, errors: [], warnings: [] }; ruleToCheck = stripRuleComment(ruleToCheck);
     if (!ruleToCheck) return { valid: true, errors: [], warnings: [] }; const errors = []; const warnings = [];
-    let hlN = null; const hlValMatch = ruleToCheck.match(/^@(\d+)(?=\s|$|\*:\/\/)/);
+    let hlN = null; const hlValMatch = ruleToCheck.match(/^@(\d+)(?=\s|$|\*:\/\/|title\/|text\/)/);
     if (hlValMatch) {
       const N = parseInt(hlValMatch[1]);
       if (N < 1 || N > 5) {
@@ -1607,7 +1626,6 @@
       .join(''); const compiled = { type, regex: new RegExp(pattern, sanitizedFlags) }; memo.set(coreRule, compiled); return compiled;
   }
 
-  // 预编译
   function buildRuleIndex() {
     let pageContext = ''
     try {
@@ -1631,7 +1649,7 @@
         if (currentConfig.debug) console.warn('规则校验未通过, 已跳过:', rule); return;
       }
 
-      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/)/);
+      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/|title\/|text\/)/);
       if (hlMatch) {
         const N = parseInt(hlMatch[1]); if (N < 1 || N > 5) return; let hlRule = rule.substring(hlMatch[0].length).trim(); if (!hlRule) return; let parsed;
         try {
@@ -1911,7 +1929,6 @@
     return /^https?:\/\//i.test(realUrl) ? realUrl : '';
   }
 
-  // 去除重定向
   function unwrapRedirectUrl(url) {
     const isRedirectHost = (host) => {
       host = String(host || '').replace(/\.$/, '');
@@ -1943,7 +1960,7 @@
             const ruMatch = path.match(/(?:^|\/)RU=([\s\S]*?)(?=(?:\/(?:rk|rs|rv|ro|re|rh|rt|_ylt|_ylu)=|\/$|$))/i); if (ruMatch && ruMatch[1]) next = decodeRedirectTarget(ruMatch[1]);
           }
           if (!next && url.includes('/*')) {
-            const starMatch = url.match(/\/\*-?(https?(?::|%3A)[\s\S]*)$/i); if (starMatch && starMatch[1]) next = decodeRedirectTarget(starMatch[1]);
+            const starMatch = url.match(/\/\*+-?(https?(?::|%3A)[\s\S]*)$/i); if (starMatch && starMatch[1]) next = decodeRedirectTarget(starMatch[1]);
           }
           if (!next) {
             const tryParam = (p) => { const v = urlObj.searchParams.get(p); if (v) next = decodeRedirectTarget(v); return !!next; };
@@ -2094,7 +2111,6 @@
     result.querySelectorAll('.serh-collapse-hide').forEach(el => el.classList.remove('serh-collapse-hide'));
   }
 
-  // 折叠模式
   function applyResultCollapse(result, engine) {
     restoreResultCollapse(result);
     const titleEl = getResultTitleElement(result, engine);
@@ -2794,7 +2810,6 @@
     requestAnimationFrame(processBatch);
   }
 
-  // 预留翻页高度
   const LAYOUT_CSS = `
         body { min-height: 101vh !important; }
         #rcnt, #rso { min-height: 60vh; }
@@ -3673,7 +3688,7 @@
 
     const whitelistRules = []; const highlightRules = [];
     activeRules.forEach(rule => {
-      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/)/);
+      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/|title\/|text\/)/);
       if (hlMatch) {
         const N = parseInt(hlMatch[1]); const hlBody = rule.substring(hlMatch[0].length).trim();
         if (N >= 1 && N <= 5 && hlBody) {

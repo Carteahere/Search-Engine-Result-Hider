@@ -49,6 +49,20 @@
       snippets: ['.generic-snippet .content', '.generic-snippet', '.line-clamp-dynamic', '.snippet-description', '.description'],
       links: ['a[href]'],
     },
+    ecosia: {
+      match: /^(?:(?:www|m)\.)?ecosia\.org$/,
+      containers: 'article[data-test-id="organic-result"], article[data-test-id="videos-result"], article[data-test-id="news-result"], article[data-test-id="images-result"]',
+      titles: ['h2[data-test-id="result-title"]', '.result-title__heading', 'h2.image-result__details-title', 'h2'],
+      snippets: ['[data-test-id="web-result-description"]', '[data-test-id="news-result-description"]', '.web-result__description', '.news-result__description', '.video-result__description', '.result__description'],
+      links: ['a[data-test-id="result-link"][href]', 'a.image-result__details-link[href]', 'a.image-result__link[href]', 'a[href]'],
+    },
+    startpage: {
+      match: /^(?:(?:www|eu|m)\.)?startpage\.com$/,
+      containers: 'div.result, .w-gl__result',
+      titles: ['a.result-link', 'h2.wgl-title', 'a.wgl-site-title', '.w-gl__result-title'],
+      snippets: ['p.description', '.result__main > p', '.w-gl__description'],
+      links: ['a.result-link[href]', 'a.wgl-site-title[href]', 'a.wgl-display-url[href]', 'a.display-url[href]', '.w-gl__result-title[href]', 'a[href]'],
+    },
     yahoo: {
       match: /^(?:[a-z]{2,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
       containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo',
