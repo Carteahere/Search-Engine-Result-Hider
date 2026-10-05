@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.6.1
+// @version      8.6.2
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -137,6 +137,20 @@
       snippets: ['.generic-snippet .content', '.generic-snippet', '.line-clamp-dynamic', '.snippet-description', '.description'],
       links: ['a[href]'],
     },
+    ecosia: {
+      match: /^(?:(?:www|m)\.)?ecosia\.org$/,
+      containers: 'article[data-test-id="organic-result"], article[data-test-id="videos-result"], article[data-test-id="news-result"], article[data-test-id="images-result"]',
+      titles: ['h2[data-test-id="result-title"]', '.result-title__heading', 'h2.image-result__details-title', 'h2'],
+      snippets: ['[data-test-id="web-result-description"]', '[data-test-id="news-result-description"]', '.web-result__description', '.news-result__description', '.video-result__description', '.result__description'],
+      links: ['a[data-test-id="result-link"][href]', 'a.image-result__details-link[href]', 'a.image-result__link[href]', 'a[href]'],
+    },
+    startpage: {
+      match: /^(?:(?:www|eu|m)\.)?startpage\.com$/,
+      containers: 'div.result, .w-gl__result',
+      titles: ['a.result-link', 'h2.wgl-title', 'a.wgl-site-title', '.w-gl__result-title'],
+      snippets: ['p.description', '.result__main > p', '.w-gl__description'],
+      links: ['a.result-link[href]', 'a.wgl-site-title[href]', 'a.wgl-display-url[href]', 'a.display-url[href]', '.w-gl__result-title[href]', 'a[href]'],
+    },
     yahoo: {
       match: /^(?:[a-z]{2,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
       containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo',
@@ -266,9 +280,18 @@
         const u = new URL(loc.href); if (!path) path = u.pathname.toLowerCase(); if (!search) search = u.search.toLowerCase();
       } catch (e) {}
     }
-    if (/^images\./.test(host) || /(?:^|\/)images(?:\/|$)/.test(path) || /[?&](?:tbm=isch|udm=2|iax?=images)(?:&|$)/.test(search)) return 'images';
+    if (/^images\./.test(host) || /(?:^|\/)images?(?:\/|$)/.test(path) || /[?&](?:tbm=isch|udm=2|iax?=images)(?:&|$)/.test(search)) return 'images';
     if (/^videos?\./.test(host) || /(?:^|\/)videos?(?:\/|$)/.test(path) || /[?&](?:tbm=vid|udm=7|iax?=videos)(?:&|$)/.test(search)) return 'videos';
-    if (/^news\./.test(host) || /(?:^|\/)news(?:\/|$)/.test(path) || /[?&](?:tbm=nws|udm=12|iax?=news)(?:&|$)/.test(search)) return 'news'; return 'web';
+    if (/^news\./.test(host) || /(?:^|\/)news(?:\/|$)/.test(path) || /[?&](?:tbm=nws|udm=12|iax?=news)(?:&|$)/.test(search)) return 'news';
+    if (/(?:^|\.)toutiao\.com$/.test(host)) {
+      const pd = (search.match(/[?&]pd=([a-z_]+)(?:&|$)/) || [])[1] || '';
+      if (pd === 'atlas') return 'images'; if (pd === 'information') return 'news'; if (pd.indexOf('video') !== -1) return 'videos';
+    }
+    if (/(?:^|\.)startpage\.com$/.test(host)) {
+      const cat = (search.match(/[?&]cat=([a-z]+)(?:&|$)/) || [])[1] || '';
+      if (cat === 'images' || cat === 'video' || cat === 'news') return cat === 'video' ? 'videos' : cat;
+    }
+    return 'web';
   }
 
   function getContainerSelector(engine) {
@@ -775,11 +798,13 @@
     const existing = document.getElementById(id);
     if (existing) {
       if (typeof existing._cleanupClick === 'function') existing._cleanupClick();
+      if (typeof existing._beforeClose === 'function') { try { existing._beforeClose(); } catch (err) { console.error('[面板] 关闭前回调失败:', err); } existing._beforeClose = null; }
       if (onExisting) onExisting(existing);
       existing.remove();
       return null;
     }
     const panel = createPanel(id, width, padding);
+    panel._beforeClose = typeof beforeClose === 'function' ? beforeClose : null;
     return { panel, closePanel: bindClose ? bindOutsideClickClose(panel, beforeClose) : null };
   }
 
@@ -1370,7 +1395,7 @@
 
     let ruleToCheck = rule.trim(); if (ruleToCheck.startsWith('#')) return { valid: true, errors: [], warnings: [] }; ruleToCheck = stripRuleComment(ruleToCheck);
     if (!ruleToCheck) return { valid: true, errors: [], warnings: [] }; const errors = []; const warnings = [];
-    let hlN = null; const hlValMatch = ruleToCheck.match(/^@(\d+)(?=\s|$|\*:\/\/)/);
+    let hlN = null; const hlValMatch = ruleToCheck.match(/^@(\d+)(?=\s|$|\*:\/\/|title\/|text\/)/);
     if (hlValMatch) {
       const N = parseInt(hlValMatch[1]);
       if (N < 1 || N > 5) {
@@ -1731,7 +1756,7 @@
         if (currentConfig.debug) console.warn('规则校验未通过, 已跳过:', rule); return;
       }
 
-      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/)/);
+      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/|title\/|text\/)/);
       if (hlMatch) {
         const N = parseInt(hlMatch[1]); if (N < 1 || N > 5) return; let hlRule = rule.substring(hlMatch[0].length).trim(); if (!hlRule) return; let parsed;
         try {
@@ -2051,7 +2076,7 @@
             const ruMatch = path.match(/(?:^|\/)RU=([\s\S]*?)(?=(?:\/(?:rk|rs|rv|ro|re|rh|rt|_ylt|_ylu)=|\/$|$))/i); if (ruMatch && ruMatch[1]) next = decodeRedirectTarget(ruMatch[1]);
           }
           if (!next && url.includes('/*')) {
-            const starMatch = url.match(/\/\*-?(https?(?::|%3A)[\s\S]*)$/i); if (starMatch && starMatch[1]) next = decodeRedirectTarget(starMatch[1]);
+            const starMatch = url.match(/\/\*+-?(https?(?::|%3A)[\s\S]*)$/i); if (starMatch && starMatch[1]) next = decodeRedirectTarget(starMatch[1]);
           }
           if (!next) {
             const tryParam = (p) => { const v = urlObj.searchParams.get(p); if (v) next = decodeRedirectTarget(v); return !!next; };
@@ -3922,7 +3947,7 @@
 
     const whitelistRules = []; const highlightRules = [];
     activeRules.forEach(rule => {
-      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/)/);
+      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/|title\/|text\/)/);
       if (hlMatch) {
         const N = parseInt(hlMatch[1]); const hlBody = rule.substring(hlMatch[0].length).trim();
         if (N >= 1 && N <= 5 && hlBody) {
@@ -5587,7 +5612,10 @@
     }
 
     if (syncSelectors) {
-      prefix += '# Selectors:' + JSON.stringify(getUserSelectors()) + '\n';
+      const userSelectors = getUserSelectors();
+      if (Object.keys(userSelectors).length || remotePreserved.rawSelectors) prefix += '# Selectors:' + JSON.stringify(userSelectors) + '\n';
+    } else if (remotePreserved.rawSelectors) {
+      prefix += remotePreserved.rawSelectors + '\n';
     }
 
     return prefix + content;
@@ -5697,17 +5725,23 @@
       return out;
     };
     const splitFlowItems = (payload) => (payload.indexOf('\n') !== -1 ? flowLineItems(payload.split('\n')) : flowLineItems([payload]));
+    const pushFlowSeq = (raw, from, key) => {
+      let payload; let end = from;
+      if (raw.endsWith(']')) payload = raw.slice(1, raw.lastIndexOf(']'));
+      else {
+        const close = flowCloseAt(from + 1); if (!close) return -1;
+        payload = [raw.slice(1), ...lines.slice(from + 1, close.line).map((l) => l.trim()).filter(Boolean)].filter(Boolean).join('\n');
+        if (close.prefix) payload = payload ? payload + '\n' + close.prefix : close.prefix;
+        end = close.line;
+      }
+      for (const part of splitFlowItems(payload)) pushYamlItem(part, key);
+      return end;
+    };
     for (let idx = 0; idx < lines.length; idx++) {
       const line = lines[idx]; const flowOpen = flowOpenOf(line);
       if (flowOpen) {
-        const close = flowCloseAt(idx + 1);
-        if (close) {
-          hasSection = true;
-          let payload = [flowOpen.payload, ...lines.slice(idx + 1, close.line).map((l) => l.trim()).filter(Boolean)].filter(Boolean).join('\n');
-          if (close.prefix) payload = payload ? payload + '\n' + close.prefix : close.prefix;
-          for (const part of splitFlowItems(payload)) pushYamlItem(part, flowOpen.key);
-          idx = close.line; continue;
-        }
+        const end = pushFlowSeq('[' + flowOpen.payload, idx, flowOpen.key);
+        if (end !== -1) { hasSection = true; idx = end; continue; }
       }
       const flow = flowKeyOf(line);
       if (flow) {
@@ -5733,6 +5767,7 @@
         continue;
       }
       const s = line.trim(); if (!s || s.startsWith('#')) continue;
+      if (s.startsWith('[')) { const end = pushFlowSeq(stripLineComment(s), idx, sectionKind); if (end !== -1) { idx = end; continue; } }
 
       const currentIndent = line.search(/\S/); const isListItem = s.startsWith('-');
       if (!isListItem && (currentIndent <= sectionIndent || (sectionIndent === 0 && currentIndent === 0))) {
@@ -5770,7 +5805,7 @@
   }
 
   function parseRulesetContent(content) {
-    let lines = String(content || '').replace(/^\uFEFF/, '').split('\n'); let meta = {}; let isYaml = false; const firstContentIdx = lines.findIndex((l) => l.trim() !== '');
+    let lines = String(content || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n'); let meta = {}; let isYaml = false; const firstContentIdx = lines.findIndex((l) => l.trim() !== '');
     if (firstContentIdx !== -1 && lines[firstContentIdx].trim() === '---') {
       const endIndex = lines.findIndex((l, i) => i > firstContentIdx && l.trim() === '---');
       if (endIndex !== -1) {
@@ -6419,7 +6454,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           GM_setValue(SELECTORS_KEY, mergedSelectors); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite();
         }
       }
-      const selectorsChanged = syncSelectors && (cloudSelectors === null || !selectorsEqual(mergedSelectors, cloudSelectors)); const contentChanged = mergedRules.join('\n') !== cloudRules.join('\n');
+      const selectorsChanged = syncSelectors && (cloudSelectors === null ? Object.keys(getUserSelectors()).length > 0 : !selectorsEqual(mergedSelectors, cloudSelectors)); const contentChanged = mergedRules.join('\n') !== cloudRules.join('\n');
       const localNewer = localTime > cloudTime; const localSettingsNewer = localSettingsTime > cloudSettingsTime;
       const subscriptionsChanged = syncConfig && (
         subscriptionsSignature(mergedSubs || getSubscriptions()) !== subscriptionsSignature(cloudConfig && cloudConfig.subscriptions));

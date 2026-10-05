@@ -156,7 +156,7 @@ bing: {disabled: true},
 
 **Description:**
 
-1. Built-in engine IDs: `google`, `google_scholar`, `bing`, `duckduckgo_lite`, `duckduckgo`, `yandex`, `brave`, `yahoo`, `so360`, `sogou`, `toutiao`, `quark` (in `@if($site=)`, `ddg` is an alias for `duckduckgo`, `yahoo-japan` is an alias for `yahoo`).
+1. Built-in engine IDs: `google`, `google_scholar`, `bing`, `duckduckgo_lite`, `duckduckgo`, `yandex`, `brave`, `ecosia`, `startpage`, `yahoo`, `so360`, `sogou`, `toutiao`, `quark` (in `@if($site=)`, `ddg` is an alias for `duckduckgo`, `yahoo-japan` is an alias for `yahoo`).
 2. Custom engines support the `$site = "Engine ID"` condition as well as block/highlight/whitelist rules; `titles`/`snippets` can be omitted.
 3. Engine IDs allow only letters/digits/`_`/`-`; `other` is a reserved key and cannot be used. The same ID as a built-in engine, or an overlapping site, overrides the built-in selectors, e.g. matching `cn.bing.com` takes priority over built-in `bing`.
 4. Priority: Custom selectors > Built-in selectors. Changing an override back to the built-in value or using Reset restores following script updates.
