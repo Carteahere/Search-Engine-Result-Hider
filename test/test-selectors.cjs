@@ -194,6 +194,7 @@ check('选择器-023: links 非法类型报错', api.validateUserSelectors({ e6:
 check('选择器-024: containers 伪元素被拒且引号内不误报', api.validateUserSelectors({ e7: { match: 'a', containers: 'div::after' } }).length === 1 && api.validateUserSelectors({ e8: { match: 'a', containers: '[data-x="a::b"]' } }).length === 0);
 check('修复P-1: titles/snippets/links 伪元素被拒且引号内不误报', api.validateUserSelectors({ p1: { match: 'a', containers: '.x', titles: ['h3::after'] } }).length === 1 && api.validateUserSelectors({ p2: { match: 'a', containers: '.x', snippets: ['.c::before'] } }).length === 1 && api.validateUserSelectors({ p3: { match: 'a', containers: '.x', links: 'a::after' } }).length === 1 && api.validateUserSelectors({ p4: { match: 'a', containers: '.x', links: ['a', 'b::after'] } }).length === 1 && api.validateUserSelectors({ p5: { match: 'a', containers: '.x', titles: ['[data-k="a::b"]'] } }).length === 0);
 check('选择器-025: 对象match校验: 非法flags报错且合法通过', api.validateUserSelectors({ e11: { match: { source: 'a', flags: 'q' }, containers: '.x' } }).length === 1 && api.validateUserSelectors({ e12: { match: { source: 'a', flags: 'i' }, containers: '.x' } }).length === 0);
+check('审查D1: 字符串match写成/re/g(非法flags)被拒且合法字面量仍通过', api.validateUserSelectors({ f1: { match: '/a/g', containers: '.x' } }).some(m => m.includes('invalidRegexFlags')) && api.validateUserSelectors({ f2: { match: '/a/i', containers: '.x' } }).length === 0);
 
 // ---- normalizeSelectorList ----
 check('选择器-026: 数组过滤非字符串', JSON.stringify(api.normalizeSelectorList(['a', 1, '', 'b'])) === '["a","b"]');
@@ -315,6 +316,13 @@ check('选择器-069: sameSelectorDef 兼容字符串/RegExp/对象形态且flag
 // ---- disable 别名字段 ----
 check('选择器-070: disable:true 别名校验通过', api.validateUserSelectors({ z4: { disable: true } }).length === 0);
 check('选择器-071: disable:false 单独视为显式恢复', api.validateUserSelectors({ z5: { disable: false } }).length === 0);
+check('审查D2-1: disabled/disable 非布尔值被拒', api.validateUserSelectors({ z10: { match: 'a', containers: '.x', disabled: 'true' } }).some(m => m.includes('disabled')) && api.validateUserSelectors({ z11: { match: 'a', containers: '.x', disable: 'false' } }).some(m => m.includes('disable')));
+{
+  api.setStore({ bing: { disabled: 'false' } });
+  const stringFalseKeepsEngineOn = api.getSelectors().bing.disabled !== true;
+  api.setStore({});
+  check('审查D2-2: 存储里 disabled 为字符串 false 不再误禁用引擎', stringFalseKeepsEngineOn);
+}
 {
   const out = api.diffUserSelectors({ bing: { disable: true } });
   check('选择器-072: diff disable:true 归一为 disabled:true', out.bing && out.bing.disabled === true && out.bing.disable === undefined);
@@ -1573,6 +1581,16 @@ await (async () => {
     check('审查B-9: 展开模式解除任一子项父立即恢复', !P.hasAttribute('data-blocker-google-parent') && !P.hasAttribute('data-serh-orig-display'));
   }
   {
+    const { root, fns } = makeParentEnv(true);
+    const P = makeTreeEl('div', 'MjjYud', root); P.style.display = 'flex';
+    const g1 = makeTreeEl('div', 'g', P);
+    const g2 = makeTreeEl('div', 'g', P);
+    fns.saveOriginalDisplay(g1); g1.setAttribute('data-is-blocked', 'true');
+    fns.saveOriginalDisplay(g2); g2.setAttribute('data-is-blocked', 'true');
+    fns.hideParentIfNoVisibleSiblings(P, P.querySelectorAll('div.g'), 'data-blocker-google-parent');
+    check('审查B-15: 展开模式下父容器原内联flex被保留(不再清空致布局塌陷)', P.style.display === 'flex' && P.getAttribute('data-blocker-google-parent') === 'true' && P.getAttribute('data-serh-orig-display') === 'flex');
+  }
+  {
     const { root, fns } = makeParentEnv(false);
     const P = makeTreeEl('div', 'MjjYud', root);
     const g1 = makeTreeEl('div', 'g', P);
@@ -1847,7 +1865,157 @@ return { injectBlockButton };
   const sourceOrder = ['', ''].map((_, i) => `sub:${i + 1}`).concat('local');
   check('统计-004(修复7): 中英混排来源dataset聚合后全部落入sourceOrder键(修复前zh→en切换后3/4行消失)', sourceOrder.includes('sub:1') && sourceOrder.includes('sub:2') && agg.get('local') === 3 && agg.get('sub:1') === 1 && agg.get('sub:2') === 1);
   const usSrc = extractFn(src, 'updateStatsContent');
-  check('统计-005(修复7): 聚合走statSourceKey归一, sourceOrder为[key,label]对且展示用sourceLabel', usSrc.includes('statSourceKey(matchedSource)') && usSrc.includes("['local', t('localRule')]") && usSrc.includes('${sourceLabel}'));
+  check('统计-005(修复7): 聚合走statSourceKey归一, sourceOrder为[key,label]对且展示用sourceLabel', usSrc.includes('statSourceKey(source)') && usSrc.includes("['local', t('localRule')]") && usSrc.includes('${sourceLabel}'));
+}
+
+// ---- 统计-006~020: 高亮命中进统计 + 分组总数按结果去重(并入原 repro-stats-render.cjs / repro-hl-stats.cjs) ----
+{
+  // 顶层常量提取(值里可能含括号/花括号, 按配对深度取到分号)
+  const grabConst = (name) => {
+    const i = src.indexOf('const ' + name + ' =');
+    if (i === -1) throw new Error('const not found: ' + name);
+    let depth = 0, j = src.indexOf('=', i) + 1;
+    for (; j < src.length; j++) {
+      const ch = src[j];
+      if ('{[('.includes(ch)) depth++;
+      else if ('}])'.includes(ch)) depth--;
+      else if (ch === ';' && depth === 0) break;
+    }
+    return src.slice(i, j + 1);
+  };
+  const langTextsSrc = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
+
+  const subRules = ['@2 *://*.badsite.com/*', 'tracker.com'];
+  const initSubs = [{ name: 'sub1', enabled: true, rules: subRules }];
+  let rulesText = '';
+  let fakeResults = [];
+  const statsContent = { _html: '', set innerHTML(v) { this._html = v; }, get innerHTML() { return this._html; } };
+  const documentStub = {
+    getElementById: (id) => {
+      if (id === 'serh-stats-content') return statsContent;
+      if (id === 'serh-rules') return { get value() { return rulesText; } };
+      return null;
+    },
+    querySelectorAll: () => fakeResults,
+  };
+  const windowStub = { location: { hostname: 'www.google.com', href: 'https://www.google.com/search?q=x', pathname: '/search', search: '?q=x' } };
+
+  const statsFns = [
+    'escHtml', 'cachedAnalyzeRule', 'statSourceKey', 'updateStatsContent', 'filterValidRuleLines', 'getRuleKey',
+    'hostLabelToASCII', 'toASCIIHostname', 'safeRegexTest', 'stripRuleComment',
+    'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens',
+    'analyzeCondExpr', 'foldCondExpr', 'isCondExprCore', 'looksLikeCondExpr',
+    'parsePrefixedRegexRule', 'ruleToRegex', 'escapeWildcardPart', 'wildcardToRegex',
+    'matchWildcardDomainPattern', 'matchSimpleDomain', 'compileRuleRegex',
+    'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition',
+    'absorbStandaloneExpr', 'parseRuleWithConditions', 'validateCondition', 'analyzeRule',
+    'findBalancedParenEnd', 'isBadRegexTail', 'scanRuleString', 'encodeNonAscii',
+    'extractIfConditions', 'isScriptRuleLine', 'isElementRuleLine', 'normalizeHostCandidate',
+    'validateUrlWildcard', 'splitHostAndPort', 'escapeHostPart', 'punycodeDecodeLabel', 'toUnicodeHostname',
+    'getSubdomainLevels', 'matchDomainEntryType',
+    'buildRuleIndex', 'checkRuleMatchOptimized', 'newCompiledRules', 'checkDynamicConditions',
+    'evalCondAST', 'extractSimpleWhitelistDomain', 'isLocalEntry', 'validateRule',
+  ].map((n) => extractFn(src, n));
+
+  // 真实链路: buildRuleIndex -> checkRuleMatchOptimized -> (processSingleResult 写 dataset) -> updateStatsContent
+  const api = new Function('document', 'window', 'location', 'INIT_RULES', 'INIT_SUBS', `
+${grabConst('SUPPORTED_REGEX_FLAGS')}
+${langTextsSrc}
+${grabConst('HL_STATS_REGEX')}
+${grabConst('COMMON_HOST_PREFIXES')}
+${grabConst('PUBLIC_SUFFIX_2LD')}
+const validationCache = new Map();
+const subdomainCache = new Map();
+let compiledRules = null;
+const currentConfig = { rules: INIT_RULES.slice(), language: 'zh-CN', enabled: true, debug: false, errorDetection: true, highlightColors: { 1: '#CE2029' } };
+function t(key, params = {}) {
+  const texts = LANG_TEXTS['zh-CN'] || {};
+  let text = texts[key] || key;
+  for (const [k, v] of Object.entries(params)) text = text.replaceAll('{' + k + '}', v);
+  return text;
+}
+function getSubscriptions() { return INIT_SUBS; }
+function getAllSubscriptionRules() { return INIT_SUBS.filter(s => s.enabled).reduce((a, s) => a.concat(Array.isArray(s.rules) ? s.rules : []), []); }
+function getSearchEngine() { return 'google'; }
+function getSearchCategory() { return 'web'; }
+function getContainerSelector() { return '.g'; }
+${statsFns.join('\n')}
+return { buildRuleIndex, checkRuleMatchOptimized, updateStatsContent, setRules: (r) => { currentConfig.rules = r; } };
+  `)(documentStub, windowStub, windowStub.location, [], initSubs);
+
+  const applyRules = (arr) => { rulesText = arr.join('\n'); api.setRules(arr); api.buildRuleIndex(); };
+  const runStats = () => { statsContent.innerHTML = ''; api.updateStatsContent(); return statsContent.innerHTML; };
+  const parseStats = (html) => {
+    const groups = {};
+    for (const m of html.matchAll(/>([^<>]+)<\/span><span[^>]*>匹配 (\d+) 条/g)) groups[m[1]] = Number(m[2]);
+    const hits = new Map(), types = new Map();
+    for (const m of html.matchAll(/匹配: (\d+) 条<\/span><\/div><div[^>]*>([^<]*)<\/div>/g)) hits.set(m[2], Number(m[1]));
+    for (const m of html.matchAll(/color: #718096;">([^<]*)<\/span><span[^>]*>匹配: \d+ 条<\/span><\/div><div[^>]*>([^<]*)<\/div>/g)) types.set(m[2], m[1]);
+    return { groups, hits, types };
+  };
+
+  // 1) 渲染回归: 高亮/屏蔽/白名单命中都要出现在统计里
+  applyRules(['@1 *://*.example.com/* @if(title *= "测试")', 'ads.com', '@good.com']);
+  fakeResults = [
+    { dataset: { highlightRule: '@1 *://*.example.com/* @if(title *= "测试")', highlightSource: '本地规则' } },
+    { dataset: { matchedRule: 'ads.com', matchedSource: '本地规则' } },
+    { dataset: { whitelistRule: '@good.com', whitelistSource: '本地规则' } },
+  ];
+  const renderHtml = runStats();
+  check('统计-006(渲染): 高亮命中渲染为条目', renderHtml.includes('@1 *://*.example.com/* @if(title *= &quot;测试&quot;)') || renderHtml.includes('@1 *://*.example.com/* @if(title *= "测试")'));
+  check('统计-007(渲染): 屏蔽命中渲染为条目', renderHtml.includes('ads.com'));
+  check('统计-008(渲染): 白名单命中渲染为条目', renderHtml.includes('@good.com'));
+  check('统计-009(渲染): 有命中时不显示"无匹配项"', !renderHtml.includes('无匹配项') && !renderHtml.includes('noMatch'));
+
+  // 2) 端到端: 高亮规则来源 + 屏蔽且高亮的结果只计入分组总数一次
+  const localRules = ['@1 *://*.example.com/*', 'ads.example.com', 'ads.com', '@good.com'];
+  applyRules(localRules);
+  const statCases = [
+    'https://www.example.com/p',   // 仅高亮
+    'https://news.example.com/p',  // 仅高亮
+    'https://blog.example.com/p',  // 仅高亮
+    'https://ads.example.com/p',   // 屏蔽且高亮 ← 去重口径来源
+    'https://www.ads.com/p',       // 仅屏蔽
+    'https://www.good.com/p',      // 仅白名单
+    'https://www.badsite.com/p',   // 订阅高亮
+    'https://www.tracker.com/p',   // 订阅屏蔽
+  ];
+  const matches = statCases.map((u) => { const uo = new URL(u); return api.checkRuleMatchOptimized(uo.href, uo.hostname, '任意标题', '任意摘要'); });
+  check('统计-010: 本地高亮命中带 hlSource=本地规则', !!(matches[0] && matches[0].hlSource === '本地规则'), matches[0]);
+  check('统计-011: 订阅高亮命中带 hlSource=订阅1', !!(matches[6] && matches[6].hlSource === '订阅1'), matches[6]);
+  check('统计-012: ads.example.com 同时返回屏蔽+高亮', !!(matches[3] && matches[3].blocked && matches[3].highlight && matches[3].hlSource === '本地规则'), matches[3]);
+  check('统计-013: 订阅屏蔽规则来源=订阅1(来源计算前移未回归)', !!(matches[7] && matches[7].blocked && matches[7].source === '订阅1'), matches[7]);
+
+  // dataset 与 processSingleResult 一致: 屏蔽分支不再写白名单
+  const toDataset = (m, keepHlSource) => {
+    const ds = {};
+    if (m && m.highlight) { ds.highlightRule = m.hlRule; ds.highlightSource = keepHlSource ? (m.hlSource || '') : ''; }
+    if (m && m.blocked) { ds.matchedRule = m.rule || ''; ds.matchedSource = m.source || ''; }
+    else if (m && m.whitelisted) { ds.whitelistRule = m.rule || ''; ds.whitelistSource = m.source || ''; }
+    return ds;
+  };
+  const runStatsFor = (keepHlSource) => { fakeResults = matches.map((m) => ({ dataset: toDataset(m, keepHlSource) })); return runStats(); };
+  const fixedHtml = runStatsFor(true);
+  const fixedStats = parseStats(fixedHtml);
+  const controlStats = parseStats(runStatsFor(false));
+
+  check('统计-014: 高亮条目类型标为"高亮规则"', fixedStats.types.get('@1 *://*.example.com/*') === '高亮规则' && fixedStats.hits.has('@1 *://*.example.com/*'), [...fixedStats.types.entries()]);
+  check('统计-015: 本地组徽标=去重后结果数6(3仅高亮+1屏蔽且高亮+1仅屏蔽+1仅白名单)', fixedStats.groups['本地规则'] === 6, fixedStats.groups);
+  check('统计-016: 订阅1组徽标=2', fixedStats.groups['订阅1'] === 2, fixedStats.groups);
+  check('统计-017: 每条规则命中数独立(高亮4/ads.example.com 1/ads.com 1/白名单1/订阅高亮1/订阅屏蔽1)',
+    fixedStats.hits.get('@1 *://*.example.com/*') === 4 && fixedStats.hits.get('ads.example.com') === 1 &&
+    fixedStats.hits.get('ads.com') === 1 && fixedStats.hits.get('@good.com') === 1 &&
+    fixedStats.hits.get('@2 *://*.badsite.com/*') === 1 && fixedStats.hits.get('tracker.com') === 1,
+    [...fixedStats.hits.entries()]);
+  const localRuleSum = ['@1 *://*.example.com/*', 'ads.example.com', 'ads.com', '@good.com']
+    .reduce((s, r) => s + (fixedStats.hits.get(r) || 0), 0);
+  check('统计-018(修复): 按命中累加会得到7, 分组总数去重后=6(对应"18高亮+12屏蔽且高亮却显示30")', localRuleSum === 7 && fixedStats.groups['本地规则'] === 6, [localRuleSum, fixedStats.groups['本地规则']]);
+  check('统计-019: 端到端有命中时不显示"无匹配项"', !fixedHtml.includes('无匹配项') && !fixedHtml.includes('noMatch'));
+  check('统计-020(对照): hlSource 为空时高亮不进统计(修复前行为)', !controlStats.hits.has('@1 *://*.example.com/*') && !controlStats.hits.has('@2 *://*.badsite.com/*'), [...controlStats.hits.keys()]);
+  const origQSA = documentStub.querySelectorAll;
+  documentStub.querySelectorAll = () => { throw new Error('invalid selector'); };
+  let c1Threw = false; try { runStats(); } catch (e) { c1Threw = true; } documentStub.querySelectorAll = origQSA;
+  check('审查C1-1: 容器选择器非法时统计面板不再抛错', c1Threw === false);
 }
 
 // ---- 选择器-233~234: 关闭回调恒假守卫死代码移除 / no-op调用清理 ----
@@ -1967,7 +2135,8 @@ return { injectBlockButton };
   // 修复W-11: Lite 版脚本同步修复
   const liteSrc = fs.readFileSync(path.join(__dirname, '..', 'Other', 'Lite.user.js'), 'utf8');
   check('修复W-11: Lite 版搜狗容器选择器同步覆盖 div.vrResult', /containers: 'div\.vrwrap:has\(h3\), \.reactResult, div\.vrResult'/.test(liteSrc));
-  check('修复H-4: Lite 版 @Ntitle/@Ntext 高亮识别同步(3处)', liteSrc.split('|title\\/|text\\/').length - 1 === 3);
+  const hlPatCount = (s) => s.split('|title\\/|text\\/').length - 1;
+  check('修复H-4: Lite 版 @Ntitle/@Ntext 高亮识别与主版本同步(2处, 高亮统计改为仅记录命中)', hlPatCount(liteSrc) === 2 && hlPatCount(liteSrc) === hlPatCount(src));
 }
 
 // ---- 适配S: 神马搜索(sm.cn, 夸克系渲染)识别与选择器 ----

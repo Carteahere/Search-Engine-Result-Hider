@@ -880,6 +880,12 @@ await (async () => {
   r = run('# ScriptConfig: {"a":1}\n# 我的分组注释\n# Selectors: []\nrule1');
   assert('规则-170: 两头之间的注释保留', r.restLines.join('\n') === '# 我的分组注释\nrule1');
   assert('规则-171: Selectors 头解析并合入 config', Array.isArray(r.config.selectors));
+  r = run('# Selectors: {"bing":{"containers":".x"}}\nrule1');
+  assert('审查C1-2: 合法选择器头照常解析并合入 config', !!r.rawSelectors && r.config.selectors.bing.containers === '.x' && r.restLines.join('\n') === 'rule1');
+  r = run('# Selectors: {"foo":1}\nrule1');
+  assert('审查C1-3: 非法选择器头整行剔除且 rawSelectors 置空', r.rawSelectors === null && !(r.config && r.config.selectors) && r.restLines.join('\n') === 'rule1');
+  r = run('# Selectors: {"bing":{"disabled":"true"}}\nrule1');
+  assert('审查C1-4: disabled 非布尔的选择器头同样剔除', r.rawSelectors === null && r.restLines.join('\n') === 'rule1');
 
   r = run('# 注释\nrule1\n# ScriptConfig: {"a":1}');
   assert('规则-172: 规则行后的头行不吞(按规则保留)', r.restLines.join('\n') === '# 注释\nrule1\n# ScriptConfig: {"a":1}');
@@ -1588,6 +1594,32 @@ api.buildRuleIndex();
 cr = api.getCR();
 const hlC = api.checkRuleMatchOptimized('https://a.example.com/x', 'a.example.com', 't', '', ['a.example.com', 'example.com']);
 check('规则-313: 紧贴@N与@if组合仍为条件高亮', (cr.highlightConditionalRules.length === 1 || cr.highlightConditionalDomains.size === 1) && !!hlC && hlC.highlight === 2);
+
+// ---- 规则-362~365: @N+@if 高亮条件规则的编译与命中(并入原 repro-hl-conditional.cjs) ----
+// 校验由 buildRuleIndex 内的 validateRule 兜底: 规则无效则不会入索引, 下面 362/363 必然失败
+const HL_COND_RULE = '@1 *://*.example.com/* @if(title *= "测试")';
+api.setState([HL_COND_RULE], []);
+api.buildRuleIndex();
+cr = api.getCR();
+const hlCondList = cr.highlightConditionalDomains.get('example.com') || [];
+check('规则-362: 编译进 highlightConditionalDomains(域名+级别1+原始规则+来源本地)',
+  cr.highlightDomains.size === 0 && hlCondList.length === 1 && hlCondList[0].N === 1 &&
+  hlCondList[0].originalRule === HL_COND_RULE && hlCondList[0].source === '本地规则' && hlCondList[0].isLocal === true,
+  JSON.stringify(hlCondList));
+const HL_COND_LEVELS = ['sub.example.com', 'example.com', 'com'];
+const hlCondHit = api.checkRuleMatchOptimized('https://sub.example.com/page?q=x', 'sub.example.com', '这是一个测试页面', '', HL_COND_LEVELS);
+check('规则-363: 标题命中条件时高亮并带 hlRule/hlSource(高亮规则可进统计)',
+  !!(hlCondHit && hlCondHit.highlight === 1 && hlCondHit.hlRule === HL_COND_RULE && hlCondHit.hlSource === '本地规则' && !hlCondHit.blocked),
+  hlCondHit);
+check('规则-364: 标题不命中条件时不高亮', api.checkRuleMatchOptimized('https://sub.example.com/page?q=x', 'sub.example.com', '无关标题', '', HL_COND_LEVELS) === false);
+
+api.setState(['@1 *://*.example.com/*'], []);
+api.buildRuleIndex();
+const hlPlainCr = api.getCR();
+const hlPlainHit = api.checkRuleMatchOptimized('https://sub.example.com/page?q=x', 'sub.example.com', '任意标题', '', HL_COND_LEVELS);
+check('规则-365(对照): 无@if 时走 highlightDomains 静态命中',
+  hlPlainCr.highlightDomains.has('example.com') && hlPlainCr.highlightConditionalDomains.size === 0 && !!hlPlainHit && hlPlainHit.highlight === 1,
+  [...hlPlainCr.highlightDomains.keys()]);
 
 // ==== [修复-问题1/5/6] IDN中文通配符转ASCII / Yahoo重定向RU截断 / host端口条件匹配 ====
 {

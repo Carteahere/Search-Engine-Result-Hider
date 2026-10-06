@@ -564,6 +564,15 @@ assert('条件-434(修复SC对照): 注释含斜杠仍剥离', api.stripRuleComm
 assert('条件-435(修复SC): @if组后体内#前缀正则保留', api.stripRuleComment('@if(x) title/a/b # c/') === '@if(x) title/a/b # c/' && api.validateRule('title/a/b # c/') === true);
 assert('条件-436(对照): @if简写正则3字符flags(gim)识别为合法条件', api.validateRule('@if(title/abc/gim)') === true && api.validateRule('@if(title/abc/im)') === true);
 
+// ---- 审查A2: @N 与规则之间可省略空格 ----
+const a2eq = (a, b) => JSON.stringify(api.analyzeRule(a)) === JSON.stringify(api.analyzeRule(b));
+assert('审查A2-0(对照): @N带空格条件表达式本身合法', api.analyzeRule('@1 path $= ".pdf"').valid === true);
+assert('审查A2-1: @N后无空格的条件/正则/URL写法与带空格同构', a2eq('@1path $= ".pdf"', '@1 path $= ".pdf"') && a2eq('@1host $= ".example.com"', '@1 host $= ".example.com"') && a2eq('@1/abc/i', '@1 /abc/i') && a2eq('@1https://x.com/*', '@1 https://x.com/*'));
+const a2parts = src.split(String.fromCharCode(10)).filter((l) => l.indexOf('.match(/^@(') !== -1).map((l) => l.slice(l.indexOf('/^@('), l.lastIndexOf('/)') + 1));
+assert('审查A2-2: analyzeRule 与 buildRuleIndex 的 @N 前瞻字面一致', a2parts.length === 2 && a2parts[0] === a2parts[1], a2parts);
+const a2re = new RegExp(a2parts[0].slice(1, -1));
+assert('审查A2-3(对照): 裸域名无空格仍不进高亮前瞻', a2re.test('@1path $= ".pdf"') && a2re.test('@1/abc/i') && !a2re.test('@1example.com') && !a2re.test('@2fast.com') && !a2re.test('@1path.com'));
+
 
 // ---- @if 括号提取 ----
 const src1 = '@if(title *= "a)b")';
