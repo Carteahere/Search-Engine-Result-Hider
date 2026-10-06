@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.6.2
+// @version      8.6.3
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -218,7 +218,7 @@
     if (activeSelectors) return activeSelectors; const merged = {}; const user = getUserSelectors(); const userKeys = Object.keys(user).filter(k => k !== 'other');
     for (const key of userKeys) {
       const def = user[key]; if (!def || typeof def !== 'object' || Array.isArray(def)) continue;
-      if (def.disabled || def.disable) {
+      if (def.disabled === true || def.disable === true) {
         const base = builtinSelectorOf(key); merged[key] = { ...mergeSelectorDef(def, base), match: def.match !== undefined ? def.match : base.match, disabled: true }; continue;
       }
       const defContentKeys = Object.keys(def).filter(k => k !== 'disabled' && k !== 'disable' && def[k] !== undefined && def[k] !== null && def[k] !== '');
@@ -367,6 +367,7 @@
       selectorInvalidRegex: 'match 正则无效: {key}',
       selectorInvalidCss: 'CSS 选择器无效: {key}.{field}: {value}',
       selectorFieldRequired: '字段必填: {key}.{field}',
+      selectorInvalidBool: '字段必须为布尔值: {key}.{field}',
     },
     'en': {
       disableBlock: 'Disable Block', showCount: 'Show Count', debugMode: 'Debug Mode',
@@ -434,6 +435,7 @@
       selectorInvalidRegex: 'Invalid match regex: {key}',
       selectorInvalidCss: 'Invalid CSS selector: {key}.{field}: {value}',
       selectorFieldRequired: 'Required field: {key}.{field}',
+      selectorInvalidBool: 'Field must be a boolean: {key}.{field}',
     }
   };
 
@@ -1393,7 +1395,7 @@
 
     let ruleToCheck = rule.trim(); if (ruleToCheck.startsWith('#')) return { valid: true, errors: [], warnings: [] }; ruleToCheck = stripRuleComment(ruleToCheck);
     if (!ruleToCheck) return { valid: true, errors: [], warnings: [] }; const errors = []; const warnings = [];
-    let hlN = null; const hlValMatch = ruleToCheck.match(/^@(\d+)(?=\s|$|\*:\/\/|title\/|text\/)/);
+    let hlN = null; const hlValMatch = ruleToCheck.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|[(!])/);
     if (hlValMatch) {
       const N = parseInt(hlValMatch[1]);
       if (N < 1 || N > 5) {
@@ -1754,7 +1756,11 @@
         if (currentConfig.debug) console.warn('规则校验未通过, 已跳过:', rule); return;
       }
 
-      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/|title\/|text\/)/);
+      const isLocal = ruleIndex < localRuleCount; const source = isLocal
+        ? t('localRule')
+        : (subscriptionSources[ruleIndex - localRuleCount] || t('localRule'));
+
+      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|[(!])/);
       if (hlMatch) {
         const N = parseInt(hlMatch[1]); if (N < 1 || N > 5) return; let hlRule = rule.substring(hlMatch[0].length).trim(); if (!hlRule) return; let parsed;
         try {
@@ -1767,26 +1773,26 @@
         if (highlightWhitelist) coreRule = coreRule.substring(1).trim();
 
         if (!coreRule && (parsed.standaloneExpr || parsed.dynamicConditions.length)) {
-          compiledRules.highlightConditionalRules.push({type: 'expr', conditions: parsed.dynamicConditions, N});
+          compiledRules.highlightConditionalRules.push({type: 'expr', conditions: parsed.dynamicConditions, originalRule: rule, N, source, isLocal});
           if (!highlightWhitelist) return;
         } else if (coreRule) {
           const dm = matchSimpleDomain(coreRule);
           if (dm) {
             if (!parsed.dynamicConditions.length) {
               if (!compiledRules.highlightDomains.has(dm.domain))
-                compiledRules.highlightDomains.set(dm.domain, []); compiledRules.highlightDomains.get(dm.domain).push({N, type: dm.domainType});
+                compiledRules.highlightDomains.set(dm.domain, []); compiledRules.highlightDomains.get(dm.domain).push({N, type: dm.domainType, originalRule: rule, source, isLocal});
             } else {
-              const hlCondRule = {type: 'domain', domain: dm.domain, N, conditions: parsed.dynamicConditions, domainType: dm.domainType};
+              const hlCondRule = {type: 'domain', domain: dm.domain, N, conditions: parsed.dynamicConditions, domainType: dm.domainType, originalRule: rule, source, isLocal};
               if (!compiledRules.highlightConditionalDomains.has(dm.domain))
                 compiledRules.highlightConditionalDomains.set(dm.domain, []); compiledRules.highlightConditionalDomains.get(dm.domain).push(hlCondRule);
             }
           } else {
             try {
-              const compiled = compileRuleRegex(coreRule); const ruleObj = {type: compiled.type, regex: compiled.regex, conditions: parsed.dynamicConditions, N};
+              const compiled = compileRuleRegex(coreRule); const ruleObj = {type: compiled.type, regex: compiled.regex, conditions: parsed.dynamicConditions, originalRule: rule, N, source, isLocal};
               if (!parsed.dynamicConditions.length) {
-                if (compiled.type === 'url' || compiled.type === 'regex') compiledRules.highlightUrls.push({regex: compiled.regex, N});
-                else if (compiled.type === 'title') compiledRules.highlightTitles.push({regex: compiled.regex, N});
-                else if (compiled.type === 'text') compiledRules.highlightTexts.push({regex: compiled.regex, N});
+                if (compiled.type === 'url' || compiled.type === 'regex') compiledRules.highlightUrls.push({regex: compiled.regex, originalRule: rule, N, source, isLocal});
+                else if (compiled.type === 'title') compiledRules.highlightTitles.push({regex: compiled.regex, originalRule: rule, N, source, isLocal});
+                else if (compiled.type === 'text') compiledRules.highlightTexts.push({regex: compiled.regex, originalRule: rule, N, source, isLocal});
               } else {
                 compiledRules.highlightConditionalRules.push(ruleObj);
               }
@@ -1800,10 +1806,6 @@
       }
 
       if (!rule || rule.trim() === '' || rule.startsWith('#')) return;
-      const isLocal = ruleIndex < localRuleCount;
-      const source = isLocal
-        ? t('localRule')
-        : (subscriptionSources[ruleIndex - localRuleCount] || t('localRule'));
 
       let parsed;
       try {
@@ -1820,17 +1822,17 @@
         if (simpleDomain) {
           if (!hasDynamic) {
             if (!compiledRules.whitelistDomains.has(simpleDomain.domain))
-              compiledRules.whitelistDomains.set(simpleDomain.domain, []); compiledRules.whitelistDomains.get(simpleDomain.domain).push({type: simpleDomain.type, source, isLocal});
+              compiledRules.whitelistDomains.set(simpleDomain.domain, []); compiledRules.whitelistDomains.get(simpleDomain.domain).push({type: simpleDomain.type, originalRule: rule, source, isLocal});
           } else {
             if (!compiledRules.whitelistConditionalDomains.has(simpleDomain.domain))
               compiledRules.whitelistConditionalDomains.set(simpleDomain.domain, []);
-            compiledRules.whitelistConditionalDomains.get(simpleDomain.domain).push({type: simpleDomain.type, conditions: parsed.dynamicConditions, source, isLocal});
+            compiledRules.whitelistConditionalDomains.get(simpleDomain.domain).push({type: simpleDomain.type, conditions: parsed.dynamicConditions, originalRule: rule, source, isLocal});
           }
         } else {
           const whitelistRule = coreRule.substring(1).trim();
           if (!whitelistRule) {
             if (parsed.standaloneExpr || hasDynamic) {
-              compiledRules.whitelistConditionalRules.push({type: 'expr', conditions: parsed.dynamicConditions, source, isLocal});
+              compiledRules.whitelistConditionalRules.push({type: 'expr', conditions: parsed.dynamicConditions, originalRule: rule, source, isLocal});
             }
             return;
           }
@@ -1838,14 +1840,14 @@
             const compiled = compileRuleRegex(whitelistRule);
             if (!hasDynamic) {
               if (compiled.type === 'title') {
-                compiledRules.whitelistTitlePatterns.push({regex: compiled.regex, source, isLocal});
+                compiledRules.whitelistTitlePatterns.push({regex: compiled.regex, originalRule: rule, source, isLocal});
               } else if (compiled.type === 'text') {
-                compiledRules.whitelistTextPatterns.push({regex: compiled.regex, source, isLocal});
+                compiledRules.whitelistTextPatterns.push({regex: compiled.regex, originalRule: rule, source, isLocal});
               } else {
-                compiledRules.whitelistUrlPatterns.push({regex: compiled.regex, source, isLocal});
+                compiledRules.whitelistUrlPatterns.push({regex: compiled.regex, originalRule: rule, source, isLocal});
               }
             } else {
-              compiledRules.whitelistConditionalRules.push({type: compiled.type, regex: compiled.regex, conditions: parsed.dynamicConditions, source, isLocal});
+              compiledRules.whitelistConditionalRules.push({type: compiled.type, regex: compiled.regex, conditions: parsed.dynamicConditions, originalRule: rule, source, isLocal});
             }
           } catch (e) {
             if (currentConfig.debug) console.warn('白名单规则预编译失败:', rule, e);
@@ -1992,17 +1994,25 @@
         scanConditionalRules(compiledRules.conditionalRules, want);
     };
 
-    let whitelisted = !!findWhitelist(true); let blockedInfo = null; const toBlockedInfo = (item) => ({ rule: item.originalRule, source: item.source });
+    let whitelistHit = findWhitelist(true); let whitelisted = !!whitelistHit; let blockedInfo = null; const toBlockedInfo = (item) => ({ rule: item.originalRule, source: item.source });
     if (!whitelisted) {
       const item = findBlocked(true); if (item) blockedInfo = toBlockedInfo(item);
     }
-    if (!whitelisted && !blockedInfo) whitelisted = !!findWhitelist(false);
+    if (!whitelisted && !blockedInfo) { whitelistHit = findWhitelist(false); whitelisted = !!whitelistHit; }
     if (!whitelisted && !blockedInfo) {
       const item = findBlocked(false); if (item) blockedInfo = toBlockedInfo(item);
     }
 
-    if (highlightN && blockedInfo) return {highlight: highlightN, blocked: true, rule: blockedInfo.rule, source: blockedInfo.source}; if (highlightN) return {highlight: highlightN};
-    if (blockedInfo) return {blocked: true, rule: blockedInfo.rule, source: blockedInfo.source}; return false;
+    const toHlInfo = () => (hlEntry ? {hlRule: hlEntry.originalRule, hlSource: hlEntry.source} : {});
+    if (highlightN && blockedInfo) return {highlight: highlightN, blocked: true, rule: blockedInfo.rule, source: blockedInfo.source, ...toHlInfo()};
+    if (blockedInfo) return {blocked: true, rule: blockedInfo.rule, source: blockedInfo.source};
+    if (whitelistHit) {
+      const hit = {whitelisted: true, rule: whitelistHit.originalRule, source: whitelistHit.source};
+      if (highlightN) { hit.highlight = highlightN; Object.assign(hit, toHlInfo()); }
+      return hit;
+    }
+    if (highlightN) return {highlight: highlightN, ...toHlInfo()};
+    return false;
   }
 
   function decodeRedirectTarget(raw) {
@@ -2552,6 +2562,7 @@
 
   function clearMatchedData(result) {
     result.removeAttribute('data-matched-rule'); result.removeAttribute('data-matched-source');
+    result.removeAttribute('data-whitelist-rule'); result.removeAttribute('data-whitelist-source');
   }
 
   function saveOriginalDisplay(el) {
@@ -2578,13 +2589,13 @@
   function hideParentIfNoVisibleSiblings(parent, children, attr) {
     const hasVisible = Array.from(children).some(visibleUnblocked);
     if (!hasVisible) {
-      saveOriginalDisplay(parent); parent.style.display = blockedShown() ? '' : 'none'; parent.setAttribute(attr, 'true');
+      saveOriginalDisplay(parent); parent.style.display = blockedShown() ? (parent.getAttribute('data-serh-orig-display') || '') : 'none'; parent.setAttribute(attr, 'true');
     }
   }
 
   function resetResultStyles(result) {
     restoreResultExtraElements(result); restoreResultCollapse(result); _hrefUrlCache.delete(result); _resultContentCache.delete(result); _resultRetryCounts.delete(result); result.removeAttribute('data-blocker-processed');
-    result.removeAttribute('data-is-blocked'); result.removeAttribute('data-is-highlighted'); result.removeAttribute('data-highlight-n'); clearMatchedData(result);
+    result.removeAttribute('data-is-blocked'); result.removeAttribute('data-is-highlighted'); result.removeAttribute('data-highlight-n'); result.removeAttribute('data-highlight-rule'); result.removeAttribute('data-highlight-source'); clearMatchedData(result);
     result.classList.remove('serh-blocked-visible'); result.classList.remove('serh-blocked-collapsed'); result.style.outline = ''; result.style.outlineOffset = ''; const origDisplay = result.getAttribute('data-serh-orig-display');
     if (origDisplay !== null) { result.style.display = origDisplay; result.removeAttribute('data-serh-orig-display'); }
     if (result.parentElement && result.parentElement.dataset.blockerYandexParent) {
@@ -2688,6 +2699,7 @@
       const color = currentConfig.highlightColors[matchHL] || '#CE2029';
       result.style.outline = `2px solid ${color}`; result.style.outlineOffset = '-2px';
       result.setAttribute('data-is-highlighted', 'true'); result.setAttribute('data-highlight-n', matchHL);
+      if (matchResult.hlRule) { result.dataset.highlightRule = matchResult.hlRule; result.dataset.highlightSource = matchResult.hlSource || ''; }
     }
     if (matchResult && matchResult.blocked) {
       _resultRetryCounts.delete(result); saveOriginalDisplay(result); result.style.display = blockedShown() ? '' : 'none'; setResultExtraElementsVisible(result, showHiddenResults);
@@ -2717,11 +2729,14 @@
     if (matchHL) {
       _resultRetryCounts.delete(result); saveOriginalDisplay(result); result.style.display = '';
       result.classList.remove('serh-blocked-visible'); result.classList.remove('serh-blocked-collapsed'); result.setAttribute('data-blocker-processed', 'true'); result.removeAttribute('data-is-blocked'); clearMatchedData(result);
+      if (matchResult && matchResult.whitelisted) { result.dataset.whitelistRule = matchResult.rule || ''; result.dataset.whitelistSource = matchResult.source || ''; }
       if (currentConfig.showBlockBtn) injectBlockButton(result, engine, domain);
       return false;
     }
 
-    _resultRetryCounts.delete(result); clearMatchedData(result); result.setAttribute('data-blocker-processed', 'true'); if (currentConfig.showBlockBtn) injectBlockButton(result, engine, domain); return false;
+    _resultRetryCounts.delete(result); clearMatchedData(result);
+    if (matchResult && matchResult.whitelisted) { result.dataset.whitelistRule = matchResult.rule || ''; result.dataset.whitelistSource = matchResult.source || ''; }
+    result.setAttribute('data-blocker-processed', 'true'); if (currentConfig.showBlockBtn) injectBlockButton(result, engine, domain); return false;
   }
 
   const resultObserver = new IntersectionObserver((entries, observer) => {
@@ -3824,7 +3839,7 @@
     rules.push('body.serh-collapse-on .serh-blocked-collapsed .serh-collapse-hide { display: none !important; }');
     for (const def of Object.values(getSelectors())) {
       for (const sel of [...(def.snippets || []), ...(def.extraElements || [])]) {
-        if (typeof sel !== 'string' || !sel.trim() || seen.has(sel)) continue; seen.add(sel);
+        if (typeof sel !== 'string' || !sel.trim() || sel.includes(',') || seen.has(sel)) continue; seen.add(sel);
         rules.push(`body.serh-collapse-on .serh-blocked-collapsed ${sel} { display: none !important; }`);
       }
     }
@@ -3943,43 +3958,27 @@
     });
     const duplicateRules = [...ruleCounts.entries()].filter(([, c]) => c > 1);
 
-    const whitelistRules = []; const highlightRules = [];
-    activeRules.forEach(rule => {
-      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/|title\/|text\/)/);
-      if (hlMatch) {
-        const N = parseInt(hlMatch[1]); const hlBody = rule.substring(hlMatch[0].length).trim();
-        if (N >= 1 && N <= 5 && hlBody) {
-          try {
-            const hlParsed = parseRuleWithConditions(hlBody); if (hlParsed.staticPass && !hlParsed.coreRule.startsWith('@@')) highlightRules.push(rule);
-          } catch (e) {
-            if (currentConfig.debug) console.warn('统计高亮规则解析失败:', rule, e);
-          }
-        }
-        return;
-      }
-      if (!rule.startsWith('@')) return;
-      try {
-        const parsed = parseRuleWithConditions(rule);
-        const isWhitelist = parsed.staticPass
-          && parsed.coreRule.startsWith('@')
-          && !parsed.coreRule.startsWith('@@')
-          && (parsed.coreRule.length > 1 || parsed.standaloneExpr || parsed.dynamicConditions.length > 0); if (isWhitelist) whitelistRules.push(rule);
-      } catch (e) {
-        if (currentConfig.debug) console.warn('统计白名单规则解析失败:', rule, e);
-      }
-    });
-
-    const engine = getSearchEngine(); const selector = getContainerSelector(engine); const results = selector ? document.querySelectorAll(selector) : []; const statsBySource = new Map();
-    results.forEach(result => {
-      const matchedRule = result.dataset.matchedRule; const matchedSource = result.dataset.matchedSource; if (!matchedRule || !matchedSource) return;
-      const sourceKey = statSourceKey(matchedSource); if (!sourceKey) return;
+    const engine = getSearchEngine(); const selector = getContainerSelector(engine); let results = [];
+    try { if (selector) results = document.querySelectorAll(selector); } catch (e) { if (currentConfig.debug) console.warn('[统计] 容器选择器无效:', selector, e); }
+    const statsBySource = new Map(); const countedResults = new Map();
+    const addRuleHit = (rule, source, type, result) => {
+      if (!rule || !source) return;
+      const sourceKey = statSourceKey(source); if (!sourceKey) return;
       if (!statsBySource.has(sourceKey)) {
         statsBySource.set(sourceKey, {
           total: 0,
           rules: new Map()
         });
       }
-      const sourceStats = statsBySource.get(sourceKey); sourceStats.total++; const ruleMap = sourceStats.rules; ruleMap.set(matchedRule, (ruleMap.get(matchedRule) || 0) + 1);
+      const sourceStats = statsBySource.get(sourceKey);
+      let seen = countedResults.get(sourceKey); if (!seen) { seen = new Set(); countedResults.set(sourceKey, seen); }
+      if (!seen.has(result)) { seen.add(result); sourceStats.total++; }
+      const ruleMap = sourceStats.rules; const entry = ruleMap.get(rule) || { count: 0, type }; ruleMap.set(rule, entry); entry.count++;
+    };
+    results.forEach(result => {
+      const blockedRule = (result.dataset.matchedRule || '').trim(); if (blockedRule) addRuleHit(blockedRule, result.dataset.matchedSource, null, result);
+      const wlRule = (result.dataset.whitelistRule || '').trim(); if (wlRule) addRuleHit(wlRule, result.dataset.whitelistSource, t('whitelistRules'), result);
+      const hlRule = (result.dataset.highlightRule || '').trim(); if (hlRule) addRuleHit(hlRule, result.dataset.highlightSource, t('highlightRules'), result);
     });
 
     const ruleErrorsArray = Object.entries(ruleErrors).map(([rule, errors]) => ({
@@ -4033,25 +4032,28 @@
       resultHTML += `<span style="background: #2c5282; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px;">${t('matchedCountLabel')} ${sourceStats.total} ${t('matchedCountUnit')}</span>`;
       resultHTML += `</div>`;
 
-      const sortedRules = Array.from(sourceStats.rules.entries()).sort((a, b) => b[1] - a[1]);
-      sortedRules.forEach(([rule, count]) => {
-        let ruleType = t('urlRule');
-        if (HL_STATS_REGEX.test(rule)) {
-          ruleType = t('highlightRules');
-        } else if (/@if\s*\(/i.test(rule) || looksLikeCondExpr(rule.replace(/^@\d+\s+/, '').replace(/^@/, ''))) {
-          ruleType = t('statsCompound');
-        } else if (/^title\//i.test(rule)) {
-          ruleType = t('titleRule');
-        } else if (/^text\//i.test(rule)) {
-          ruleType = t('textRule');
-        } else if (rule.startsWith('/')) {
-          ruleType = t('regexRule');
+      const sortedRules = Array.from(sourceStats.rules.entries()).sort((a, b) => b[1].count - a[1].count);
+      sortedRules.forEach(([rule, hit]) => {
+        let ruleType = hit.type;
+        if (!ruleType) {
+          ruleType = t('urlRule');
+          if (HL_STATS_REGEX.test(rule)) {
+            ruleType = t('highlightRules');
+          } else if (/@if\s*\(/i.test(rule) || looksLikeCondExpr(rule.replace(/^@\d+\s+/, '').replace(/^@/, ''))) {
+            ruleType = t('statsCompound');
+          } else if (/^title\//i.test(rule)) {
+            ruleType = t('titleRule');
+          } else if (/^text\//i.test(rule)) {
+            ruleType = t('textRule');
+          } else if (rule.startsWith('/')) {
+            ruleType = t('regexRule');
+          }
         }
 
         resultHTML += `<div style="margin: 6px 0; padding: 6px 8px; background: #f7fafc; border-radius: 4px;">`;
         resultHTML += `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">`;
         resultHTML += `<span style="font-size: 11px; color: #718096;">${ruleType}</span>`;
-        resultHTML += `<span style="font-size: 11px; color: #38a169; font-weight: bold;">${t('matchedCountLabel')}: ${count} ${t('matchedCountUnit')}</span>`;
+        resultHTML += `<span style="font-size: 11px; color: #38a169; font-weight: bold;">${t('matchedCountLabel')}: ${hit.count} ${t('matchedCountUnit')}</span>`;
         resultHTML += `</div>`;
         resultHTML += `<div style="font-size: 12px; color: #2d3748; word-break: break-all; font-family: 'Consolas', monospace;">${escHtml(rule)}</div>`;
         resultHTML += `</div>`;
@@ -4064,8 +4066,6 @@
       resultHTML = `<div style="color: #38a169; padding: 10px; border-radius: 4px; font-size: 12px; background: #f0fff4; text-align: center;">${t('noMatch')}</div>`;
     }
 
-    resultHTML += rulesSectionHtml(t('whitelistRules'), `${t('stateEnabled')} ${whitelistRules.length} ${t('matchedCountUnit')}`, whitelistRules.map(r => escHtml(r)));
-    resultHTML += rulesSectionHtml(t('highlightRules'), `${t('stateEnabled')} ${highlightRules.length} ${t('matchedCountUnit')}`, highlightRules.map(r => escHtml(r)));
     resultHTML += rulesSectionHtml(t('duplicateRules'), `${duplicateRules.length} ${t('matchedCountUnit')}`,
       duplicateRules.map(([rule, count]) => `${escHtml(rule)} <span style="color:#c53030;">${t('ruleDuplicate', {count})}</span>`));
 
@@ -4719,9 +4719,13 @@
           }
         }
       }
+      if (def.disabled !== undefined && def.disabled !== null && typeof def.disabled !== 'boolean') errors.push(t('selectorInvalidBool', { key, field: 'disabled' }));
+      if (def.disable !== undefined && def.disable !== null && typeof def.disable !== 'boolean') errors.push(t('selectorInvalidBool', { key, field: 'disable' }));
       if (def.disabled === true || def.disable === true) continue; if ((def.disabled === false || def.disable === false) && Object.keys(def).every(k => k === 'disabled' || k === 'disable')) continue;
       if (typeof def.match === 'string' && def.match) {
-        try { new RegExp(def.match); } catch (e) { errors.push(t('selectorInvalidRegex', { key })); }
+        const lit = def.match.match(/^\/(.*)\/([a-z]*)$/i); const badLit = lit ? getInvalidRegexFlags(lit[2]) : '';
+        if (badLit) errors.push(t('invalidRegexFlags', { flags: badLit }));
+        else { try { new RegExp(def.match); } catch (e) { errors.push(t('selectorInvalidRegex', { key })); } }
       } else if (def.match && typeof def.match === 'object' && typeof def.match.source === 'string' && def.match.source) {
         try { new RegExp(def.match.source, String(def.match.flags || '').toLowerCase().replace(/[^imsu]/g, '')); } catch (e) { errors.push(t('selectorInvalidRegex', { key })); }
         const badFlags = getInvalidRegexFlags(String(def.match.flags || '')); if (badFlags) errors.push(t('invalidRegexFlags', { flags: badFlags }));
@@ -4739,7 +4743,7 @@
           errors.push(t('selectorFieldRequired', { key, field })); continue;
         }
         for (const s of normalizeSelectorList(value)) {
-          if (!isValidCssSelector(s) || hasPseudoElement(s)) errors.push(t('selectorInvalidCss', { key, field, value: s }));
+          if ((field === 'snippets' && s.includes(',')) || !isValidCssSelector(s) || hasPseudoElement(s)) errors.push(t('selectorInvalidCss', { key, field, value: s }));
         }
       }
       if (def.links === undefined || def.links === null) continue;
@@ -5462,6 +5466,27 @@
 
   function parseSyncHeader(content) {
     const lines = String(content || '').replace(/^\uFEFF/, '').split('\n'); let config = null; let selectors = null; let rawScriptConfig = null; let rawSelectors = null;
+    const selectorPatchOk = (v) => {
+      if (Array.isArray(v)) return true; if (!v || typeof v !== 'object') return false;
+      const flagsOk = (f) => { f = String(f || '').toLowerCase(); return /^[imsu]*$/.test(f) && new Set(f).size === f.length; };
+      const probe = (s) => { if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return true; try { document.querySelector(s); return true; } catch (e) { return false; } };
+      const cssOk = (val) => { const list = typeof val === 'string' ? [val] : val; return Array.isArray(list) && list.every((s) => typeof s === 'string' && !!s.trim() && probe(s)); };
+      const reOk = (val) => {
+        if (typeof val === 'string') { const lit = val.match(/^\/(.*)\/([a-z]*)$/i); if (lit && !flagsOk(lit[2])) return false; try { new RegExp(val); return true; } catch (e) { return false; } }
+        if (val && typeof val === 'object' && typeof val.source === 'string' && flagsOk(val.flags)) { try { new RegExp(val.source, String(val.flags || '').toLowerCase()); return true; } catch (e) { return false; } }
+        return false;
+      };
+      for (const key of Object.keys(v)) {
+        const def = v[key];
+        if (key === 'other' || !/^[A-Za-z0-9_-]+$/.test(key)) return false;
+        if (!def || typeof def !== 'object' || Array.isArray(def)) return false;
+        if ((def.disabled !== undefined && def.disabled !== null && typeof def.disabled !== 'boolean') || (def.disable !== undefined && def.disable !== null && typeof def.disable !== 'boolean')) return false;
+        if (def.extraElements !== undefined && def.extraElements !== null && (!Array.isArray(def.extraElements) || !def.extraElements.every((s) => typeof s === 'string' && !!s.trim() && !s.includes(',') && probe(':scope > :nth-child(1) ' + s)))) return false;
+        if (def.match !== undefined && def.match !== null && !reOk(def.match)) return false;
+        for (const f of ['containers', 'titles', 'snippets', 'links']) if (def[f] !== undefined && def[f] !== null && !cssOk(def[f])) return false;
+      }
+      return true;
+    };
     const headerLineIndexes = new Set();
 
     for (let i = 0; i < Math.min(lines.length, 10); i++) {
@@ -5477,7 +5502,7 @@
         if (/^[\x7B\x5B]/.test(payload)) {
           try { parsed = JSON.parse(payload); } catch (e) { if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[WebDAV] 选择器头解析失败:', e); }
         }
-        if (parsed && !selectors) { selectors = parsed; rawSelectors = line; headerLineIndexes.add(i); } else if (payload.startsWith('\x7B') && !selectors) headerLineIndexes.add(i);
+        if (parsed && !selectors && selectorPatchOk(parsed)) { selectors = parsed; rawSelectors = line; headerLineIndexes.add(i); } else if (payload.startsWith('\x7B') && !selectors) headerLineIndexes.add(i);
       } else if (!line.startsWith('#')) {
         break;
       }
@@ -5488,6 +5513,7 @@
     } else if (!config && selectors) {
       config = { selectors };
     }
+    if (config && config.selectors !== undefined && !selectorPatchOk(config.selectors)) delete config.selectors;
 
     const restLines = lines.filter((_, idx) => !headerLineIndexes.has(idx)); return { config, rawScriptConfig, rawSelectors, restLines };
   }
