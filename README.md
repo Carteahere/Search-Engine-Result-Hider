@@ -57,7 +57,7 @@ Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、S
 
 ## 文档
 
-具体规则语法、自定义引擎见 [规则说明](Rule-Explanation.md)
+具体规则语法、添加自定义引擎教程见 [规则说明](Rule-Explanation.md)
 
 调试模式、规则自检报错说明见 [测试说明](Debug.md)
 

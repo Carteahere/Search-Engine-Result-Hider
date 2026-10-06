@@ -57,7 +57,7 @@ Partial setting instructions:
 
 ## Docs
 
-For detailed rule syntax and custom engine, see [Rule-Explanation](Rule-Explanation.en.md)
+For detailed rule syntax and tutorial on adding custom engines, see [Rule-Explanation](Rule-Explanation.en.md)
 
 For debug mode and rules detection error instructions, see [Debug](Debug.en.md)
 

@@ -70,10 +70,12 @@ Regex uses browser-supported JavaScript `RegExp` flags: `i`, `m`, `s`, `u` (`s` 
 | --- | --- |
 | `@N*://*.example.com/*` | Adds a colored border to results from `example.com` and its subdomains |
 | `@Ntitle/.*example.*/` | Adds a colored border to results whose title contains `example` |
+| `@1path $= ".pdf"` | Add a colored border to the results of links ending with `.pdf` |
 
 Notes:
 1. `@N` must be separated by a [space] from naked domain name rules, while other rules can ignore [space]. For example, `@1 example.com` is recognized normally, while `@1example.com` is recognized as a whitelist rule.
-2. Only 5 colors are supported, `@N` = `@1`–`@5`; open the custom color panel from the script menu
+2. Only 5 colors are supported, `@N` = `@1`–`@5`; open the custom color panel from the script menu.
+3. Supports conditional expressions, such as `@N+host/path/url/scheme`.
 
 ### 2.8 Composite Rules:
 
@@ -81,7 +83,7 @@ Notes:
 1. Append `@if(...)` after a rule as an extra condition; the rule and `@if` must be separated by a space; multiple `@if` conditions all apply (they can be merged into a single `@if` with `&`). Composite rules are case-insensitive by default.
 2. Within `@if`, logical operations are supported: `|` OR, `&` AND, `!` NOT, nested and grouped with parentheses, precedence `!` > `&` > `|`.
 3. `!` negates the condition itself, e.g. `!(title *= "keyword")` matches results without a title.
-4. Condition expressions can be used standalone, e.g. `host $= ".example.com"`, `path *= "/download/"`, applying to all search results.
+4. Condition expressions can be **used standalone**, e.g. `host $= ".example.com"`, `path *= "/download/"`, applying to all search results.
 5. Quotes can be omitted for attribute values; space-free values such as `@if($site=google)`, `@if(scheme=https)` can be written bare.
 6. `$site` search engine IDs are the same as in **2.9 Custom Engine**.
 
@@ -159,6 +161,9 @@ bing: {disabled: true},
 1. Built-in engine IDs: `google`, `google_scholar`, `bing`, `duckduckgo_lite`, `duckduckgo`, `yandex`, `brave`, `ecosia`, `startpage`, `yahoo`, `so360`, `sogou`, `toutiao`, `quark` (in `@if($site=)`, `ddg` is an alias for `duckduckgo`, `yahoo-japan` is an alias for `yahoo`).
 2. Custom engines support the `$site = "Engine ID"` condition as well as block/highlight/whitelist rules; `titles`/`snippets` can be omitted.
 3. Engine IDs allow only letters/digits/`_`/`-`; `other` is a reserved key and cannot be used. The same ID as a built-in engine, or an overlapping site, overrides the built-in selectors, e.g. matching `cn.bing.com` takes priority over built-in `bing`.
-4. Priority: Custom selectors > Built-in selectors. Changing an override back to the built-in value or using Reset restores following script updates.
-5. On save, only keys that differ from the built-ins are stored; unmodified built-ins are not written to storage. When no selector matches, it falls back to `other` (empty) by default.
-6. All selector fields are unsupported pseudo-elements like `::after`.
+4. Priority: Custom selectors > Built-in selectors. On save, only keys that differ from the built-ins are stored; unmodified built-ins are not written to storage. When no selector matches, it falls back to `other` (empty) by default. Changing an override back to the built-in value or using Reset restores following script updates.
+5. All selector fields are unsupported pseudo-elements like `::after`.
+
+**Auto-analysis:**
+
+Send the offline web page files (such as `.mht` / `.html`) and tables to AI for automatic analysis of container structures. Some search engines have different container naming conventions for mobile, desktop, and regional sites, requiring analysis of multiple files and filling in multiple selectors.
