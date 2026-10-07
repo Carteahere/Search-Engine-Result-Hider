@@ -166,4 +166,4 @@ bing: {disabled: true},
 
 **Auto-analysis:**
 
-Send the offline web page files (such as `.mht` / `.html`) and tables to AI for automatic analysis of container structures. Some search engines have different container naming conventions for mobile, desktop, and regional sites, requiring analysis of multiple files and filling in multiple selectors.
+If you don't know how to add, you can send the offline web page file (such as `.mht` / `.html`) and the table to Ai to automatically analyze the container structure and generate corresponding selectors. Some search engines have different container naming conventions for mobile, desktop, and regional sites, requiring multiple files to analyze and fill in multiple selectors.
