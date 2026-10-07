@@ -71,6 +71,7 @@ Simple Rule Explanation:
 | highlight | `@1*://*.example.com/*` | adds a colored border to results from `example.com` |
 | whitelist | `@*://*.example.com/*` | allows `example.com` |
 | `@if` conditional statements | `*://*.example.com/* @if(title *= "keyword")` | block results from `example.com` whose title contains `keyword` |
+| multiple `@if` conditional statements | `*://*.example.com/* @if((title *= "a" \| title *= "b") & !(url *= "c"))` | Block `example.com` results whose title contains `a` or `b` and URL does not contain `c` |
 
 ## Screenshots
 

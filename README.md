@@ -71,6 +71,7 @@ Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、S
 | 高亮 | `@1*://*.example.com/*` | 给`example.com`加上高亮边框 |
 | 白名单 | `@*://*.example.com/*` | 放行`example.com` |
 | `@if`附加条件 | `*://*.example.com/* @if(title *= "示例")` | 屏蔽`example.com`的标题中含`示例`的结果 |
+| 多`@if`附加条件 | `*://*.example.com/* @if((title *= "a" \| title *= "b") & !(url *= "c"))` | 屏蔽标题含`a`或`b`且URL不含`c`的`example.com`的结果 |
 
 ## 截图
 
