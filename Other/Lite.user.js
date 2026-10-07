@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.6.3
+// @version      8.6.4
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了所有规则订阅/webdav相关内容。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了所有规则订阅/webdav相关内容。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version has removed all content related to Rule Subscriptions and WebDAV.
@@ -36,7 +36,7 @@
   const HL_STATS_REGEX = /^@\d+/;
   const RESULT_RETRY_LIMIT = 3, RESULT_RETRY_DELAY = 200;
 
-  const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', autoDark: true, exportConfig: false, collapseMode: false, removeRedirects: true, language: 'zh-CN' };
+  const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', autoDark: true, exportConfig: false, collapseMode: false, removeRedirects: true, bracketHighlight: true, language: 'zh-CN' };
   const DEFAULT_HIGHLIGHT_COLORS = {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'};
   function getDefaultConfig() {
     return {
@@ -288,6 +288,7 @@
       disableBlock: '临时禁用', showCount: '显示数量', debugMode: '调试模式',
       enableFeature: '启用功能', blockDomain: '屏蔽域名', doubleConfirm: '二次确认', showMatchedSource: '来源显示',
       autoDark: '自动深色', exportConfig: '导出配置', collapseMode: '折叠模式', collapseModeHint: '开启后屏蔽结果只显示标题',
+      bracketHighlight: '括号高亮',
       settingsBtn: '设置', settingsPanelTitle: '脚本设置',
       settingsSecBlock: '一键屏蔽', settingsSecUI: '界面显示', settingsSecOther: '其他设置', removeRedirects: '去除重定向',
       bubbleSize: '悬浮球:', blockRules: '屏蔽规则:',
@@ -340,6 +341,7 @@
       disableBlock: 'Disable Block', showCount: 'Show Count', debugMode: 'Debug Mode',
       enableFeature: 'Enable Feature', blockDomain: 'Block Domain', doubleConfirm: 'Double Confirm', showMatchedSource: 'Show Source',
       autoDark: 'Auto Dark', exportConfig: 'Export Config', collapseMode: 'Collapse Mode', collapseModeHint: 'Blocked results will show titles only',
+      bracketHighlight: 'Highlight Bracket',
       settingsBtn: 'Settings', settingsPanelTitle: 'Script Settings',
       settingsSecBlock: 'One-click Block', settingsSecUI: 'Interface', settingsSecOther: 'Other', removeRedirects: 'Remove redirects',
       bubbleSize: 'Bubble:', blockRules: 'Block Rules:',
@@ -460,6 +462,8 @@
   const RULE_LEADING_REGEX_RE = /^\/(?:[^/\\]|\\.)*\//;
   const REGEX_CTX_A = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*=~$/i;
   const REGEX_CTX_B = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)$/i;
+  const REGEX_CTX_C = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*=$/i;
+  const RULE_REGEX_LIT_RE = /^\/(?:[^/\\[\]()]|\\.|\[(?:[^\]\\]|\\.)*\]|\((?:[^/\\[\]()]|\\.)*\))+\//;
 
   function isBadRegexTail(s) {
     if (!RULE_PREFIX_REGEX_RE.test(s)) return false;
@@ -503,7 +507,7 @@
       if (ch === '"') { inDQ = true; continue; }
       if (ch === '/' && !inRE) {
         const prev = str.slice(0, i).trimEnd();
-        if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev)) { inRE = true; continue; }
+        if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(str.slice(i)))) { inRE = true; continue; }
       }
       if (justClosedIf) {
         if (/\s/.test(ch)) continue;
@@ -562,7 +566,7 @@
       if (ch === '"') { inDQ = true; continue; }
       if (ch === '/') {
         const prev = str.slice(0, i).trimEnd();
-        if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev)) { inRE = true; continue; }
+        if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(str.slice(i)))) { inRE = true; continue; }
       }
       if (ch === '(') depth++;
       else if (ch === ')') { depth--; if (depth === 0) return i; }
@@ -659,6 +663,258 @@
     target.pending = true; updateLineNumbersIncremental(key);
   }
 
+  function isJsRegexAllowed(text, idx) {
+    let k = idx - 1;
+    while (k >= 0 && /\s/.test(text[k])) k--;
+    if (k < 0) return true;
+    const prev = text[k];
+    if ('(,;:=!&|?+-*%<>~^{}[]'.indexOf(prev) !== -1) return true;
+    if (!/[\w$]/.test(prev)) return false;
+    let s = k;
+    while (s >= 0 && /[\w$]/.test(text[s])) s--;
+    return /^(?:return|typeof|instanceof|in|of|new|delete|void|do|else|case|yield|await|throw)$/.test(text.slice(s + 1, k + 1));
+  }
+
+  function buildBracketMatchMap(text, lang) {
+    const n = text.length;
+    const map = new Int32Array(n);
+    map.fill(-1);
+    const PAIRS = '()[]{}';
+    const stack = [];
+    const closeAt = (i) => {
+      const top = stack.length ? stack[stack.length - 1] : -1;
+      const ci = PAIRS.indexOf(text[i]);
+      if (top === -1 || ci < 1 || text[top] !== PAIRS[ci - 1]) return -1;
+      map[top] = i; map[i] = top; stack.pop(); return top;
+    };
+    let i = 0;
+
+    if (lang === 'js') {
+      const modes = ['code'];
+      const tplBraces = new Set();
+      while (i < n) {
+        const ch = text[i];
+        if (modes[modes.length - 1] === 'template') {
+          if (ch === '\\') { i += 2; continue; }
+          if (ch === '`') { modes.pop(); i++; continue; }
+          if (ch === '$' && PAIRS.indexOf(text[i + 1]) === 4) { tplBraces.add(i + 1); stack.push(i + 1); modes.push('code'); i += 2; continue; }
+          i++; continue;
+        }
+        if (ch === '/' && text[i + 1] === '/') { const e = text.indexOf('\n', i); i = e === -1 ? n : e; continue; }
+        if (ch === '/' && text[i + 1] === '*') { const e = text.indexOf('*/', i + 2); i = e === -1 ? n : e + 2; continue; }
+        if (ch === "'" || ch === '"') {
+          i++;
+          while (i < n && text[i] !== ch && text[i] !== '\n') { if (text[i] === '\\') i++; i++; }
+          i++; continue;
+        }
+        if (ch === '`') { modes.push('template'); i++; continue; }
+        if (ch === '/' && isJsRegexAllowed(text, i)) {
+          i++;
+          let inClass = false;
+          while (i < n && text[i] !== '\n') {
+            const c = text[i];
+            if (c === '\\') { i += 2; continue; }
+            if (inClass) { if (c === ']') inClass = false; i++; continue; }
+            if (c === '[') { inClass = true; i++; continue; }
+            if (c === '/') { i++; break; }
+            i++;
+          }
+          continue;
+        }
+        const oi = PAIRS.indexOf(ch);
+        if (oi !== -1) {
+          if (oi % 2 === 1) {
+            const top = closeAt(i);
+            if (top !== -1 && tplBraces.has(top)) { tplBraces.delete(top); modes.pop(); }
+          } else { stack.push(i); }
+          i++; continue;
+        }
+        i++;
+      }
+      return map;
+    }
+
+    const scanRegexLiteral = (open, to) => {
+      const opens = [], paired = [];
+      let cls = false;
+      for (let k = open + 1; k < to; k++) {
+        const ch = text[k];
+        if (ch === '\\') { k++; continue; }
+        if (cls) {
+          if (ch === ']') { cls = false; const top = opens.pop(); if (top !== undefined) paired.push([top, k]); }
+          continue;
+        }
+        if (ch === '[') { cls = true; opens.push(k); continue; }
+        if (ch === '/') { paired.forEach(([a, b]) => { map[a] = b; map[b] = a; }); return k; }
+        const oi = PAIRS.indexOf(ch);
+        if (oi !== -1) {
+          if (oi % 2 === 1) { const top = opens.pop(); if (top !== undefined && text[top] === PAIRS[oi - 1]) paired.push([top, k]); }
+          else opens.push(k);
+        }
+      }
+      return -1;
+    };
+    while (i < n) {
+      const lineEnd = text.indexOf('\n', i); const end = lineEnd === -1 ? n : lineEnd;
+      let j = i;
+      while (j < end && /\s/.test(text[j])) j++;
+      if (text[j] === '@' && text.substr(j + 1, 2).toLowerCase() !== 'if') {
+        j++; while (j < end && /\d/.test(text[j])) j++; while (j < end && /\s/.test(text[j])) j++;
+      }
+      const body = text.slice(j, end);
+      let inRe = false, inClass = false;
+      const leadingRe = RULE_LEADING_REGEX_RE.test(body);
+      if (leadingRe || RULE_PREFIX_REGEX_RE.test(body)) {
+        const reEnd = scanRegexLiteral(leadingRe ? j : j + RULE_PREFIX_RE.exec(body)[0].length - 1, end);
+        j = reEnd !== -1 ? reEnd + 1 : end;
+      }
+      while (j < end) {
+        const ch = text[j];
+        if (inRe) {
+          if (ch === '\\') { j += 2; continue; }
+          if (inClass) { if (ch === ']') inClass = false; j++; continue; }
+          if (ch === '[') { inClass = true; j++; continue; }
+          if (ch === '/') { inRe = false; }
+          j++; continue;
+        }
+        if (ch === "'" || ch === '"') {
+          j++;
+          while (j < end && text[j] !== ch) { if (text[j] === '\\') j++; j++; }
+          j++; continue;
+        }
+        if (ch === '#') {
+          const prevCh = j > 0 ? text[j - 1] : '';
+          if (prevCh === '' || /\s/.test(prevCh)) break;
+          j++; continue;
+        }
+        if (ch === '/') {
+          const prev = text.slice(Math.max(0, j - 64), j).trimEnd();
+          if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(text.slice(j, Math.min(n, j + 4096))))) {
+            const reEnd = scanRegexLiteral(j, end);
+            if (reEnd !== -1) { j = reEnd + 1; continue; }
+            inRe = true; inClass = false;
+          }
+          j++; continue;
+        }
+        const oi = PAIRS.indexOf(ch);
+        if (oi !== -1) { if (oi % 2 === 1) closeAt(j); else stack.push(j); }
+        j++;
+      }
+      stack.length = 0;
+      i = end + 1;
+    }
+    return map;
+  }
+
+  function findBracketPairAt(map, pos) {
+    const tries = [pos - 1, pos];
+    for (let k = 0; k < 2; k++) {
+      const p = tries[k];
+      if (p < 0 || p >= map.length || map[p] === -1) continue;
+      return p < map[p] ? { a: p, b: map[p] } : { a: map[p], b: p };
+    }
+    return null;
+  }
+
+  function findEnclosingBracketAt(map, pos, exclude) {
+    for (let i = pos - 1; i >= 0; i--) {
+      const m = map[i];
+      if (m === -1 || m <= pos) continue;
+      if (exclude && (i === exclude.a || i === exclude.b || m === exclude.a || m === exclude.b)) continue;
+      return { a: i, b: m };
+    }
+    return null;
+  }
+
+  function buildLineStartOffsets(text) {
+    const starts = [0];
+    for (let i = 0; i < text.length; i++) {
+      if (text.charCodeAt(i) === 10) starts.push(i + 1);
+    }
+    return starts;
+  }
+
+  function lineIndexAt(starts, idx) {
+    let lo = 0; let hi = starts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (starts[mid] <= idx) lo = mid; else hi = mid - 1;
+    }
+    return lo;
+  }
+
+  function setupBracketHighlight(textarea, lang) {
+    const container = textarea ? textarea.parentElement : null;
+    if (!container || container.dataset.bracketLayer) return;
+    container.dataset.bracketLayer = '1';
+    const layer = document.createElement('div'); layer.className = 'serh-bracket-layer';
+    const mirror = document.createElement('div'); mirror.className = 'serh-bracket-mirror'; layer.appendChild(mirror);
+    const markerPool = [], hits = [];
+    for (let i = 0; i < 4; i++) { const m = document.createElement('span'); markerPool.push(m); mirror.appendChild(m); }
+    for (let i = 0; i < 4; i++) { const hit = document.createElement('i'); hit.className = `serh-bracket-hit ${i < 2 ? 'serh-bracket-pair' : 'serh-bracket-enclosing'}`; layer.appendChild(hit); hits.push(hit); }
+    container.insertBefore(layer, container.firstChild);
+
+    let cache = { text: null, map: null }, mkText = null, mkIdxs = '', styleKey = null;
+    const hide = () => { for (const hit of hits) hit.style.display = 'none'; };
+    const STYLE_PROPS = ['fontStyle', 'fontVariant', 'fontWeight', 'fontStretch', 'fontSize', 'fontSizeAdjust', 'lineHeight', 'fontFamily', 'fontKerning', 'fontVariantLigatures', 'textRendering', 'letterSpacing', 'wordSpacing', 'whiteSpace', 'tabSize', 'textTransform', 'direction', 'overflowWrap', 'wordBreak', 'textAlign', 'textIndent'];
+
+    const syncMirrorStyle = (cs, contentWidth) => {
+      const vals = STYLE_PROPS.map((p) => cs[p]);
+      const key = vals.join('|') + '|' + contentWidth;
+      if (key === styleKey) return;
+      styleKey = key;
+      const set = (el, p, v) => el.style.setProperty(p.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase()), v, 'important');
+      set(mirror, 'all', 'unset');
+      [['display', 'block'], ['position', 'absolute'], ['top', '0'], ['left', '0'], ['visibility', 'hidden'], ['pointerEvents', 'none'], ['-webkit-text-size-adjust', '100%'], ['text-size-adjust', '100%']].forEach((e) => set(mirror, e[0], e[1]));
+      const targets = [mirror, ...markerPool];
+      STYLE_PROPS.forEach((p, i) => targets.forEach((el) => { el.style[p] = vals[i]; set(el, p, vals[i]); }));
+      mirror.style.width = `${contentWidth}px`;
+    };
+
+    const buildMirror = (text, idxs) => {
+      const idxKey = idxs.join(',');
+      if (mkText === text && mkIdxs === idxKey) return;
+      mkText = text; mkIdxs = idxKey;
+      mirror.textContent = '';
+      let at = 0;
+      idxs.forEach((idx, k) => {
+        if (idx > at) mirror.appendChild(document.createTextNode(text.slice(at, idx)));
+        markerPool[k].textContent = text[idx] || '\u200b'; mirror.appendChild(markerPool[k]);
+        at = idx + 1;
+      });
+      if (at < text.length) mirror.appendChild(document.createTextNode(text.slice(at)));
+    };
+
+    const refresh = () => {
+      if (currentConfig.bracketHighlight === false || !textarea.isConnected || document.activeElement !== textarea) { hide(); return; }
+      const text = textarea.value;
+      const pos = Math.min(Math.max(textarea.selectionEnd || 0, 0), text.length);
+      if (cache.text !== text) cache = { text, map: buildBracketMatchMap(text, lang) };
+      const pair = findBracketPairAt(cache.map, pos);
+      const enclosing = findEnclosingBracketAt(cache.map, pos, pair);
+      if (!pair && !enclosing) { hide(); return; }
+      const cs = getComputedStyle(textarea);
+      const padL = parseFloat(cs.paddingLeft) || 0, padR = parseFloat(cs.paddingRight) || 0, padT = parseFloat(cs.paddingTop) || 0;
+      syncMirrorStyle(cs, Math.max(0, textarea.clientWidth - padL - padR));
+      layer.style.left = `${textarea.offsetLeft}px`; layer.style.top = `${textarea.offsetTop}px`;
+      const scrollL = textarea.scrollLeft, scrollT = textarea.scrollTop;
+      const idxs = [...new Set([pair, enclosing].flatMap((range) => range ? [range.a, range.b] : []))].sort((a, b) => a - b);
+      buildMirror(text, idxs);
+      const metrics = new Map(idxs.map((idx, k) => { const m = markerPool[k]; return [idx, [padL + m.offsetLeft - scrollL, padT + m.offsetTop - scrollT, m.offsetWidth, m.offsetHeight]]; }));
+      const place = (range, first) => {
+        if (!range) { hits[first].style.display = 'none'; hits[first + 1].style.display = 'none'; return; }
+        [range.a, range.b].forEach((idx, k) => {
+          const [x, y, w, h] = metrics.get(idx); const hit = hits[first + k];
+          hit.style.left = `${x}px`; hit.style.top = `${y}px`; hit.style.width = `${w}px`; hit.style.height = `${h}px`; hit.style.display = 'block';
+        });
+      };
+      place(pair, 0); place(enclosing, 2);
+    };
+
+    ['input', 'keyup', 'click', 'mouseup', 'select', 'focus', 'scroll'].forEach((ev) => textarea.addEventListener(ev, refresh));
+    textarea.addEventListener('blur', hide);
+  }
+
   function getPanelPositionStyles() {
     const statusBtn = document.getElementById('serh-status');
     if (currentConfig.panelCentered) {
@@ -709,10 +965,10 @@
   function bindOutsideClickClose(panel, onBeforeClose) {
     let pressStartedInside = false;
     const pressHandler = (e) => {
-      pressStartedInside = panel.contains(e.target);
+      if (e.isTrusted === false) return; pressStartedInside = panel.contains(e.target);
     };
     const closeHandler = (e) => {
-      if (preventPanelClose) return;
+      if (preventPanelClose) return; if (e.isTrusted === false) return;
       if (pressStartedInside) {
         pressStartedInside = false; return;
       }
@@ -1071,7 +1327,7 @@
       } catch (e) {
         return false;
       }
-      const cmpVal = cond.type === 'host' ? toASCIIHostname(cond.val) : cond.val; const hasPortInCond = cond.type === 'host' && cmpVal.includes(':');
+      const cmpVal = cond.type === 'host' ? toASCIIHostname(cond.val) : cond.val; if (cond.type === 'host' && cond.op !== '=~' && !cmpVal) return false; const hasPortInCond = cond.type === 'host' && cmpVal.includes(':');
       const raw = cond.type === 'host' ? (hasPortInCond ? toASCIIHostname(u.host || u.hostname) : toASCIIHostname(u.hostname))
         : cond.type === 'path' ? (u.pathname + u.search)
         : u.protocol.slice(0, -1); const value = raw.toLowerCase(); let altValue = value; let altCmpVal = cmpVal;
@@ -2931,8 +3187,24 @@
             resize: none !important; background: transparent !important; box-sizing: border-box !important;
             font-family: 'Consolas', 'Monaco', 'Courier New', monospace !important;
             line-height: 15.4px !important; white-space: pre !important;
+            position: relative; z-index: 1;
             overflow-x: auto !important; overflow-y: auto !important; outline: none !important; box-shadow: none !important;
         }
+
+        .serh-bracket-layer {
+            position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+            z-index: 0; overflow: hidden; pointer-events: none;
+        }
+        .serh-bracket-mirror {
+            position: absolute; top: 0; left: 0; visibility: hidden;
+            white-space: pre; pointer-events: none;
+            margin: 0 !important; padding: 0 !important; border: 0 !important;
+            text-indent: 0 !important; text-align: left !important;
+            -webkit-text-size-adjust: 100% !important; text-size-adjust: 100% !important;
+        }
+        .serh-bracket-hit { position: absolute; display: none; border-radius: 2px; pointer-events: none; }
+        .serh-bracket-pair { background: rgba(49, 130, 206, 0.30); box-shadow: 0 0 0 1px rgba(49, 130, 206, 0.60); }
+        .serh-bracket-enclosing { background: rgba(100, 116, 139, 0.16); }
 
         :is(#serh-rules, #serh-sel-rules)::-webkit-scrollbar { width: 6px; height: 0px; }
         :is(#serh-rules, #serh-sel-rules, #serh-stats-content)::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
@@ -3037,8 +3309,10 @@
             body.serh-dark-on #serh-panel .serh-compact-row span { color: #f3f4f6 !important; }
             body.serh-dark-on :is(#serh-panel, #serh-selector-panel) .serh-rules-container { border-color: #4b5563 !important; background: #1E1F21 !important; }
             body.serh-dark-on :is(#serh-line-numbers, #serh-sel-line-numbers) { background: #222629 !important; border-right-color: #4b5563 !important; color: #9ca3af !important; }
-            body.serh-dark-on :is(#serh-rules, #serh-sel-rules) { background: #1E1F21 !important; color: #f3f4f6 !important; }
+            body.serh-dark-on :is(#serh-rules, #serh-sel-rules) { background: transparent !important; color: #f3f4f6 !important; }
             body.serh-dark-on #serh-rules::placeholder { color: #6b7280 !important; }
+            body.serh-dark-on .serh-bracket-pair { background: rgba(96, 165, 250, 0.38); box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.75); }
+            body.serh-dark-on .serh-bracket-enclosing { background: rgba(148, 163, 184, 0.22); }
             body.serh-dark-on #serh-stats-panel { background: #171717 !important; border-color: #374151 !important; }
             body.serh-dark-on #serh-stats-content { color: #f3f4f6 !important; }
             body.serh-dark-on #serh-panel .serh-compact-row button.serh-button {
@@ -3562,7 +3836,14 @@
 
   function getSyncSettings(config) {
     const { rules, bubbleState, bubbleSize, selectors, subscriptions, syncedAt, rulesSyncedAt, settingsModifiedAt, selectorsSyncedAt, tombstones, ruleAddedTimes, subscriptionTombstones, ...settings } = config || {};
-    return settings;
+    const unsafeKey = (k) => k === '__proto__' || k === 'constructor' || k === 'prototype';
+    const cleanVal = (v) => {
+      if (!v || typeof v !== 'object' || Array.isArray(v)) return v;
+      const o = {}; for (const k of Object.keys(v)) if (!unsafeKey(k)) o[k] = cleanVal(v[k]);
+      return o;
+    };
+    const clean = {}; for (const k of Object.keys(settings)) if (!unsafeKey(k)) clean[k] = cleanVal(settings[k]);
+    return clean;
   }
 
   function persistConfig() {
@@ -3573,7 +3854,7 @@
     'serh-set-remove-redirects': 'removeRedirects',
     'serh-set-show-block-btn': 'showBlockBtn',
     'serh-set-block-domain': 'blockDomain', 'serh-set-block-confirm': 'blockConfirm',
-    'serh-set-show-source': 'showMatchedSource',
+    'serh-set-show-source': 'showMatchedSource', 'serh-set-bracket-highlight': 'bracketHighlight',
     'serh-set-show-bubble': 'showBubble', 'serh-set-show-count': 'showCount',
     'serh-set-panel-centered': 'panelCentered', 'serh-set-auto-dark': 'autoDark',
     'serh-set-disable-block': 'enabled', 'serh-set-debug': 'debug',
@@ -3615,8 +3896,8 @@
     if (!document.getElementById('serh-panel')) return;
     Object.keys(SETTINGS_PANEL_CHECKBOXES).forEach(id => {
       const el = document.getElementById(id); if (!el) return; const key = SETTINGS_PANEL_CHECKBOXES[id];
-      if (id === 'serh-set-error-detection') {
-        el.checked = currentConfig.errorDetection !== false;
+      if (id === 'serh-set-error-detection' || id === 'serh-set-bracket-highlight') {
+        el.checked = currentConfig[key] !== false;
       } else if (INVERTED_SETTINGS_CHECKBOXES.has(id)) {
         el.checked = currentConfig[key] === false;
       } else {
@@ -3877,6 +4158,7 @@
     lineNums.addEventListener('click', (e) => {
       const errorEl = e.target.closest('.serh-line-error'); if (errorEl) showToast(errorEl.getAttribute('data-error') || t('invalidRule'), 'error');
     });
+    setupBracketHighlight(textarea, 'rules');
 
     const closePanel = () => {
       clearPanelCloseTimers(); fadeOutAndRemovePanel(panel); const toastContainer = document.getElementById('serh-toast-container'); if (toastContainer) toastContainer.remove();
@@ -4077,6 +4359,9 @@
               { id: 'serh-set-panel-centered', labelKey: 'menuCenter', checked: currentConfig.panelCentered === true },
               { id: 'serh-set-auto-dark', labelKey: 'autoDark', checked: currentConfig.autoDark !== false }
             ])}
+            ${settingsRow([
+              { id: 'serh-set-bracket-highlight', labelKey: 'bracketHighlight', checked: currentConfig.bracketHighlight !== false }
+            ])}
             ${settingsHeader('settingsSecOther')}
             ${settingsRow([
               { id: 'serh-set-remove-redirects', labelKey: 'removeRedirects', checked: currentConfig.removeRedirects !== false },
@@ -4131,6 +4416,7 @@
         applyPanelPosition(document.getElementById('serh-panel')); applyPanelPosition(document.getElementById('serh-settings-panel'));
       } },
       { id: 'serh-set-auto-dark', key: 'autoDark', apply: () => { applyDarkModeClass(); } },
+      { id: 'serh-set-bracket-highlight', key: 'bracketHighlight', apply: () => { document.querySelectorAll('.serh-bracket-hit').forEach(h => { h.style.display = 'none'; }); } },
       { id: 'serh-set-disable-block', key: 'enabled', invert: true, apply: () => { forceReprocessAll(); } },
       { id: 'serh-set-debug', key: 'debug', apply: () => { exposeDebugApi(); } },
       { id: 'serh-set-error-detection', key: 'errorDetection', apply: () => {
@@ -4736,6 +5022,7 @@
     textarea.addEventListener('scroll', () => {
       lineNums.scrollTop = textarea.scrollTop;
     });
+    setupBracketHighlight(textarea, 'js');
 
     const applyUserSelectors = (config) => {
       GM_setValue(SELECTORS_KEY, diffUserSelectors(config)); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite();
