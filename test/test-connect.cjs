@@ -51,7 +51,7 @@ function extractFn(text, fnName) {
   const body = text.slice(idx, i + 1);
   const dependencies = { stripRuleComment: ['scanRuleString'], findIfOccurrences: ['scanRuleString'], extractBalancedParens: ['findBalancedParenEnd'], scanRuleString: ['findBalancedParenEnd', 'isBadRegexTail'], buildSyncPayload: ['getSyncSettings'] };
   const scanDeps = !['findBalancedParenEnd', 'scanRuleString'].includes(fnName) && /scanRuleString\(|RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_[AB]\b/.test(body);
-  const consts = text.split('\n').filter(line => /^\s*const (?:RULE_\w+|REGEX_CTX_[AB]) =/.test(line)).map(line => line.replace('const ', 'var ')).join('\n') + '\n';
+  const consts = text.split('\n').filter(line => /^\s*const (?:RULE_\w+|REGEX_CTX_[ABC]) =/.test(line)).map(line => line.replace('const ', 'var ')).join('\n') + '\n';
   const prelude = (scanDeps ? consts + rawExtract(text, 'findBalancedParenEnd') + '\n' + rawExtract(text, 'scanRuleString') + '\n' + rawExtract(text, 'isBadRegexTail') + '\n' : '') + (fnName !== 'encodeNonAscii' && /encodeNonAscii\(/.test(body) ? rawExtract(text, 'encodeNonAscii') + '\n' : '') + (!['isUniqueFlagsStr', 'isFlagsCandidateError'].includes(fnName) && /isUniqueFlagsStr\(|isFlagsCandidateError\(/.test(body) ? ['isUniqueFlagsStr', 'isFlagsCandidateError'].map(n => rawExtract(text, n)).join('\n') + '\n' : '');
   return prelude + (dependencies[fnName] || []).map(n => extractFn(text, n)).join('\n') + '\n' + body;
 }
@@ -909,7 +909,7 @@ rules:
 
 // P1-1 修复回归: 主面板外点关闭过滤合成事件(永页机等自动翻页脚本拼接页面派发的合成click不再误关面板),
 // 并记录按下起点(面板内拖选文本/拖滑块到面板外松开不再误关, 未保存编辑不丢失)。
-assert('面板-007: 主面板closeHandler与pressHandler均过滤合成事件(isTrusted===false)', (src.match(/e\.isTrusted === false/g) || []).length === 2);
+assert('面板-007(修复12更新): 主面板与bindOutsideClickClose的closeHandler/pressHandler均过滤合成事件(isTrusted===false), 共4处', (src.match(/e\.isTrusted === false/g) || []).length === 4);
 assert('面板-008: 主面板外点关闭带按下起点防护且关闭时同步移除监听', src.includes('const closeZoneSelector') && src.includes('window._panelPressHandler') && src.includes("removeEventListener('pointerdown', window._panelPressHandler)"));
 
 // P2-3 修复回归: 引擎自身域名守卫仅拦截新建屏蔽, 被屏蔽结果的删除规则/白名单入口不再被拦截。
@@ -1948,6 +1948,14 @@ assert('审查10-S3(已修复): closeZoneSelector豁免区不再引用#serh-hlco
   assert('修复4-1: 大规则量合并结果正确且耗时线性(2w骨架+2k新增耗时' + (Date.now() - t0) + 'ms, 修复前二次方同规模需15s+)', rBig.length === 22000 && Date.now() - t0 < 3000);
   assert('审查4-S4(修复6回归): 手动下载路径同样传入WebDAV Date头作授时回退(与自动同步路径一致, 符合文档1.3.4)', extractFn(src, 'performWebDAVDownload').includes('await getTrustedNow(parseHttpDateHeader(resp.responseHeaders))') && extractFn(src, 'performAutoWebDAVSync').includes('getTrustedNow(parseHttpDateHeader(resp.responseHeaders))'));
   assert('修复4-2: isSerhPanelOpen纳入serh-settings-panel, 仅设置面板留存时自动同步同样暂停(文档1.5.4: 打开面板时暂停同步)', extractFn(src, 'isSerhPanelOpen').includes('serh-settings-panel') && extractFn(src, 'showSettingsPanel').includes("openPanel('serh-settings-panel'"));
+  // 修复12: 辅助面板外点关闭对合成click的防护与主面板(4257/4260)对齐
+  const liteSrc12 = fs.readFileSync([path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p)), 'utf8');
+  assert('修复12-1: bindOutsideClickClose对合成click(isTrusted===false)双handler防护, 页面脚本派发的click不再关闭设置/高亮颜色/自定义引擎/订阅/WebDAV面板(主版+Lite)', (extractFn(src, 'bindOutsideClickClose').match(/isTrusted === false/g) || []).length === 2 && (extractFn(liteSrc12, 'bindOutsideClickClose').match(/isTrusted === false/g) || []).length === 2);
+  // 修复12-2: getSyncSettings剥离危险键, ScriptConfig导入不再原型污染
+  const getSyncOf = (srcText) => new Function(extractFn(srcText, 'getSyncSettings') + '\nreturn getSyncSettings;')();
+  const poisonedHdr = JSON.parse('{"__proto__":{"debug":true},"language":"en","highlightColors":{"__proto__":{"1":"#0f0"},"1":"#f00"}}');
+  const cleanOk = (fn) => { const s = fn(poisonedHdr); const t = Object.assign({}, { a: 1 }); Object.assign(t, s); return Object.getPrototypeOf(t) === Object.prototype && !Object.keys(s).includes('__proto__') && s.language === 'en' && !Object.keys(s.highlightColors).includes('__proto__') && s.highlightColors['1'] === '#f00'; };
+  assert('修复12-2: getSyncSettings剥离__proto__/constructor/prototype(顶层+嵌套), ScriptConfig导入Object.assign不再原型污染(主版+Lite)', cleanOk(getSyncOf(src)) && cleanOk(getSyncOf(liteSrc12)));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

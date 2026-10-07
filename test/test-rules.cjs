@@ -26,7 +26,7 @@ const SERH_RAW_EXTRACT = (text, fnName) => {
   return text.slice(idx, i + 1);
 };
 const SERH_FN_DEPS = ((text) => {
-  const consts = text.match(/const (?:RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_A|REGEX_CTX_B) = [^\n]+;/g).join('\n').replace(/\bconst\b/g, 'var');
+  const consts = text.match(/const (?:RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_A|REGEX_CTX_B|REGEX_CTX_C|RULE_REGEX_LIT_RE) = [^\n]+;/g).join('\n').replace(/\bconst\b/g, 'var');
   return consts + '\n' + ['findBalancedParenEnd', 'isBadRegexTail', 'scanRuleString', 'encodeNonAscii'].map((n) => SERH_RAW_EXTRACT(text, n)).join('\n');
 })(src);
 const SERH_FLAG_HELPERS = ['isUniqueFlagsStr', 'isFlagsCandidateError'].map((n) => SERH_RAW_EXTRACT(src, n)).join('\n');
@@ -2188,6 +2188,67 @@ assert('审查9-15(修复回归): 含##的脚本URL规则不受影响',
   api9.analyzeRule('*://example.com/page##x').valid === true);
 assert('审查9-16(修复回归): 正则含##不受影响',
   api9.analyzeRule('title/.*##.*/i').valid === true);
+})();
+
+// ---- 规则-366~381: 规则/自定义引擎输入区成对括号显示 ----
+await (async () => {
+const bracketNames = ['isJsRegexAllowed', 'buildBracketMatchMap', 'findBracketPairAt', 'findEnclosingBracketAt', 'buildLineStartOffsets', 'lineIndexAt'];
+const bracketApi = new Function(bracketNames.map((n) => extractFn(src, n)).join('\n') + `
+return { buildBracketMatchMap, findBracketPairAt, findEnclosingBracketAt, buildLineStartOffsets, lineIndexAt };`)();
+
+const ruleLine = '*://a.com/* @if(title *= "示例(x)" && path =~ /a(b)cd/) # 尾注释 (';
+const ruleMap = bracketApi.buildBracketMatchMap(ruleLine, 'rules');
+const ifOpen = ruleLine.indexOf('(');
+const ifClose = ruleLine.lastIndexOf(')');
+const regexParen = ruleLine.indexOf('(', ruleLine.indexOf('path'));
+const stringParen = ruleLine.indexOf('(', ruleLine.indexOf('示例'));
+
+assert('规则-366: @if 括号成对命中', ruleMap[ifOpen] === ifClose && ruleMap[ifClose] === ifOpen, [ruleMap[ifOpen], ifClose]);
+const regexParenClose = ruleLine.indexOf(')', regexParen);
+assert('规则-367: =~ 正则内的括号参与配对', ruleMap[regexParen] === regexParenClose, [regexParen, ruleMap[regexParen], regexParenClose]);
+assert('规则-368: 条件字符串内的括号不参与配对', ruleMap[stringParen] === -1, [stringParen, ruleMap[stringParen]]);
+assert('规则-369: 尾注释内的括号不参与配对', ruleMap[ruleLine.lastIndexOf('(')] === -1, ruleMap[ruleLine.lastIndexOf('(')]);
+const pairLeft = bracketApi.findBracketPairAt(ruleMap, ifOpen + 1);
+const pairRight = bracketApi.findBracketPairAt(ruleMap, ifClose);
+assert('规则-370: 光标紧贴左/右括号均给出同一配对区间', !!pairLeft && !!pairRight && pairLeft.a === ifOpen && pairLeft.b === ifClose && pairRight.a === ifOpen && pairRight.b === ifClose, { pairLeft, pairRight });
+assert('规则-371: 未配对括号旁无相邻配对结果', bracketApi.findBracketPairAt(ruleMap, ruleLine.length) === null, bracketApi.findBracketPairAt(ruleMap, ruleLine.length));
+const enclosing = bracketApi.findEnclosingBracketAt(ruleMap, ruleLine.indexOf('title'), null);
+assert('规则-372: 给出光标所在的最内层包围括号', !!enclosing && enclosing.a === ifOpen && enclosing.b === ifClose, enclosing);
+assert('规则-373: 已命中的相邻配对不再计入包围括号', bracketApi.findEnclosingBracketAt(ruleMap, ifOpen + 1, pairLeft) === null, bracketApi.findEnclosingBracketAt(ruleMap, ifOpen + 1, pairLeft));
+assert('规则-374: 注释之后不存在包围括号', bracketApi.findEnclosingBracketAt(ruleMap, ruleLine.length, null) === null, bracketApi.findEnclosingBracketAt(ruleMap, ruleLine.length, null));
+
+const twoLines = '@if(title *= "a"\n*://b.com/*)';
+const twoMap = bracketApi.buildBracketMatchMap(twoLines, 'rules');
+assert('规则-375: 规则按行独立, 括号不跨行配对', twoMap[twoLines.indexOf('(')] === -1 && twoMap[twoLines.indexOf(')')] === -1, [twoMap[twoLines.indexOf('(')], twoMap[twoLines.indexOf(')')]]);
+
+const leading = '/a(b)c/i';
+const prefixed = 'title/.*(.*)/i';
+const look = 'title/^(?=.*A)(?=.*(?:B)).*/i';
+const textPre = 'text/(示例A|示例B)与内容/i';
+const mLeading = bracketApi.buildBracketMatchMap(leading, 'rules');
+const mPrefixed = bracketApi.buildBracketMatchMap(prefixed, 'rules');
+const mLook = bracketApi.buildBracketMatchMap(look, 'rules');
+const mTextPre = bracketApi.buildBracketMatchMap(textPre, 'rules');
+const l1 = look.indexOf('(');
+const l2 = look.indexOf('(', l1 + 1);
+const l3 = look.indexOf('(', l2 + 1);
+assert('规则-376: 行首正则内的括号参与配对', mLeading[leading.indexOf('(')] === leading.indexOf(')'), Array.from(mLeading));
+assert('规则-377: 前缀正则内的括号参与配对', mPrefixed[prefixed.indexOf('(')] === prefixed.indexOf(')'), Array.from(mPrefixed));
+assert('规则-377b: title 前缀正则嵌套分组括号逐层配对', mLook[l1] === look.indexOf(')') && mLook[l2] === look.lastIndexOf(')') && mLook[l3] === look.indexOf(')', l3 + 1), [mLook[l1], mLook[l2], mLook[l3]]);
+assert('规则-377c: text 前缀正则内的括号参与配对', mTextPre[textPre.indexOf('(')] === textPre.indexOf(')'), Array.from(mTextPre));
+const stray = '*://a.com/* @if(title =~ /a)b/)';
+const mStray = bracketApi.buildBracketMatchMap(stray, 'rules');
+assert('规则-377d: 正则内多余右括号不影响 @if 括号配对', mStray[stray.indexOf('(')] === stray.lastIndexOf(')'), Array.from(mStray));
+
+const hashUrl = 'example.com/path#frag (a)';
+const mHash = bracketApi.buildBracketMatchMap(hashUrl, 'rules');
+assert('规则-378: URL 中的 # 不当作注释分隔', mHash[hashUrl.indexOf('(')] === hashUrl.indexOf(')'), [mHash[hashUrl.indexOf('(')], hashUrl.indexOf(')')]);
+
+const lineStarts = bracketApi.buildLineStartOffsets('a\nbb\nccc');
+assert('规则-379: 行起点偏移表', lineStarts.join() === '0,2,5', lineStarts);
+assert('规则-380: 按偏移表定位行号', bracketApi.lineIndexAt(lineStarts, 0) === 0 && bracketApi.lineIndexAt(lineStarts, 4) === 1 && bracketApi.lineIndexAt(lineStarts, 6) === 2, lineStarts);
+
+assert('规则-381: 规则面板挂载成对括号高亮', /setupBracketHighlight\(textarea, 'rules'\)/.test(src));
 })();
 
 console.log(`\n${pass} passed, ${fail} failed`);

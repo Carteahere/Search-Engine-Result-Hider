@@ -11,6 +11,8 @@ if (!scriptFiles.length) throw new Error('no .js script found in ' + scriptDir);
 const file = path.join(scriptDir, scriptFiles[0]);
 console.log('Testing', file);
 const src = fs.readFileSync(file, 'utf8');
+// Lite/SELECTORS 兼容仓库根目录与 Other/ 两种布局
+const readRepoFile = (rel) => fs.readFileSync(['', 'Other', '文档'].map((d) => path.join(scriptDir, d, rel)).find((p) => fs.existsSync(p)), 'utf8');
 
 function extractFn(text, fnName) {
   const marker = `function ${fnName}(`;
@@ -28,7 +30,7 @@ function extractFn(text, fnName) {
   const prelude = [];
   if (!['findBalancedParenEnd', 'scanRuleString', 'encodeNonAscii'].includes(fnName)) {
     if (/scanRuleString\(|RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_[AB]\b/.test(fn)) {
-      prelude.push(text.split('\n').filter(line => /^\s*const (?:RULE_\w+|REGEX_CTX_[AB]) =/.test(line)).map(line => line.replace('const ', 'var ')).join('\n'), rawExtract(text, 'findBalancedParenEnd'), rawExtract(text, 'scanRuleString'), rawExtract(text, 'isBadRegexTail'));
+      prelude.push(text.split('\n').filter(line => /^\s*const (?:RULE_\w+|REGEX_CTX_[ABC]) =/.test(line)).map(line => line.replace('const ', 'var ')).join('\n'), rawExtract(text, 'findBalancedParenEnd'), rawExtract(text, 'scanRuleString'), rawExtract(text, 'isBadRegexTail'));
     }
     if (/encodeNonAscii\(/.test(fn)) prelude.push(rawExtract(text, 'encodeNonAscii'));
     if (/isUniqueFlagsStr\(|isFlagsCandidateError\(/.test(fn)) prelude.push(['isUniqueFlagsStr', 'isFlagsCandidateError'].map(n => rawExtract(text, n)).join('\n'));
@@ -1245,7 +1247,7 @@ for (const [i, [loc, expected]] of catCases.entries()) {
 
 // Lite 版同源 getSearchCategory 与主脚本分类口径一致
 {
-  const liteCatSrc = fs.readFileSync(path.join(__dirname, '..', 'Other', 'Lite.user.js'), 'utf8');
+  const liteCatSrc = readRepoFile('Lite.user.js');
   const liteCat = new Function(extractFn(liteCatSrc, 'getSearchCategory') + '\nreturn getSearchCategory;')();
   const bad = catCases.filter(([loc, expected]) => liteCat(loc) !== expected);
   assert('选择器-191L: Lite 分类口径与主脚本一致(含yahoo /image与头条pd)', bad.length === 0, bad.map(([loc, expected]) => loc.hostname + loc.pathname + loc.search + '=>' + liteCat(loc)));
@@ -2133,7 +2135,7 @@ return { buildRuleIndex, checkRuleMatchOptimized, updateStatsContent, setRules: 
   check('修复W-9(对照): 大家还在搜(per-hint)不作为结果容器', !/per-hint/.test(wContainerSel), wContainerSel);
 
   // 修复W-11: Lite 版脚本同步修复
-  const liteSrc = fs.readFileSync(path.join(__dirname, '..', 'Other', 'Lite.user.js'), 'utf8');
+  const liteSrc = readRepoFile('Lite.user.js');
   check('修复W-11: Lite 版搜狗容器选择器同步覆盖 div.vrResult', /containers: 'div\.vrwrap:has\(h3\), \.reactResult, div\.vrResult'/.test(liteSrc));
   const hlPatCount = (s) => s.split('|title\\/|text\\/').length - 1;
   check('修复H-4: Lite 版 @Ntitle/@Ntext 高亮识别与主版本同步(2处, 高亮统计改为仅记录命中)', hlPatCount(liteSrc) === 2 && hlPatCount(liteSrc) === hlPatCount(src));
@@ -2187,7 +2189,7 @@ return { buildRuleIndex, checkRuleMatchOptimized, updateStatsContent, setRules: 
   const sDef = apiS.getSelectors().quark;
   check('适配S-8: 标题选择器含 qk-title-text, 摘要含 qk-paragraph-text, 链接优先取标题链接', sDef.titles[0] === '.qk-title-text' && sDef.snippets[0] === '.qk-paragraph-text' && sDef.links[0] === 'a.qk-title a[href]', JSON.stringify({ titles: sDef.titles, snippets: sDef.snippets, links: sDef.links }));
 
-  const sLiteSrc = fs.readFileSync(path.join(__dirname, '..', 'Other', 'Lite.user.js'), 'utf8');
+  const sLiteSrc = readRepoFile('Lite.user.js');
   check('适配S-9: Lite 版神马选择器同步', /quark: \{\s*\n\s*match: \/\^\(\?:\(\?:quark\|yz\)\\\.\)\?\(\?:\(\?:www\|m\)\\\.\)\?sm\\\.cn\$\/,\s*\n\s*containers: 'div\.qk-card'/.test(sLiteSrc));
 }
 
@@ -2240,7 +2242,7 @@ return { buildRuleIndex, checkRuleMatchOptimized, updateStatsContent, setRules: 
   check('适配SP-12b: 手机版摘要钩子 .result__main > p 在 p.description 之后兜底', spDef.snippets.indexOf('.result__main > p') === 1, JSON.stringify(spDef.snippets));
   check('适配SP-12c: 手机版展示链接 a.display-url[href] 纳入链接候选', spDef.links.includes('a.display-url[href]'), JSON.stringify(spDef.links));
 
-  const spLiteSrc = fs.readFileSync(path.join(__dirname, '..', 'Other', 'Lite.user.js'), 'utf8');
+  const spLiteSrc = readRepoFile('Lite.user.js');
   check('适配SP-13: Lite 版 Startpage 选择器同步', /startpage: \{\s*\n\s*match: \/\^\(\?:\(\?:www\|eu\|m\)\\\.\)\?startpage\\\.com\$\/,\s*\n\s*containers: 'div\.result, \.w-gl__result'/.test(spLiteSrc));
 }
 
@@ -2286,11 +2288,45 @@ return { buildRuleIndex, checkRuleMatchOptimized, updateStatsContent, setRules: 
   check('适配EC-9: 链接候选含图片结果页链与兜底 a[href]', ecDef.links.includes('a.image-result__details-link[href]') && ecDef.links[ecDef.links.length - 1] === 'a[href]', JSON.stringify(ecDef.links));
   check('适配EC-10: /images /videos /news 路径归类为对应分类', ['images', 'videos', 'news'].every(c => ecApi.getSearchCategory({ pathname: '/' + c, search: '?q=test', hostname: 'www.ecosia.org' }) === c), ['images', 'videos', 'news'].map(c => ecApi.getSearchCategory({ pathname: '/' + c, search: '?q=test', hostname: 'www.ecosia.org' })).join(','));
 
-  const ecLiteSrc = fs.readFileSync(path.join(__dirname, '..', 'Other', 'Lite.user.js'), 'utf8');
-  const ecSelSrc = fs.readFileSync(path.join(__dirname, '..', 'Other', 'SELECTORS.js'), 'utf8');
+  const ecLiteSrc = readRepoFile('Lite.user.js');
+  const ecSelSrc = readRepoFile('SELECTORS.js');
   const ecEntry = src.slice(src.indexOf('    ecosia: {'), src.indexOf('\n    },', src.indexOf('    ecosia: {')) + '\n    },'.length);
   check('适配EC-11: Lite 版 Ecosia 选择器同步', ecLiteSrc.includes(ecEntry), ecEntry.split('\n')[0]);
   check('适配EC-12: SELECTORS.js 参考副本同步', ecSelSrc.includes(ecEntry), ecEntry.split('\n')[0]);
+}
+
+// ---- 选择器-243~252: 自定义引擎编辑区成对括号显示(JS 扫描) ----
+{
+  const bracketNames = ['isJsRegexAllowed', 'buildBracketMatchMap', 'findBracketPairAt', 'findEnclosingBracketAt'];
+  const bracketApi = new Function(bracketNames.map((n) => extractFn(src, n)).join('\n') + `
+return { isJsRegexAllowed, buildBracketMatchMap, findBracketPairAt, findEnclosingBracketAt };`)();
+
+  const obj = '{\n  a: f(1, [2]),\n  b: \'x)y\'\n}';
+  const objMap = bracketApi.buildBracketMatchMap(obj, 'js');
+  check('选择器-243: 对象字面量内 {} () [] 成对命中', objMap[obj.indexOf('{')] === obj.lastIndexOf('}') && objMap[obj.indexOf('(')] === obj.indexOf(')') && objMap[obj.indexOf('[')] === obj.indexOf(']'), Array.from(objMap));
+  check('选择器-244: 字符串内的括号不参与配对', objMap[obj.indexOf('y') - 1] === -1, objMap[obj.indexOf('y') - 1]);
+
+  const tpl = 'x = `a)b${c(1)}`';
+  const tplMap = bracketApi.buildBracketMatchMap(tpl, 'js');
+  check('选择器-245: 模板字符串文本中的括号不参与配对', tplMap[tpl.indexOf(')')] === -1, Array.from(tplMap));
+  check('选择器-246: 模板插值与内部调用均成对命中', tplMap[tpl.indexOf('${') + 1] === tpl.indexOf('}', tpl.indexOf('${')) && tplMap[tpl.indexOf('(')] === tpl.lastIndexOf(')'), [tplMap[tpl.indexOf('${') + 1], tplMap[tpl.indexOf('(')]]);
+
+  const cmt = '/* ( */ // )\ny = (1)';
+  const cmtMap = bracketApi.buildBracketMatchMap(cmt, 'js');
+  check('选择器-247: 行/块注释内的括号不参与配对', cmtMap[cmt.indexOf('(')] === -1 && cmtMap[cmt.indexOf(')')] === -1 && cmtMap[cmt.lastIndexOf('(')] === cmt.lastIndexOf(')'), Array.from(cmtMap));
+
+  const re = 're = /a(b)c/; z = (1)';
+  const reMap = bracketApi.buildBracketMatchMap(re, 'js');
+  check('选择器-248: 正则字面量内的括号不参与配对', reMap[re.indexOf('(')] === -1 && reMap[re.lastIndexOf('(')] === re.lastIndexOf(')'), Array.from(reMap));
+
+  const div = 'v = a / b + (c)';
+  const divMap = bracketApi.buildBracketMatchMap(div, 'js');
+  check('选择器-249: 除法斜杠不误判为正则', divMap[div.indexOf('(')] === div.lastIndexOf(')'), Array.from(divMap));
+
+  check('选择器-250: 自定义引擎面板挂载成对括号高亮', /setupBracketHighlight\(textarea, 'js'\)/.test(src));
+
+  const liteSrc = readRepoFile('Lite.user.js');
+  check('选择器-252: 主版与 Lite 的规则/引擎两个编辑区都已挂载', ['rules', 'js'].every((k) => [src, liteSrc].every((s) => s.includes(`setupBracketHighlight(textarea, '${k}')`))));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

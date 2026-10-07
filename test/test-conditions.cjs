@@ -26,7 +26,7 @@ const SERH_RAW_EXTRACT = (text, fnName) => {
   return text.slice(idx, i + 1);
 };
 const SERH_FN_DEPS = ((text) => {
-  const consts = text.match(/const (?:RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_A|REGEX_CTX_B) = [^\n]+;/g).join('\n').replace(/\bconst\b/g, 'var');
+  const consts = text.match(/const (?:RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_A|REGEX_CTX_B|REGEX_CTX_C|RULE_REGEX_LIT_RE) = [^\n]+;/g).join('\n').replace(/\bconst\b/g, 'var');
   return consts + '\n' + ['findBalancedParenEnd', 'isBadRegexTail', 'scanRuleString', 'encodeNonAscii'].map((n) => SERH_RAW_EXTRACT(text, n)).join('\n');
 })(src);
 const SERH_FLAG_HELPERS = ['isUniqueFlagsStr', 'isFlagsCandidateError'].map((n) => SERH_RAW_EXTRACT(src, n)).join('\n');
@@ -1254,6 +1254,33 @@ return { parseRulesetContent };`
   assert('审查7-C4(修复2回归): 仅含matches:的合法uBlacklist订阅正常解析出规则集(不再按导入失败处理)', nz7(pM7.lines).length === 1 && nz7(pM7.lines)[0] === 'foo.com' && pM7.meta.name === 'X');
   const pF7 = pc7('name: X\nrules: [\n  a.com,\n  b.com]\n');
   assert('审查7-C5(已修复): 多行flow列表闭合]与末元素同行, 正确解析为rules列表', pF7.meta.name === 'X' && nz7(pF7.lines).length === 2 && nz7(pF7.lines)[0] === 'a.com' && nz7(pF7.lines)[1] === 'b.com');
+}
+
+// ---- @if 单等号正则: 括号平衡(修复4) ----
+{
+  const envF4 = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
+    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'splitHostAndPort', 'escapeHostPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'checkDynamicConditions', 'getSubdomainLevels', 'matchDomainEntryType', 'extractYamlRuleItems', 'parseRulesetContent', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule'].map((n) => extractFn(src, n)).join('\n') + `
+const window = { location: { hostname: 'www.google.com' } };
+function getSearchEngine() { return 'google'; } function getSearchCategory() { return 'web'; }
+function t(key) { return key; }
+const currentConfig = { rules: [], debug: false };
+const validationCache = new Map(); const subdomainCache = new Map();
+let compiledRules;
+return { analyzeRule, parseRuleWithConditions, checkDynamicConditions, stripRuleComment };`
+  )();
+  const ruleF4 = '@if(title=/\\)$/) example.com';
+  const hitF4 = (title) => envF4.checkDynamicConditions(envF4.parseRuleWithConditions(ruleF4).dynamicConditions, title, 'https://example.com/x');
+  assert('修复4-1: @if(title=/\\)$/) 单等号正则含不成对括号不再误杀, 语义为标题以)结尾', envF4.analyzeRule(ruleF4).valid === true && hitF4('报告(2024)') === true && hitF4('报告 2024') === false);
+  assert('修复4-2: 裸值字符串条件不误入正则态, url=/foo 与 site=x/y 及多斜杠URL体仍valid', envF4.analyzeRule('@if(url=/foo) *://x.com/a/b/*').valid === true && envF4.analyzeRule('@if(site=x/y) x.com').valid === true);
+  assert('修复4-3: =~/简写/独立单等号三写法行为不变', envF4.analyzeRule('@if(title=~ /\\)$/) example.com').valid === true && envF4.analyzeRule('@if(title/\\)$/) example.com').valid === true && envF4.analyzeRule('title=/\\)$/ ').valid === true);
+  assert('修复4-4: strip注释剥离与嵌套括号组不受影响', envF4.stripRuleComment(ruleF4 + ' # 注释') === ruleF4 && envF4.analyzeRule('@if(title=/((a))/) x.com').valid === true && envF4.checkDynamicConditions(envF4.parseRuleWithConditions('@if(title=/((a))/) x.com').dynamicConditions, '(a)', 'https://x.com') === true);
+  // 修复13: host条件值归一为空串后^=/*=恒真
+  const liteSrc13 = fs.readFileSync([path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p)), 'utf8');
+  const hitF13 = (cond) => envF4.checkDynamicConditions(envF4.parseRuleWithConditions(cond).dynamicConditions, '标题', 'https://example.com/x');
+  assert('修复13-1: host条件值经toASCIIHostname归一为空串时^=/*=不再恒真, host ^= . 与 host *= . 均不命中', hitF13('@if(host ^= .) x.com') === false && hitF13('@if(host ^= ".") x.com') === false && hitF13('@if(host *= .) x.com') === false);
+  assert('修复13-2(对照): host常规前缀/后缀/包含/全点值语义不变', hitF13('@if(host ^= ex) x.com') === true && hitF13('@if(host $= .com) x.com') === true && hitF13('@if(host *= xa) x.com') === true && hitF13('@if(host ^= ..) x.com') === false);
+  assert('修复13-3: Lite版evalDynamicLeaf同步空值守卫', extractFn(liteSrc13, 'evalDynamicLeaf').includes('!cmpVal'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
