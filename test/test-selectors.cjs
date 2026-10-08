@@ -99,7 +99,7 @@ global.document = {
   }
 };
 
-const fns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'isEngineSite', 'getContainerSelector', 'isValidCssSelector', 'hasPseudoElement', 'validateUserSelectors', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'normalizeMatchLiteral', 'parseSelectorText', 'sameSelectorDef', 'diffSelectorDefFields', 'diffUserSelectors', 'pruneUserSelectors'].map((n) => extractFn(src, n));
+const fns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'getSearchCategory', 'isBingImagesPage', 'isEngineSite', 'getContainerSelector', 'isValidCssSelector', 'hasPseudoElement', 'validateUserSelectors', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'normalizeMatchLiteral', 'parseSelectorText', 'sameSelectorDef', 'diffSelectorDefFields', 'diffUserSelectors', 'pruneUserSelectors'].map((n) => extractFn(src, n));
 
 // builtinSelectorOf 为 const 箭头函数, extractFn 提取不到, 按行原样提取以跟随源码
 const builtinSelectorOfLine = src.match(/const builtinSelectorOf = .+?;/);
@@ -148,6 +148,34 @@ const CUSTOM = {
 check('选择器-001: 默认无用户配置时返回内置', api.getSelectors().google.containers === 'div.g, div.MjjYud');
 check('选择器-002: 内置键序在前', Object.keys(api.getSelectors()).join(',') === ['bing', 'google_scholar', 'google', 'duckduckgo_lite', 'duckduckgo', 'yandex', 'brave', 'ecosia', 'startpage', 'yahoo', 'so360', 'sogou', 'toutiao', 'quark', 'other'].join(','));
 check('选择器-003: getContainerSelector 内置', api.getContainerSelector('bing') === 'li.b_algo, div.b_algo');
+check('选择器-003b(修复14): bing图片页(/images/search)使用图片结果容器, 网页版不变', (() => {
+  api.setHref('https://cn.bing.com/images/search?q=test');
+  const imgs = api.getContainerSelector('bing');
+  api.setHref('https://cn.bing.com/search?q=test');
+  const web = api.getContainerSelector('bing');
+  api.setHref('https://www.google.com/');
+  return imgs === 'li:has(div.iuscp), div.iuscp, div.imgpt' && web === 'li.b_algo, div.b_algo';
+})());
+check('选择器-003c(修复15): google/ddg图片页使用图片结果容器, 网页版不变', (() => {
+  api.setHref('https://www.google.com/search?q=test&udm=2');
+  const g = api.getContainerSelector('google');
+  api.setHref('https://duckduckgo.com/?q=test&iax=images&ia=images');
+  const d = api.getContainerSelector('duckduckgo');
+  api.setHref('https://duckduckgo.com/?q=test');
+  const dWeb = api.getContainerSelector('duckduckgo');
+  api.setHref('https://www.google.com/');
+  return /data-attrid="images universal"/.test(g) && d === 'li:has(> figure), figure' && dWeb !== 'li:has(> figure), figure';
+})());
+check('选择器-003d(修复16): yandex/brave图片页使用图片结果容器, 网页版不变', (() => {
+  api.setHref('https://yandex.com/images/search?text=test');
+  const y = api.getContainerSelector('yandex');
+  api.setHref('https://search.brave.com/images?q=test');
+  const b = api.getContainerSelector('brave');
+  api.setHref('https://yandex.com/search/?text=test');
+  const yWeb = api.getContainerSelector('yandex');
+  api.setHref('https://www.google.com/');
+  return y === '.JustifierRowLayout-Item, div.SerpItem' && b === 'button.image-result, .image-wrapper' && yWeb !== '.JustifierRowLayout-Item, div.SerpItem';
+})());
 check('选择器-003a(修复T): 头条链接兜底排除站内搜索链(相关搜索/大家都在搜卡不再显示 so.toutiao.com)', (() => {
   const links = api.getSelectors().toutiao.links;
   const arr = Array.isArray(links) ? links : [links];
@@ -1615,6 +1643,11 @@ await (async () => {
       function toASCIIHostname(h) { return h; }
       function toASCIIUrl(u) { return u; }
       function getSelectors() { return SELECTORS; }
+      const window = { location: { hostname: 'www.bing.com', href: 'https://www.bing.com/search?q=x' } };
+      let _engineCacheHost = null; let _engineCacheResult = 'other';
+      ${extractFn(src, 'getSearchEngine')}
+      ${extractFn(src, 'getSearchCategory')}
+      ${extractFn(src, 'isBingImagesPage')}
       ${extractFn(src, 'decodeRedirectTarget')}
       ${extractFn(src, 'decodeBingCkTarget')}
       ${extractFn(src, 'unwrapRedirectUrl')}
@@ -1799,6 +1832,9 @@ return { setConfig: (v) => { currentConfig = v; }, run: (r) => addMatchedRuleLab
   let appended = null;
   const fakeBtn = { className: '', innerHTML: '', style: {}, addEventListener() {}, onclick: null };
   const api = new Function('document', 'window', `
+function getSearchEngine() { return 'other'; }
+function getSearchCategory() { return 'web'; }
+function isBingImagesPage(engine) { return engine === 'bing' && getSearchCategory() === 'images'; }
 ${extractFn(src, 'ensurePositioned')}
 ${injFn}
 return { injectBlockButton };
@@ -2098,7 +2134,7 @@ return { buildRuleIndex, checkRuleMatchOptimized, updateStatsContent, setRules: 
 {
   const wSelStart = src.indexOf('const SELECTORS = {');
   const wSelObject = src.slice(src.indexOf('{', wSelStart), extractObjectLiteral(src, src.indexOf('{', wSelStart)) + 1);
-  const wFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'isEngineSite', 'getContainerSelector'].map((n) => extractFn(src, n)).join('\n');
+  const wFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'getSearchCategory', 'isBingImagesPage', 'isEngineSite', 'getContainerSelector'].map((n) => extractFn(src, n)).join('\n');
   const wBuiltin = src.match(/const builtinSelectorOf = .+?;/)[0];
   const apiW = new Function('storeRef', `
     const SELECTORS_KEY = 'searchfilter_selectors';
@@ -2145,7 +2181,7 @@ return { buildRuleIndex, checkRuleMatchOptimized, updateStatsContent, setRules: 
 {
   const sSelStart = src.indexOf('const SELECTORS = {');
   const sSelObject = src.slice(src.indexOf('{', sSelStart), extractObjectLiteral(src, src.indexOf('{', sSelStart)) + 1);
-  const sFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'isEngineSite', 'getContainerSelector'].map((n) => extractFn(src, n)).join('\n');
+  const sFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'getSearchCategory', 'isBingImagesPage', 'isEngineSite', 'getContainerSelector'].map((n) => extractFn(src, n)).join('\n');
   const sBuiltin = src.match(/const builtinSelectorOf = .+?;/)[0];
   const apiS = new Function('storeRef', `
     const SELECTORS_KEY = 'searchfilter_selectors';
@@ -2197,7 +2233,7 @@ return { buildRuleIndex, checkRuleMatchOptimized, updateStatsContent, setRules: 
 {
   const spSelStart = src.indexOf('const SELECTORS = {');
   const spSelObject = src.slice(src.indexOf('{', spSelStart), extractObjectLiteral(src, src.indexOf('{', spSelStart)) + 1);
-  const spFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'isEngineSite', 'getContainerSelector'].map((n) => extractFn(src, n)).join('\n');
+  const spFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'getSearchCategory', 'isBingImagesPage', 'isEngineSite', 'getContainerSelector'].map((n) => extractFn(src, n)).join('\n');
   const spBuiltin = src.match(/const builtinSelectorOf = .+?;/)[0];
   const apiSP = new Function('storeRef', `
     const SELECTORS_KEY = 'searchfilter_selectors';
@@ -2250,7 +2286,7 @@ return { buildRuleIndex, checkRuleMatchOptimized, updateStatsContent, setRules: 
 {
   const ecSelStart = src.indexOf('const SELECTORS = {');
   const ecSelObject = src.slice(src.indexOf('{', ecSelStart), extractObjectLiteral(src, src.indexOf('{', ecSelStart)) + 1);
-  const ecFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'isEngineSite', 'getContainerSelector', 'getSearchCategory'].map((n) => extractFn(src, n)).join('\n');
+  const ecFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'getSearchCategory', 'isBingImagesPage', 'isEngineSite', 'getContainerSelector', 'getSearchCategory'].map((n) => extractFn(src, n)).join('\n');
   const ecBuiltin = src.match(/const builtinSelectorOf = .+?;/)[0];
   const ecApi = new Function('storeRef', `
     const SELECTORS_KEY = 'searchfilter_selectors';

@@ -968,6 +968,9 @@ await (async () => {
   assert('规则-197: **:// 前缀判定无效', analyzeRule('**://example.com/*').valid === false);
   assert('规则-198: 路径尾部/**不误伤', analyzeRule('*://*.example.com/**').valid === true);
   assert('规则-199: *://**.x 仍判定无效', analyzeRule('*://**.example.com/*').valid === false);
+  assert('修复F-1: 重复flags title/x/ii 判定无效', analyzeRule('title/x/ii').valid === false);
+  assert('修复F-2: 重复flags text/x/uu 判定无效', analyzeRule('text/x/uu').valid === false);
+  assert('修复F-3(对照): 合法flags title/x/iu 仍有效', analyzeRule('title/x/iu').valid === true);
 
   const getCleanUrl = new Function(
     extractFn(src, 'decodeRedirectTarget') + '\n' +
@@ -1365,6 +1368,9 @@ return { buildRuleIndex, checkRuleMatchOptimized, parseRulesetContent, collectSu
   assert('修复M1-5: flow引号项含逗号/花括号不被拆坏', JSON.stringify(m1e.lines) === JSON.stringify(['x.com/a{2,3}', 'y.com', 'z.com']));
   const m1f = collect('whitelist: [keep.com, ok.com]\n');
   assert('修复M1-6: flow whitelist自动加@', JSON.stringify(m1f.rules) === JSON.stringify(['@keep.com', '@ok.com']));
+
+  const m1g = collect('blacklist:\n  -\n    *://*.example.com/* # 注释\n');
+  assert('修复Y-1: 块序列下一行条目去行内注释', JSON.stringify(m1g.rules) === JSON.stringify(['*://*.example.com/*']), m1g.rules);
 
   const l3 = collect('rules:\n  - localhost:8080/*\n  - user:pass@host/page\n');
   assert('修复L3: 无空格冒号键形标量保留', JSON.stringify(l3.rules) === JSON.stringify(['localhost:8080/*', 'user:pass@host/page']));
@@ -1769,8 +1775,8 @@ return { buildRuleIndex, checkRuleMatchOptimized, compileRuleRegex, safeRegexTes
 
 // ---- 高亮只附加边框, 不改变屏蔽的隐藏结果 ----
 {
-  const paint = (matchResult) => {
-    const result = { attrs: {}, style: { display: '', outline: '', outlineOffset: '' }, classes: new Set(), dataset: {}, children: [] };
+  const paint = (matchResult, presetDisplay) => {
+    const result = { attrs: {}, style: { display: presetDisplay || '', outline: '', outlineOffset: '' }, classes: new Set(), dataset: {}, children: [] };
     result.setAttribute = (k, v) => { result.attrs[k] = String(v); };
     result.getAttribute = (k) => (k in result.attrs ? result.attrs[k] : null);
     result.removeAttribute = (k) => { delete result.attrs[k]; };
@@ -1793,7 +1799,8 @@ return { buildRuleIndex, checkRuleMatchOptimized, compileRuleRegex, safeRegexTes
       function getSubdomainLevels() { return ['example.com']; }
       function checkRuleMatchOptimized() { return matchResult; }
       const _hrefUrlCache = { set() {} }, _resultContentCache = { set() {} }, _resultRetryCounts = { delete() {} };
-      function saveOriginalDisplay() {}
+      function saveOriginalDisplay(el) { if (el._orig === undefined) el._orig = el.style.display; }
+      function restoreOriginalDisplay(el) { el.style.display = el._orig !== undefined ? el._orig : ''; }
       function setResultExtraElementsVisible() {}
       function clearMatchedData() {}
       function injectBlockButton() {}
@@ -1806,6 +1813,9 @@ return { buildRuleIndex, checkRuleMatchOptimized, compileRuleRegex, safeRegexTes
   const only = paint({ highlight: 2 });
   assert('高亮附加: 同时屏蔽时仍隐藏且保留边框', both.getAttribute('data-is-blocked') === 'true' && both.style.display === 'none' && both.style.outline === '2px solid #123456' && both.getAttribute('data-highlight-n') === '2');
   assert('高亮附加(对照): 仅高亮时不隐藏', only.getAttribute('data-is-blocked') === null && only.style.display === '' && only.style.outline === '2px solid #123456');
+  // 审查修复1: 仅高亮命中时按原始display还原, 不强制显示站点内联隐藏元素
+  const ghost = paint({ highlight: 2 }, 'none');
+  assert('审查修复1(已修复): 仅高亮命中恢复原始display(内联none不强制显示)', ghost.style.display === 'none' && ghost.getAttribute('data-is-highlighted') === 'true');
 }
 
 // ---- 已修复: 悬浮球"显示被屏蔽结果"按data-serh-orig-display还原 ----
