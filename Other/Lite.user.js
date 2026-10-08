@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.6.4
+// @version      8.6.5
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了所有规则订阅/webdav相关内容。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了所有规则订阅/webdav相关内容。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version has removed all content related to Rule Subscriptions and WebDAV.
@@ -275,7 +275,16 @@
     return 'web';
   }
 
+  function isBingImagesPage(engine) {
+    return engine === 'bing' && getSearchCategory() === 'images';
+  }
+
   function getContainerSelector(engine) {
+    if (isBingImagesPage(engine)) return 'li:has(div.iuscp), div.iuscp, div.imgpt';
+    if (engine === 'google' && getSearchCategory() === 'images') return 'div[data-attrid="images universal"], div.isv-r';
+    if (engine === 'duckduckgo' && getSearchCategory() === 'images') return 'li:has(> figure), figure';
+    if (engine === 'yandex' && getSearchCategory() === 'images') return '.JustifierRowLayout-Item, div.SerpItem';
+    if (engine === 'brave' && getSearchCategory() === 'images') return 'button.image-result, .image-wrapper';
     return (getSelectors()[engine] || SELECTORS.other).containers;
   }
 
@@ -1629,7 +1638,7 @@
         if (invalidFlags) {
           errors.push(t('invalidRegexFlags', { flags: invalidFlags })); return { valid: false, errors, warnings };
         }
-        if (flagsCandidate && isFlagsCandidateError(flagsCandidate)) {
+        if (flagsCandidate && (isFlagsCandidateError(flagsCandidate) || (flagsCandidate.length <= 2 && /^[gyimsu]+$/i.test(flagsCandidate) && getInvalidRegexFlags(flagsCandidate)))) {
           errors.push(t('invalidRegexFlags', { flags: getInvalidRegexFlags(flagsCandidate) })); return { valid: false, errors, warnings };
         }
         new RegExp(pattern, String(flags || '').toLowerCase());
@@ -2393,6 +2402,35 @@
   }
 
   function getResultLink(result, engine) {
+    if (isBingImagesPage(engine)) {
+      const iusc = result.querySelector('a.iusc'); if (!iusc) return null;
+      let murl = '';
+      try { const m = JSON.parse(iusc.getAttribute('m') || '{}'); murl = m.purl || m.murl || ''; } catch (_) {}
+      return murl ? { href: murl, getAttribute: a => iusc.getAttribute(a), setAttribute: (a, v) => iusc.setAttribute(a, v) } : iusc;
+    }
+    if (engine === 'google' && getSearchCategory() === 'images') {
+      const card = result.querySelector('[data-lpage]');
+      if (card && /^https?:\/\//i.test(card.getAttribute('data-lpage') || '')) {
+        const lp = card.getAttribute('data-lpage');
+        return { href: lp, getAttribute: a => card.getAttribute(a), setAttribute: (a, v) => card.setAttribute(a, v) };
+      }
+      const imgres = result.querySelector('a[href*="/imgres"]');
+      if (imgres) { try { const iu = new URL(imgres.href, location.origin).searchParams.get('imgurl'); if (iu) return { href: iu, getAttribute: a => imgres.getAttribute(a), setAttribute: (a, v) => imgres.setAttribute(a, v) }; } catch (_) {} }
+    }
+    if (engine === 'yandex' && getSearchCategory() === 'images') {
+      const a = result.querySelector('a[href*="img_url="]');
+      if (a) { try { const u = new URL(a.href, location.origin).searchParams.get('img_url'); if (u && /^https?:\/\//i.test(u)) return { href: u, getAttribute: x => a.getAttribute(x), setAttribute: (x, v) => a.setAttribute(x, v) }; } catch (_) {} }
+    }
+    if (engine === 'brave' && getSearchCategory() === 'images') {
+      const img = result.querySelector('img[src*="imgs.search.brave.com"]');
+      if (img) {
+        const segs = (img.getAttribute('src') || '').split('?')[0].split('/');
+        for (let i = 1; i < segs.length; i++) {
+          let b64 = segs.slice(i).join('').replace(/-/g, '+').replace(/_/g, '/'); if (b64.length % 4) b64 += '='.repeat(4 - b64.length % 4);
+          try { const u = atob(b64); if (/^https?:\/\//i.test(u)) return { href: u, getAttribute: x => img.getAttribute(x), setAttribute: (x, v) => img.setAttribute(x, v) }; } catch (_) {}
+        }
+      }
+    }
     const linkSelectors = (getSelectors()[engine] || SELECTORS.other).links; let foundEl = null;
     if (Array.isArray(linkSelectors)) {
       for (let selector of linkSelectors) {
@@ -2450,7 +2488,26 @@
   }
 
   function getResultTitle(result, engine) {
-    return getResultText(result, (getSelectors()[engine] || SELECTORS.other).titles);
+    if (isBingImagesPage(engine)) {
+      const iusc = result.querySelector('a.iusc');
+      if (iusc) { try { const t = JSON.parse(iusc.getAttribute('m') || '{}').t; if (t) return String(t); } catch (_) {} }
+    }
+    const title = getResultText(result, (getSelectors()[engine] || SELECTORS.other).titles);
+    if (!title && engine === 'google' && getSearchCategory() === 'images') {
+      const card = result.querySelector('[data-lpage]');
+      const txt = card ? (card.getAttribute('aria-label') || card.textContent || '').trim() : '';
+      if (txt) return txt.slice(0, 200);
+    }
+    if (!title && (engine === 'duckduckgo' || engine === 'yandex') && getSearchCategory() === 'images') {
+      const img = result.querySelector('img[alt]');
+      if (img && img.alt) return img.alt.trim();
+    }
+    if (!title && engine === 'brave' && getSearchCategory() === 'images') {
+      const el = result.querySelector('.image-metadata-title') || result;
+      const txt = (el.textContent || '').trim();
+      if (txt) return txt.slice(0, 200);
+    }
+    return title;
   }
 
   function getResultTitleElement(result, engine) {
@@ -2613,7 +2670,7 @@
   }
 
   function injectBlockButton(result, engine, domain) {
-    if (!domain) return; if (result.closest('header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav')) return;
+    if (!domain || getSearchCategory() === 'images') return; if (result.closest('header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav')) return;
     if (engine === 'google') {
       if (result.classList.contains('isv-r') || result.querySelector('g-img')) {
         if (!result.querySelector('h3')) return;
@@ -2751,6 +2808,8 @@
         parent.style.display = parentOrig !== null ? parentOrig : ''; parent.removeAttribute('data-blocker-yandex-parent'); parent.removeAttribute('data-serh-orig-display');
       }
     }
+    const gridItem = result.closest ? result.closest('[data-serh-grid-item-hidden]') : null;
+    if (gridItem) { gridItem.style.display = ''; gridItem.removeAttribute('data-serh-grid-item-hidden'); }
     const googleParent = result.closest ? result.closest('[data-blocker-google-parent]') : null;
     if (googleParent) {
       const stillHasBlockedHidden = googleResultBlocks(googleParent).some(el =>
@@ -2844,7 +2903,7 @@
       if (matchResult.hlRule) { result.dataset.highlightRule = matchResult.hlRule; result.dataset.highlightSource = matchResult.hlSource || ''; }
     }
     if (matchResult && matchResult.blocked) {
-      _resultRetryCounts.delete(result); saveOriginalDisplay(result); result.style.display = blockedShown() ? '' : 'none'; setResultExtraElementsVisible(result, showHiddenResults);
+      _resultRetryCounts.delete(result); saveOriginalDisplay(result); if (blockedShown()) restoreOriginalDisplay(result); else result.style.display = 'none'; setResultExtraElementsVisible(result, showHiddenResults);
       result.setAttribute('data-blocker-processed', 'true'); result.setAttribute('data-is-blocked', 'true');
 
       if (engine === 'yandex') {
@@ -2853,6 +2912,11 @@
 
       if (engine === 'google' && result.matches && result.matches('div.g')) {
         const parent = result.closest('div.MjjYud'); if (parent && parent !== result) hideParentIfNoVisibleSiblings(parent, googleResultBlocks(parent), 'data-blocker-google-parent');
+      }
+      if (engine === 'google' && getSearchCategory() === 'images' && !blockedShown()) {
+        let cell = result.parentElement;
+        while (cell && cell.parentElement && cell.tagName !== 'BODY') { const d = getComputedStyle(cell.parentElement).display; if (d === 'grid' || d === 'inline-grid') break; cell = cell.parentElement; }
+        if (cell && cell.parentElement && cell.tagName !== 'BODY') { cell.style.display = 'none'; cell.setAttribute('data-serh-grid-item-hidden', 'true'); }
       }
 
       result.dataset.matchedRule = matchResult.rule || ''; result.dataset.matchedSource = matchResult.source || '';
@@ -2869,7 +2933,7 @@
     }
 
     if (matchHL) {
-      _resultRetryCounts.delete(result); saveOriginalDisplay(result); result.style.display = '';
+      _resultRetryCounts.delete(result); saveOriginalDisplay(result); restoreOriginalDisplay(result);
       result.classList.remove('serh-blocked-visible'); result.classList.remove('serh-blocked-collapsed'); result.setAttribute('data-blocker-processed', 'true'); result.removeAttribute('data-is-blocked'); clearMatchedData(result);
       if (matchResult && matchResult.whitelisted) { result.dataset.whitelistRule = matchResult.rule || ''; result.dataset.whitelistSource = matchResult.source || ''; }
       if (currentConfig.showBlockBtn) injectBlockButton(result, engine, domain);
@@ -3947,13 +4011,14 @@
 
   function hideStatsPanel() {
     const statsPanel = document.getElementById('serh-stats-panel'); if (statsPanel) statsPanel.style.display = 'none';
+    const statsBtn = document.getElementById('serh-test'); if (statsBtn) statsBtn.blur();
   }
 
   function toggleStatsPanel() {
     const statsPanel = document.getElementById('serh-stats-panel'); if (!statsPanel) return;
 
     if (statsPanel.style.display === 'flex') {
-      statsPanel.style.display = 'none'; return;
+      hideStatsPanel(); return;
     }
 
     updateStatsContent(); statsPanel.style.display = 'flex';
@@ -4316,9 +4381,11 @@
   }
 
   function showSettingsPanel() {
-    const opened = openPanel('serh-settings-panel', { width: '260px' });
+    const opened = openPanel('serh-settings-panel', { width: 'max-content' });
     if (!opened) return;
     const { panel, closePanel } = opened;
+    panel.style.minWidth = '240px';
+    panel.style.maxWidth = 'calc(100vw - 24px)';
     const settingsSwitch = (id, label, checked) => `
                 <label style="display: flex; align-items: center; flex: 1; justify-content: space-between; white-space: nowrap; cursor: pointer; font-size: 12px; color: #4a5568; margin: 0; padding: 0;">
                     <span style="display: flex; align-items: center; margin: 0; padding: 0;">
@@ -4330,7 +4397,7 @@
                     </span>
                 </label>`;
     const settingsRow = (items, last) => `
-            <div style="display: flex; gap: 8px; margin: 0 0 ${last ? 0 : 10}px; padding: 0;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: center; margin: 0 0 ${last ? 0 : 10}px; padding: 0;">
                 ${items.map(item => settingsSwitch(item.id, t(item.labelKey), item.checked)).join('\n                ')}
             </div>`;
     const settingsHeader = key => `
@@ -5182,7 +5249,7 @@
 
     let _pendingRecords = []; let _mutationRafPending = false;
     const flushMutations = () => {
-      _mutationRafPending = false; const records = _pendingRecords; _pendingRecords = []; if (!records.length) return; if (_domObserver) _domObserver.disconnect();
+      _mutationRafPending = false; const records = _pendingRecords; _pendingRecords = []; if (!records.length || !_engineSiteSetup) return; if (_domObserver) _domObserver.disconnect();
       try {
         const selector = getContainerSelector(getSearchEngine());
         for (const m of records) {
