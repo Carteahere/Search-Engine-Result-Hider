@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.6.5
+// @version      8.6.6
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了所有规则订阅/webdav相关内容。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了所有规则订阅/webdav相关内容。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version has removed all content related to Rule Subscriptions and WebDAV.
@@ -300,7 +300,7 @@
       bracketHighlight: '括号高亮',
       settingsBtn: '设置', settingsPanelTitle: '脚本设置',
       settingsSecBlock: '一键屏蔽', settingsSecUI: '界面显示', settingsSecOther: '其他设置', removeRedirects: '去除重定向',
-      bubbleSize: '悬浮球:', blockRules: '屏蔽规则:',
+      bubbleSize: '悬浮球:', blockRules: '规则：',
       import: '导入', export: '导出', save: '保存',
       stats: '统计', close: '关闭', cancel: '取消',
       placeholder: '每行一个规则',
@@ -318,7 +318,8 @@
       statsErrors: '发现 {count} 个规则错误: ',
       matchedCountLabel: '匹配', matchedCountUnit: '条',
       menuBubbleStateShow: '显示', menuBubbleStateHide: '隐藏',
-      menuBubbleActionOpen: '打开面板', menuBubbleActionToggle: '显隐结果',
+      menuBubbleActionOpen: '打开面板', menuBubbleActionStats: '打开统计', menuBubbleActionToggle: '显隐结果',
+      bubbleStatsHint: '点击打开统计，长按打开面板',
       bubbleToggleHint: '点击显示/隐藏屏蔽结果，长按打开面板',
       stateEnabled: '启用', stateDisabled: '关闭',
       subImportFailed: '导入失败，请检查链接或网络状态',
@@ -353,7 +354,7 @@
       bracketHighlight: 'Highlight Bracket',
       settingsBtn: 'Settings', settingsPanelTitle: 'Script Settings',
       settingsSecBlock: 'One-click Block', settingsSecUI: 'Interface', settingsSecOther: 'Other', removeRedirects: 'Remove redirects',
-      bubbleSize: 'Bubble:', blockRules: 'Block Rules:',
+      bubbleSize: 'Bubble:', blockRules: 'Rules:',
       import: 'Import', export: 'Export', save: 'Save',
       stats: 'Stats', close: 'Close', cancel: 'Cancel',
       placeholder: 'One rule per line',
@@ -371,7 +372,8 @@
       statsErrors: 'Found {count} rule errors:',
       matchedCountLabel: 'Hits', matchedCountUnit: 'Rule',
       menuBubbleStateShow: 'Show', menuBubbleStateHide: 'Hide',
-      menuBubbleActionOpen: 'Open Panel', menuBubbleActionToggle: 'Show Results',
+      menuBubbleActionOpen: 'Open Panel', menuBubbleActionStats: 'Open Stats', menuBubbleActionToggle: 'Show Results',
+      bubbleStatsHint: 'Click to open stats, long-press to open panel',
       bubbleToggleHint: 'Click to show/hide blocked results, long-press to open panel',
       stateEnabled: 'Enabled', stateDisabled: 'Disabled',
       subImportFailed: 'Import failed, check URL or network',
@@ -2253,7 +2255,7 @@
           }
         } else if (/(?:^|\.)so\.com$/i.test(host) && /^\/jump\/?$/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('u'));
-        } else if (/(?:^|\.)(?:so\.com|sogou\.com)$/i.test(host)) {
+        } else if (/(?:^|\.)(?:so\.com|sogou\.com)$/i.test(host) && /(?:\/tc\b|\/jump\b|\/link\b)/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('url'));
         }
       } catch (_) {}
@@ -2390,7 +2392,9 @@
   function applyResultCollapse(result, engine) {
     restoreResultCollapse(result);
     const titleEl = getResultTitleElement(result, engine);
-    if (!titleEl || (result.contains && !result.contains(titleEl))) return;
+    if (!titleEl || (result.contains && !result.contains(titleEl))) {
+      if (result && result.style) result.style.display = 'none'; return;
+    }
     let node = titleEl;
     while (node && node !== result) {
       const parent = node.parentElement; if (!parent) break;
@@ -3772,7 +3776,7 @@
         });
         document.addEventListener('touchend', endDrag); document.addEventListener('touchcancel', endDrag);
 
-        if (currentConfig.bubbleAction === 'toggleHidden') {
+        if (currentConfig.bubbleAction === 'toggleHidden' || currentConfig.bubbleAction === 'openStats') {
           longPressTimer = setTimeout(() => {
             if (!isDragging) {
               hasLongPressed = true; status.style.transform = 'scale(1.15)';
@@ -3836,6 +3840,10 @@
               setTimeout(() => {
                 showConfigPanel();
               }, 50);
+            } else if (currentConfig.bubbleAction === 'openStats') {
+              setTimeout(() => {
+                showStatsPanel();
+              }, 50);
             } else {
               toggleHiddenResults();
             }
@@ -3877,7 +3885,7 @@
       }
     });
     if (showHiddenResults) {
-      document.querySelectorAll('[data-blocker-google-parent], [data-blocker-yandex-parent]').forEach(parent => {
+      document.querySelectorAll('[data-blocker-google-parent], [data-blocker-yandex-parent], [data-serh-grid-item-hidden]').forEach(parent => {
         restoreOriginalDisplay(parent);
       });
     } else {
@@ -3969,7 +3977,7 @@
       }
     });
     const bubbleActionSelect = document.getElementById('serh-set-bubble-action');
-    if (bubbleActionSelect) bubbleActionSelect.value = currentConfig.bubbleAction === 'toggleHidden' ? 'toggleHidden' : 'openPanel';
+    if (bubbleActionSelect) bubbleActionSelect.value = (currentConfig.bubbleAction === 'toggleHidden' || currentConfig.bubbleAction === 'openStats') ? currentConfig.bubbleAction : 'openPanel';
     const textarea = document.getElementById('serh-rules');
     if (textarea && Array.isArray(currentConfig.rules)) {
       textarea.value = currentConfig.rules.join('\n'); updateLineNumbers();
@@ -4006,6 +4014,15 @@
     });
     if (filtered.length !== lines.length) {
       textarea.value = filtered.join('\n'); updateLineNumbers();
+    }
+  }
+
+  function showStatsPanel() {
+    showConfigPanel();
+    const statsPanel = document.getElementById('serh-stats-panel');
+    if (statsPanel && statsPanel.style.display !== 'flex') {
+      updateStatsContent();
+      statsPanel.style.display = 'flex';
     }
   }
 
@@ -4446,7 +4463,8 @@
                 <div style="flex: 1; min-width: 0; margin: 0; padding: 0;">
                     <label for="serh-set-bubble-action" style="display: block; margin: 0 0 4px; padding: 0; cursor: pointer; font-size: 12px; color: #4a5568;">${t('menuBubbleAction')}</label>
                     <select id="serh-set-bubble-action" style="width: 100%; min-width: 0; margin: 0; font-size: 12px; padding: 3px 4px; border: 1px solid #cbd5e0; border-radius: 4px; background: #fff; color: #2d3748; cursor: pointer; outline: none; font-family: inherit;">
-                        <option value="openPanel" ${currentConfig.bubbleAction !== 'toggleHidden' ? 'selected' : ''}>${t('menuBubbleActionOpen')}</option>
+                        <option value="openPanel" ${(currentConfig.bubbleAction !== 'openStats' && currentConfig.bubbleAction !== 'toggleHidden') ? 'selected' : ''}>${t('menuBubbleActionOpen')}</option>
+                        <option value="openStats" ${currentConfig.bubbleAction === 'openStats' ? 'selected' : ''}>${t('menuBubbleActionStats')}</option>
                         <option value="toggleHidden" ${currentConfig.bubbleAction === 'toggleHidden' ? 'selected' : ''}>${t('menuBubbleActionToggle')}</option>
                     </select>
                 </div>
@@ -4512,6 +4530,7 @@
         if (wasToggleMode && this.value !== 'toggleHidden' && showHiddenResults) toggleHiddenResults();
         const statusBtn = document.getElementById('serh-status'); if (statusBtn) updateBubbleContent(statusBtn, parseInt(statusBtn.dataset.blockedCount || 0));
         if (this.value === 'toggleHidden') showToast(t('bubbleToggleHint'), 'info');
+        else if (this.value === 'openStats') showToast(t('bubbleStatsHint'), 'info');
       });
     }
 
