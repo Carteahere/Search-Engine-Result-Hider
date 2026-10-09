@@ -32,7 +32,7 @@ Partial setting instructions:
 1. Show Source: Enabled by default, when disabled, the rules that match the blocked results will not be shown on it.
 2. Folding mode: Disabled by default, when enabled, blocked results will show titles only.
 3. Export Config: Disabled by default, when enabled, export TXT with script configuration attached.
-4. Bubble Action: Open the panel by default; after toggling, tap shows/hides blocked results, long press opens the panel, and clicking the block button for blocked results again removes the block.
+4. Bubble Action: Open the panel by default; after switching to show results mode, tap shows/hides blocked results, long press opens the panel, and clicking the block button for blocked results again removes the block.
 
 ### 1.3 About WebDAV:
 
