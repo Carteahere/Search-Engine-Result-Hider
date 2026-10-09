@@ -2070,6 +2070,7 @@ return { buildRuleIndex, checkRuleMatchOptimized, updateStatsContent, setRules: 
   function mkCollapseEl(tag, cls, parent, text) {
     const el = {
       tag, cls: cls || '', children: [], parentElement: parent || null, _classes: new Set(),
+      style: { display: '' },
       textContent: text || '',
       contains(other) { if (other === this) return true; return this.children.some((c) => c.contains(other)); },
       walk() { const out = []; const rec = (n) => n.children.forEach((c) => { out.push(c); rec(c); }); rec(this); return out; },
@@ -2119,7 +2120,7 @@ return { buildRuleIndex, checkRuleMatchOptimized, updateStatsContent, setRules: 
   const noTitle = mkCollapseEl('div', 'other');
   const noTitleChild = mkCollapseEl('div', 'inner', noTitle);
   collapseEnv.applyResultCollapse(noTitle, 'bing');
-  check('选择器-240(对照): 找不到标题元素时不打任何标记(由snippet/extra隐藏规则兜底)', !noTitleChild._classes.has('serh-collapse-hide') && !noTitle._classes.has('serh-collapse-hide'));
+  check('选择器-240(对照): 找不到标题元素时降级隐藏容器(由snippet/extra隐藏规则兜底)', noTitle.style && noTitle.style.display === 'none' && !noTitleChild._classes.has('serh-collapse-hide'));
 
   const li2 = mkCollapseEl('li', 'b_algo');
   const tpcn2 = mkCollapseEl('div', 'b_tpcn', li2, 'example.comhttps://example.com');
