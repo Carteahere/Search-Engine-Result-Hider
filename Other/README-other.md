@@ -2,7 +2,8 @@
 
 ### 简介：
 
-**详细信息见 [Github](https://github.com/Carteahere/Search-Engine-Result-Hider)**
+**详细信息见 [Github](https://github.com/Carteahere/Search-Engine-Result-Hider)**  
+建议在Issue反馈bug方便上传附件
 
 在仅支持安装脚本的浏览器上实现复杂规则屏蔽搜索结果功能  
 兼容uBlacklist基础规则，支持URL匹配、正则匹配、标题匹配、结果摘要(snippet)匹配、高亮目标结果、白名单匹配、`@if`附加判断条件，以及添加**自定义引擎**  
