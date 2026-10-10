@@ -1283,6 +1283,21 @@ return { analyzeRule, parseRuleWithConditions, checkDynamicConditions, stripRule
   assert('修复13-3: Lite版evalDynamicLeaf同步空值守卫', extractFn(liteSrc13, 'evalDynamicLeaf').includes('!cmpVal'));
 }
 
+// ---- 修复14: @if空串比较值守卫扩展到title/url/path/scheme ----
+{
+  const env14 = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
+    ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'punycodeDecodeLabel', 'toUnicodeHostname', 'encodeNonAscii', 'safeRegexTest', 'safeDecodeURIComponent', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST'].map((n) => extractFn(src, n)).join('\n') +
+    '\nreturn { evalDynamicLeaf };'
+  )();
+  const ev14 = (cond, title, url) => env14.evalDynamicLeaf(cond, title, url);
+  assert('修复14-1: title $= ""/^= ""/*= ""/= "" 空串比较值不再恒真或漏判, 一律不命中', ev14({ type: 'title', op: '$=', val: '' }, '标题', 'https://x.com') === false && ev14({ type: 'title', op: '^=', val: '' }, '标题', 'https://x.com') === false && ev14({ type: 'title', op: '*=', val: '' }, '标题', 'https://x.com') === false && ev14({ type: 'title', op: '=', val: '' }, '标题', 'https://x.com') === false);
+  assert('修复14-2: url ^= "" / path *= "" / scheme ^= "" 空串比较值不命中', ev14({ type: 'url', op: '^=', val: '' }, 't', 'https://x.com/a') === false && ev14({ type: 'path', op: '*=', val: '' }, 't', 'https://x.com/a') === false && ev14({ type: 'scheme', op: '^=', val: '' }, 't', 'https://x.com/a') === false);
+  assert('修复14-3(对照): 非空值与 =~ 及 host 后缀语义不变', ev14({ type: 'title', op: '*=', val: '题' }, '标题', 'https://x.com') === true && ev14({ type: 'path', op: '*=', val: '/a' }, 't', 'https://x.com/a') === true && ev14({ type: 'url', op: '=~', regex: /x\.com/ }, 't', 'https://x.com/a') === true && ev14({ type: 'host', op: '$=', val: '.com' }, '', 'https://x.com') === true);
+  const liteSrc14 = fs.readFileSync([path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p)), 'utf8');
+  assert('修复14-4: Lite版evalDynamicLeaf同步空串守卫(title/url双路径)', (() => { const f = extractFn(liteSrc14, 'evalDynamicLeaf'); return f.includes("!cond.val") && f.split("!cond.val").length === 3; })());
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 

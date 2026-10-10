@@ -1505,6 +1505,18 @@ return {
   assert('修复5-11: 不同输入不误复用', cc3 !== cc1 && cc3.regex.source !== cc1.regex.source);
   const rw1 = api.ruleToRegex('example.com');
   assert('修复5-12: 通配规则结果与既有一致', rw1.pattern.indexOf('example') !== -1);
+
+  // 修复18: 裸域简写只看主机段, 路径/查询里的*不再跳过子域展开; 主机段含*仍不套简写。
+  const fix18Re = (rule) => { const r = api.ruleToRegex(rule); return new RegExp(r.pattern, r.flags); };
+  assert('修复18-1: 裸域路径含*仍展开为子域简写(命中www子域)', fix18Re('example.com/path/*').test('https://www.example.com/path/x'));
+  assert('修复18-2: 查询含*同样展开(命中根路径查询)', fix18Re('example.com?q=*page*').test('https://example.com/?q=abcpage2'));
+  assert('修复18-3(对照): 无*的裸域路径简写行为不变', fix18Re('example.com/path').test('https://www.example.com/path'));
+  assert('修复18-4(对照): 主机段含*不套简写(无*.*双重前缀且子域命中)', fix18Re('*.example.com/path/*').test('https://sub.example.com/path/x') && api.ruleToRegex('*.example.com/path/*').pattern.indexOf('*.*') === -1);
+  assert('修复18-5(对照): 裸域路径规则不误命中无关主机', !fix18Re('example.com/path/*').test('https://other.example.net/path/x'));
+  const lite18 = fs.readFileSync([path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p)), 'utf8');
+  const liteR2R = new Function(['encodeNonAscii', 'hostLabelToASCII', 'toASCIIHostname', 'escapeWildcardPart', 'wildcardToRegex', 'parsePrefixedRegexRule', 'ruleToRegex'].map((n) => SERH_RAW_EXTRACT(lite18, n)).join('\n') + '\nreturn ruleToRegex;')();
+  const lite18Re = (rule) => { const r = liteR2R(rule); return new RegExp(r.pattern, r.flags); };
+  assert('修复18-6: Lite版ruleToRegex同步放宽(路径含*仍子域简写, 主机含*仍不套简写)', lite18Re('example.com/path/*').test('https://www.example.com/path/x') && lite18Re('*.example.com/path/*').test('https://sub.example.com/path/x') && liteR2R('*.example.com/path/*').pattern.indexOf('*.*') === -1);
 }
 
 // ---- 规则-300~314 + 修复1/5/6/2: title-text尾段flags / 畸形scheme / 紧贴@N / IDN通配 / Yahoo RU / host端口 ----
@@ -1831,6 +1843,38 @@ return { buildRuleIndex, checkRuleMatchOptimized, compileRuleRegex, safeRegexTes
     return parent.style.display;
   `)(parent);
   check('审查4-1(已修复): 父容器原内联 display:flex 被隐藏后, 切换显示时按 data-serh-orig-display 还原(此前被置空致布局塌陷)', run(mkParent('flex')) === 'flex' && run(mkParent(null)) === '');
+}
+
+// ---- 已修复: 悬浮球收起分支重新隐藏Google图片网格单元格 ----
+{
+  const runGrid = (scriptText) => {
+    const grid = { style: { display: '' } };
+    const yandex = { style: { display: '' }, children: [] };
+    const bySel = {
+      '[data-blocker-google-parent], [data-blocker-yandex-parent], [data-serh-grid-item-hidden]': [grid],
+      '[data-blocker-yandex-parent]': [yandex],
+      '[data-blocker-google-parent]': [],
+      '[data-serh-grid-item-hidden]': [grid]
+    };
+    return new Function('bySel', `
+      let showHiddenResults = true;
+      const document = { querySelectorAll: (sel) => (bySel[sel] || []), getElementById: () => null };
+      const currentConfig = {};
+      const blockedShown = () => false;
+      function hideParentIfNoVisibleSiblings() {}
+      function googleResultBlocks() { return []; }
+      ${extractFn(scriptText, 'saveOriginalDisplay')}
+      ${extractFn(scriptText, 'restoreOriginalDisplay')}
+      ${extractFn(scriptText, 'toggleHiddenResults')}
+      toggleHiddenResults();
+      const grid2 = bySel['[data-serh-grid-item-hidden]'][0]; const yandex2 = bySel['[data-blocker-yandex-parent]'][0];
+      return { grid: grid2.style.display, yandex: yandex2.style.display };
+    `)(bySel);
+  };
+  const liteSrcG = fs.readFileSync([path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p)), 'utf8');
+  assert('审查G-1(已修复): 收起分支重新隐藏data-serh-grid-item-hidden单元格(此前留空白占位格)', runGrid(src).grid === 'none');
+  assert('审查G-2: Lite版收起分支同步重隐藏', runGrid(liteSrcG).grid === 'none');
+  assert('审查G-3(对照): yandex/google父容器收起路径不受影响', runGrid(src).yandex === '' && runGrid(liteSrcG).yandex === '');
 }
 
 // ---- 已修复: @@if不再编译成白名单条件 ----

@@ -883,14 +883,14 @@ rules:
     return { p, state };
   };
   const calls = { sub: 0, dav: 0 };
-  const factory = new Function('document', 'panel', 'preventPanelClose', 'setTimeout', 'isSerhPanelOpen', 'checkAutoSubscription', 'checkAutoWebDAV', `
+  const factory = new Function('document', 'panel', 'preventPanelClose', 'setTimeout', 'isSerhPanelOpen', 'checkAutoSubscription', 'checkAutoWebDAV', 'currentConfig', `
     ${extractFn(src, 'fadeOutAndRemovePanel')}
     ${extractFn(src, 'bindOutsideClickClose')}
     return bindOutsideClickClose;
   `);
   const deps = [() => false, () => { calls.sub++; }, () => { calls.dav++; }];
   const first = makePanel();
-  factory(doc, first.p, false, (fn) => fn(), ...deps)(first.p, () => { first.state.beforeClose = true; });
+  factory(doc, first.p, false, (fn) => fn(), ...deps, { bubbleAction: 'openPanel' })(first.p, () => { first.state.beforeClose = true; });
   doc.fire('pointerdown', { target: inside });
   doc.fire('mousedown', { target: inside });
   doc.fire('click', { target: outside });
@@ -902,7 +902,7 @@ rules:
   const openDeps = [() => true, () => { calls.sub++; }, () => { calls.dav++; }];
   const subBefore = calls.sub, davBefore = calls.dav;
   const third = makePanel();
-  factory(doc, third.p, false, (fn) => fn(), ...openDeps)(third.p, () => { third.state.beforeClose = true; });
+  factory(doc, third.p, false, (fn) => fn(), ...openDeps, { bubbleAction: 'openPanel' })(third.p, () => { third.state.beforeClose = true; });
   doc.fire('click', { target: outside });
   assert('面板-006: 其他面板仍打开时不恢复同步', third.state.removed && calls.sub === subBefore && calls.dav === davBefore);
 }
@@ -927,6 +927,85 @@ assert('面板-009: 屏蔽按钮的引擎域名守卫位于!isBlocked分支内',
   created = first.panel;
   openPanel('serh-subscription-panel', opts);
   assert('面板-010b: 面板已存在分支触发 beforeClose(未保存编辑不再静默丢失)且清空回调', saved === 1 && first.panel.removed === true && first.panel._beforeClose === null);
+}
+
+// 修复18(面板): 统计入口复用已开面板不销毁编辑; 淡出350ms窗口内重开重建而非被吞; 淡出幽灵不再吃点击。
+{
+  const liteSrc18 = fs.readFileSync([path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p)), 'utf8');
+
+  const fadeOf = (s) => new Function('setTimeout', `${extractFn(s, 'fadeOutAndRemovePanel')}\nreturn fadeOutAndRemovePanel;`)(() => {});
+  const mkFadeP = () => { const p = { classList: { remove: (c) => { p.cls = c; } }, addEventListener: () => {}, remove: () => {} }; return p; };
+  const fp1 = mkFadeP(); fadeOf(src)(fp1);
+  const fp2 = mkFadeP(); fadeOf(liteSrc18)(fp2);
+  assert('面板-011(修复18): 淡出即标记_fading并移除show(主版+Lite)', fp1._fading === true && fp1.cls === 'show' && fp2._fading === true && fp2.cls === 'show');
+
+  for (const [tag, s] of [['主版', src], ['Lite', liteSrc18]]) {
+    const doc = { getElementById: () => doc._existing };
+    let created = 0;
+    const openPanel = new Function('document', 'injectWidgetStyles', 'createPanel', 'bindOutsideClickClose', `${extractFn(s, 'openPanel')}\nreturn openPanel;`)(
+      doc, () => {}, () => { created++; return { remove() { this.removed = true; } }; }, (p, cb) => ({ closePanel: () => cb && cb() }));
+    let before = 0, existingCalls = 0;
+    doc._existing = { _beforeClose: () => { before++; }, remove() { this.removed = true; } };
+    const r1 = openPanel('serh-x-panel', { beforeClose: () => {}, onExisting: () => { existingCalls++; } });
+    assert(`面板-012(修复18): ${tag}健康已开面板仍按toggle关闭返回null并触发beforeClose`, r1 === null && before === 1 && existingCalls === 1 && doc._existing.removed === true);
+    before = 0; existingCalls = 0;
+    doc._existing = { _fading: true, _beforeClose: () => { before++; }, remove() { this.removed = true; } };
+    const r2 = openPanel('serh-x-panel', { beforeClose: () => {}, onExisting: () => { existingCalls++; } });
+    assert(`面板-013(修复18): ${tag}淡出窗口内重开重建新面板且幽灵已移除`, !!(r2 && r2.panel) && created === 1 && doc._existing.removed === true);
+    assert(`面板-014(修复18): ${tag}淡出面板不再重复触发关闭回调`, before === 0 && existingCalls === 0);
+
+    const statsOf = (panel) => {
+      let calls = 0, shown = 0;
+      const sdoc = { getElementById: (id) => id === 'serh-panel' ? panel : (id === 'serh-stats-panel' ? { style: { display: 'none' } } : null) };
+      new Function('document', 'showConfigPanel', 'updateStatsContent', `${extractFn(s, 'showStatsPanel')}\nreturn showStatsPanel;`)(sdoc, () => { calls++; }, () => { shown++; })();
+      return { calls, shown };
+    };
+    const st1 = statsOf(null);
+    assert(`面板-015(修复18): ${tag}面板未开时统计入口先建面板再显示统计`, st1.calls === 1 && st1.shown === 1);
+    const st2 = statsOf({ _fading: false });
+    assert(`面板-016(修复18): ${tag}面板已开时统计入口不再重建(未保存编辑不丢)`, st2.calls === 0 && st2.shown === 1);
+    const st3 = statsOf({ _fading: true });
+    assert(`面板-017(修复18): ${tag}淡出中的面板按重建处理`, st3.calls === 1 && st3.shown === 1);
+  }
+
+  const cssOf = (s) => /\.serh-panel-fade\s*\{[^}]*pointer-events:\s*none;/s.test(s) && /\.serh-panel-fade\.show\s*\{[^}]*pointer-events:\s*auto;/s.test(s);
+  assert('面板-018(修复18): 淡出态pointer-events:none且show态auto(主版+Lite)', cssOf(src) && cssOf(liteSrc18));
+}
+
+// 悬浮球点击仲裁: 非显隐模式打开任意面板时点击不再关闭所有面板; 打开统计模式保留开统计, 统计显示中仍关全部。
+{
+  const liteSrcB = fs.readFileSync([path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p)), 'utf8');
+  const mkWin = (id, opts = {}) => ({ id, _fading: !!opts.fading, style: { display: opts.display || '' } });
+  const resolveOf = (s, cfg, panels, prevent) => {
+    const doc = { getElementById: (id) => panels[id] || null, querySelectorAll: (sel) => (sel === '.serh-window' ? Object.values(panels).filter(Boolean) : []) };
+    return new Function('document', 'currentConfig', 'preventPanelClose', `${extractFn(s, 'openSerhPanels')}\n${extractFn(s, 'resolveBubblePanelAction')}\nreturn resolveBubblePanelAction;`)(doc, cfg, !!prevent);
+  };
+  for (const [tag, s] of [['主版', src], ['Lite', liteSrcB]]) {
+    const openCfg = { bubbleAction: 'openPanel' }; const statsCfg = { bubbleAction: 'openStats' };
+    const main = mkWin('serh-panel');
+    const statsHidden = { id: 'serh-stats-panel', style: { display: 'none' } }; const statsShown = { id: 'serh-stats-panel', style: { display: 'flex' } };
+    assert(`面板-019(悬浮球): ${tag}非显隐模式主面板已开时点击悬浮球关闭所有面板(toggle)`, resolveOf(s, openCfg, { 'serh-panel': main })() === 'closeAll');
+    assert(`面板-019b(悬浮球): ${tag}仅其他面板已开时点击悬浮球也关闭所有面板`, resolveOf(s, openCfg, { 'serh-settings-panel': mkWin('serh-settings-panel') })() === 'closeAll');
+    assert(`面板-020(悬浮球): ${tag}打开统计模式主面板已开(统计未开)时点击仍打开统计面板`, resolveOf(s, statsCfg, { 'serh-panel': main, 'serh-stats-panel': statsHidden })() === 'stats');
+    assert(`面板-021(悬浮球): ${tag}统计面板显示中时点击悬浮球仍关闭所有面板`, resolveOf(s, statsCfg, { 'serh-panel': main, 'serh-stats-panel': statsShown })() === 'closeAll' && resolveOf(s, openCfg, { 'serh-panel': main, 'serh-stats-panel': statsShown })() === 'closeAll');
+    assert(`面板-022(悬浮球): ${tag}无面板打开时按模式打开主面板/统计面板`, resolveOf(s, openCfg, {})() === 'panel' && resolveOf(s, statsCfg, {})() === 'stats');
+    assert(`面板-023(悬浮球): ${tag}文件选择期间点击悬浮球不关闭面板`, resolveOf(s, openCfg, { 'serh-panel': main }, true)() === 'none');
+    assert(`面板-024(悬浮球): ${tag}淡出中的主面板视为未打开, 可重新打开`, resolveOf(s, openCfg, { 'serh-panel': mkWin('serh-panel', { fading: true }) })() === 'panel');
+
+    let cleanup = 0, before = 0;
+    const p1 = { id: 'serh-panel', _cleanupClick: () => { cleanup++; }, _beforeClose: () => { before++; } };
+    const p2 = { id: 'serh-settings-panel', _cleanupClick: () => { cleanup++; } };
+    const faded = []; const docEvents = [];
+    const win = { _panelCloseTimer: 1, _panelCloseHandler: () => {}, _panelPressHandler: () => {}, _toastNode: { removed: false, remove() { this.removed = true; } } };
+    const cdoc = { querySelectorAll: (sel) => (sel === '.serh-window' ? [p1, p2] : []), getElementById: () => win._toastNode, removeEventListener: (t) => docEvents.push(t) };
+    new Function('document', 'window', 'fadeOutAndRemovePanel', `${extractFn(s, 'openSerhPanels')}\n${extractFn(s, 'closeAllSerhPanels')}\nreturn closeAllSerhPanels;`)(cdoc, win, (p) => faded.push(p.id))();
+    assert(`面板-025(悬浮球): ${tag}关闭全部时解绑全局监听/执行beforeClose/淡出所有窗口并清toast`, faded.length === 2 && cleanup === 2 && before === 1 && win._panelCloseTimer === null && win._panelCloseHandler === null && win._panelPressHandler === null && docEvents.includes('click') && win._toastNode.removed === true);
+
+    const bindOf = extractFn(s, 'bindOutsideClickClose');
+    assert(`面板-026(悬浮球): ${tag}非显隐模式其他面板豁免悬浮球点击, 显隐模式维持原外点关闭`, bindOf.includes("currentConfig.bubbleAction !== 'toggleHidden'") && bindOf.includes("closest('#serh-status')") && /if \(currentConfig\.bubbleAction !== 'toggleHidden'[\s\S]*?return;\s*if \(!panel\.contains/.test(bindOf));
+    const bubbleOf = extractFn(s, 'updateStatus');
+    assert(`面板-027(悬浮球): ${tag}悬浮球点击经resolveBubblePanelAction仲裁(closeAll/stats/panel), 显隐模式仍走toggleHiddenResults`, /const action = resolveBubblePanelAction\(\);/.test(bubbleOf) && /if \(action === 'closeAll'\) closeAllSerhPanels\(\);/.test(bubbleOf) && /else if \(action === 'stats'\) showStatsPanel\(\);/.test(bubbleOf) && /else if \(action === 'panel'\) showConfigPanel\(\);/.test(bubbleOf) && /if \(currentConfig\.bubbleAction === 'toggleHidden'\) \{\s*toggleHiddenResults\(\);/.test(bubbleOf));
+  }
 }
 
 // 正则/条件内部的 # 不能当作行尾注释参与去重。
