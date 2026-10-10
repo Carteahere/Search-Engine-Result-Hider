@@ -76,6 +76,7 @@ Notes:
 1. `@N` must be separated by a [space] from naked domain name rules, while other rules can ignore [space]. For example, `@1 example.com` is recognized normally, while `@1example.com` is recognized as a whitelist rule.
 2. Only 5 colors are supported, `@N` = `@1`–`@5`; open the custom color panel from the script menu.
 3. Supports conditional expressions, such as `@N+host/path/url/scheme`.
+4. The highlighting rule serves only as an additional display, meaning that when a rule is highlighted and also hits the blacklist, it will be blocked.
 
 ### 2.8 Composite Rules:
 
