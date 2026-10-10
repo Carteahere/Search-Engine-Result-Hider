@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.6.6
+// @version      8.6.7
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -1018,7 +1018,7 @@
   }
 
   function fadeOutAndRemovePanel(panel, onClosed) {
-    panel.classList.remove('show'); let done = false;
+    panel.classList.remove('show'); panel._fading = true; let done = false;
     const finish = () => {
       if (done) return; done = true; panel.remove(); if (onClosed) onClosed();
       if (!isSerhPanelOpen()) {
@@ -1038,6 +1038,7 @@
       if (pressStartedInside) {
         pressStartedInside = false; return;
       }
+      if (currentConfig.bubbleAction !== 'toggleHidden' && e.target && e.target.closest && e.target.closest('#serh-status')) return;
       if (!panel.contains(e.target)) closePanel();
     };
     const closePanel = () => {
@@ -1063,16 +1064,40 @@
   function openPanel(id, { width = '320px', padding = '15px', beforeClose = null, onExisting = null, bindClose = true } = {}) {
     injectWidgetStyles();
     const existing = document.getElementById(id);
-    if (existing) {
+    if (existing && !existing._fading) {
       if (typeof existing._cleanupClick === 'function') existing._cleanupClick();
       if (typeof existing._beforeClose === 'function') { try { existing._beforeClose(); } catch (err) { console.error('[面板] 关闭前回调失败:', err); } existing._beforeClose = null; }
       if (onExisting) onExisting(existing);
       existing.remove();
       return null;
     }
+    if (existing) existing.remove();
     const panel = createPanel(id, width, padding);
     panel._beforeClose = typeof beforeClose === 'function' ? beforeClose : null;
     return { panel, closePanel: bindClose ? bindOutsideClickClose(panel, beforeClose) : null };
+  }
+
+  function openSerhPanels() { return Array.from(document.querySelectorAll('.serh-window')).filter(p => !p._fading); }
+  function closeAllSerhPanels() {
+    if (window._panelCloseTimer) { clearTimeout(window._panelCloseTimer); window._panelCloseTimer = null; }
+    if (window._panelCloseHandler) { document.removeEventListener('click', window._panelCloseHandler); window._panelCloseHandler = null; }
+    if (window._panelPressHandler) { document.removeEventListener('pointerdown', window._panelPressHandler); document.removeEventListener('mousedown', window._panelPressHandler); window._panelPressHandler = null; }
+    openSerhPanels().forEach(p => {
+      if (typeof p._cleanupClick === 'function') p._cleanupClick();
+      if (typeof p._beforeClose === 'function') { try { p._beforeClose(); } catch (err) { console.error('[面板] 关闭前回调失败:', err); } p._beforeClose = null; }
+      fadeOutAndRemovePanel(p);
+    });
+    const toastContainer = document.getElementById('serh-toast-container'); if (toastContainer) toastContainer.remove();
+  }
+  function resolveBubblePanelAction() {
+    if (preventPanelClose) return 'none';
+    const mainPanel = document.getElementById('serh-panel');
+    const statsPanel = document.getElementById('serh-stats-panel');
+    const mainAlive = !!(mainPanel && !mainPanel._fading);
+    if (statsPanel && mainAlive && statsPanel.style.display === 'flex') return 'closeAll';
+    if (currentConfig.bubbleAction === 'openStats' && mainAlive) return 'stats';
+    if (openSerhPanels().length) return 'closeAll';
+    return currentConfig.bubbleAction === 'openStats' ? 'stats' : 'panel';
   }
 
   function subscriptionsSignature(subs) {
@@ -1379,12 +1404,12 @@
 
   function evalDynamicLeaf(cond, title, url) {
     if (cond.type === 'title') {
-      if (!title) return false; const lowerTitle = title.toLowerCase(); if (cond.op === '=') return lowerTitle === cond.val; if (cond.op === '^=') return lowerTitle.startsWith(cond.val);
+      if (!title || (cond.op !== '=~' && !cond.val)) return false; const lowerTitle = title.toLowerCase(); if (cond.op === '=') return lowerTitle === cond.val; if (cond.op === '^=') return lowerTitle.startsWith(cond.val);
       if (cond.op === '$=') return lowerTitle.endsWith(cond.val); if (cond.op === '*=') return lowerTitle.includes(cond.val); if (cond.op === '=~') return safeRegexTest(cond.regex, title);
       return false;
     }
     if (cond.type === 'url') {
-      if (!url) return false; const lowerUrl = url.toLowerCase();
+      if (!url || (cond.op !== '=~' && !cond.val)) return false; const lowerUrl = url.toLowerCase();
       const foldUrl = (value) => {
         const raw = String(value || ''); if (!raw) return '';
         const abs = /:\/\//.test(raw) || raw.startsWith('//'); let out = raw;
@@ -1432,7 +1457,7 @@
       } catch (e) {
         return false;
       }
-      const cmpVal = cond.type === 'host' ? toASCIIHostname(cond.val) : cond.val; if (cond.type === 'host' && cond.op !== '=~' && !cmpVal) return false; const hasPortInCond = cond.type === 'host' && cmpVal.includes(':');
+      const cmpVal = cond.type === 'host' ? toASCIIHostname(cond.val) : cond.val; if (cond.op !== '=~' && !cmpVal) return false; const hasPortInCond = cond.type === 'host' && cmpVal.includes(':');
       const raw = cond.type === 'host' ? (hasPortInCond ? toASCIIHostname(u.host || u.hostname) : toASCIIHostname(u.hostname))
         : cond.type === 'path' ? (u.pathname + u.search)
         : u.protocol.slice(0, -1); const value = raw.toLowerCase(); let altValue = value; let altCmpVal = cmpVal;
@@ -1901,12 +1926,10 @@
   function ruleToRegex(rule) {
     let memo = ruleToRegex._memo; if (!memo) memo = ruleToRegex._memo = new Map(); if (memo.has(rule)) return memo.get(rule); let out; if (rule.startsWith('.')) rule = '*' + rule;
     if (!rule.startsWith('/') && !/^title\//i.test(rule) && !/^text\//i.test(rule) &&
-      !rule.includes('*') && !rule.includes('://') && !rule.startsWith('.')) {
-      if (rule.includes('.') && !/\s/.test(rule)) {
-        const restMatch = rule.match(/^([^\/?#]+)([\/?#].*)?$/);
-        if (restMatch && restMatch[1].includes('.')) {
-          rule = restMatch[2] ? '*://*.' + restMatch[1] + (restMatch[2].startsWith('/') ? restMatch[2] : '/' + restMatch[2]) : '*://*.' + rule + '/*';
-        }
+      !rule.includes('://') && !rule.startsWith('.')) {
+      const restMatch = rule.match(/^([^\/?#]+)([\/?#].*)?$/);
+      if (restMatch && restMatch[1].includes('.') && !restMatch[1].includes('*') && !/\s/.test(rule)) {
+        rule = restMatch[2] ? '*://*.' + restMatch[1] + (restMatch[2].startsWith('/') ? restMatch[2] : '/' + restMatch[2]) : '*://*.' + rule + '/*';
       }
     }
 
@@ -3596,10 +3619,12 @@
             opacity: 0;
             transform: translate(-50%, -48%);
             transition: all 0.3s ease;
+            pointer-events: none;
         }
         .serh-panel-fade.show {
             opacity: 1;
             transform: translate(-50%, -50%);
+            pointer-events: auto;
         }
 
         .serh-window:not(.serh-panel-fade) {
@@ -4052,16 +4077,15 @@
           applyBubbleStatePosition(status);
 
           if (!hasLongPressed) {
-            if (currentConfig.bubbleAction === 'openPanel') {
-              setTimeout(() => {
-                showConfigPanel();
-              }, 50);
-            } else if (currentConfig.bubbleAction === 'openStats') {
-              setTimeout(() => {
-                showStatsPanel();
-              }, 50);
-            } else {
+            if (currentConfig.bubbleAction === 'toggleHidden') {
               toggleHiddenResults();
+            } else {
+              setTimeout(() => {
+                const action = resolveBubblePanelAction();
+                if (action === 'closeAll') closeAllSerhPanels();
+                else if (action === 'stats') showStatsPanel();
+                else if (action === 'panel') showConfigPanel();
+              }, 50);
             }
           }
         }
@@ -4111,6 +4135,7 @@
       document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
         hideParentIfNoVisibleSiblings(parent, googleResultBlocks(parent), 'data-blocker-google-parent');
       });
+      if (!blockedShown()) document.querySelectorAll('[data-serh-grid-item-hidden]').forEach(cell => { cell.style.display = 'none'; });
     }
     const status = document.getElementById('serh-status');
     if (status) {
@@ -4271,7 +4296,8 @@
   }
 
   function showStatsPanel() {
-    showConfigPanel();
+    const panel = document.getElementById('serh-panel');
+    if (!panel || panel._fading) showConfigPanel();
     const statsPanel = document.getElementById('serh-stats-panel');
     if (statsPanel && statsPanel.style.display !== 'flex') {
       updateStatsContent();
