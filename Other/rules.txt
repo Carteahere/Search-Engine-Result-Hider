@@ -1,25 +1,24 @@
-#2609
+# 26-10 可能含有大量误杀 仅供参考
 # ==== 文件 ====
-/^https?:\/\/[^\s"'<>]+\.(?:pdf|xlsx?)$/
-# ==== 标题 ====
-title/.*(威|葳|㣲|幑|薇|嶶|溦|徽)信./
+/^https?:\/\/[^\s"'<>]+\.(?:pdf|xlsx?)(?:[?#].*)?$/i
+# ==== 标题-摘要 ====
+title/.*(威|葳|㣲|幑|薇|嶶|溦|徽)信.*/
 title/.*(威|葳|㣲|幑|薇|嶶|溦|徽|微)芯.*/
 title/.*[+加]\s*q{1,2}\s*\d{5,}.*/i
-title/.*pikpak.*优惠码.*/i
-title/.*最新章节在线阅读.*/
 title/.*吧友互助吧.*/
 title/.*笔趣阁.*/
-title/^(?=.*clash)(?=.*(?:官网|官方网站|中文官方|中文站|中文网|中文官网|中文教程|教程网|免费|中文...|免 …)).*/i
-title/^(?=.*github)(?=.*(?:在线教程网|中文教程网|中文站|中文网)).*/i
+title/.*来到了没有知识存在的荒原.*/
+title/.*最新章节在线阅读.*/
+title/.*pikpak.*优惠码.*/i
+title/^(?=.*app)(?=.*(?:体育|娱乐)).*/i
+title/^(?=.*clash)(?=.*(?:官|中文|教程)).*/i
+title/^(?=.*github)(?=.*(?:教程网|中文站|中文网)).*/i
 title/^(?=.*telegram)(?=.*(?:86|短信)).*/i
 title/^(?=.*YSM)(?=.*爱发电).*/i
-title/^(?=.*app)(?=.*体育).*/i
-title/.*来到了没有知识存在的荒原.*/
-# ==== 摘要 ====
-text/.*暂无购买权限.*/
 text/.*来到了没有知识存在的荒原.*/
 text/.*验证码_哔哩哔哩.*/
-# ==== 域名-标题 ====
+text/.*暂无购买权限.*/
+# ==== 域名-条件 ====
 *://*.ali213.net/* @if(title *= "视频指南")
 *://*.gamersky.com/* @if(title =~ /视频|修改器/)
 *://*.github.com/* @if(title *= "pikpak")
@@ -42,6 +41,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.developer.volcengine.com/articles/*
 *://*.dj.sina.com.cn/*
 *://*.juejin.cn/*
+*://*.learn.microsoft.com/*
 *://*.linux.do/*
 *://*.php.cn/*
 *://*.support.huaweicloud.com/*
@@ -77,6 +77,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.douyin.com/video/*
 *://*.douyin.com/zhuanti/*
 *://*.duitang.com/search/?kw=*
+*://*.erying.cc/sys-nd/*
 *://*.fetcherx.com/*
 *://*.form.baidu.com/*
 *://*.gamersky.com/handbook/*
@@ -147,14 +148,14 @@ text/.*验证码_哔哩哔哩.*/
 *://*.zaixianjisuan.com/*
 *://*.zhihu.com/zvideo/*
 *://*.ziliao.baidu.com/*
+*://telemetr.io/*/channels/*
+*://zh-classical.wikipedia.org/*
 *://github.com/cirosantilli/*
 *://github.com/wumaoland/*
 # ==== 购物平台 ====
 *://*.1688.com/*
 *://*.aeoncity.com.hk/*
-*://*.amazon.co.jp/*
-*://*.amazon.co.uk/*
-*://*.amazon.com/*
+*://*.amazon.*/*
 *://*.autobuy.tw/*
 *://*.baike.baidu.com/tashuo/*
 *://*.balletto.cn/*
@@ -208,6 +209,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.search.hksuning.com/*
 *://*.shiraimusic.shop-pro.jp/*
 *://*.shop.chacott.co.jp/*
+*://*.shopee.com.my/*
 *://*.shopee.tw/*
 *://*.shopping.yahoo.co.jp/*
 *://*.smart3c.com.tw/*
@@ -226,6 +228,8 @@ text/.*验证码_哔哩哔哩.*/
 *://*.uniqlo.com/*
 *://*.zh.accio.com/*
 # ==== 域名 ====
+*://168.76.33.6
+*://64.110.91.194
 *://*.0769soft.com/*
 *://*.0s52.com/*
 *://*.0xo.net/*
@@ -240,6 +244,9 @@ text/.*验证码_哔哩哔哩.*/
 *://*.233leyuan.com/*
 *://*.289.com/*
 *://*.28hse.com/*
+*://*.321kf.com/*
+*://*.321zhib.com.cn/*
+*://*.321zhibo.com.cn/*
 *://*.32r.com/*
 *://*.333ttt.com/*
 *://*.360game.360.cn/*
@@ -264,6 +271,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.7724.com/*
 *://*.7chaowan.com/*
 *://*.7xz.com/*
+*://*.7yuki.com/*
 *://*.80aj.com/*
 *://*.87g.com/*
 *://*.91084.com/*
@@ -294,6 +302,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.amazon.se/*
 *://*.androidblip.com/*
 *://*.anfensi.com/*
+*://*.animetox.com/*
 *://*.antiquefarmhouse.com/*
 *://*.apkcombo.com/*
 *://*.apkzu.com/*
@@ -314,6 +323,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.baishuwu.org/*
 *://*.baixiaotangtop.com/*
 *://*.baobeiy.com/*
+*://*.bbs.hdmovie.cc/*
 *://*.bbs.ijingyi.com/*
 *://*.bbs.yiove.com/*
 *://*.beihangsoft.cn/*
@@ -334,10 +344,12 @@ text/.*验证码_哔哩哔哩.*/
 *://*.cbduanju.com.cn/*
 *://*.ccbiblestudy.org/*
 *://*.cdn.cnbj1.fds.api.mi-img.com/*
+*://*.cdwxwl.com/*
 *://*.centralbank.bank.in/*
 *://*.centralfield.com/*
 *://*.cg.163.com/*
 *://*.cgdao.cn/*
+*://*.cgown.com/*
 *://*.chaojiyingxiong.com/*
 *://*.chaoyirl.com/*
 *://*.charmydecor.com/*
@@ -345,6 +357,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.chinajournal.news/*
 *://*.chooseai.net/*
 *://*.chunman4.com/*
+*://*.chuzhou.cn/*
 *://*.cilifeilong.wiki/*
 *://*.ciligou.mom/*
 *://*.cilimao.fit/*
@@ -362,6 +375,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.cnkiok.com/*
 *://*.cnxds.com/*
 *://*.codeleading.com/*
+*://*.comicstreet.top/*
 *://*.coservip.com/*
 *://*.cosjun.cn/*
 *://*.cp.baidu.com/*
@@ -411,6 +425,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.ee001.com/*
 *://*.en.handinglaw.com/*
 *://*.en.pinkoi.com/*
+*://*.eoffcn.com/*
 *://*.epochtimes.com/*
 *://*.erbmarket.com/*
 *://*.ertecho.gr/*
@@ -450,6 +465,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.gdedu123.com/*
 *://*.geek-blogs.com/*
 *://*.geek-docs.com/*
+*://*.gelonghui.com/*
 *://*.geoz.com.cn/*
 *://*.ghzs.com/*
 *://*.giffgaff.com/*
@@ -469,10 +485,12 @@ text/.*验证码_哔哩哔哩.*/
 *://*.haodou.com/*
 *://*.haozhuangji.com/*
 *://*.hdduck.com/*
+*://*.hdleg.com/*
 *://*.health.baidu.com/*
 *://*.heishou.org/*
 *://*.hfplg.com/*
 *://*.hitman.huijiwiki.com/*
+*://*.hj.cn/*
 *://*.hk.trip.com/*
 *://*.hktvmall.com/*
 *://*.hmxz.org/*
@@ -481,13 +499,16 @@ text/.*验证码_哔哩哔哩.*/
 *://*.hongxiu.com/*
 *://*.htumeng.com/*
 *://*.hubeilong.com/*
+*://*.huntscreens.com/*
 *://*.huoche.checi.cn/*
 *://*.hushuge.com/*
+*://*.hznet.tv/*
 *://*.icode.best/*
 *://*.id.tradingview.com/*
 *://*.iefans.net/*
 *://*.ifanr.com/*
 *://*.igaichong.com/*
+*://*.ikanchai.com/*
 *://*.imcn.me/*
 *://*.imgkits.com/*
 *://*.imovie.soso.com/*
@@ -524,6 +545,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.kerrynotes.com/*
 *://*.kittysb.pro/*
 *://*.kkx.net/*
+*://*.klgeek.com/*
 *://*.knowcat.cn/*
 *://*.ku.gamersky.com/*
 *://*.kuaishoumaizan.com.cn/*
@@ -531,6 +553,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.kuazhi.com/*
 *://*.kuliyx.com/*
 *://*.kunjuke.com/*
+*://*.kuyumanhua.com/*
 *://*.kxdw.com/*
 *://*.ladwen.com/*
 *://*.ldshop.gg/*
@@ -578,7 +601,10 @@ text/.*验证码_哔哩哔哩.*/
 *://*.madouchuanmei.net.cn/*
 *://*.maifenpingtai.com.cn/*
 *://*.mall.jd.com/*
+*://*.manhuade.com/*
+*://*.manjuchang.com/*
 *://*.manualzz.com/*
+*://*.manxiaozhan.com/*
 *://*.mayflyyx.com/*
 *://*.mcn7.com/*
 *://*.mcschematic.top/*
@@ -613,6 +639,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.newgame.17173.com/*
 *://*.news.17173.com/*
 *://*.news.4399.com/*
+*://*.news.hctcasting.com/*
 *://*.np.huya.com/*
 *://*.ntdfriends.com.tw/*
 *://*.ntdtv.com.tw/*
@@ -643,6 +670,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.pchome.net/*
 *://*.pcsoft.com.cn/*
 *://*.pd.qq.com/*
+*://*.peachring.com/*
 *://*.peterrabbit-shop.jp/*
 *://*.pexels.com/*
 *://*.pincai.com/*
@@ -652,7 +680,6 @@ text/.*验证码_哔哩哔哩.*/
 *://*.ping0.co/*
 *://*.pipimanhua.com/*
 *://*.pixabay.com/*
-*://*.post.smzdm.com/*
 *://*.price.com.hk/*
 *://*.pricerite.com.hk/*
 *://*.primevideo.com/*
@@ -661,6 +688,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.pxb7.com/*
 *://*.qidian.com/*
 *://*.qinghexinli.cn/*
+*://*.qiyou.cn/*
 *://*.qjfyx.com/*
 *://*.qqtf.com/*
 *://*.qt6.com/*
@@ -684,6 +712,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.search.damai.cn/*
 *://*.search.tudou.com/*
 *://*.sechub.in/*
+*://*.secure.mydown.com/*
 *://*.shixueshi.cn/*
 *://*.shop.theclub.com.hk/*
 *://*.shopee.vn/*
@@ -731,7 +760,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.top81.ws/*
 *://*.topcpu.net/*
 *://*.tourismtoyota.jp/*
-*://*.toutiao.com/*
+*://*.ttplus.cn/*
 *://*.tv.zuoain.wiki/*
 *://*.tw.bid.yahoo.com/*
 *://*.tweetmanager.app/*
@@ -747,9 +776,13 @@ text/.*验证码_哔哩哔哩.*/
 *://*.veryok.net/*
 *://*.vikacg.com/*
 *://*.vkxiazai.com/*
+*://*.voachinese.com/*
 *://*.volcengine.com/*
+*://*.vyuan8.com/*
 *://*.wandanji.cc/*
 *://*.wangyouhub.com/*
+*://*.wanjiadongli.com/*
+*://*.wanjiadongli.github.io/*
 *://*.wankr.com.cn/*
 *://*.wap.houdini888.cn/*
 *://*.wap.pp.cn/*
@@ -767,6 +800,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.writehelp.cn/*
 *://*.www4.fusionmovies.to/*
 *://*.xda.cn/*
+*://*.xfbzk.aihorizondemo.com/*
 *://*.xhjjiedian.com/*
 *://*.xiageba.liumingye.cn/*
 *://*.xiaokupan.com/*
@@ -789,6 +823,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.xrfxw.com/*
 *://*.xuekanba.com/*
 *://*.xuewei.zikaosw.cn/*
+*://*.xunyou.com/*
 *://*.xzhao.net/*
 *://*.xzji.com/*
 *://*.yank-note.com/*
@@ -803,7 +838,9 @@ text/.*验证码_哔哩哔哩.*/
 *://*.yinhangkahao.com/*
 *://*.yjbys.com/*
 *://*.ynwater.com/*
+*://*.yofont.com/*
 *://*.yohohongkong.com/*
+*://*.you-agi.cn/*
 *://*.youlai.cn/*
 *://*.youxiabc.com/*
 *://*.youxibao.com/*
@@ -811,6 +848,7 @@ text/.*验证码_哔哩哔哩.*/
 *://*.youzan.com/*
 *://*.youzy.cn/*
 *://*.ysgcgw.com.cn/*
+*://*.yuhuatour.com/*
 *://*.yundiesc.com/*
 *://*.yxbao.com/*
 *://*.zaixianpusa.com/*
@@ -829,5 +867,4 @@ text/.*验证码_哔哩哔哩.*/
 *://*.zjgkw.org/*
 *://*.zn50.cc/*
 *://*.zsbaocheng.net/*
-*://168.76.33.6
-*://64.110.91.194
+*://*.zzzyk.com.cn/*
