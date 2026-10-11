@@ -7,7 +7,7 @@
 | 类型 | 屏蔽域名 开 | 屏蔽域名 关 |
 | --- | --- | --- |
 | 二次确认 开 | 弹窗可选精确/域名/白名单，默认屏蔽域名 | 弹窗可选精确/域名/白名单，默认精确屏蔽 |
-| 二次确认 关 | 直接屏蔽 `*://*.example.com/*` | 直接屏蔽 `*://abc.example.com/*` |
+| 二次确认 关 | 直接屏蔽 `*://*.example.com/*` | 直接屏蔽 `*://m.example.com/*` |
 
 悬浮球：切换显示/隐藏结果模式，点击**被屏蔽结果**的屏蔽按钮时
 
@@ -36,7 +36,7 @@ URL通配规则按匹配模式语义从URL开头匹配，主机通配`*`不跨�
 | `title/pattern/flags` | 使用正则表达式匹配标题，如`title/.*屏蔽.*/i` |
 | `text/pattern/flags` | 使用正则表达式匹配摘要内容，如`text/.*广告.*/i` |
 
-正则使用浏览器支持的 JavaScript `RegExp` flags，支持`i`、`m`、`s`、`u`，其中 `s` 使用原生 dotAll 匹配(点号匹配换行)；不支持`g`/`y`，脚本规则只判断是否匹配不执行全局提取，flags ≤ 2字符时自动检测`g`/`y`并报错
+正则使用浏览器支持的 JavaScript `RegExp` flags，支持`i`、`m`、`s`、`u`，其中 `s` 使用原生 dotAll 匹配(点号匹配换行)；不支持`g`/`y`，脚本规则只判断是否匹配不执行全局提取，flags 自动检测`g`/`y`并报错
 
 ### 2.4 标题匹配：
 
@@ -132,7 +132,8 @@ URL通配规则按匹配模式语义从URL开头匹配，主机通配`*`不跨�
 
 ### 2.9 自定义引擎：
 
-通过脚本管理器菜单 `🖋️ 自定义引擎` 打开编辑面板（JS 格式，与内置 [SELECTORS](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js) 结构一致）
+通过脚本管理器菜单 `🖋️ 自定义引擎` 打开编辑面板（JS 格式，与内置 [SELECTORS](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js) 结构一致）  
+不局限于搜索引擎，理论上只要是含有容器的网页都能添加
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -150,20 +151,22 @@ URL通配规则按匹配模式语义从URL开头匹配，主机通配`*`不跨�
 example: {
   match: /(?:^|\.)search\.example\.com$/,
   containers: '.result',
-  titles: ['h3'],
+  titles: ['.title'],
   snippets: ['.content'],
   links: 'a[href]',
 },
 bing: {disabled: true},
 ```
 
+**内置引擎ID：**
+
+`google`、`google_scholar`、`bing`、`duckduckgo_lite`、`duckduckgo`、`yandex`、`brave`、`ecosia`、`startpage`、`yahoo`、`so360`、`sogou`、`toutiao`、`quark`（在`@if($site=)`中，`ddg`是`duckduckgo`别名，`yahoo-japan`是`yahoo`别名）
+
 **说明：**
 
-1. 内置引擎ID：`google`、`google_scholar`、`bing`、`duckduckgo_lite`、`duckduckgo`、`yandex`、`brave`、`ecosia`、`startpage`、`yahoo`、`so360`、`sogou`、`toutiao`、`quark`（在`@if($site=)`中，`ddg`是`duckduckgo`别名，`yahoo-japan`是`yahoo`别名）
-2. 自定义引擎支持 `$site = "引擎ID"` 条件以及屏蔽/高亮/白名单规则
-3. 引擎ID仅允许字母/数字/`_`/`-`，`other` 为保留键不可写，与内置引擎同ID或站点重叠时会覆盖内置选择器，如匹配 `cn.bing.com` 时将优先于内置 `bing` 命中
-4. 优先级：自定义选择器 > 内置选择器，保存时仅存储与内置有差异的键，未改动的内置不会写入存储，改回内置值或重置可恢复跟随脚本更新，选择器未匹配到时默认退回`other`（置空）
-5. 选择器字段均不支持伪元素，如 `::after`
+1. 自定义引擎支持 `$site = "引擎ID"` 条件以及屏蔽/高亮/白名单规则，选择器字段均不支持伪元素，如 `::after`
+2. 引擎ID仅允许字母/数字/`_`/`-`，`other` 为保留键不可写，与内置引擎同ID或站点重叠时会覆盖内置选择器，如匹配 `cn.bing.com` 时将优先于内置 `bing` 命中，即优先级：自定义选择器 > 内置选择器
+3. 保存时仅存储与内置有差异的键，未改动的内置不会写入存储，改回内置值或重置可恢复跟随脚本更新，选择器未匹配到时默认退回`other`（置空）
 
 **自动分析：**
 

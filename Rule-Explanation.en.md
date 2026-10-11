@@ -7,7 +7,7 @@ Floating ball in "Open Panel" mode — clicking the block button on an **unblock
 | Setting | Block Domain ON | Block Domain OFF |
 | --- | --- | --- |
 | Confirm ON | Dialog offers Exact / Domain / Whitelist, Domain block selected by default | Dialog offers Exact / Domain / Whitelist, Exact block selected by default |
-| Confirm OFF | Directly blocks `*://*.example.com/*` | Directly blocks `*://abc.example.com/*` |
+| Confirm OFF | Directly blocks `*://*.example.com/*` | Directly blocks `*://m.example.com/*` |
 
 Floating ball in "Toggle Results" (show/hide results) mode — clicking the block button on a **blocked result**:
 
@@ -36,7 +36,7 @@ URL wildcard rules match from the start of the URL per match-pattern semantics; 
 | `title/pattern/flags` | Matches title using regex, e.g. `title/.*block.*/i` |
 | `text/pattern/flags` | Matches snippet content using regex, e.g. `text/.*ad.*/i` |
 
-Regex uses browser-supported JavaScript `RegExp` flags: `i`, `m`, `s`, `u` (`s` = native dotAll, dot matches newline); `g`/`y` are not supported, as script rules only test for a match without global extraction; when flags ≤ 2 characters, `g`/`y` are automatically detected and reported as an error.
+Regex uses browser-supported JavaScript `RegExp` flags: `i`, `m`, `s`, `u` (`s` = native dotAll, dot matches newline); `g`/`y` are not supported, as script rules only test for a match without global extraction; `g`/`y` are automatically detected and reported as an error.
 
 ### 2.4 Title Matching:
 
@@ -132,7 +132,8 @@ Notes:
 
 ### 2.9 Custom Engine:
 
-Open the edit panel via script manager menu `🖋️ Custom Engine` (JS format, same structure as built-in [SELECTORS](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js)).
+Open the edit panel via script manager menu `🖋️ Custom Engine` (JS format, same structure as built-in [SELECTORS](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js)).  
+Not limited to search engines, theoretically, any web page containing a container can be added.
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -150,20 +151,21 @@ Open the edit panel via script manager menu `🖋️ Custom Engine` (JS format, 
 example: {
   match: /(?:^|\.)search\.example\.com$/,
   containers: '.result',
-  titles: ['h3'],
+  titles: ['.title'],
   snippets: ['.content'],
   links: 'a[href]',
 },
 bing: {disabled: true},
 ```
 
+**Built-in engine IDs:**  
+`google`, `google_scholar`, `bing`, `duckduckgo_lite`, `duckduckgo`, `yandex`, `brave`, `ecosia`, `startpage`, `yahoo`, `so360`, `sogou`, `toutiao`, `quark` (in `@if($site=)`, `ddg` is an alias for `duckduckgo`, `yahoo-japan` is an alias for `yahoo`).
+
 **Description:**
 
-1. Built-in engine IDs: `google`, `google_scholar`, `bing`, `duckduckgo_lite`, `duckduckgo`, `yandex`, `brave`, `ecosia`, `startpage`, `yahoo`, `so360`, `sogou`, `toutiao`, `quark` (in `@if($site=)`, `ddg` is an alias for `duckduckgo`, `yahoo-japan` is an alias for `yahoo`).
-2. Custom engines support the `$site = "Engine ID"` condition as well as block/highlight/whitelist rules; `titles`/`snippets` can be omitted.
-3. Engine IDs allow only letters/digits/`_`/`-`; `other` is a reserved key and cannot be used. The same ID as a built-in engine, or an overlapping site, overrides the built-in selectors, e.g. matching `cn.bing.com` takes priority over built-in `bing`.
-4. Priority: Custom selectors > Built-in selectors. On save, only keys that differ from the built-ins are stored; unmodified built-ins are not written to storage. When no selector matches, it falls back to `other` (empty) by default. Changing an override back to the built-in value or using Reset restores following script updates.
-5. All selector fields are unsupported pseudo-elements like `::after`.
+1. Custom engines support the `$site = "Engine ID"` condition as well as block/highlight/whitelist rules; `titles`/`snippets` can be omitted, all selector fields are unsupported pseudo-elements like `::after`.
+2. Engine IDs allow only letters/digits/`_`/`-`; `other` is a reserved key and cannot be used. The same ID as a built-in engine, or an overlapping site, overrides the built-in selectors, e.g. matching `cn.bing.com` takes priority over built-in `bing`. Priority: Custom selectors > Built-in selectors.
+3. On save, only keys that differ from the built-ins are stored; unmodified built-ins are not written to storage. Changing an override back to the built-in value or using Reset restores following script updates. When no selector matches, it falls back to `other` (empty) by default.
 
 **Auto-analysis:**
 
