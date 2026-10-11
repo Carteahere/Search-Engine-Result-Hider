@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.6.7
+// @version      8.6.8
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -602,6 +602,7 @@
         if (ch === '#' && ifDepth === 0) {
           const prev = str[i - 1];
           if (prev === undefined || /\s/.test(prev)) {
+            if (/^#(?:#|@#|@?[$?%]{1,2}#)/.test(str.slice(i))) continue;
             let end = i; while (end > 0 && /\s/.test(str[end - 1])) end--;
             if (pfxStart !== -1 && isBadRegexTail(str.slice(pfxStart, end)) && !isBadRegexTail(str.slice(pfxStart))) continue;
             return { stripped: str.slice(0, end), occurrences };
@@ -3058,6 +3059,14 @@
         while (cell && cell.parentElement && cell.tagName !== 'BODY') { const d = getComputedStyle(cell.parentElement).display; if (d === 'grid' || d === 'inline-grid') break; cell = cell.parentElement; }
         if (cell && cell.parentElement && cell.tagName !== 'BODY') { cell.style.display = 'none'; cell.setAttribute('data-serh-grid-item-hidden', 'true'); }
       }
+      if (engine === 'bing' && getSearchCategory() === 'images' && !blockedShown()) {
+        const slot = result.closest ? result.closest('li') : null;
+        if (slot) {
+          const tops = Array.from(slot.children || []).filter(c => c.matches && c.matches('div.iuscp, div.imgpt'));
+          const targets = tops.length ? tops : (slot.querySelectorAll ? Array.from(slot.querySelectorAll('div.iuscp, div.imgpt')) : []);
+          if (targets.length && targets.every(el => el.style.display === 'none')) { slot.style.display = 'none'; slot.setAttribute('data-serh-grid-item-hidden', 'true'); }
+        }
+      }
 
       result.dataset.matchedRule = matchResult.rule || ''; result.dataset.matchedSource = matchResult.source || '';
       if (blockedShown()) {
@@ -3957,9 +3966,10 @@
     const isLeft = currentConfig.bubbleState ? currentConfig.bubbleState.isLeftHalf : true; const isToggleMode = currentConfig.bubbleAction === 'toggleHidden';
 
     const bubbleIcon = (inner) => `<span style="display: inline-block; width: 1em; height: 1em; vertical-align: -0.15em; flex-shrink: 0; line-height: 0;"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg></span>`;
+    const slash = currentConfig.bubbleAction === 'openStats' ? '<line x1="19.07" y1="4.93" x2="4.93" y2="19.07"/>' : '<line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>';
     const icon = isToggleMode
       ? bubbleIcon('<circle cx="12" cy="12" r="10"/>')
-      : bubbleIcon('<circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>');
+      : bubbleIcon(`<circle cx="12" cy="12" r="10"/>${slash}`);
 
     let newHtml;
     if (currentConfig.showCount) {
