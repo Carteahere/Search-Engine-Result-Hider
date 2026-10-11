@@ -1877,6 +1877,62 @@ return { buildRuleIndex, checkRuleMatchOptimized, compileRuleRegex, safeRegexTes
   assert('审查G-3(对照): yandex/google父容器收起路径不受影响', runGrid(src).yandex === '' && runGrid(liteSrcG).yandex === '');
 }
 
+// ---- Bing图片: 屏蔽后隐藏被内容占满的li槽位(桌面行布局不再留白占位格) ----
+{
+  const runBing = (scriptText, opts) => {
+    const o = Object.assign({ engine: 'bing', category: 'images', showHidden: false, otherTop: false }, opts);
+    const result = { attrs: {}, style: { display: '', outline: '', outlineOffset: '' }, classes: new Set(), dataset: {}, children: [] };
+    result.setAttribute = (k, v) => { result.attrs[k] = String(v); };
+    result.getAttribute = (k) => (k in result.attrs ? result.attrs[k] : null);
+    result.removeAttribute = (k) => { delete result.attrs[k]; };
+    result.hasAttribute = (k) => k in result.attrs;
+    result.classList = { add: (c) => result.classes.add(c), remove: (c) => result.classes.delete(c) };
+    result.querySelector = () => null;
+    result.matches = (s) => String(s).indexOf('iuscp') !== -1;
+    const tops = [];
+    if (o.otherTop) tops.push({ matches: (s) => String(s).indexOf('iuscp') !== -1, style: { display: '' } });
+    tops.push(result);
+    const slot = { children: tops, style: { display: '' }, attrs: {}, setAttribute(k, v) { this.attrs[k] = String(v); } };
+    result.closest = (s) => (String(s) === 'li' ? slot : null);
+    const link = { href: 'https://blocked.example/page' };
+    new Function('result', 'link', 'matchResult', `
+      const showHiddenResults = ${!!o.showHidden};
+      function blockedShown() { return showHiddenResults; }
+      const currentConfig = { enabled: true, showBlockBtn: false, highlightColors: {} };
+      function getSearchEngine() { return '${o.engine}'; }
+      function getSearchCategory() { return '${o.category}'; }
+      function getResultLink() { return link; }
+      function resolveUrlDomain() { return { url: link.href, domain: 'blocked.example' }; }
+      function getResultTitle() { return ''; }
+      function getResultSnippet() { return ''; }
+      function buildContentSignature() { return ''; }
+      function getSubdomainLevels() { return ['blocked.example']; }
+      function checkRuleMatchOptimized() { return matchResult; }
+      const _hrefUrlCache = { set() {} }, _resultContentCache = { set() {} }, _resultRetryCounts = { delete() {} };
+      function saveOriginalDisplay(el) { if (el._orig === undefined) el._orig = el.style.display; }
+      function restoreOriginalDisplay(el) { el.style.display = el._orig !== undefined ? el._orig : ''; }
+      function setResultExtraElementsVisible() {}
+      function clearMatchedData() {}
+      function injectBlockButton() {}
+      function addMatchedRuleLabel() {}
+      ${extractFn(scriptText, 'processSingleResult')}
+      processSingleResult(result);
+    `)(result, link, { blocked: true, rule: '*.blocked.example/*', source: '本地规则' });
+    return { slot, result };
+  };
+  const liteSrc19 = fs.readFileSync([path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p)), 'utf8');
+  const r1 = runBing(src);
+  assert('修复19-1: bing图片页子项全部隐藏后隐藏li槽位并标记data-serh-grid-item-hidden(桌面行布局内联固定尺寸不再留白)', r1.slot.style.display === 'none' && r1.slot.attrs['data-serh-grid-item-hidden'] === 'true' && r1.result.getAttribute('data-is-blocked') === 'true');
+  const r2 = runBing(src, { otherTop: true });
+  assert('修复19-2(对照): 同槽位仍有可见子项时不隐藏li', r2.slot.style.display === '' && !('data-serh-grid-item-hidden' in r2.slot.attrs));
+  const r3 = runBing(src, { showHidden: true });
+  assert('修复19-3: 显隐结果模式(结果保持可见)不隐藏li', r3.slot.style.display === '' && !('data-serh-grid-item-hidden' in r3.slot.attrs));
+  const r4 = runBing(src, { engine: 'google' });
+  assert('修复19-4(对照): 非bing引擎不触发li槽位隐藏', r4.slot.style.display === '' && !('data-serh-grid-item-hidden' in r4.slot.attrs));
+  const r5 = runBing(liteSrc19);
+  assert('修复19-5: Lite版同步隐藏li槽位', r5.slot.style.display === 'none' && r5.slot.attrs['data-serh-grid-item-hidden'] === 'true');
+}
+
 // ---- 已修复: @@if不再编译成白名单条件 ----
 {
   const lang62 = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
@@ -2303,6 +2359,70 @@ assert('规则-379: 行起点偏移表', lineStarts.join() === '0,2,5', lineStar
 assert('规则-380: 按偏移表定位行号', bracketApi.lineIndexAt(lineStarts, 0) === 0 && bracketApi.lineIndexAt(lineStarts, 4) === 1 && bracketApi.lineIndexAt(lineStarts, 6) === 2, lineStarts);
 
 assert('规则-381: 规则面板挂载成对括号高亮', /setupBracketHighlight\(textarea, 'rules'\)/.test(src));
+})();
+
+// ---- 审查12-M2: 修复回归(uBO元素规则带空格不被截断成整站屏蔽) ----
+await (async () => {
+const m2fns = [
+  'hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
+  'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr',
+  'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
+  'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr',
+  'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule',
+  'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchDomainEntryType', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
+  'compileRuleRegex', 'checkDynamicConditions', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules',
+  'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule',
+  'checkRuleMatchOptimized', 'isLocalEntry',
+].map((n) => extractFn(src, n));
+const m2api = new Function(`${src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0]}
+${src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0]}
+let compiledRules;
+const validationCache = new Map();
+const subdomainCache = new Map();
+let currentEngine = 'google';
+let currentSite = 'www.google.com';
+let currentCategory = 'web';
+const window = { location: { get hostname() { return currentSite; } } };
+function getSearchEngine() { return currentEngine; }
+function getSearchCategory() { return currentCategory; }
+function t(key, params = {}) {
+  const texts = LANG_TEXTS['zh-CN'] || {};
+  let text = texts[key] || key;
+  for (const [k, v] of Object.entries(params)) text = text.replaceAll('{' + k + '}', v);
+  return text;
+}
+const currentConfig = { rules: [], debug: false };
+let subscriptions = [];
+function getSubscriptions() { return subscriptions; }
+function getAllSubscriptionRules() { return []; }
+${m2fns.join('\n')}
+return { stripRuleComment, analyzeRule, buildRuleIndex, checkRuleMatchOptimized, setState: (rules) => { currentConfig.rules = rules; } };
+`)();
+const m2blocked = (rules) => {
+  m2api.setState(rules); m2api.buildRuleIndex();
+  const hit = m2api.checkRuleMatchOptimized('https://example.com/page', 'example.com', '任意标题', '摘要', ['example.com']);
+  return !!(hit && hit.blocked === true);
+};
+
+assert('审查12-M2-1(修复回归): 带空格元素规则 `example.com ##.ad` 不再被截断成裸域',
+  m2api.stripRuleComment('example.com ##.ad') === 'example.com ##.ad', m2api.stripRuleComment('example.com ##.ad'));
+assert('审查12-M2-2(修复回归): analyzeRule 报不支持元素规则(与无空格写法一致)',
+  m2api.analyzeRule('example.com ##.ad').valid === false && m2api.analyzeRule('example.com ##.ad').errors.some((e) => /元素规则/.test(e)));
+assert('审查12-M2-3(修复回归): 带空格元素规则不产生整站屏蔽', m2blocked(['example.com ##.ad']) === false);
+assert('审查12-M2-4(对照): 裸域规则仍屏蔽', m2blocked(['example.com']) === true);
+assert('审查12-M2-5(对照): 行尾注释仍被剥离', m2api.stripRuleComment('example.com # 注释') === 'example.com');
+assert('审查12-M2-6(对照): 注释内容以##开头仍按注释截断', m2api.stripRuleComment('example.com # ##x') === 'example.com');
+assert('审查12-M2-7(对照): 引号内#与行尾注释不受影响', m2api.stripRuleComment('*://x.com/* @if(title *= "a # b") # note') === '*://x.com/* @if(title *= "a # b")');
+assert('审查12-M2-8(对照): 含##的脚本URL与正则规则仍有效',
+  m2api.analyzeRule('*://example.com/page##x').valid === true && m2api.analyzeRule('title/.*##.*/i').valid === true);
+
+const liteM2 = fs.readFileSync([path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p)), 'utf8');
+const liteStrip = new Function(
+  liteM2.match(/const (?:RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_A|REGEX_CTX_B|REGEX_CTX_C|RULE_REGEX_LIT_RE) = [^\n]+;/g).join('\n').replace(/\bconst\b/g, 'var') + '\n' +
+  ['findBalancedParenEnd', 'isBadRegexTail', 'scanRuleString', 'encodeNonAscii', 'stripRuleComment'].map((n) => SERH_RAW_EXTRACT(liteM2, n)).join('\n') +
+  '\nreturn stripRuleComment;')();
+assert('审查12-M2-9(修复回归): Lite版带空格元素规则同样不截断', liteStrip('example.com ##.ad') === 'example.com ##.ad', liteStrip('example.com ##.ad'));
+assert('审查12-M2-10(对照): Lite版行尾注释仍截断', liteStrip('example.com # 注释') === 'example.com');
 })();
 
 console.log(`\n${pass} passed, ${fail} failed`);

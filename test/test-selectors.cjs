@@ -1635,6 +1635,17 @@ await (async () => {
     fns.reconcileHiddenParents();
   }
   {
+    const { root, fns } = makeParentEnv(false);
+    const li = makeTreeEl('li', '', root);
+    const iuscp = makeTreeEl('div', 'iuscp', li);
+    const imgpt = makeTreeEl('div', 'imgpt', iuscp);
+    blockEl(fns, iuscp); blockEl(fns, imgpt);
+    li.style.display = 'none'; li.setAttribute('data-serh-grid-item-hidden', 'true');
+    check('修复19-6: bing图片li槽位屏蔽态为隐藏且带网格标记(mock状态构造)', li.style.display === 'none' && li.getAttribute('data-serh-grid-item-hidden') === 'true');
+    fns.resetResultStyles(iuscp);
+    check('修复19-7: 解除屏蔽后li槽位经closest标记恢复显示且标记移除', li.style.display === '' && !li.hasAttribute('data-serh-grid-item-hidden') && iuscp.style.display === '' && iuscp.getAttribute('data-is-blocked') === null);
+  }
+  {
     const sStart = src.indexOf('const SELECTORS = {');
     const sOpen = src.indexOf('{', sStart);
     const sClose = extractObjectLiteral(src, sOpen);
@@ -2365,6 +2376,24 @@ return { isJsRegexAllowed, buildBracketMatchMap, findBracketPairAt, findEnclosin
   const liteSrc = readRepoFile('Lite.user.js');
   check('选择器-252: 主版与 Lite 的规则/引擎两个编辑区都已挂载', ['rules', 'js'].every((k) => [src, liteSrc].every((s) => s.includes(`setupBracketHighlight(textarea, '${k}')`))));
 }
+
+// ==== [选择器-253~256] 打开统计模式悬浮球图标左右翻转 ====
+await (async () => {
+  const liteCatSrc253 = readRepoFile('Lite.user.js');
+  const mkBubbleHtml = (text, action) => {
+    const fn = new Function('currentConfig', extractFn(text, 'updateBubbleContent') + '\nreturn updateBubbleContent;')({ bubbleAction: action, showCount: false, bubbleState: null });
+    const btn = {}; fn(btn, 0); return btn.innerHTML;
+  };
+  for (const [tag, text] of [['主版', src], ['Lite', liteCatSrc253]]) {
+    const stats = mkBubbleHtml(text, 'openStats');
+    const panel = mkBubbleHtml(text, 'openPanel');
+    const toggle = mkBubbleHtml(text, 'toggleHidden');
+    check(`选择器-253: ${tag} 打开统计模式斜杠为默认图标左右翻转`, stats.includes('x1="19.07" y1="4.93" x2="4.93" y2="19.07"') && !stats.includes('x1="4.93" y1="4.93"'));
+    check(`选择器-254: ${tag} 打开面板模式斜杠方向不变`, panel.includes('x1="4.93" y1="4.93" x2="19.07" y2="19.07"') && !panel.includes('x1="19.07" y1="4.93"'));
+    check(`选择器-255: ${tag} 切换隐藏模式仍为无斜杠圆圈`, !toggle.includes('<line') && toggle.includes('<circle'));
+    check(`选择器-256: ${tag} 统计与面板模式图标可区分`, stats !== panel);
+  }
+})();
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
