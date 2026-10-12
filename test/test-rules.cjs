@@ -971,6 +971,9 @@ await (async () => {
   assert('修复F-1: 重复flags title/x/ii 判定无效', analyzeRule('title/x/ii').valid === false);
   assert('修复F-2: 重复flags text/x/uu 判定无效', analyzeRule('text/x/uu').valid === false);
   assert('修复F-3(对照): 合法flags title/x/iu 仍有效', analyzeRule('title/x/iu').valid === true);
+  assert('修复F-4(修复1): 任意长度尾段含g/y不再静默并入正则 title/x/gim 判定无效', analyzeRule('title/x/gim').valid === false);
+  assert('修复F-5(修复1): text/x/gyi 同样判定无效', analyzeRule('text/x/gyi').valid === false);
+  assert('修复F-6(对照): 非flags斜杠尾段 title/a/b 不受影响', analyzeRule('title/a/b').valid === true);
 
   const getCleanUrl = new Function(
     extractFn(src, 'decodeRedirectTarget') + '\n' +

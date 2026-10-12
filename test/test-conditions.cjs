@@ -562,7 +562,7 @@ assert('条件-432(修复SC对照): 前缀正则行尾注释仍剥离', api.stri
 assert('条件-433(修复SC对照): 带flags前缀正则行尾注释仍剥离', api.stripRuleComment('title/abc/i # note') === 'title/abc/i');
 assert('条件-434(修复SC对照): 注释含斜杠仍剥离', api.stripRuleComment('title/abc/ # 注释 /x/') === 'title/abc/' && api.stripRuleComment('title/abc/ # https://x.com/a') === 'title/abc/');
 assert('条件-435(修复SC): @if组后体内#前缀正则保留', api.stripRuleComment('@if(x) title/a/b # c/') === '@if(x) title/a/b # c/' && api.validateRule('title/a/b # c/') === true);
-assert('条件-436(对照): @if简写正则3字符flags(gim)识别为合法条件', api.validateRule('@if(title/abc/gim)') === true && api.validateRule('@if(title/abc/im)') === true);
+assert('条件-436(修复1更新): @if简写正则尾段含g/y即报flags错, 纯合法flags仍合法', api.validateRule('@if(title/abc/gim)') === false && api.validateRule('@if(title/abc/im)') === true);
 
 // ---- 审查A2: @N 与规则之间可省略空格 ----
 const a2eq = (a, b) => JSON.stringify(api.analyzeRule(a)) === JSON.stringify(api.analyzeRule(b));

@@ -2395,6 +2395,49 @@ await (async () => {
   }
 })();
 
+// ==== [选择器-257~263] 修复KEY: 数字开头引擎ID裸键解析(主版+Lite) ====
+{
+  const liteSrcK = readRepoFile('Lite.user.js');
+  const mkApiK = (srcText) => new Function(`
+    const SUPPORTED_REGEX_FLAGS = 'imsu';
+    const t = (key) => key;
+    function isValidCssSelector() { return true; }
+    function hasPseudoElement() { return false; }
+    ${extractFn(srcText, 'normalizeSelectorList')}
+    ${extractFn(srcText, 'getInvalidRegexFlags')}
+    ${extractFn(srcText, 'normalizeMatchLiteral')}
+    ${extractFn(srcText, 'parseSelectorText')}
+    ${extractFn(srcText, 'validateUserSelectors')}
+    return { parseSelectorText, validateUserSelectors };
+  `)();
+  const apiM = mkApiK(src), apiL = mkApiK(liteSrcK);
+  const DEF = '123abc: { match: /(?:^|\\.)search\\.example\\.com$/, containers: ".result" }';
+  const RM = apiM.parseSelectorText(DEF);
+  check('选择器-257: 数字开头引擎ID裸键直接解析(修复前 readKey 首字符限字母/_/$ 报"解析失败")', !RM.errors.length && !!RM.config && !!RM.config['123abc'] && RM.config['123abc'].match === '(?:^|\\.)search\\.example\\.com$' && RM.config['123abc'].containers === '.result', RM.errors);
+  check('选择器-258: 数字开头ID过校验层(与 validateUserSelectors 的 /^[A-Za-z0-9_-]+$/ 对齐)', apiM.validateUserSelectors(RM.config).length === 0, apiM.validateUserSelectors(RM.config));
+  const RMix = apiM.parseSelectorText(DEF + ", '456def': { match: /b/, containers: '.s' }, xyz: { match: /c/, containers: '.t' }");
+  check('选择器-259: 数字键/引号键/字母键混写共存', !RMix.errors.length && JSON.stringify(Object.keys(RMix.config)) === JSON.stringify(['123abc', '456def', 'xyz']), RMix.errors);
+  const RPure = apiM.parseSelectorText('123: { match: /a/, containers: ".x" }');
+  check('选择器-260: 纯数字ID同样解析且过校验', !RPure.errors.length && apiM.validateUserSelectors(RPure.config).length === 0);
+  check('选择器-261: 垃圾输入仍拒绝(无冒号/值非法)', apiM.parseSelectorText('123abc').config === null && apiM.parseSelectorText('123: 456').config === null);
+  const RJson = apiM.parseSelectorText('{"123abc": { "match": "/a/", "containers": ".x" }}');
+  check('选择器-262(对照): JSON路径数字键不受影响', !RJson.errors.length && !!RJson.config['123abc']);
+  const RL = apiL.parseSelectorText(DEF);
+  check('选择器-264: Lite 版同步修复(裸键数字开头解析且过校验)', !RL.errors.length && !!RL.config['123abc'] && apiL.validateUserSelectors(RL.config).length === 0, RL.errors);
+  const apiSer = new Function(`
+    const SELECTORS = {};
+    ${extractFn(src, 'normalizeSelectorList')}
+    ${extractFn(src, 'regexSourceToLiteralText')}
+    ${extractFn(src, 'escapeJsString')}
+    ${extractFn(src, 'matchDefToParts')}
+    ${extractFn(src, 'serializeSelectors')}
+    return serializeSelectors;
+  `)();
+  const PK = apiSer({ '123abc': { match: '(?:^|\\.)x\\.example\\.com$', containers: '.r', titles: [], snippets: [], links: 'a[href]' } });
+  const RRT = apiM.parseSelectorText(PK);
+  check('选择器-263: 序列化往返无损(数字开头键自动加引号, 重解析回原值)', PK.includes("'123abc':") && !RRT.errors.length && !!RRT.config && !!RRT.config['123abc'] && RRT.config['123abc'].match === '(?:^|\\.)x\\.example\\.com$', PK.split('\n')[0]);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 

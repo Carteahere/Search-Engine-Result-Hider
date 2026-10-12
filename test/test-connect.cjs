@@ -1451,7 +1451,7 @@ await (async () => {
   assert('修复S3-3: 云端删除+本地修改且本地规则时间较新时修改保留', merge(base, { bing: { containers: '.new-local' } }, {}, true).bing.containers === '.new-local');
   assert('修复S3-4: 云端删除+本地修改且云端规则时间较新时删除赢', merge(base, { bing: { containers: '.new-local' } }, {}, false).bing === undefined);
   assert('修复S3-5(对照): 存活侧未修改时纯删除仍传播', merge(base, {}, { bing: { containers: '.old' } }, false).bing === undefined && merge(base, { bing: { containers: '.old' } }, {}, true).bing === undefined);
-  assert('修复S3-6: 自动同步调用点以本地/云端规则时间戳仲裁', src.includes('mergeSelectors3Way(getSelectorSyncSnapshot(), getUserSelectors(), cloudSelectors, localTime > cloudTime)'));
+  assert('修复S3-6: 自动同步调用点以本地/云端选择器时间戳仲裁', src.includes('mergeSelectors3Way(getSelectorSyncSnapshot(), getUserSelectors(), cloudSelectors, localSelectorsTime > cloudSelectorsTime)') && src.includes("getCloudModifiedTime(cloudConfig, 'selectorsSyncedAt', trustedNow)"));
 }
 
 // 审查D-17: 云端头没有选择器字段时不三方合并, 保留本地并上传
@@ -2008,6 +2008,12 @@ assert('审查10-S3(已修复): closeZoneSelector豁免区不再引用#serh-hlco
   assert('修复YAML-2: 唯一结构是键独占一行流式列表时仍按YAML解析(不回退成整行跳过)', JSON.stringify(flowNextLineOnly.lines) === JSON.stringify(['a.com', 'b.com']), flowNextLineOnly.lines);
   const flowNextLineBroken = api.parseRulesetContent('rules:\n  - a.com\n  ["broken\n  - b.com\n');
   assert('修复YAML-3(对照): 未闭合的裸流式行不吞掉后续列表项', JSON.stringify(flowNextLineBroken.lines) === JSON.stringify(['a.com', 'b.com']), flowNextLineBroken.lines);
+  const yamlFoldKey = api.parseRulesetContent('name: MyList\nrules:\n- >\n  some folded rule\nblacklist:\n  - a.com\n');
+  assert('修复YAML-4: 0缩进折叠块以首个内容行缩进为基准, 不再吞掉缩进相同/更浅的后续节声明', JSON.stringify(yamlFoldKey.lines) === JSON.stringify(['some folded rule', 'a.com']), yamlFoldKey.lines);
+  const yamlFoldWl = api.parseRulesetContent('rules:\n- >\n  folded rule\nwhitelist:\n  - ok.com\n');
+  assert('修复YAML-5(对照): 折叠块后whitelist节条目正确加@前缀', JSON.stringify(yamlFoldWl.lines) === JSON.stringify(['folded rule', '@ok.com']), yamlFoldWl.lines);
+  const yamlFoldIndented = api.parseRulesetContent('rules:\n  - >\n    folded text\n  - b.com\n');
+  assert('修复YAML-6(对照): 缩进式折叠块仍正常折叠且后续列表项不受影响', JSON.stringify(yamlFoldIndented.lines) === JSON.stringify(['folded text', 'b.com']), yamlFoldIndented.lines);
 }
 
 // ---- 审查4: 三方合并口径 / 大规则量合并性能 / 手动下载授时回退 / 面板暂停同步 ----
@@ -2035,6 +2041,48 @@ assert('审查10-S3(已修复): closeZoneSelector豁免区不再引用#serh-hlco
   const poisonedHdr = JSON.parse('{"__proto__":{"debug":true},"language":"en","highlightColors":{"__proto__":{"1":"#0f0"},"1":"#f00"}}');
   const cleanOk = (fn) => { const s = fn(poisonedHdr); const t = Object.assign({}, { a: 1 }); Object.assign(t, s); return Object.getPrototypeOf(t) === Object.prototype && !Object.keys(s).includes('__proto__') && s.language === 'en' && !Object.keys(s.highlightColors).includes('__proto__') && s.highlightColors['1'] === '#f00'; };
   assert('修复12-2: getSyncSettings剥离__proto__/constructor/prototype(顶层+嵌套), ScriptConfig导入Object.assign不再原型污染(主版+Lite)', cleanOk(getSyncOf(src)) && cleanOk(getSyncOf(liteSrc12)));
+}
+
+// ---- 审查M1/M2/M4: ScriptConfig数组头拒绝 / 订阅缓存跨页签名失效 / 上传后台合并回写 ----
+// 审查M1: parseSyncHeader拒绝数组形式的ScriptConfig头, 不再把索引键当配置导入并随同步扩散(主版+Lite)
+{
+  const liteSrcM1 = fs.readFileSync([path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p)), 'utf8');
+  const parseM1 = (srcText) => new Function(extractFn(srcText, 'parseSyncHeader') + '\nreturn parseSyncHeader;')();
+  const bad = parseM1(src)('# ScriptConfig:[1,2]\n*://a.com/*');
+  assert('审查M1-1: 数组ScriptConfig头拒绝为config且rawScriptConfig置空, 规则正文不受影响(主版)', bad.config === null && bad.rawScriptConfig === null && bad.restLines.join('|') === '# ScriptConfig:[1,2]|*://a.com/*', bad);
+  const good = parseM1(src)('# ScriptConfig: {"syncedAt":1}\n*://a.com/*');
+  assert('审查M1-2(对照): 对象ScriptConfig头仍正常解析', !!good.config && good.config.syncedAt === 1 && good.restLines[0] === '*://a.com/*');
+  const liteParse = parseM1(liteSrcM1);
+  assert('审查M1-3: Lite版同样拒绝数组头且对象头正常', liteParse('# ScriptConfig:[1,2]\n*://a.com/*').config === null && liteParse('# ScriptConfig: {"syncedAt":1}').config.syncedAt === 1);
+}
+// 审查M2: 订阅规则缓存带存储签名, 其他标签页改写订阅后本页读取自动失效重算(主版)
+{
+  const store = { subs: [{ url: 'https://x/rules.txt', name: '', enabled: true, rules: ['*://a.com/*'] }] };
+  const api = new Function('GM_getValue', 'GM_setValue', `
+    const SUBSCRIPTIONS_KEY = 'SUBSCRIPTIONS_KEY';
+    let cachedSubscriptionRules = null; let _subscriptionStoreSignature = null;
+    ${extractFn(src, 'getSubscriptions')}
+    ${extractFn(src, 'getSubscriptionStoreSignature')}
+    ${extractFn(src, 'saveSubscriptions')}
+    ${extractFn(src, 'getAllSubscriptionRules')}
+    return { getAll: getAllSubscriptionRules, save: saveSubscriptions };
+  `)((k, d) => (k === 'SUBSCRIPTIONS_KEY' ? store.subs : d), (k, v) => { store.subs = v; });
+  const first = api.getAll();
+  assert('审查M2-1: 首次读取构建订阅规则缓存', first.length === 1 && first[0] === '*://a.com/*');
+  assert('审查M2-2: 存储未变时命中缓存(同一数组引用)', api.getAll() === first);
+  store.subs = [{ url: 'https://x/rules.txt', name: '', enabled: true, rules: ['*://a.com/*', '*://b.example.com/*'] }];
+  const second = api.getAll();
+  assert('审查M2-3: 他页改写订阅存储后签名失配, 缓存失效重算(修复前沿用旧规则)', second.length === 2 && second !== first);
+  api.save([{ url: 'https://x/rules.txt', name: '', enabled: false, rules: ['*://a.com/*'] }]);
+  assert('审查M2-4: 本页saveSubscriptions失效缓存, 停用订阅不再收录', api.getAll().length === 0);
+}
+// 审查M4: WebDAV手动上传把后台新增规则合并进currentConfig后回写textarea(与saveConfig对齐), 后续保存不再丢弃合并规则并覆盖云端
+{
+  const seg = src.slice(src.indexOf("serh-webdav-upload').onclick"), src.indexOf("serh-webdav-download').onclick"));
+  const initIdx = seg.indexOf('panel._initialRules = [...currentConfig.rules]');
+  const syncIdx = seg.indexOf('if (backgroundNewRules.length > 0) syncRulesTextarea();');
+  assert('审查M4-1: 上传路径合并backgroundNewRules后回写textarea(修复前缺失, 后续保存会用删减规则覆盖云端)', initIdx !== -1 && syncIdx > initIdx);
+  assert('审查M4-2(对照): saveConfig合并后同样回写textarea', extractFn(src, 'saveConfig').includes('if (backgroundNewRules.length > 0) syncRulesTextarea();'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
