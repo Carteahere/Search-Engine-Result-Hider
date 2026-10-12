@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.6.8
+// @version      8.7.0
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -53,7 +53,7 @@
   const RESULT_RETRY_LIMIT = 3, RESULT_RETRY_DELAY = 200;
 
   // 默认配置
-  const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', autoDark: true, exportConfig: false, collapseMode: false, removeRedirects: true, showSubBtn: true, showSyncBtn: true, bracketHighlight: true, language: 'zh-CN' };
+  const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', uiScale: 'l', darkMode: 'system', exportConfig: false, collapseMode: false, removeRedirects: true, showSubBtn: true, showSyncBtn: true, bracketHighlight: true, language: 'zh-CN' };
   const DEFAULT_HIGHLIGHT_COLORS = {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'};
   function getDefaultConfig() {
     return {
@@ -315,7 +315,9 @@
     'zh-CN': {
       disableBlock: '临时禁用', showCount: '显示数量', debugMode: '调试模式',
       enableFeature: '启用功能', blockDomain: '屏蔽域名', doubleConfirm: '二次确认', showMatchedSource: '来源显示',
-      autoDark: '自动深色', exportConfig: '导出配置', collapseMode: '折叠模式', collapseModeHint: '开启后屏蔽结果只显示标题',
+      uiScale: 'UI比例', scaleM: '75%', scaleL: '100%', scaleXL: '125%', scaleXXL: '150%',
+      darkMode: '深色模式', darkSystem: '跟随系统', darkLight: '浅色', darkDark: '深色',
+      exportConfig: '导出配置', collapseMode: '折叠模式', collapseModeHint: '开启后屏蔽结果只显示标题',
       showSubBtn: '订阅按钮', showSyncBtn: '同步按钮', bracketHighlight: '括号高亮',
       settingsBtn: '设置', settingsPanelTitle: '脚本设置',
       settingsSecBlock: '一键屏蔽', settingsSecUI: '界面显示', settingsSecOther: '其他设置', removeRedirects: '去除重定向',
@@ -384,7 +386,9 @@
     'en': {
       disableBlock: 'Disable Block', showCount: 'Show Count', debugMode: 'Debug Mode',
       enableFeature: 'Enable Feature', blockDomain: 'Block Domain', doubleConfirm: 'Double Confirm', showMatchedSource: 'Show Source',
-      autoDark: 'Auto Dark', exportConfig: 'Export Config', collapseMode: 'Collapse Mode', collapseModeHint: 'Blocked results will show titles only',
+      uiScale: 'UI Scale', scaleM: '75%', scaleL: '100%', scaleXL: '125%', scaleXXL: '150%',
+      darkMode: 'Dark Mode', darkSystem: 'System', darkLight: 'Light', darkDark: 'Dark',
+      exportConfig: 'Export Config', collapseMode: 'Collapse Mode', collapseModeHint: 'Blocked results will show titles only',
       showSubBtn: 'Sub Button', showSyncBtn: 'Sync Button', bracketHighlight: 'Highlight Bracket',
       settingsBtn: 'Settings', settingsPanelTitle: 'Script Settings',
       settingsSecBlock: 'One-click Block', settingsSecUI: 'Interface', settingsSecOther: 'Other', removeRedirects: 'Remove redirects',
@@ -465,7 +469,7 @@
   }
   let compiledRules = newCompiledRules();
 
-  const validationCache = new Map(); const subdomainCache = new Map(); let cachedSubscriptionRules = null; let forceReprocessBatchId = 0;
+  const validationCache = new Map(); const subdomainCache = new Map(); let cachedSubscriptionRules = null; let _subscriptionStoreSignature = null; let forceReprocessBatchId = 0;
   function t(key, params = {}) {
     const lang = currentConfig.language; const texts = LANG_TEXTS[lang] || LANG_TEXTS['zh-CN']; let text = texts[key] || key;
     for (const [k, v] of Object.entries(params)) {
@@ -892,9 +896,7 @@
 
   function buildLineStartOffsets(text) {
     const starts = [0];
-    for (let i = 0; i < text.length; i++) {
-      if (text.charCodeAt(i) === 10) starts.push(i + 1);
-    }
+    for (let i = 0; i < text.length; i++) { if (text.charCodeAt(i) === 10) starts.push(i + 1); }
     return starts;
   }
 
@@ -989,14 +991,7 @@
     if (statusBtn) {
       rect = statusBtn.getBoundingClientRect();
     } else {
-      rect = {
-        left: window.innerWidth - 50,
-        right: window.innerWidth - 10,
-        top: window.innerHeight - 50,
-        bottom: window.innerHeight - 10,
-        width: 40,
-        height: 40
-      };
+      rect = { left: window.innerWidth - 50, right: window.innerWidth - 10, top: window.innerHeight - 50, bottom: window.innerHeight - 10, width: 40, height: 40 };
     }
     const centerX = rect.left + rect.width / 2; const centerY = rect.top + rect.height / 2; const isLeft = centerX < window.innerWidth / 2; const isTop = centerY < window.innerHeight / 2;
 
@@ -1015,6 +1010,7 @@
         display: flex;
         flex-direction: column;
     `;    document.body.appendChild(panel);
+    applyDarkModeClass(); applyUiScale();
     requestAnimationFrame(() => requestAnimationFrame(() => panel.classList.add('show'))); return panel;
   }
 
@@ -1159,14 +1155,7 @@
     const s = String(label || '').toLowerCase(); if (!s.startsWith('xn--')) return label; const body = s.slice(4);
     const base = 36, tmin = 1, tmax = 26, skew = 38, damp = 700, initialBias = 72, initialN = 128; let n = initialN, i = 0, bias = initialBias; const output = [];
     const delimPos = body.lastIndexOf('-'); let pos = 0;
-    if (delimPos > 0) {
-      for (; pos < delimPos; ++pos) {
-        output.push(body.charCodeAt(pos));
-      }
-      pos++;
-    } else if (delimPos === 0) {
-      pos++;
-    }
+    if (delimPos > 0) { for (; pos < delimPos; ++pos) output.push(body.charCodeAt(pos)); pos++; } else if (delimPos === 0) pos++;
     const adapt = (delta, numPoints, firstTime) => {
       let k = 0; delta = firstTime ? Math.floor(delta / damp) : delta >> 1; delta += Math.floor(delta / numPoints);
       while (delta > ((base - tmin) * tmax) >> 1) {
@@ -1188,14 +1177,8 @@
   function toUnicodeHostname(host) {
     const raw = String(host || '').replace(/\.$/, '').trim(); if (!raw || !raw.toLowerCase().includes('xn--')) return raw;
     return raw.split('.').map(label => {
-      if (label && label.toLowerCase().startsWith('xn--')) {
-        try {
-          return punycodeDecodeLabel(label);
-        } catch (_) {
-          return label;
-        }
-      }
-      return label;
+      if (!(label && label.toLowerCase().startsWith('xn--'))) return label;
+      try { return punycodeDecodeLabel(label); } catch (_) { return label; }
     }).join('.');
   }
 
@@ -1218,11 +1201,7 @@
   }
 
   function safeDecodeURIComponent(str) {
-    try {
-      return decodeURIComponent(String(str ?? ''));
-    } catch (e) {
-      return String(str ?? '');
-    }
+    try { return decodeURIComponent(String(str ?? '')); } catch (e) { return String(str ?? ''); }
   }
 
   function encodeNonAscii(str) {
@@ -1230,9 +1209,7 @@
   }
 
   function filterValidRuleLines(lines) {
-    return lines
-      .map(line => line.trim())
-      .filter(line => line.length > 0);
+    return lines.map(line => line.trim()).filter(line => line.length > 0);
   }
 
   function getRuleKey(r) {
@@ -1561,7 +1538,7 @@
     return [...new Set(invalid)].join('');
   }
   function isUniqueFlagsStr(seg) { const s = String(seg || '').toLowerCase(); return /^[imsu]+$/.test(s) && new Set(s).size === s.length; }
-  function isFlagsCandidateError(seg) { seg = String(seg || ''); return /^[gy]+$/i.test(seg) || (seg.length <= 2 && /^[gyimsu]+$/i.test(seg) && /[gy]/i.test(seg)); }
+  function isFlagsCandidateError(seg) { seg = String(seg || ''); return /^[gy]+$/i.test(seg) || (/^[gyimsu]+$/i.test(seg) && /[gy]/i.test(seg)); }
 
   function validateUrlWildcard(rule) {
     if (!rule || /[<>"']/.test(rule) || /\s/.test(rule)) return false; if (rule.startsWith('|') || rule.startsWith('@@')) return false; if (rule.includes('^')) return false;
@@ -1650,7 +1627,7 @@
     }
     const staticMatchAll = !absorbed && !coreRule && staticPass && !dynamicConditions.length && /@if\s*\(/i.test(ruleStr);
 
-    const standaloneExpr = !!absorbed || staticMatchAll || (!coreRule && dynamicConditions.length > 0); if (whitelist) coreRule = '@' + coreRule; if (coreRule === '@' && /@@if\s*\(/i.test(ruleStr)) coreRule = '@@';
+    const standaloneExpr = !!absorbed || staticMatchAll || (!coreRule && dynamicConditions.length > 0); if (whitelist) coreRule = '@' + coreRule;
     return {
       coreRule,
       staticPass,
@@ -1760,7 +1737,7 @@
         if (invalidFlags) {
           errors.push(t('invalidRegexFlags', { flags: invalidFlags })); return { valid: false, errors, warnings };
         }
-        if (flagsCandidate && (isFlagsCandidateError(flagsCandidate) || (flagsCandidate.length <= 2 && /^[gyimsu]+$/i.test(flagsCandidate) && getInvalidRegexFlags(flagsCandidate)))) {
+        if (flagsCandidate && (isFlagsCandidateError(flagsCandidate) || (/^[imsu]+$/i.test(flagsCandidate) && getInvalidRegexFlags(flagsCandidate)))) {
           errors.push(t('invalidRegexFlags', { flags: getInvalidRegexFlags(flagsCandidate) })); return { valid: false, errors, warnings };
         }
         new RegExp(pattern, String(flags || '').toLowerCase());
@@ -2193,9 +2170,7 @@
   }
 
   function cachedAnalyzeRule(rule) {
-    if (!validationCache.has(rule)) {
-      validationCache.set(rule, analyzeRule(rule));
-    }
+    if (!validationCache.has(rule)) validationCache.set(rule, analyzeRule(rule));
     return validationCache.get(rule);
   }
 
@@ -2310,9 +2285,7 @@
     if (!raw) return ''; let value = String(raw);
     for (let i = 0; i < 2; i++) {
       if (/^https?:\/\//i.test(value)) break;
-      try {
-        const next = decodeURIComponent(value); if (next === value) break; value = next;
-      } catch (_) { break; }
+      try { const next = decodeURIComponent(value); if (next === value) break; value = next; } catch (_) { break; }
     }
     return /^https?:\/\//i.test(value) ? value : '';
   }
@@ -2335,9 +2308,7 @@
 
     for (let i = 0; i < 2; i++) {
       if (/^https?:\/\//i.test(realUrl)) break;
-      try {
-        const decoded = decodeURIComponent(realUrl); if (decoded === realUrl) break; realUrl = decoded;
-      } catch (_) { break; }
+      try { const decoded = decodeURIComponent(realUrl); if (decoded === realUrl) break; realUrl = decoded; } catch (_) { break; }
     }
 
     return /^https?:\/\//i.test(realUrl) ? realUrl : '';
@@ -2465,11 +2436,8 @@
 
   function getResultText(result, selectors) {
     if (!Array.isArray(selectors)) return '';
-    for (let selector of selectors) {
-      let elem = null;
-      try {
-        elem = result.querySelector(selector);
-      } catch (e) { continue; }
+    for (const selector of selectors) {
+      let elem = null; try { elem = result.querySelector(selector); } catch (e) { continue; }
       const text = elem ? elem.textContent.trim() : ''; if (text) return text;
     }
     return '';
@@ -2654,11 +2622,8 @@
   function getResultTitleElement(result, engine) {
     const selectors = (getSelectors()[engine] || SELECTORS.other).titles;
     if (!Array.isArray(selectors)) return null;
-    for (let selector of selectors) {
-      let elem = null;
-      try {
-        elem = result.querySelector(selector);
-      } catch (e) { continue; }
+    for (const selector of selectors) {
+      let elem = null; try { elem = result.querySelector(selector); } catch (e) { continue; }
       if (elem && elem.textContent && elem.textContent.trim()) return elem;
     }
     return null;
@@ -3202,6 +3167,7 @@
       document.querySelectorAll('[data-blocker-processed], [data-observed]').forEach(result => {
         resultObserver.unobserve(result); resetResultStyles(result); result.removeAttribute('data-observed');
       });
+      document.querySelectorAll('.serh-quick-block').forEach(btn => btn.remove());
       showHiddenResults = false; _observedSelector = ''; return;
     }
 
@@ -3450,11 +3416,9 @@
             transform: scale(1.1);
         }
 
-        @media (prefers-color-scheme: dark) {
-            body.serh-dark-on .serh-quick-block {
-                color: #ffffff;
-            }
-        }
+    body.serh-dark-on .serh-quick-block {
+        color: #ffffff;
+    }
 
         #serh-block-confirm-dialog {
             position: fixed; z-index: 10002; display: flex; flex-direction: column; gap: 6px;
@@ -3493,15 +3457,13 @@
         #serh-block-confirm-dialog .sfb-confirm-rule:focus { border-color: #3182ce; background: #ffffff; }
         #serh-block-confirm-dialog .sfb-confirm-btns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
         #serh-block-confirm-dialog .sfb-confirm-btns .serh-button { height: 24px; padding: 0 10px; font-size: 11px; }
-        @media (prefers-color-scheme: dark) {
-            body.serh-dark-on #serh-block-confirm-dialog {
-                background: #171717; color: #f3f4f6; border-color: #374151;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-            }
-            body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-rule { background: #374151; border-color: #4b5563; color: #f3f4f6; }
-            body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-rule:focus { border-color: #60a5fa; background: #374151; }
-            body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule { background: #1f2937; color: #6b7280; }
-        }
+    body.serh-dark-on #serh-block-confirm-dialog {
+        background: #171717; color: #f3f4f6; border-color: #374151;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+    body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-rule { background: #374151; border-color: #4b5563; color: #f3f4f6; }
+    body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-rule:focus { border-color: #60a5fa; background: #374151; }
+    body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule { background: #1f2937; color: #6b7280; }
 
         .serh-scroll-btn {
             position: absolute; right: 7px; cursor: pointer; opacity: 0.5; font-size: 18px !important;
@@ -3519,23 +3481,21 @@
         :is(#serh-webdav-panel, #serh-subscription-panel) { height: 332px; overflow: visible; }
         :is(#serh-webdav-panel, #serh-subscription-panel, #serh-selector-panel) #serh-toast-container { max-width: none; width: auto; left: 0; right: 0; }
 
-        @media (prefers-color-scheme: dark) {
-            body.serh-dark-on #serh-panel .serh-option-label,
-            body.serh-dark-on #serh-panel .serh-compact-row span { color: #f3f4f6 !important; }
-            body.serh-dark-on :is(#serh-panel, #serh-selector-panel) .serh-rules-container { border-color: #4b5563 !important; background: #1E1F21 !important; }
-            body.serh-dark-on :is(#serh-line-numbers, #serh-sel-line-numbers) { background: #222629 !important; border-right-color: #4b5563 !important; color: #9ca3af !important; }
-            body.serh-dark-on :is(#serh-rules, #serh-sel-rules) { background: transparent !important; color: #f3f4f6 !important; }
-            body.serh-dark-on #serh-rules::placeholder { color: #6b7280 !important; }
-            body.serh-dark-on .serh-bracket-pair { background: rgba(96, 165, 250, 0.38); box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.75); }
-            body.serh-dark-on .serh-bracket-enclosing { background: rgba(148, 163, 184, 0.22); }
-            body.serh-dark-on #serh-stats-panel { background: #171717 !important; border-color: #374151 !important; }
-            body.serh-dark-on #serh-stats-content { color: #f3f4f6 !important; }
-            body.serh-dark-on #serh-panel .serh-compact-row button.serh-button {
-                height: auto !important; min-height: 0 !important; width: auto !important; min-width: 0 !important;
-                flex: 0 0 auto !important; line-height: normal !important; padding: 3px 8px !important;
-                font-size: 11px !important; margin: 0 !important;
-            }
-        }
+    body.serh-dark-on #serh-panel .serh-option-label,
+    body.serh-dark-on #serh-panel .serh-compact-row span { color: #f3f4f6 !important; }
+    body.serh-dark-on :is(#serh-panel, #serh-selector-panel) .serh-rules-container { border-color: #4b5563 !important; background: #1E1F21 !important; }
+    body.serh-dark-on :is(#serh-line-numbers, #serh-sel-line-numbers) { background: #222629 !important; border-right-color: #4b5563 !important; color: #9ca3af !important; }
+    body.serh-dark-on :is(#serh-rules, #serh-sel-rules) { background: transparent !important; color: #f3f4f6 !important; }
+    body.serh-dark-on #serh-rules::placeholder { color: #6b7280 !important; }
+    body.serh-dark-on .serh-bracket-pair { background: rgba(96, 165, 250, 0.38); box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.75); }
+    body.serh-dark-on .serh-bracket-enclosing { background: rgba(148, 163, 184, 0.22); }
+    body.serh-dark-on #serh-stats-panel { background: #171717 !important; border-color: #374151 !important; }
+    body.serh-dark-on #serh-stats-content { color: #f3f4f6 !important; }
+    body.serh-dark-on #serh-panel .serh-compact-row button.serh-button {
+        height: auto !important; min-height: 0 !important; width: auto !important; min-width: 0 !important;
+        flex: 0 0 auto !important; line-height: normal !important; padding: 3px 8px !important;
+        font-size: 11px !important; margin: 0 !important;
+    }
 
         :is(#serh-webdav-panel, #serh-subscription-panel, #serh-hlcolor-panel) h3 {
             margin: 0 0 8px 0 !important; font-size: 14px !important; color: inherit !important;
@@ -3592,36 +3552,34 @@
             flex: 1 !important;
         }
 
-        @media (prefers-color-scheme: dark) {
-            body.serh-dark-on .serh-window {
-                background: #171717 !important; color: #f3f4f6 !important; border-color: #374151 !important;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
-            }
-            body.serh-dark-on #serh-webdav-panel label,
-            body.serh-dark-on #serh-subscription-panel label,
-            body.serh-dark-on #serh-settings-panel label,
-            body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row label {
-                color: #9ca3af !important;
-            }
-            body.serh-dark-on #serh-webdav-panel input[type="text"],
-            body.serh-dark-on #serh-webdav-panel input[type="password"],
-            body.serh-dark-on #serh-subscription-panel input[type="text"],
-            body.serh-dark-on #serh-settings-panel select,
-            body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row input {
-                background: #374151 !important; border-color: #4b5563 !important; color: #f3f4f6 !important;
-            }
-            body.serh-dark-on #serh-webdav-panel input:focus,
-            body.serh-dark-on #serh-subscription-panel input:focus,
-            body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row input:focus {
-                border-color: #60a5fa !important;
-            }
-            body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row .serh-hlcolor-preview,
-            body.serh-dark-on #serh-hlcolor-current-preview,
-            body.serh-dark-on #serh-hlcolor-sv-canvas,
-            body.serh-dark-on #serh-hlcolor-hue-canvas {
-                border-color: #4b5563 !important;
-            }
-        }
+    body.serh-dark-on .serh-window {
+        background: #171717 !important; color: #f3f4f6 !important; border-color: #374151 !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
+    }
+    body.serh-dark-on #serh-webdav-panel label,
+    body.serh-dark-on #serh-subscription-panel label,
+    body.serh-dark-on #serh-settings-panel label,
+    body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row label {
+        color: #9ca3af !important;
+    }
+    body.serh-dark-on #serh-webdav-panel input[type="text"],
+    body.serh-dark-on #serh-webdav-panel input[type="password"],
+    body.serh-dark-on #serh-subscription-panel input[type="text"],
+    body.serh-dark-on #serh-settings-panel select,
+    body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row input {
+        background: #374151 !important; border-color: #4b5563 !important; color: #f3f4f6 !important;
+    }
+    body.serh-dark-on #serh-webdav-panel input:focus,
+    body.serh-dark-on #serh-subscription-panel input:focus,
+    body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row input:focus {
+        border-color: #60a5fa !important;
+    }
+    body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row .serh-hlcolor-preview,
+    body.serh-dark-on #serh-hlcolor-current-preview,
+    body.serh-dark-on #serh-hlcolor-sv-canvas,
+    body.serh-dark-on #serh-hlcolor-hue-canvas {
+        border-color: #4b5563 !important;
+    }
 
         /* 渐变动画 */
         .serh-panel-fade {
@@ -3699,9 +3657,7 @@
         .serh-subscription-btn-group .serh-button {
             flex: 1 !important;
         }
-        @media (prefers-color-scheme: dark) {
-            body.serh-dark-on :is(.serh-subscription-index, .serh-subscription-info) { color: #9ca3af; }
-        }
+    body.serh-dark-on :is(.serh-subscription-index, .serh-subscription-info) { color: #9ca3af; }
 
         /* 屏蔽灰底 */
         .serh-blocked-visible,
@@ -3711,13 +3667,11 @@
             transition: background 0.2s;
         }
 
-        @media (prefers-color-scheme: dark) {
-            body.serh-dark-on .serh-blocked-visible,
-            body.serh-dark-on .g.serh-blocked-visible,
-            body.serh-dark-on .MjjYud.serh-blocked-visible {
-                background-color: #374151 !important;
-            }
-        }
+    body.serh-dark-on .serh-blocked-visible,
+    body.serh-dark-on .g.serh-blocked-visible,
+    body.serh-dark-on .MjjYud.serh-blocked-visible {
+        background-color: #374151 !important;
+    }
 
         .serh-blocked-visible div,
         .serh-blocked-visible .yuRUbf,
@@ -3731,14 +3685,12 @@
             line-height: 1 !important;
         }
 
-        @media (prefers-color-scheme: dark) {
-            body.serh-dark-on #serh-status {
-                color: #a8c7fa !important;
-            }
-            body.serh-dark-on .serh-bubble-number {
-                color: #ffffff !important;
-            }
-        }
+    body.serh-dark-on #serh-status {
+        color: #a8c7fa !important;
+    }
+    body.serh-dark-on .serh-bubble-number {
+        color: #ffffff !important;
+    }
 
         .serh-matched-rule {
             position: absolute; top: 2px; left: 50%; transform: translateX(-50%);
@@ -3748,12 +3700,10 @@
             font-family: monospace; backdrop-filter: blur(2px);
             box-shadow: 0 1px 3px rgba(0,0,0,0.2);
         }
-        @media (prefers-color-scheme: dark) {
-            body.serh-dark-on .serh-matched-rule {
-                background: rgba(0, 160, 0, 0.9);
-                color: #fff;
-            }
-        }
+    body.serh-dark-on .serh-matched-rule {
+        background: rgba(0, 160, 0, 0.9);
+        color: #fff;
+    }
 
         /* 高亮 */
         #serh-hlcolor-panel .serh-hlcolor-row {
@@ -3854,14 +3804,12 @@
             transform: translateX(12px) !important;
         }
 
-        @media (prefers-color-scheme: dark) {
-            body.serh-dark-on .serh-slider {
-                background-color: #4b5563 !important;
-            }
-            body.serh-dark-on .serh-switch input:checked + .serh-slider {
-                background-color: #2c5282 !important;
-            }
-        }
+    body.serh-dark-on .serh-slider {
+        background-color: #4b5563 !important;
+    }
+    body.serh-dark-on .serh-switch input:checked + .serh-slider {
+        background-color: #2c5282 !important;
+    }
 
         #serh-bubble-size-slider {
             flex: 1 1 0% !important; margin: 0 0 0 5px !important;
@@ -3902,12 +3850,10 @@
             transform: translateY(0);
         }
 
-        @media (prefers-color-scheme: dark) {
-            body.serh-dark-on .serh-toast {
-                background: #171717 !important; color: #f3f4f6 !important;
-                border-top-color: #374151; border-right-color: #374151; border-bottom-color: #374151;
-            }
-        }
+    body.serh-dark-on .serh-toast {
+        background: #171717 !important; color: #f3f4f6 !important;
+        border-top-color: #374151; border-right-color: #374151; border-bottom-color: #374151;
+    }
 
         .serh-toast-success { border-left-color: #276749; }
         .serh-toast-error { border-left-color: #c53030; }
@@ -3972,15 +3918,9 @@
       : bubbleIcon(`<circle cx="12" cy="12" r="10"/>${slash}`);
 
     let newHtml;
-    if (currentConfig.showCount) {
-      if (isLeft) {
-        newHtml = `${icon} <span class="serh-bubble-number">${blocked}</span>`;
-      } else {
-        newHtml = `<span class="serh-bubble-number">${blocked}</span> ${icon}`;
-      }
-    } else {
-      newHtml = icon;
-    }
+    newHtml = currentConfig.showCount
+      ? (isLeft ? `${icon} <span class="serh-bubble-number">${blocked}</span>` : `<span class="serh-bubble-number">${blocked}</span> ${icon}`)
+      : icon;
     if (statusBtn._lastHtml !== newHtml) {
       statusBtn.innerHTML = newHtml; statusBtn._lastHtml = newHtml;
     }
@@ -4209,14 +4149,21 @@
     'serh-set-block-domain': 'blockDomain', 'serh-set-block-confirm': 'blockConfirm',
     'serh-set-show-source': 'showMatchedSource', 'serh-set-show-sub-btn': 'showSubBtn', 'serh-set-show-sync-btn': 'showSyncBtn', 'serh-set-bracket-highlight': 'bracketHighlight',
     'serh-set-show-bubble': 'showBubble', 'serh-set-show-count': 'showCount',
-    'serh-set-panel-centered': 'panelCentered', 'serh-set-auto-dark': 'autoDark',
+    'serh-set-panel-centered': 'panelCentered',
     'serh-set-disable-block': 'enabled', 'serh-set-debug': 'debug',
     'serh-set-error-detection': 'errorDetection', 'serh-set-export-config': 'exportConfig', 'serh-set-collapse-mode': 'collapseMode'
   };
   const INVERTED_SETTINGS_CHECKBOXES = new Set(['serh-set-disable-block']);
 
   function applyDarkModeClass() {
-    if (document.body) document.body.classList.toggle('serh-dark-on', currentConfig.autoDark !== false);
+    const mode = currentConfig.darkMode === 'light' || currentConfig.darkMode === 'dark' ? currentConfig.darkMode : 'system';
+    const dark = mode === 'dark' || (mode === 'system' && !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches));
+    if (document.body) document.body.classList.toggle('serh-dark-on', dark);
+  }
+  const UI_SCALE_VALUE = { s: 0.75, l: 1, xl: 1.25, xxl: 1.5 };
+  function applyUiScale() {
+    const scale = UI_SCALE_VALUE[currentConfig.uiScale === 's' ? 's' : currentConfig.uiScale === 'xl' ? 'xl' : currentConfig.uiScale === 'xxl' ? 'xxl' : 'l'] || 1;
+    document.querySelectorAll('.serh-window').forEach(el => { el.style.zoom = scale === 1 ? '' : String(scale); });
   }
 
   let _collapseStyleEl = null;
@@ -4346,11 +4293,11 @@
       .map(rule => stripRuleComment(rule))
       .filter(rule => rule.length > 0);
 
-    const ruleErrors = {}; const ruleWarnings = {}; const ruleCounts = new Map();
+    const ruleErrors = new Map(); const ruleWarnings = new Map(); const ruleCounts = new Map();
     activeRules.forEach(rule => {
       if (currentConfig.errorDetection !== false) {
-        const analysis = cachedAnalyzeRule(rule); if (!analysis.valid) ruleErrors[rule] = analysis.errors.length ? analysis.errors : [t('invalidRule')];
-        if (analysis.warnings.length) ruleWarnings[rule] = analysis.warnings;
+        const analysis = cachedAnalyzeRule(rule); if (!analysis.valid) ruleErrors.set(rule, analysis.errors.length ? analysis.errors : [t('invalidRule')]);
+        if (analysis.warnings.length) ruleWarnings.set(rule, analysis.warnings);
       }
       ruleCounts.set(rule, (ruleCounts.get(rule) || 0) + 1);
     });
@@ -4379,11 +4326,11 @@
       const hlRule = (result.dataset.highlightRule || '').trim(); if (hlRule) addRuleHit(hlRule, result.dataset.highlightSource, t('highlightRules'), result);
     });
 
-    const ruleErrorsArray = Object.entries(ruleErrors).map(([rule, errors]) => ({
+    const ruleErrorsArray = [...ruleErrors].map(([rule, errors]) => ({
       rule,
       msg: errors.join(', ')
     }));
-    const ruleWarningsArray = Object.entries(ruleWarnings).map(([rule, warnings]) => ({
+    const ruleWarningsArray = [...ruleWarnings].map(([rule, warnings]) => ({
       rule,
       msg: warnings.join(', ')
     }));
@@ -4720,10 +4667,17 @@
             </div>`;
     const settingsHeader = key => `
             <div style="margin: 0 0 6px; padding: 0; font-size: 11px; font-weight: 600; color: #718096;">${t(key)}</div>`;
+    const settingsSelect = (id, labelKey, options, current) => `
+            <div style="flex: 1; min-width: 0; margin: 0; padding: 0;">
+                <label for="${id}" style="display: block; margin: 0 0 4px; padding: 0; cursor: pointer; font-size: 12px; color: #4a5568;">${t(labelKey)}</label>
+                <select id="${id}" style="width: 100%; min-width: 0; margin: 0; font-size: 12px; padding: 3px 4px; border: 1px solid #cbd5e0; border-radius: 4px; background: #fff; color: #2d3748; cursor: pointer; outline: none; font-family: inherit;">
+                    ${options.map(([val, label]) => `<option value="${val}" ${current === val ? 'selected' : ''}>${escHtml(label)}</option>`).join('\n                    ')}
+                </select>
+            </div>`;
 
     panel.innerHTML = `
             <div style="display: flex; align-items: center; justify-content: space-between; margin: 0 0 4px; padding: 0;">
-                <h3 style="margin: 0; padding: 0; font-size: 13px; color: #2d3748; font-weight: 600;">${escHtml(t('settingsPanelTitle'))}</h3>
+                <h3 style="margin: 0; padding: 0; font-size: 13px; font-weight: 600;">${escHtml(t('settingsPanelTitle'))}</h3>
                 <span id="serh-settings-close" style="cursor: pointer; font-size: 12px; line-height: 1; margin: 0; padding: 0;">❌</span>
             </div>
             ${settingsHeader('settingsSecBlock')}
@@ -4742,14 +4696,11 @@
             ])}
             ${settingsRow([
               { id: 'serh-set-panel-centered', labelKey: 'menuCenter', checked: currentConfig.panelCentered === true },
-              { id: 'serh-set-auto-dark', labelKey: 'autoDark', checked: currentConfig.autoDark !== false }
+              { id: 'serh-set-bracket-highlight', labelKey: 'bracketHighlight', checked: currentConfig.bracketHighlight !== false }
             ])}
             ${settingsRow([
               { id: 'serh-set-show-sub-btn', labelKey: 'showSubBtn', checked: currentConfig.showSubBtn !== false },
               { id: 'serh-set-show-sync-btn', labelKey: 'showSyncBtn', checked: currentConfig.showSyncBtn !== false }
-            ])}
-            ${settingsRow([
-              { id: 'serh-set-bracket-highlight', labelKey: 'bracketHighlight', checked: currentConfig.bracketHighlight !== false }
             ])}
             ${settingsHeader('settingsSecOther')}
             ${settingsRow([
@@ -4765,6 +4716,10 @@
               { id: 'serh-set-collapse-mode', labelKey: 'collapseMode', checked: currentConfig.collapseMode === true }
             ])}
             <div style="display: flex; gap: 8px; margin: 0; padding: 0;">
+                ${settingsSelect('serh-set-ui-scale', 'uiScale', [['s', t('scaleM')], ['l', t('scaleL')], ['xl', t('scaleXL')], ['xxl', t('scaleXXL')]], ['s', 'xl', 'xxl'].includes(currentConfig.uiScale) ? currentConfig.uiScale : 'l')}
+                ${settingsSelect('serh-set-dark-mode', 'darkMode', [['system', t('darkSystem')], ['light', t('darkLight')], ['dark', t('darkDark')]], ['light', 'dark'].includes(currentConfig.darkMode) ? currentConfig.darkMode : 'system')}
+            </div>
+            <div style="display: flex; gap: 8px; margin: 5px 0 0; padding: 0;">
                 <div style="flex: 1; min-width: 0; margin: 0; padding: 0;">
                     <label for="serh-set-bubble-action" style="display: block; margin: 0 0 4px; padding: 0; cursor: pointer; font-size: 12px; color: #4a5568;">${t('menuBubbleAction')}</label>
                     <select id="serh-set-bubble-action" style="width: 100%; min-width: 0; margin: 0; font-size: 12px; padding: 3px 4px; border: 1px solid #cbd5e0; border-radius: 4px; background: #fff; color: #2d3748; cursor: pointer; outline: none; font-family: inherit;">
@@ -4805,7 +4760,6 @@
       { id: 'serh-set-panel-centered', key: 'panelCentered', apply: () => {
         applyPanelPosition(document.getElementById('serh-panel')); applyPanelPosition(document.getElementById('serh-settings-panel'));
       } },
-      { id: 'serh-set-auto-dark', key: 'autoDark', apply: () => { applyDarkModeClass(); } },
       { id: 'serh-set-show-sub-btn', key: 'showSubBtn', apply: () => { applySubSyncBtnVisibility(); } },
       { id: 'serh-set-show-sync-btn', key: 'showSyncBtn', apply: () => { applySubSyncBtnVisibility(); } },
       { id: 'serh-set-bracket-highlight', key: 'bracketHighlight', apply: () => { document.querySelectorAll('.serh-bracket-hit').forEach(h => { h.style.display = 'none'; }); } },
@@ -4828,6 +4782,20 @@
         });
       }
     });
+
+    const uiScaleSelect = document.getElementById('serh-set-ui-scale');
+    if (uiScaleSelect) {
+      uiScaleSelect.addEventListener('change', function() {
+        adoptStoredConfigBeforeWrite(); currentConfig.uiScale = this.value; persistConfig(true); applyUiScale();
+      });
+    }
+
+    const darkModeSelect = document.getElementById('serh-set-dark-mode');
+    if (darkModeSelect) {
+      darkModeSelect.addEventListener('change', function() {
+        adoptStoredConfigBeforeWrite(); currentConfig.darkMode = this.value; persistConfig(true); applyDarkModeClass();
+      });
+    }
 
     const bubbleActionSelect = document.getElementById('serh-set-bubble-action');
     if (bubbleActionSelect) {
@@ -4876,13 +4844,8 @@
       return [Math.round(h), max === 0 ? 0 : d / max, max];
     }
 
-    function hexToRgb(hex) {
-      return [parseInt(hex.slice(1,3), 16), parseInt(hex.slice(3,5), 16), parseInt(hex.slice(5,7), 16)];
-    }
-
-    function rgbToHex(r, g, b) {
-      return '#' + [r,g,b].map(x => x.toString(16).padStart(2,'0').toUpperCase()).join('');
-    }
+    function hexToRgb(hex) { return [parseInt(hex.slice(1,3), 16), parseInt(hex.slice(3,5), 16), parseInt(hex.slice(5,7), 16)]; }
+    function rgbToHex(r, g, b) { return '#' + [r,g,b].map(x => x.toString(16).padStart(2,'0').toUpperCase()).join(''); }
 
     const colors = currentConfig.highlightColors || {}; const sanitizeHex = (val, fallback) => (/^#[0-9A-Fa-f]{6}$/.test(String(val || '')) ? String(val).toUpperCase() : fallback); let rowsHtml = '';
     for (let i = 1; i <= 5; i++) {
@@ -4958,19 +4921,19 @@
 
     const svCanvas = document.getElementById('serh-hlcolor-sv-canvas');
     function onSVMove(clientX, clientY) {
-      const rect = svCanvas.getBoundingClientRect(); const x = Math.max(0, Math.min(svCanvas.width, clientX - rect.left)); const y = Math.max(0, Math.min(svCanvas.height, clientY - rect.top));
-      currentSat = x / svCanvas.width; currentVal = 1 - y / svCanvas.height; updatePickedColor(); updateIndicators();
+      const rect = svCanvas.getBoundingClientRect(); const x = Math.max(0, Math.min(rect.width, clientX - rect.left)); const y = Math.max(0, Math.min(rect.height, clientY - rect.top));
+      currentSat = x / rect.width; currentVal = 1 - y / rect.height; updatePickedColor(); updateIndicators();
     }
 
     const hueCanvas = document.getElementById('serh-hlcolor-hue-canvas');
     const svDot = document.getElementById('serh-hlcolor-sv-dot'); const hueDot = document.getElementById('serh-hlcolor-hue-dot');
     function updateIndicators() {
-      if (!svDot || !hueDot || !svCanvas.width) return; const wrap = svCanvas.parentElement.getBoundingClientRect(); const sr = svCanvas.getBoundingClientRect(); const hr = hueCanvas.getBoundingClientRect();
-      svDot.style.left = (sr.left + currentSat * sr.width - wrap.left) + 'px'; svDot.style.top = (sr.top + (1 - currentVal) * sr.height - wrap.top) + 'px';
-      hueDot.style.left = (hr.left + hr.width / 2 - wrap.left) + 'px'; hueDot.style.top = (hr.top + (currentHue / 360) * hr.height - wrap.top) + 'px';
+      if (!svDot || !hueDot || !svCanvas.width) return;
+      svDot.style.left = (svCanvas.offsetLeft + currentSat * svCanvas.offsetWidth) + 'px'; svDot.style.top = (svCanvas.offsetTop + (1 - currentVal) * svCanvas.offsetHeight) + 'px';
+      hueDot.style.left = (hueCanvas.offsetLeft + hueCanvas.offsetWidth / 2) + 'px'; hueDot.style.top = (hueCanvas.offsetTop + (currentHue / 360) * hueCanvas.offsetHeight) + 'px';
     }
     function onHueMove(clientY) {
-      const rect = hueCanvas.getBoundingClientRect(); const y = Math.max(0, Math.min(hueCanvas.height, clientY - rect.top)); currentHue = (y / hueCanvas.height) * 360; drawSVCanvas(currentHue);
+      const rect = hueCanvas.getBoundingClientRect(); const y = Math.max(0, Math.min(rect.height, clientY - rect.top)); currentHue = (y / rect.height) * 360; drawSVCanvas(currentHue);
       updatePickedColor(); updateIndicators();
     }
 
@@ -5297,7 +5260,7 @@
     };
     const config = {}; let keyCount = 0;
     const readKey = () => {
-      if (s[i] === '\'' || s[i] === '"') return readString(); const m = /^[A-Za-z_$][\w$-]*/.exec(s.slice(i)); if (!m) return null; i += m[0].length; return m[0];
+      if (s[i] === '\'' || s[i] === '"') return readString(); const m = /^[A-Za-z0-9_$][\w$-]*/.exec(s.slice(i)); if (!m) return null; i += m[0].length; return m[0];
     };
     while (true) {
       skipWs(); if (i >= n) break;
@@ -5425,7 +5388,7 @@
     setupBracketHighlight(textarea, 'js');
 
     const applyUserSelectors = (config) => {
-      GM_setValue(SELECTORS_KEY, diffUserSelectors(config)); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite(); markLocalModifiedTime(); markLocalModifiedTime(SELECTORS_LAST_MODIFIED_KEY);
+      GM_setValue(SELECTORS_KEY, diffUserSelectors(config)); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite(); markLocalModifiedTime(SELECTORS_LAST_MODIFIED_KEY);
       if (typeof triggerWebDAVSyncDelayed === 'function') {
         triggerWebDAVSyncDelayed(5000);
       }
@@ -5477,14 +5440,7 @@
   function migrateSubscriptions() {
     if (GM_getValue(SUBSCRIPTIONS_KEY) !== undefined) return; const oldUrl = GM_getValue(SUBSCRIPTION_URL_KEY); const oldRules = GM_getValue(SUBSCRIPTION_RULES_KEY, []);
     const oldLastUpdate = GM_getValue(SUBSCRIPTION_LAST_UPDATE_KEY, 0); const subscriptions = [];
-    if (oldUrl) {
-      subscriptions.push({
-        url: oldUrl,
-        enabled: true,
-        lastUpdate: oldLastUpdate,
-        rules: oldRules
-      });
-    }
+    if (oldUrl) subscriptions.push({ url: oldUrl, enabled: true, lastUpdate: oldLastUpdate, rules: oldRules });
     GM_setValue(SUBSCRIPTIONS_KEY, subscriptions);
   }
 
@@ -5492,16 +5448,23 @@
     const value = GM_getValue(SUBSCRIPTIONS_KEY, []); if (!Array.isArray(value)) return []; return value.filter(s => s && typeof s === 'object' && !Array.isArray(s) && typeof s.url === 'string');
   }
 
+  function getSubscriptionStoreSignature() {
+    try { return JSON.stringify(GM_getValue(SUBSCRIPTIONS_KEY) ?? null); } catch (e) { return null; }
+  }
+
   function saveSubscriptions(subscriptions) {
-    cachedSubscriptionRules = null; GM_setValue(SUBSCRIPTIONS_KEY, subscriptions);
+    cachedSubscriptionRules = null; _subscriptionStoreSignature = null; GM_setValue(SUBSCRIPTIONS_KEY, subscriptions);
   }
 
   function getAllSubscriptionRules() {
-    if (cachedSubscriptionRules) return cachedSubscriptionRules; const subs = getSubscriptions(); const rules = [];
+    const signature = getSubscriptionStoreSignature();
+    if (cachedSubscriptionRules && _subscriptionStoreSignature === signature) return cachedSubscriptionRules;
+    cachedSubscriptionRules = null;
+    const subs = getSubscriptions(); const rules = [];
     subs.filter(s => s.enabled).forEach(s => {
       if (s.rules && Array.isArray(s.rules)) rules.push(...s.rules);
     });
-    cachedSubscriptionRules = rules; return rules;
+    cachedSubscriptionRules = rules; _subscriptionStoreSignature = signature; return rules;
   }
 
   function getSubscriptionSyncSnapshot() {
@@ -5510,12 +5473,7 @@
 
   function setSubscriptionSyncSnapshot(subs) {
     if (!Array.isArray(subs)) return;
-    const simplified = subs.map(s => ({
-      url: s.url,
-      name: s.name,
-      enabled: s.enabled !== false
-    }));
-    GM_setValue(SUBSCRIPTION_SYNC_SNAPSHOT_KEY, simplified);
+    GM_setValue(SUBSCRIPTION_SYNC_SNAPSHOT_KEY, subs.map(s => ({ url: s.url, name: s.name, enabled: s.enabled !== false })));
   }
 
   function applyCloudSubscriptions(cloudSubs, preferLocal = false) {
@@ -5729,6 +5687,7 @@
           if (inLocal ? !preferLocal : preferLocal) return;
           result[key] = inLocal ? local[key] : cloud[key]; return;
         }
+        if (localChanged && cloudChanged) { result[key] = preferLocal ? local[key] : cloud[key]; return; }
         if (localChanged) {
           result[key] = local[key]; return;
         }
@@ -5904,7 +5863,7 @@
         if (/^[\x7B\x5B]/.test(payload)) {
           try { parsed = JSON.parse(payload); } catch (e) { if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[WebDAV] 配置头解析失败:', e); }
         }
-        if (parsed && !config) { config = parsed; rawScriptConfig = line; headerLineIndexes.add(i); } else if (payload.startsWith('\x7B') && !config) headerLineIndexes.add(i);
+        if (parsed && !Array.isArray(parsed) && !config) { config = parsed; rawScriptConfig = line; headerLineIndexes.add(i); } else if (payload.startsWith('\x7B') && !config) headerLineIndexes.add(i);
       } else if (line.startsWith('# Selectors:')) {
         const payload = line.substring('# Selectors:'.length).trim(); let parsed = null;
         if (/^[\x7B\x5B]/.test(payload)) {
@@ -6121,9 +6080,11 @@
       if (kind === 'whitelist' && item && !item.startsWith('@')) item = '@' + item; if (item) items.push(item);
     };
     const joinFold = (from, baseIndent) => {
-      const chunks = []; let j = from;
+      const chunks = []; let j = from; let contentIndent = -1;
       for (; j < lines.length; j++) {
-        const raw = lines[j]; if (!raw.trim()) continue; const trimmed = raw.trim(); if (trimmed.startsWith('-') || raw.search(/\S/) < baseIndent) break;
+        const raw = lines[j]; if (!raw.trim()) continue; const ind = raw.search(/\S/); const trimmed = raw.trim();
+        if (trimmed.startsWith('-') || ind < baseIndent) break;
+        if (contentIndent === -1) contentIndent = ind; else if (ind < contentIndent) break;
         chunks.push(trimmed);
       }
       return { text: chunks.join(' ').replace(/\s+/g, ' ').trim(), next: j };
@@ -6414,7 +6375,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
 
     function persistCurrentSubscriptions() {
-      const latestSubs = getSubscriptions(); const { newSubs } = collectSubscriptionsFromRows(latestSubs, deletedUrls);
+      const latestSubs = getSubscriptions(); const { newSubs, hasError } = collectSubscriptionsFromRows(latestSubs, deletedUrls);
+      if (hasError) return false;
       const savedSubs = newSubs.filter(s => s.url);
       const subsChanged = subscriptionsSignature(savedSubs) !== subscriptionsSignature(latestSubs); saveSubscriptions(savedSubs); deletedUrls.clear(); subscriptions = getSubscriptions();
       container.querySelectorAll('.serh-subscription-row').forEach(row => {
@@ -6495,11 +6457,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   function webdavRandomBytes(len) {
     const bytes = new Uint8Array(len);
-    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-      crypto.getRandomValues(bytes);
-    } else {
-      for (let i = 0; i < len; i++) bytes[i] = Math.floor(Math.random() * 256);
-    }
+    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') crypto.getRandomValues(bytes);
+    else for (let i = 0; i < len; i++) bytes[i] = Math.floor(Math.random() * 256);
     return bytes;
   }
 
@@ -6632,9 +6591,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       if (!url.toLowerCase().startsWith('https://')) {
         showToast(t('webdavHttpsRequired'), 'error'); return null;
       }
-      if (filenameInput.value.split('/').some(seg => {
-        const s = seg.trim(); return s === '.' || s === '..';
-      })) {
+      if (filenameInput.value.split('/').some(seg => { const s = seg.trim(); return s === '.' || s === '..'; })) {
         showToast(t('filename') + ': . / ..', 'error'); return null;
       }
       const config = resolveWebDAVPanelConfig(loadWebDAVConfig(), {
@@ -6652,9 +6609,21 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
     document.getElementById('serh-webdav-upload').onclick = async () => {
       const config = getValidatedWebDAVConfig(); if (!config) return; const uploadBtn = document.getElementById('serh-webdav-upload'); if (uploadBtn.disabled) return; setWebDAVBusy(true);
-      adoptStoredConfigBeforeWrite(); const textarea = document.getElementById('serh-rules');
+      const textarea = document.getElementById('serh-rules');
       if (textarea) {
-        currentConfig.rules = filterValidRuleLines(textarea.value.split('\n'));
+        const panel = document.getElementById('serh-panel');
+        const baseRules = (panel && Array.isArray(panel._initialRules)) ? panel._initialRules : (Array.isArray(currentConfig.rules) ? currentConfig.rules : []);
+        const userRules = filterValidRuleLines(textarea.value.split('\n'));
+        adoptStoredConfigBeforeWrite();
+        const initialKeySet = new Set(baseRules.map(getRuleKey)); const userKeySet = new Set(userRules.map(getRuleKey));
+        const backgroundNewRules = (Array.isArray(currentConfig.rules) ? currentConfig.rules : []).filter(r => {
+          const k = getRuleKey(r); return k && !initialKeySet.has(k) && !userKeySet.has(k);
+        });
+        currentConfig.rules = backgroundNewRules.length > 0 ? [...userRules, ...backgroundNewRules] : userRules;
+        if (panel) panel._initialRules = [...currentConfig.rules];
+        if (backgroundNewRules.length > 0) syncRulesTextarea();
+      } else {
+        adoptStoredConfigBeforeWrite();
       }
       collectMainPanelConfigState(); persistConfig(false); let content = currentConfig.rules.join('\n'); const loadingToast = showToast(t('webdavUploading'), 'info', 10000);
       try {
@@ -6731,11 +6700,13 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
       if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
         if (Object.keys(settings).length > 0) {
-          currentConfig = Object.assign(getDefaultConfig(), settings, {
+          const colors = settings.highlightColors;
+          if (colors && typeof colors === 'object' && !Array.isArray(colors)) settings.highlightColors = Object.assign({}, currentConfig.highlightColors, colors);
+          currentConfig = normalizeConfig(Object.assign(getDefaultConfig(), settings, {
             rules: currentConfig.rules || [],
             bubbleState: currentConfig.bubbleState,
             bubbleSize: currentConfig.bubbleSize
-          });
+          }));
           GM_setValue(CONFIG_KEY, currentConfig);
         }
         if (Array.isArray(subscriptions)) {
@@ -6881,7 +6852,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       const cloudSelectors = (cloudConfig && Object.prototype.hasOwnProperty.call(cloudConfig, 'selectors') && cloudConfig.selectors && typeof cloudConfig.selectors === 'object' && !Array.isArray(cloudConfig.selectors)) ? cloudConfig.selectors : null;
       let mergedSelectors = null;
       if (syncSelectors && cloudSelectors) {
-        mergedSelectors = mergeSelectors3Way(getSelectorSyncSnapshot(), getUserSelectors(), cloudSelectors, localTime > cloudTime);
+        let localSelectorsTime = getSelectorsModifiedTime(); if (localSelectorsTime > trustedNow + WEBDAV_TIME_TOLERANCE) localSelectorsTime = trustedNow;
+        const cloudSelectorsTime = getCloudModifiedTime(cloudConfig, 'selectorsSyncedAt', trustedNow);
+        mergedSelectors = mergeSelectors3Way(getSelectorSyncSnapshot(), getUserSelectors(), cloudSelectors, localSelectorsTime > cloudSelectorsTime);
         if (!selectorsEqual(mergedSelectors, getUserSelectors())) {
           GM_setValue(SELECTORS_KEY, mergedSelectors); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite();
         }
@@ -7160,7 +7133,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       _urlChangeHandler = () => {
         const currentHref = location.href; const currentCat = getSearchCategory();
         if (currentHref !== lastHref || currentCat !== lastCategory) {
-          lastHref = currentHref; lastCategory = currentCat; resetSelectorCache(); refreshEngineSite();
+          const hashOnly = currentCat === lastCategory && currentHref.split('#')[0] === lastHref.split('#')[0];
+          lastHref = currentHref; lastCategory = currentCat;
+          if (hashOnly) return;
+          resetSelectorCache(); refreshEngineSite();
         }
       };
       window.addEventListener('popstate', _urlChangeHandler); window.addEventListener('hashchange', _urlChangeHandler);
@@ -7236,7 +7212,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   }
 
   function init() {
-    applyDarkModeClass(); applyCollapseMode(); migrateSubscriptions(); pruneUserSelectors(); _selectorStoreSignature = getSelectorStoreSignature();
+    applyDarkModeClass(); applyUiScale(); applyCollapseMode(); migrateSubscriptions(); pruneUserSelectors(); _selectorStoreSignature = getSelectorStoreSignature();
+    if (window.matchMedia) {
+      try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyDarkModeClass); } catch (e) {}
+    }
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         checkExternalSelectorChange(); checkExternalConfigChange();
