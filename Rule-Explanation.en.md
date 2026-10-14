@@ -81,7 +81,7 @@ Notes:
 ### 2.8 Composite Rules:
 
 **Notes:**
-1. Append `@if(...)` after a rule as an extra condition; the rule and `@if` must be separated by a space; multiple `@if` conditions all apply (they can be merged into a single `@if` with `&`). Composite rules are case-insensitive by default.
+1. Append `@if(...)` after a rule as an extra condition; multiple `@if` conditions all apply (they can be merged into a single `@if` with `&`). Composite rules are case-insensitive by default.
 2. Within `@if`, logical operations are supported: `|` OR, `&` AND, `!` NOT, nested and grouped with parentheses, precedence `!` > `&` > `|`.
 3. `!` negates the condition itself, e.g. `!(title *= "keyword")` matches results without a title.
 4. Condition expressions can be **used standalone**, e.g. `host $= ".example.com"`, `path *= "/download/"`, applying to all search results.
@@ -169,4 +169,4 @@ bing: {disabled: true},
 
 **Auto-analysis:**
 
-If you don't know how to add, you can send the offline web page file (such as `.mht` / `.html`) and the table to Ai to automatically analyze the container structure and generate corresponding selectors. Some search engines have different container naming conventions for mobile, desktop, and regional sites, requiring multiple files to analyze and fill in multiple selectors.
+If you are unsure how to add or capture selectors, you can submit offline files of the search page (such as `.mht` or `.html`) along with a formatted table to the AI; it will automatically analyze the container structure and generate the corresponding selectors. Since container naming conventions may differ across mobile, desktop, or regional versions of search engines and websites, you will need to save and analyze files for each version and input multiple selectors accordingly.
