@@ -547,7 +547,7 @@ function createEnv() {
   fakeInput.onchange({ target: fakeInput });
   assert('选择器-107: 读取失败时解锁并移除 input', api.isPreventPanelClose() === false && !env.bodyChildren.includes(fakeInput));
   assert('选择器-108: 读取失败不触发导入回调', env.events.length === 0);
-  assert('选择器-109: 读取失败弹出导入失败通知', api.toasts.length === 1 && api.toasts[0][0] === 'subImportFailed' && api.toasts[0][1] === 'error');
+  assert('选择器-109: 读取失败弹出导入失败通知', api.toasts.length === 1 && api.toasts[0][0] === 'fileImportFailed' && api.toasts[0][1] === 'error');
 }
 
 // 5. 未传回调
@@ -1039,6 +1039,20 @@ check('选择器-162: map_resultExtraElements 为 WeakMap', /const map_resultExt
   }
 }
 
+// ---- 修复M3: 结果观察回调异常路径不再二次调度重试(否则重试上限失效) ----
+{
+  const roStart = src.indexOf('const resultObserver = new IntersectionObserver(');
+  const roEnd = src.indexOf('function scheduleResultRetry', roStart);
+  const roSrc = src.slice(roStart, roEnd);
+  check('修复M3-1: 回调内只保留一处 scheduleResultRetry(修复前catch与未完成分支各一次, 计数翻倍致永不达上限)', (roSrc.match(/scheduleResultRetry\(/g) || []).length === 1);
+  check('修复M3-2: 保留的调度在未完成分支(异常后仍由该分支收口)', roSrc.includes('observer.unobserve(result); scheduleResultRetry(result);'));
+  check('修复M3-3(对照): 异常分支只剩日志不再直接调度', !roSrc.slice(roSrc.indexOf('catch (e)'), roSrc.indexOf('if (blocked)')).includes('scheduleResultRetry'));
+  const liteRo = readRepoFile('Lite.user.js');
+  const liteRoStart = liteRo.indexOf('const resultObserver = new IntersectionObserver(');
+  const liteRoSrc = liteRo.slice(liteRoStart, liteRo.indexOf('function scheduleResultRetry', liteRoStart));
+  check('修复M3-4: Lite版回调同样只保留一处调度', liteRoStart !== -1 && (liteRoSrc.match(/scheduleResultRetry\(/g) || []).length === 1);
+}
+
 // ---- ensureEngineSiteSetup: 装配时启动后台同步 ----
 function createEnsureEnv(engine) {
   const calls = { start: 0, inject: 0, build: 0, status: 0, scan: 0 };
@@ -1467,7 +1481,7 @@ await (async () => {
   check('选择器-216: 拖拽绑定 touchcancel(触摸取消后监听不残留)', bindIdx > -1 && src.slice(bindIdx, bindIdx + 400).includes("document.addEventListener('touchcancel', endDrag)"));
   check('选择器-217: 拖拽解绑 touchcancel(与绑定对称)', unbindIdx > -1 && src.slice(unbindIdx, unbindIdx + 300).includes("document.removeEventListener('touchcancel', endDrag)"));
   const pick = extractFn(src, 'pickTextFile');
-  check('选择器-218: 文件读取失败弹出导入失败通知', pick.includes("showToast(t('subImportFailed')") && !/reader\.onerror\s*=\s*cleanup\s*;/.test(pick));
+  check('选择器-218: 文件读取失败弹出导入失败通知', pick.includes("showToast(t('fileImportFailed')") && !/reader\.onerror\s*=\s*cleanup\s*;/.test(pick));
   check('选择器-219: 悬浮球数字类名已加 serh- 前缀', src.includes('.serh-bubble-number') && src.includes('class="serh-bubble-number"') && !src.includes('class="bubble-number"') && !/(^|[^\w-])\.bubble-number\s*\{/.test(src));
   const selectorsStart = src.indexOf('const SELECTORS = {');
   const selectorsOpen = src.indexOf('{', selectorsStart);

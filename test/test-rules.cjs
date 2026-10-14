@@ -681,6 +681,7 @@ await (async () => {
 const parseSyncHeaderFn = extractFn(src, 'parseSyncHeader');
 const getSyncSettingsFn = extractFn(src, 'getSyncSettings');
 const importRulesFromFileFn = extractFn(src, 'importRulesFromFile');
+const isNonRuleTextResponseFn = extractFn(src, 'isNonRuleTextResponse');
 const pickTextFileFn = extractFn(src, 'pickTextFile');
 const cfgDefaults = src.match(/const CFG_DEFAULTS = \{[^\n]+\};/)[0];
 const defHl = src.match(/const DEFAULT_HIGHLIGHT_COLORS = \{[^\n]+\};/)[0];
@@ -750,6 +751,10 @@ function createEnv() {
     let preventPanelClose = false;
     ${parseSyncHeaderFn}
     ${getSyncSettingsFn}
+    ${isNonRuleTextResponseFn}
+    function showToast() {}
+    function t(key) { return key; }
+    function validateRule(rule) { const s = String(rule).trim(); return s.length > 0 && !/\s/.test(s); }
     ${pickTextFileFn}
     function updateLineNumbers() { hooks.updateLineNumbersCalls++; }
     function GM_setValue(key, val) { hooks.written.push({ key, val }); }
@@ -860,6 +865,29 @@ await (async () => {
     fakeInput.files = [{ _content: '# ScriptConfig: {"selectors":{"bing":{"match":"a"}}}\nrule1' }];
     fakeInput.onchange({ target: fakeInput });
     assert('修复IM-2(对照): 无# Selectors行时内嵌selectors不应用, 行为同修复IM-1前', env.hooks.written.length === 1 && env.hooks.written[0].key === 'searchfilter_blocker' && env.hooks.refreshCalls === undefined);
+  }
+
+  // 11. 垃圾文本导入被拒绝(修复S4)
+  {
+    const { env, api, fakeInput } = createEnv();
+    api.importRulesFromFile();
+    fakeInput.files = [{ _content: 'Lorem ipsum dolor sit amet\nConsectetur adipiscing elit' }];
+    fakeInput.onchange({ target: fakeInput });
+    assert('修复S4-1: 无头垃圾文本导入被拒绝, 编辑区与规则不变', env.textarea.value === '' && env.hooks.written.length === 0 && env.hooks.persistCalls === undefined);
+  }
+  {
+    const { env, api, fakeInput } = createEnv();
+    api.importRulesFromFile();
+    fakeInput.files = [{ _content: '<!DOCTYPE html><html><body>Cloud Error</body></html>' }];
+    fakeInput.onchange({ target: fakeInput });
+    assert('修复S4-2: HTML备份文件导入被拒绝', env.textarea.value === '' && env.hooks.written.length === 0);
+  }
+  {
+    const { env, api, fakeInput } = createEnv();
+    api.importRulesFromFile();
+    fakeInput.files = [{ _content: '# ScriptConfig: {"language":"en-US"}\nLorem ipsum dolor sit amet\nConsectetur adipiscing elit' }];
+    fakeInput.onchange({ target: fakeInput });
+    assert('修复S4-3: 有配置头但正文全是垃圾文本也被拒绝(修复S11)', env.textarea.value === '' && env.hooks.written.length === 0 && env.hooks.applyCalls === undefined);
   }
 
 })();
@@ -2427,6 +2455,51 @@ const liteStrip = new Function(
 assert('审查12-M2-9(修复回归): Lite版带空格元素规则同样不截断', liteStrip('example.com ##.ad') === 'example.com ##.ad', liteStrip('example.com ##.ad'));
 assert('审查12-M2-10(对照): Lite版行尾注释仍截断', liteStrip('example.com # 注释') === 'example.com');
 })();
+
+// ---- 审查13: 裸scheme与空host通配拒绝(修复回归, 主/Lite同源validateUrlWildcard) ----
+{
+  const liteSrc13 = fs.readFileSync([path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p)), 'utf8');
+  const deps13 = ['stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateCondition', 'analyzeRule'].map((n) => extractFn(src, n)).join('\n');
+  const liteDeps13 = ['stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart', 'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions', 'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule', 'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'validateCondition', 'analyzeRule'].map((n) => extractFn(liteSrc13, n)).join('\n');
+  const api13 = new Function(
+    'const SUPPORTED_REGEX_FLAGS = "imsu";\nconst validationCache = new Map();\nconst t = (k, p) => k;\n' + SERH_FN_DEPS + '\n' + deps13 + '\nreturn { analyzeRule, validateRule: (r) => analyzeRule(r).valid };'
+  )();
+  const liteApi13 = new Function(
+    'const SUPPORTED_REGEX_FLAGS = "imsu";\nconst validationCache = new Map();\nconst t = (k, p) => k;\n' + SERH_FN_DEPS + '\n' + liteDeps13 + '\nreturn { analyzeRule, validateRule: (r) => analyzeRule(r).valid };'
+  )();
+  for (const bad of ['https:', 'http:', 'https:/', 'https://']) {
+    assert('审查13-1: 裸scheme拒绝 ' + bad, api13.validateRule(bad) === false);
+    assert('审查13-2: Lite裸scheme拒绝 ' + bad, liteApi13.validateRule(bad) === false);
+  }
+  assert('审查13-3(对照): 常规规则不受影响', api13.validateRule('*://*.example.com/*') === true && api13.validateRule('example.com:8080') === true && liteApi13.validateRule('*://*.example.com/*') === true);
+}
+
+// ---- 审查15: 尾部转义星号末尾锚定 / Google广告跳转解包 / 确认面板#开头拦截(修复回归) ----
+{
+  const liteSrc15 = fs.readFileSync([path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p)), 'utf8');
+  const wc15For = (s) => new Function(
+    s.match(/const (?:RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_A|REGEX_CTX_B|REGEX_CTX_C|RULE_REGEX_LIT_RE) = [^\n]+;/g).join('\n').replace(/\bconst\b/g, 'var') + '\n' +
+    ['encodeNonAscii', 'escapeWildcardPart', 'wildcardToRegex'].map((n) => SERH_RAW_EXTRACT(s, n)).join('\n') + '\nreturn wildcardToRegex;'
+  )();
+  const wc15Main = wc15For(src), wc15Lite = wc15For(liteSrc15);
+  const m15 = (wc, r, u) => new RegExp(wc(r), 'i').test(u);
+  for (const [tag, wc15] of [['主版', wc15Main], ['Lite', wc15Lite]]) {
+    assert('审查15-L4-1(' + tag + '): 尾部转义星号补末尾锚定', m15(wc15, '*://x.com/a\\*', 'https://x.com/a*tracking=1') === false);
+    assert('审查15-L4-2(' + tag + '): 尾部字面星号精确匹配', m15(wc15, '*://x.com/a\\*', 'https://x.com/a*') === true);
+    assert('审查15-L4-3(' + tag + '): 普通通配结尾仍不加锚', m15(wc15, '*://x.com/a/*', 'https://x.com/a/b/c') === true);
+    assert('审查15-L4-4(' + tag + '): 中段转义星号不受影响', m15(wc15, '*://x.com/a\\*b/*', 'https://x.com/a*b/c') === true);
+  }
+  const unwrap15 = new Function(
+    extractFn(src, 'decodeRedirectTarget') + '\n' + extractFn(src, 'decodeBingCkTarget') + '\n' + extractFn(src, 'unwrapRedirectUrl') + '\nreturn unwrapRedirectUrl;'
+  )();
+  assert('审查15-H1-1: /aclk?adurl 解包', unwrap15('https://www.google.com/aclk?sa=l&adurl=https%3A%2F%2Fads.example.com%2Fx') === 'https://ads.example.com/x');
+  assert('审查15-H1-2: /pagead/aclk 解包', unwrap15('https://www.google.com/pagead/aclk?adurl=https%3A%2F%2Fads.example.com%2Fy') === 'https://ads.example.com/y');
+  assert('审查15-H1-3: /translate?url 解包', unwrap15('https://www.google.com/translate?url=https%3A%2F%2Fexample.org%2Fp') === 'https://example.org/p');
+  assert('审查15-H1-4(对照): /url?q 解包不回归', unwrap15('https://www.google.com/url?q=https%3A%2F%2Fexample.com%2Fz') === 'https://example.com/z');
+  const guardRe = /#sfb-confirm-ok'\)\.onclick[\s\S]{0,700}rule\.startsWith\('#'\)[\s\S]{0,300}invalidRule/;
+  assert('审查15-M1-1: 主版确认面板拦截#开头输入', guardRe.test(src) === true && /inp\.value\.trim\(\)\.startsWith\('#'\)/.test(src) === true);
+  assert('审查15-M1-2: Lite确认面板同样拦截', guardRe.test(liteSrc15) === true && /inp\.value\.trim\(\)\.startsWith\('#'\)/.test(liteSrc15) === true);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -113,6 +113,7 @@ function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], local
   store.set(KEYS.WEBDAV_SYNC_CONFIG_KEY, syncConfig);
   store.set(KEYS.WEBDAV_SYNC_SELECTORS_KEY, syncSelectors);
   if (localSettingsTime !== undefined) store.set(KEYS.SETTINGS_LAST_MODIFIED_KEY, localSettingsTime);
+  else if (localTime > 0) store.set(KEYS.SETTINGS_LAST_MODIFIED_KEY, localTime);
   if (localSelectors !== undefined) store.set(KEYS.SELECTORS_KEY, localSelectors);
   if (initialSelectorSnapshot !== undefined) store.set(KEYS.WEBDAV_LAST_SYNC_SELECTORS_KEY, initialSelectorSnapshot);
   store.set(KEYS.LOCAL_LAST_MODIFIED_KEY, localTime);
@@ -310,6 +311,7 @@ function makeAdoptEnv({ storedConfig, memoryConfig, panelOpen }) {
 {
   const store = new Map();
   store.set(KEYS.LOCAL_LAST_MODIFIED_KEY, 12345);
+  store.set(KEYS.SETTINGS_LAST_MODIFIED_KEY, 12345);
   let currentConfig = { rules: ['a'], bubbleSize: 30 };
   const persistConfigFn = new Function('store', 'CONFIG_KEY', 'LOCAL_LAST_MODIFIED_KEY', 'currentConfig', `
     const GM_setValue = (k, v) => { store.set(k, structuredClone(v)); };
@@ -1452,6 +1454,13 @@ await (async () => {
   assert('修复S3-4: 云端删除+本地修改且云端规则时间较新时删除赢', merge(base, { bing: { containers: '.new-local' } }, {}, false).bing === undefined);
   assert('修复S3-5(对照): 存活侧未修改时纯删除仍传播', merge(base, {}, { bing: { containers: '.old' } }, false).bing === undefined && merge(base, { bing: { containers: '.old' } }, {}, true).bing === undefined);
   assert('修复S3-6: 自动同步调用点以本地/云端选择器时间戳仲裁', src.includes('mergeSelectors3Way(getSelectorSyncSnapshot(), getUserSelectors(), cloudSelectors, localSelectorsTime > cloudSelectorsTime)') && src.includes("getCloudModifiedTime(cloudConfig, 'selectorsSyncedAt', trustedNow)"));
+  assert('修复S6: 仅选择器变更的上传也推进rulesModifiedAt, selectorsSyncedAt随之推进(修复删除复活)', src.includes('rulesModifiedAt: (contentChanged || selectorsChanged) ? uploadedTime : (cloudTime || uploadedTime)'));
+  assert('修复S7: 导入/下载共用isNonRuleTextResponse校验, 有头垃圾文本被拒', src.includes('if (isNonRuleTextResponse(parsedHeader.restLines, hasHeader))') && src.includes('ruleLines.length === 0) return false; return !hasHeader ? true :'));
+  const liteSrcS = fs.readFileSync([path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p)), 'utf8');
+  assert('修复S8: 深嵌套条件解析有深度上限与异常兜底(主+Lite)', src.includes('const tooDeep = () => { if (++depth <= 3000)') && liteSrcS.includes('const tooDeep = () => { if (++depth <= 3000)') && src.includes("catch (e) { validationCache.set(rule, { valid: false, errors: [t('regexError')], warnings: [] }); }"));
+  assert('修复S9: 禁用态flushMutations早退不空转(主+Lite)', src.includes('if (!currentConfig.enabled) { _hrefChangedContainers.clear(); _contentChangedContainers.clear(); return; }') && liteSrcS.includes('if (!currentConfig.enabled) { _hrefChangedContainers.clear(); _contentChangedContainers.clear(); return; }'));
+  assert('修复S10: reconcile/restore覆盖网格单元标记(主+Lite)', (src.match(/\[data-serh-grid-item-hidden\]'\)\.forEach\(cell =>/g) || []).length >= 1 && (liteSrcS.match(/\[data-serh-grid-item-hidden\]'\)\.forEach\(cell =>/g) || []).length >= 1 && src.includes("[data-blocker-yandex-parent], [data-blocker-google-parent], [data-serh-grid-item-hidden]"));
+  assert('修复S11: normalizeConfig按档校验高亮色并回默认(主+Lite)', src.includes('for (let i = 1; i <= 5; i++) { if (/^#[0-9A-Fa-f]{6}$/') && liteSrcS.includes('for (let i = 1; i <= 5; i++) { if (/^#[0-9A-Fa-f]{6}$/'));
 }
 
 // 审查D-17: 云端头没有选择器字段时不三方合并, 保留本地并上传
@@ -1578,6 +1587,39 @@ await (async () => {
   const out = api(cloudSubs, false);
   assert('审查D-15: 云端删除的订阅传播到本地', Array.isArray(out) && !out.some((s) => s.url === 'https://cloud-deleted/x') && subs.length === 1);
   assert('审查D-16: 本地规则保留且启用状态按云端仲裁', out[0].rules[0] === 'k1' && out[0].enabled === false);
+  // 审查14: 一侧删除另一侧已修改(enabled/name)时保留修改方, 不被整条吞掉
+  {
+    subs = [
+      { url: 'https://keep/x', enabled: true, rules: ['k1'], lastUpdate: 3, name: 'K' },
+      { url: 'https://local-mod/x', enabled: false, rules: ['m1'], lastUpdate: 5, name: 'D' }
+    ];
+    const baseMod = [
+      { url: 'https://keep/x', name: 'K', enabled: true },
+      { url: 'https://local-mod/x', name: 'D', enabled: true }
+    ];
+    const cloudNoMod = [{ url: 'https://keep/x', name: 'K', enabled: false }];
+    const apiKeep = new Function('getSubscriptions', 'saveSubscriptions', 'getSubscriptionSyncSnapshot', 'checkAutoSubscription', `
+      const SUBSCRIPTION_SYNC_SNAPSHOT_KEY = 'snap';
+      ${extractFn(src, 'applyCloudSubscriptions')}
+      return applyCloudSubscriptions;
+    `)(
+      () => subs.map((s) => ({ ...s })),
+      (v) => { subs = v; },
+      () => baseMod,
+      () => {}
+    );
+    const kept = apiKeep(cloudNoMod, false);
+    const mod = kept.find((s) => s.url === 'https://local-mod/x');
+    assert('审查14-1: 云端删除但本地已停用的订阅保留修改方', !!mod && mod.enabled === false && mod.name === 'D');
+    const renamed = [
+      { url: 'https://keep/x', enabled: true, rules: ['k1'], lastUpdate: 3, name: 'K' },
+      { url: 'https://local-renamed/x', enabled: true, rules: ['r1'], lastUpdate: 5, name: 'NewName' }
+    ];
+    subs = renamed.map((s) => ({ ...s }));
+    const kept2 = apiKeep([{ url: 'https://keep/x', name: 'K', enabled: true }], false);
+    const rn = kept2.find((s) => s.url === 'https://local-renamed/x');
+    assert('审查14-2: 云端删除但本地已改名的订阅保留新名', !!rn && rn.name === 'NewName' && rn.enabled === true);
+  }
   const localOff = [
     { url: 'https://keep/x', enabled: false, rules: ['k1'], lastUpdate: 3, name: 'K' }
   ];
@@ -2083,6 +2125,44 @@ assert('审查10-S3(已修复): closeZoneSelector豁免区不再引用#serh-hlco
   const syncIdx = seg.indexOf('if (backgroundNewRules.length > 0) syncRulesTextarea();');
   assert('审查M4-1: 上传路径合并backgroundNewRules后回写textarea(修复前缺失, 后续保存会用删减规则覆盖云端)', initIdx !== -1 && syncIdx > initIdx);
   assert('审查M4-2(对照): saveConfig合并后同样回写textarea', extractFn(src, 'saveConfig').includes('if (backgroundNewRules.length > 0) syncRulesTextarea();'));
+}
+
+// 修复L1: 本地文件读取失败/内容非规则改用 fileImportFailed(与 Lite 一致), 不再误导为链接或网络问题
+{
+  const zhEn = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
+  assert('修复L1-1: 主版补上 fileImportFailed 中英文案', /fileImportFailed: '导入失败，文件内容不是有效规则'/.test(zhEn) && /fileImportFailed: 'Import failed, file content is not valid rules'/.test(zhEn));
+  assert('修复L1-2: pickTextFile 与 importRulesFromFile 两处改用该文案', (src.match(/t\('fileImportFailed'\)/g) || []).length === 2 && !src.includes("showToast(t('subImportFailed'), 'error'); cleanup()"));
+  assert('修复L1-3(对照): 订阅拉取失败仍用 subImportFailed', src.includes("throw new Error(t('subImportFailed'))") && src.includes("showToast(t('subImportFailed'), 'error');"));
+  const liteL1 = [path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p));
+  assert('修复L1-4(对照): Lite版原本即为该文案且未受影响', fs.readFileSync(liteL1, 'utf8').includes('fileImportFailed'));
+}
+
+// 修复M6: 失败订阅源写入 lastAttempt 做12h退避, 不再每次关面板都重试
+{
+  const url = 'https://sub/broken.txt';
+  let subs = [{ url, enabled: true, rules: ['r1'], lastUpdate: 0 }];
+  let attempts = 0;
+  const INTERVAL = 12 * 60 * 60 * 1000;
+  const harness = new Function('currentConfig', 'isSerhPanelOpen', 'getSubscriptions', 'saveSubscriptions', 'performSubscriptionForUrl', 'forceReprocessAll', 'AUTO_UPDATE_INTERVAL', `
+    let _now = 0; let _pending = null;
+    const Date = { now: () => _now };
+    const console = { log() {}, error() {} };
+    const runWithSyncLock = (name, fn) => (_pending = fn());
+    ${extractFn(src, 'checkAutoSubscription')}
+    return {
+      run: checkAutoSubscription,
+      drain: async () => { if (_pending) { const p = _pending; _pending = null; await p.catch(() => {}); } },
+      setNow: (v) => { _now = v; }
+    };
+  `)({ subscriptionAutoUpdate: true }, () => false, () => subs, (v) => { subs = v; }, async () => { attempts++; throw new Error('boom'); }, () => {}, INTERVAL);
+  harness.setNow(1e12);
+  harness.run(); await harness.drain();
+  assert('修复M6-1: 拉取失败后写入 lastAttempt', attempts === 1 && subs[0].lastAttempt === 1e12, subs);
+  harness.run(); await harness.drain();
+  assert('修复M6-2(已修复): 12h 内失败源不再每次重试', attempts === 1, attempts);
+  harness.setNow(1e12 + INTERVAL + 1);
+  harness.run(); await harness.drain();
+  assert('修复M6-3(对照): 超过12h后按期重试', attempts === 2, attempts);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

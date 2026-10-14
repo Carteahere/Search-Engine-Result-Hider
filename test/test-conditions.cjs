@@ -551,7 +551,7 @@ function t(key, params = {}) {
   return text;
 }
 ${fns.join('\n')}
-return { findIfOccurrences, extractIfConditions, stripIfConditions, extractBalancedParens, validateRule, stripRuleComment, analyzeRule };
+return { findIfOccurrences, extractIfConditions, stripIfConditions, extractBalancedParens, validateRule, stripRuleComment, analyzeRule, parseConditionPart };
 `;
 const api = new Function(moduleBody)();
 
@@ -563,6 +563,26 @@ assert('条件-433(修复SC对照): 带flags前缀正则行尾注释仍剥离', 
 assert('条件-434(修复SC对照): 注释含斜杠仍剥离', api.stripRuleComment('title/abc/ # 注释 /x/') === 'title/abc/' && api.stripRuleComment('title/abc/ # https://x.com/a') === 'title/abc/');
 assert('条件-435(修复SC): @if组后体内#前缀正则保留', api.stripRuleComment('@if(x) title/a/b # c/') === '@if(x) title/a/b # c/' && api.validateRule('title/a/b # c/') === true);
 assert('条件-436(修复1更新): @if简写正则尾段含g/y即报flags错, 纯合法flags仍合法', api.validateRule('@if(title/abc/gim)') === false && api.validateRule('@if(title/abc/im)') === true);
+
+// ---- 修复M2: 规则与 @if 之间空格可省略 ----
+assert('修复M2-1: 紧贴@if仍识别出1个条件', api.extractIfConditions('*://x.com/*@if(title *= "kw")').length === 1);
+assert('修复M2-2: 紧贴条件内容完整', api.extractIfConditions('*://x.com/*@if(title *= "kw")')[0] === 'title *= "kw"');
+assert('修复M2-3: 剥离后只剩核心规则(修复前静默丢条件成死规则)', api.stripIfConditions('*://x.com/*@if(title *= "kw")').coreRule === '*://x.com/*');
+assert('修复M2-4: 裸域名紧贴@if 同样识别', api.stripIfConditions('example.com@if(title *= "kw")').coreRule === 'example.com');
+assert('修复M2-5: 前缀正则尾斜杠后紧贴@if 识别', api.stripIfConditions('title/.*kw.*/@if(title *= "a")').coreRule === 'title/.*kw.*/');
+assert('修复M2-6: 紧贴写法校验仍通过', api.validateRule('*://x.com/*@if(title *= "kw")') === true);
+assert('修复M2-7: 紧贴写法的行尾注释仍按条件组正确剥离', api.stripRuleComment('*://x.com/*@if(title *= "kw") # c') === '*://x.com/*@if(title *= "kw")');
+assert('修复M2-8(对照): 路径中@if后仍跟路径体时不误判为条件', api.extractIfConditions('*://example.com/api/@if(test)/*').length === 0);
+
+// ---- 修复M2(Lite): 同步放宽 ----
+const liteSrcM2 = fs.readFileSync([path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p)), 'utf8');
+const liteM2 = new Function(
+  liteSrcM2.match(/const (?:RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_A|REGEX_CTX_B|REGEX_CTX_C|RULE_REGEX_LIT_RE) = [^\n]+;/g).join('\n').replace(/\bconst\b/g, 'var') + '\n' +
+  ['findBalancedParenEnd', 'isBadRegexTail', 'scanRuleString', 'encodeNonAscii', 'isUniqueFlagsStr', 'isFlagsCandidateError', 'stripRuleComment', 'findIfOccurrences', 'extractBalancedParens', 'stripIfConditions', 'extractIfConditions'].map((n) => SERH_RAW_EXTRACT(liteSrcM2, n)).join('\n') +
+  '\nreturn { stripIfConditions, extractIfConditions };'
+)();
+assert('修复M2-9: Lite版同步支持@if前空格可省略', liteM2.stripIfConditions('*://x.com/*@if(title *= "kw")').coreRule === '*://x.com/*' && liteM2.extractIfConditions('*://x.com/*@if(title *= "kw")').length === 1);
+assert('修复M2-10(对照): Lite版路径中@if后仍跟路径体时不误判为条件', liteM2.stripIfConditions('*://example.com/api/@if(test)/*').coreRule === '*://example.com/api/@if(test)/*');
 
 // ---- 审查A2: @N 与规则之间可省略空格 ----
 const a2eq = (a, b) => JSON.stringify(api.analyzeRule(a)) === JSON.stringify(api.analyzeRule(b));
@@ -1275,6 +1295,10 @@ return { analyzeRule, parseRuleWithConditions, checkDynamicConditions, stripRule
   assert('修复4-2: 裸值字符串条件不误入正则态, url=/foo 与 site=x/y 及多斜杠URL体仍valid', envF4.analyzeRule('@if(url=/foo) *://x.com/a/b/*').valid === true && envF4.analyzeRule('@if(site=x/y) x.com').valid === true);
   assert('修复4-3: =~/简写/独立单等号三写法行为不变', envF4.analyzeRule('@if(title=~ /\\)$/) example.com').valid === true && envF4.analyzeRule('@if(title/\\)$/) example.com').valid === true && envF4.analyzeRule('title=/\\)$/ ').valid === true);
   assert('修复4-4: strip注释剥离与嵌套括号组不受影响', envF4.stripRuleComment(ruleF4 + ' # 注释') === ruleF4 && envF4.analyzeRule('@if(title=/((a))/) x.com').valid === true && envF4.checkDynamicConditions(envF4.parseRuleWithConditions('@if(title=/((a))/) x.com').dynamicConditions, '(a)', 'https://x.com') === true);
+  // 修复M2: 规则与 @if 之间空格可省略
+  const pcM2 = envF4.parseRuleWithConditions('*://x.com/*@if(title *= "kw")');
+  assert('修复M2-11: 紧贴@if的条件进入编译且校验通过(此前静默丢弃成死规则)', pcM2.dynamicConditions.length === 1 && pcM2.coreRule === '*://x.com/*' && envF4.analyzeRule('*://x.com/*@if(title *= "kw")').valid === true, pcM2);
+  assert('修复M2-12: 无空格写法按条件判定', envF4.checkDynamicConditions(pcM2.dynamicConditions, '其他标题', 'https://x.com/a') === false && envF4.checkDynamicConditions(pcM2.dynamicConditions, 'kw 的页面', 'https://x.com/a') === true);
   // 修复13: host条件值归一为空串后^=/*=恒真
   const liteSrc13 = fs.readFileSync([path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p)), 'utf8');
   const hitF13 = (cond) => envF4.checkDynamicConditions(envF4.parseRuleWithConditions(cond).dynamicConditions, '标题', 'https://example.com/x');
@@ -1296,6 +1320,40 @@ return { analyzeRule, parseRuleWithConditions, checkDynamicConditions, stripRule
   assert('修复14-3(对照): 非空值与 =~ 及 host 后缀语义不变', ev14({ type: 'title', op: '*=', val: '题' }, '标题', 'https://x.com') === true && ev14({ type: 'path', op: '*=', val: '/a' }, 't', 'https://x.com/a') === true && ev14({ type: 'url', op: '=~', regex: /x\.com/ }, 't', 'https://x.com/a') === true && ev14({ type: 'host', op: '$=', val: '.com' }, '', 'https://x.com') === true);
   const liteSrc14 = fs.readFileSync([path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p)), 'utf8');
   assert('修复14-4: Lite版evalDynamicLeaf同步空串守卫(title/url双路径)', (() => { const f = extractFn(liteSrc14, 'evalDynamicLeaf'); return f.includes("!cond.val") && f.split("!cond.val").length === 3; })());
+}
+
+// ---- 修复A/E: 深嵌套不再抛RangeError; @if简写正则与独立解析对齐; 尾随i不再降级 ----
+{
+  const liteSrc = fs.readFileSync([path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p)), 'utf8');
+  const assert2 = (name, cond) => { if (cond) { pass++; } else { fail++; console.log('FAIL ' + name); } };
+  const envAE = new Function(
+    src.match(/const SUPPORTED_REGEX_FLAGS = 'imsu';/)[0] + '\n' +
+    ['findBalancedParenEnd', 'isBadRegexTail', 'scanRuleString', 'encodeNonAscii', 'hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'toASCIIUrl', 'safeRegexTest', 'safeDecodeURIComponent', 'stripRuleComment', 'getInvalidRegexFlags', 'isUniqueFlagsStr', 'isFlagsCandidateError', 'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'ruleToRegex', 'validateUrlWildcard', 'parsePrefixedRegexRule', 'isCondExprCore', 'looksLikeCondExpr', 'isScriptRuleLine', 'isElementRuleLine', 'tokenizeCondExpr', 'parseCondExprTokens', 'parseConditionPart', 'evaluateCondition', 'analyzeCondExpr', 'foldCondExpr', 'evalDynamicLeaf', 'evalCondAST', 'findIfOccurrences', 'extractBalancedParens', 'stripIfConditions', 'absorbStandaloneExpr', 'parseRuleWithConditions', 'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule'].map((n) => extractFn(src, n)).join('\n') +
+    `\nconst window = { location: { hostname: 'www.google.com', pathname: '/search', search: '?q=x', href: 'https://www.google.com/search?q=x' } };
+function getSearchEngine() { return 'google'; }
+function getSearchCategory() { return 'web'; }
+function t(key) { return key; }
+const currentConfig = { rules: [], debug: false };
+let compiledRules; const validationCache = new Map(); const subdomainCache = new Map();
+return { validateRule, parseConditionPart };`
+  )();
+  assert2('修复A-1: 3000层括号返回valid=false而非抛未捕获RangeError', (() => { try { return envAE.validateRule('@if(' + '('.repeat(3000) + 'title *= "a"' + ')'.repeat(3000) + ')') === false; } catch (e) { return false; } })());
+  assert2('修复A-2(对照): 1000层括号仍valid=true', envAE.validateRule('@if(' + '('.repeat(1000) + 'title *= "a"' + ')'.repeat(1000) + ')') === true);
+  assert2('修复A-3: 8000个!不抛错返回false', (() => { try { return envAE.validateRule('@if(' + '!'.repeat(8000) + 'title *= "a")') === false; } catch (e) { return false; } })());
+  assert2('修复A-4: Lite版parseCondExprTokens同步深度守卫', (() => { const f = extractFn(liteSrc, 'parseCondExprTokens'); return f.includes('tooDeep'); })());
+  assert2('修复A-5: cachedAnalyzeRule有异常兜底不冻结编辑器', (() => { const f = extractFn(src, 'cachedAnalyzeRule'); const g = extractFn(liteSrc, 'cachedAnalyzeRule'); return f.includes('catch') && g.includes('catch'); })());
+  assert2('修复E-1: @if简写body含未转义斜杠与独立规则一致接受', envAE.validateRule('@if(title/a/b/)') === true && envAE.validateRule('title/a/b/') === true);
+  assert2('修复E-2: @if简写重复flags报错与独立规则一致', envAE.validateRule('@if(title/abc/ii)') === false && envAE.validateRule('title/abc/ii') === false);
+  assert2('修复E-3(对照): 合法flags简写仍接受', envAE.validateRule('@if(title/abc/im)') === true);
+  const pc = envAE.parseConditionPart('url=/ab/ i', 'google', 'www.google.com', 'web');
+  assert2('修复E-4: 尾随i的正则形态不再静默降级字面等值(报unknown)', pc.matched === false || pc.dynamic.op === '=~');
+  const pcEq = envAE.parseConditionPart('url = /ab/i', 'google', 'www.google.com', 'web');
+  assert2('修复E-5: =加完整正则+flags不再降级', pcEq.matched === false || pcEq.dynamic.op === '=~');
+  const pcLit = envAE.parseConditionPart('path = /a/b', 'google', 'www.google.com', 'web');
+  assert2('修复E-6(对照): 条件-396双斜杠裸值字面精确匹配保留', pcLit.matched && pcLit.dynamic && pcLit.dynamic.op === '=' && pcLit.dynamic.val === '/a/b');
+  const pcTailI = envAE.parseConditionPart('title $= "Domain" i', 'google', 'www.google.com', 'web');
+  assert2('修复E-7(对照): 引号字符串比较+尾随i修饰符不受影响', pcTailI.matched && pcTailI.dynamic.op === '$=');
+  assert2('修复E-8: Lite版parseConditionPart同步对齐(parsePrefixedRegexRule复用)', (() => { const f = extractFn(liteSrc, 'parseConditionPart'); return f.includes('parsePrefixedRegexRule(') && f.includes("strMatch[2] === '='"); })());
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
