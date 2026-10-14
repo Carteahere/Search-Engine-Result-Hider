@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.7.0
+// @version      8.7.1
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了所有规则订阅/webdav相关内容。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了所有规则订阅/webdav相关内容。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version has removed all content related to Rule Subscriptions and WebDAV.
@@ -55,7 +55,7 @@
     if (!Array.isArray(cfg.rules)) cfg.rules = []; cfg.rules = cfg.rules.filter(rule => typeof rule === 'string');
     for (const k in CFG_DEFAULTS) if (cfg[k] === undefined) cfg[k] = CFG_DEFAULTS[k];
     if (!cfg.highlightColors || typeof cfg.highlightColors !== 'object') cfg.highlightColors = {...DEFAULT_HIGHLIGHT_COLORS};
-    else cfg.highlightColors = Object.assign({}, DEFAULT_HIGHLIGHT_COLORS, cfg.highlightColors);
+    else { const colors = {...DEFAULT_HIGHLIGHT_COLORS}; for (let i = 1; i <= 5; i++) { if (/^#[0-9A-Fa-f]{6}$/.test(String(cfg.highlightColors[i] || ''))) colors[i] = String(cfg.highlightColors[i]).toUpperCase(); } cfg.highlightColors = colors; }
     return cfg;
   }
   let currentConfig = normalizeConfig(GM_getValue(CONFIG_KEY, getDefaultConfig()));
@@ -211,7 +211,8 @@
       const base = builtinSelectorOf(key); let match = base.match || null;
       try {
         if (typeof def.match === 'string' && def.match) {
-          match = new RegExp(def.match);
+          const m = def.match.match(/^\/(.*)\/([a-z]*)$/i);
+          match = m ? new RegExp(m[1], m[2].toLowerCase().replace(/[^imsu]/g, '')) : new RegExp(def.match);
         } else if (def.match && typeof def.match === 'object' && typeof def.match.source === 'string' && def.match.source) {
           match = new RegExp(def.match.source, String(def.match.flags || '').toLowerCase().replace(/[^imsu]/g, ''));
         }
@@ -325,6 +326,7 @@
       bubbleToggleHint: '点击显示/隐藏屏蔽结果，长按打开面板',
       stateEnabled: '启用', stateDisabled: '关闭',
       subImportFailed: '导入失败，请检查链接或网络状态',
+      fileImportFailed: '导入失败，文件内容不是有效规则',
       highlightRules: '高亮规则', menuHighlightColor: '🎨 高亮颜色',
       hlColorTitle: '高亮颜色', hlColorReset: '重置', resetPending: '已重置，保存后生效', hlColorHint: '点击色块快速保存',
       errorWord: '错误', warningWord: '警告',
@@ -381,6 +383,7 @@
       bubbleToggleHint: 'Click to show/hide blocked results, long-press to open panel',
       stateEnabled: 'Enabled', stateDisabled: 'Disabled',
       subImportFailed: 'Import failed, check URL or network',
+      fileImportFailed: 'Import failed, file content is not valid rules',
       highlightRules: 'Highlight Rules', menuHighlightColor: '🎨 Highlight Colors',
       hlColorTitle: 'Highlight Colors', hlColorReset: 'Reset', resetPending: 'Reset, takes effect after saving', hlColorHint: 'Click a swatch to apply it quickly.',
       errorWord: 'Error', warningWord: 'Warning',
@@ -502,6 +505,7 @@
     if (RULE_LEADING_REGEX_RE.test(body)) { i += 1; inRE = true; }
     else if (RULE_PREFIX_REGEX_RE.test(body)) { pfxStart = i; i += RULE_PREFIX_RE.exec(body)[0].length; inRE = true; }
     const occurrences = [];
+    const tailIsCond = (end) => { let m = end + 1; while (m < n && /\s/.test(str[m])) m++; return m >= n || str[m] === '#' || str.substr(m, 3).toLowerCase() === '@if'; };
     for (; i < n; i++) {
       const ch = str[i];
       if (inSQ) { if (ch === '\\') i++; else if (ch === "'") inSQ = false; continue; }
@@ -534,17 +538,17 @@
       if (ch === '@' && str.substr(i, 3).toLowerCase() === '@if') {
         const prevChar = i > 0 ? str[i - 1] : '';
         const isBoundary = i === 0 || /\s/.test(prevChar) || prevChar === '@' || prevChar === '(' || prevChar === ')';
+        let j = i + 3; while (j < n && /\s/.test(str[j])) j++;
+        const hasParen = str[j] === '(';
+        const end = hasParen ? findBalancedParenEnd(str, j) : -1;
+        const isCond = hasParen && (isBoundary || (end !== -1 && tailIsCond(end)));
         if (strip) {
-          if (isBoundary) atIf = true;
+          if (isCond) atIf = true;
           i += 2; continue;
         }
-        if (isBoundary) {
-          let j = i + 3; while (j < n && /\s/.test(str[j])) j++;
-          if (str[j] === '(') {
-            const end = findBalancedParenEnd(str, j);
-            occurrences.push({ index: i, condStart: j, endIndex: end });
-            if (end !== -1) { i = end; justClosedIf = true; }
-          }
+        if (isCond) {
+          occurrences.push({ index: i, condStart: j, endIndex: end });
+          if (end !== -1) { i = end; justClosedIf = true; }
         }
         continue;
       }
@@ -1217,15 +1221,19 @@
   }
 
   function parseCondExprTokens(tokens, leafParser, errors) {
-    let pos = 0; const peek = () => tokens[pos]; const next = () => tokens[pos++];
+    let pos = 0; let depth = 0; const peek = () => tokens[pos]; const next = () => tokens[pos++];
     const syntaxError = () => {
       errors.push({ kind: 'syntax' }); return { type: 'const', value: false };
     };
+    const tooDeep = () => { if (++depth <= 3000) return false; syntaxError(); return true; };
 
     function parseOr() {
-      const children = [parseAnd()];
-      while (peek() === '|') { next(); children.push(parseAnd()); }
-      return children.length === 1 ? children[0] : { type: 'or', children };
+      if (tooDeep()) return { type: 'const', value: false };
+      try {
+        const children = [parseAnd()];
+        while (peek() === '|') { next(); children.push(parseAnd()); }
+        return children.length === 1 ? children[0] : { type: 'or', children };
+      } finally { depth--; }
     }
     function parseAnd() {
       const children = [parseNot()];
@@ -1233,8 +1241,11 @@
       return children.length === 1 ? children[0] : { type: 'and', children };
     }
     function parseNot() {
-      if (peek() === '!') { next(); return { type: 'not', child: parseNot() }; }
-      return parsePrimary();
+      if (tooDeep()) return { type: 'const', value: false };
+      try {
+        if (peek() === '!') { next(); return { type: 'not', child: parseNot() }; }
+        return parsePrimary();
+      } finally { depth--; }
     }
     function parsePrimary() {
       const t = peek(); if (t === undefined) return syntaxError();
@@ -1412,12 +1423,25 @@
       return { matched: true, static: curSite === target || curSite.endsWith(`.${target}`) };
     }
 
+    const shorthandRe = trimmed.match(/^(title|url|host|path|scheme)\/(.+)$/i);
+    if (shorthandRe) {
+      const pre = parsePrefixedRegexRule(trimmed, shorthandRe[1].length + 1);
+      const condType = shorthandRe[1].toLowerCase();
+      const badFlags = pre.flagsCandidate && (isFlagsCandidateError(pre.flagsCandidate) || (/^[imsu]+$/i.test(pre.flagsCandidate) && !!getInvalidRegexFlags(pre.flagsCandidate)));
+      if (!pre.unclosed && String(pre.pattern || '').trim() && !getInvalidRegexFlags(pre.flags) && !badFlags) {
+        return { matched: true, dynamic: { type: condType, op: '=~', regex: new RegExp(pre.pattern, pre.flags) } };
+      }
+      return { matched: false };
+    }
+
     const eqRe = trimmed.match(/^(title|url|host|path|scheme)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
     const eqSeg = eqRe ? String(eqRe[3] || '') : ''; const eqFlags = eqRe && isUniqueFlagsStr(eqSeg) ? eqSeg.toLowerCase() : '';
     const eqReOk = eqRe && !getInvalidRegexFlags(eqFlags) && (eqFlags || !eqSeg || (!/^(title|url|host|path|scheme)\s*=/i.test(trimmed) && !isFlagsCandidateError(eqSeg))) && (String(eqRe[2] || '').trim() || eqSeg);
     const strMatch = eqReOk ? null : trimmed.match(/^(title|url|host|path|scheme)\s*(\^=|\$=|\*=|=|:)\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s"']+))\s*i?\s*$/i);
     if (strMatch) {
-      if (strMatch[5] !== undefined && strMatch[5].startsWith('~')) return { matched: false }; const op = strMatch[2] === ':' ? '=' : strMatch[2];
+      if (strMatch[5] !== undefined && strMatch[5].startsWith('~')) return { matched: false };
+      if (strMatch[2] === '=' && strMatch[5] !== undefined && /^\/((?:[^/\\\[\]]|\\.|\[(?:[^\]\\]|\\.)*\])+)\/([a-z]*)$/i.test(strMatch[5]) && (!RegExp.$2 || isUniqueFlagsStr(RegExp.$2) || isFlagsCandidateError(RegExp.$2))) return { matched: false };
+      const op = strMatch[2] === ':' ? '=' : strMatch[2];
       const rawVal = (strMatch[3] !== undefined ? strMatch[3] : (strMatch[4] !== undefined ? strMatch[4] : strMatch[5])); let val = rawVal.replace(/\\(["'])/g, '$1').toLowerCase();
       const condType = strMatch[1].toLowerCase(); if (condType === 'host') val = val.startsWith('/') ? val : toASCIIHostname(val); return { matched: true, dynamic: { type: condType, op, val } };
     }
@@ -1452,6 +1476,7 @@
       const scheme = rule.split('://')[0]; if (scheme !== '*' && !/^[a-z][a-z0-9+.-]*$/.test(scheme.toLowerCase())) return false;
     }
     const hostPart = rule.includes('://') ? (rule.split('/')[2] || '') : rule.split('/')[0]; if (/[$~]/.test(hostPart)) return false;
+    if (rule.includes('://') ? !hostPart : /^[a-z][a-z0-9+.-]*:$/i.test(hostPart)) return false;
     if (/^\*:\/\/\*\*+/.test(rule) || /^\*{2,}:\//.test(rule) || /\*{3,}/.test(rule)) return false; if (rule.startsWith('*://') && !/^\*:\/\/[^/]+(?:\/.*)?$/.test(rule)) return false; return true;
   }
 
@@ -1802,7 +1827,8 @@
           }
           return escapeWildcardPart(part, false);
         })
-        .join('\\/'); return pattern.endsWith('*') ? regexStr : regexStr + '(?:[\\/?#:]|$)';
+        .join('\\/'); let bs = 0; for (let i = pattern.length - 2; i >= 0 && pattern[i] === '\\'; i--) bs++;
+        return pattern.endsWith('*') && bs % 2 === 0 ? regexStr : regexStr + '(?:[\\/?#:]|$)';
     }
     return prefix + (hostIsFirst ? escapeHostPart(pattern) : escapeWildcardPart(pattern, false)) + '(?:[\\/?#:]|$)';
   }
@@ -2064,7 +2090,10 @@
   }
 
   function cachedAnalyzeRule(rule) {
-    if (!validationCache.has(rule)) validationCache.set(rule, analyzeRule(rule));
+    if (!validationCache.has(rule)) {
+      try { validationCache.set(rule, analyzeRule(rule)); }
+      catch (e) { validationCache.set(rule, { valid: false, errors: [t('regexError')], warnings: [] }); }
+    }
     return validationCache.get(rule);
   }
 
@@ -2226,6 +2255,9 @@
           next = decodeRedirectTarget(urlObj.searchParams.get('url'));
         } else if (/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) && /^\/url\/?$/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('q') || urlObj.searchParams.get('url'));
+        } else if (/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) && /^(?:\/aclk|\/imgres|\/translate|\/pagead\/aclk)(?:\/|\?|$)/i.test(path)) {
+          const tryGoogleParam = (p) => { const v = urlObj.searchParams.get(p); if (v) { next = decodeRedirectTarget(v); return !!next; } return false; };
+          for (const p of ['adurl', 'imgurl', 'url', 'u', 'dest']) { if (tryGoogleParam(p)) break; }
         } else if (/(?:^|\.)(?:duckduckgo\.com|ddg\.gg)$/i.test(host) && /^\/l\/?$/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('uddg'));
         } else if (/(?:^|\.)(?:[a-z]{2,6}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) || /(?:^|\.)(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i.test(host)) {
@@ -2480,6 +2512,21 @@
         }
       } catch (_) {}
     }
+    if (foundEl && engine === 'google' && getSearchCategory() !== 'images') {
+      try {
+        const u = new URL(foundEl.href, location.origin);
+        if (/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(u.hostname)) {
+          const el = result.querySelector('.lJQCTe, .XVWGNd, .R8BTeb, span.ob9lvb, .eip8Bb');
+          const txt = el ? el.textContent.trim() : '';
+          const m = txt.match(/^https?:\/\/[^\s/"']+\/?/i) || txt.match(/^(?:[a-z0-9-]+\.)+[a-z]{2,}(?=\/|$)/i);
+          if (m) {
+            const fallback = /^https?:/i.test(m[0]) ? m[0] : 'https://' + m[0] + '/';
+            const host = (() => { try { return toASCIIHostname(new URL(fallback).hostname); } catch (_) { return ''; } })();
+            if (host && !/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host)) return { href: fallback, getAttribute: a => foundEl.getAttribute(a), setAttribute: (a, v) => foundEl.setAttribute(a, v) };
+          }
+        }
+      } catch (_) {}
+    }
     return foundEl;
   }
 
@@ -2621,6 +2668,7 @@
         if (radio) radio.checked = true;
       });
       inp.addEventListener('click', (e) => e.stopPropagation());
+      inp.addEventListener('input', () => { inp.style.borderColor = inp.value.trim().startsWith('#') ? '#e53935' : ''; });
       inp.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault(); e.stopPropagation(); const okBtn = panel.querySelector('#sfb-confirm-ok'); if (okBtn) okBtn.click();
@@ -2636,6 +2684,10 @@
       const ruleInput = panel.querySelector(`.sfb-confirm-rule[data-idx="${idx}"]`);
       const rule = (ruleInput ? ruleInput.value : '').trim();
       if (!rule) { close(); return; }
+      if (rule.startsWith('#')) {
+        if (ruleInput) { ruleInput.style.borderColor = '#e53935'; ruleInput.focus(); }
+        showToast(t('invalidRule'), 'error'); return;
+      }
       if (!validateRule(rule)) {
         showToast(t('invalidRule'), 'error'); return;
       }
@@ -2823,7 +2875,7 @@
   }
 
   function restoreAllHiddenParents() {
-    document.querySelectorAll('[data-blocker-yandex-parent], [data-blocker-google-parent]').forEach(restoreParentDisplay);
+    document.querySelectorAll('[data-blocker-yandex-parent], [data-blocker-google-parent], [data-serh-grid-item-hidden]').forEach(restoreParentDisplay);
   }
 
   function reconcileHiddenParents() {
@@ -2834,6 +2886,10 @@
     });
     document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
       if (parent.getAttribute('data-is-blocked') !== 'true' && googleResultBlocks(parent).some(visibleUnblocked)) restoreParentDisplay(parent);
+    });
+    document.querySelectorAll('[data-serh-grid-item-hidden]').forEach(cell => {
+      const stillBlocked = Array.from(cell.querySelectorAll('[data-is-blocked="true"]')).some(el => el.style.display === 'none');
+      if (!stillBlocked && !blockedShown()) restoreParentDisplay(cell);
     });
   }
 
@@ -2890,7 +2946,7 @@
     const matchResult = checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels); _resultRetryCounts.delete(result);
     const matchHL = matchResult && matchResult.highlight;
     if (matchHL) {
-      const color = currentConfig.highlightColors[matchHL] || '#CE2029';
+      const hlColor = currentConfig.highlightColors[matchHL]; const color = (typeof hlColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(hlColor)) ? hlColor : (DEFAULT_HIGHLIGHT_COLORS[matchHL] || '#CE2029');
       result.style.outline = `2px solid ${color}`; result.style.outlineOffset = '-2px';
       result.setAttribute('data-is-highlighted', 'true'); result.setAttribute('data-highlight-n', matchHL);
       if (matchResult.hlRule) { result.dataset.highlightRule = matchResult.hlRule; result.dataset.highlightSource = matchResult.hlSource || ''; }
@@ -2957,13 +3013,12 @@
           if (currentConfig.debug) {
             console.error('[屏蔽] 处理结果时出错:', result, e);
           }
-          scheduleResultRetry(result);
         }
         if (blocked) newlyBlocked++;
         if (result.hasAttribute('data-blocker-processed')) {
           observer.unobserve(result);
         } else {
-          result.removeAttribute('data-observed'); observer.unobserve(result);
+          result.removeAttribute('data-observed'); observer.unobserve(result); scheduleResultRetry(result);
         }
       }
     });
@@ -4579,7 +4634,7 @@
 
     const colors = currentConfig.highlightColors || {}; const sanitizeHex = (val, fallback) => (/^#[0-9A-Fa-f]{6}$/.test(String(val || '')) ? String(val).toUpperCase() : fallback); let rowsHtml = '';
     for (let i = 1; i <= 5; i++) {
-      const hex = sanitizeHex(colors[i], '#CE2029');
+      const hex = sanitizeHex(colors[i], DEFAULT_HIGHLIGHT_COLORS[i]);
       rowsHtml += `<div class="serh-hlcolor-row">
         <label>@${i}</label>
         <span class="serh-hlcolor-preview" id="serh-hlcolor-preview-${i}" style="background:${escHtml(hex)}"></span>
@@ -5063,7 +5118,7 @@
         onLoaded(String(ev.target.result || '')); cleanup();
       };
       reader.onerror = () => {
-        showToast(t('subImportFailed'), 'error'); cleanup();
+        showToast(t('fileImportFailed'), 'error'); cleanup();
       };
       reader.readAsText(file, 'UTF-8');
     };
@@ -5207,6 +5262,14 @@
     const restLines = lines.filter((_, idx) => !headerLineIndexes.has(idx)); return { config, rawScriptConfig, rawSelectors, restLines };
   }
 
+  function isNonRuleTextResponse(restLines, hasHeader = false) {
+    const lines = (Array.isArray(restLines) ? restLines : [])
+      .map((l) => String(l || '').trim())
+      .filter((l) => l.length > 0); if (lines.length === 0) return false; if (lines.some((l) => /<\s*\/?\s*(?:!doctype|html|head|body)\b/i.test(l))) return true;
+    const ruleLines = lines.filter((l) => !l.startsWith('#')); if (ruleLines.some((l) => validateRule(l))) return false; if (lines.some((l) => /<\s*\/?\s*[a-z!?][^>\n]*>/i.test(l))) return true;
+    if (ruleLines.length === 0) return false; return !hasHeader ? true : !ruleLines.some((l) => validateRule(l.trim()) || l.startsWith('#'));
+  }
+
   function timestampFilename(prefix, ext) {
     const d = new Date(), pad = (n) => String(n).padStart(2, '0');
     return `${prefix}-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.${ext}`;
@@ -5220,6 +5283,8 @@
   function importRulesFromFile() {
     pickTextFile('.txt,text/plain', (content) => {
       const parsedHeader = parseSyncHeader(content);
+      const hasHeader = !!(parsedHeader.rawScriptConfig || parsedHeader.rawSelectors);
+      if (isNonRuleTextResponse(parsedHeader.restLines, hasHeader)) { showToast(t('fileImportFailed'), 'error'); return; }
       const headerConfig = parsedHeader.config;
       if (headerConfig && typeof headerConfig === 'object' && !Array.isArray(headerConfig)) {
         const headerSelectors = parsedHeader.rawSelectors ? headerConfig.selectors : null;
@@ -5268,7 +5333,8 @@
 
     let _pendingRecords = []; let _mutationRafPending = false;
     const flushMutations = () => {
-      _mutationRafPending = false; const records = _pendingRecords; _pendingRecords = []; if (!records.length || !_engineSiteSetup) return; if (_domObserver) _domObserver.disconnect();
+      _mutationRafPending = false; const records = _pendingRecords; _pendingRecords = []; if (!records.length || !_engineSiteSetup) return;
+      if (!currentConfig.enabled) { _hrefChangedContainers.clear(); _contentChangedContainers.clear(); return; } if (_domObserver) _domObserver.disconnect();
       try {
         const selector = getContainerSelector(getSearchEngine());
         for (const m of records) {
