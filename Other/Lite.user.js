@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.7.1
+// @version      8.7.2
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了所有规则订阅/webdav相关内容。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了所有规则订阅/webdav相关内容。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version has removed all content related to Rule Subscriptions and WebDAV.
@@ -482,6 +482,19 @@
   const REGEX_CTX_B = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)$/i;
   const REGEX_CTX_C = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*=$/i;
   const RULE_REGEX_LIT_RE = /^\/(?:[^/\\[\]()]|\\.|\[(?:[^\]\\]|\\.)*\]|\((?:[^/\\[\]()]|\\.)*\))+\//;
+  const REGEX_CTX_D = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*(?:\^=|\$=|\*=|:)$/i;
+  function regexCloseAhead(str, pos) {
+    let inClass = false;
+    for (let j = pos + 1; j < str.length; j++) {
+      const ch = str[j];
+      if (ch === '\\') { j++; continue; }
+      if (ch === '\n') return false;
+      if (inClass) { if (ch === ']') inClass = false; continue; }
+      if (ch === '[') { inClass = true; continue; }
+      if (ch === '/') { let k = j + 1; while (k < str.length && /[a-z]/i.test(str[k])) k++; if (k >= str.length || /[\s)&|]/.test(str[k])) return true; }
+    }
+    return false;
+  }
 
   function isBadRegexTail(s) {
     if (!RULE_PREFIX_REGEX_RE.test(s)) return false;
@@ -526,7 +539,7 @@
       if (ch === '"') { inDQ = true; continue; }
       if (ch === '/' && !inRE) {
         const prev = str.slice(0, i).trimEnd();
-        if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(str.slice(i)))) { inRE = true; continue; }
+        if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(str.slice(i))) || (REGEX_CTX_D.test(prev) && regexCloseAhead(str, i))) { inRE = true; continue; }
       }
       if (justClosedIf) {
         if (/\s/.test(ch)) continue;
@@ -586,7 +599,7 @@
       if (ch === '"') { inDQ = true; continue; }
       if (ch === '/') {
         const prev = str.slice(0, i).trimEnd();
-        if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(str.slice(i)))) { inRE = true; continue; }
+        if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(str.slice(i))) || (REGEX_CTX_D.test(prev) && regexCloseAhead(str, i))) { inRE = true; continue; }
       }
       if (ch === '(') depth++;
       else if (ch === ')') { depth--; if (depth === 0) return i; }
@@ -809,7 +822,7 @@
         }
         if (ch === '/') {
           const prev = text.slice(Math.max(0, j - 64), j).trimEnd();
-          if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(text.slice(j, Math.min(n, j + 4096))))) {
+          if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(text.slice(j, Math.min(n, j + 4096)))) || (REGEX_CTX_D.test(prev) && regexCloseAhead(text, j))) {
             const reEnd = scanRegexLiteral(j, end);
             if (reEnd !== -1) { j = reEnd + 1; continue; }
             inRe = true; inClass = false;
@@ -2253,8 +2266,8 @@
           const uParam = urlObj.searchParams.get('u'); next = decodeBingCkTarget(uParam); if (!next && uParam) next = decodeRedirectTarget(uParam);
         } else if (/(?:^|\.)scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) && /\/scholar_url\/?$/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('url'));
-        } else if (/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) && /^\/url\/?$/i.test(path)) {
-          next = decodeRedirectTarget(urlObj.searchParams.get('q') || urlObj.searchParams.get('url'));
+        } else if (/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) && /^\/(?:url|goto)\/?$/i.test(path)) {
+          next = decodeRedirectTarget(urlObj.searchParams.get('q') || urlObj.searchParams.get('url') || urlObj.searchParams.get('u'));
         } else if (/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) && /^(?:\/aclk|\/imgres|\/translate|\/pagead\/aclk)(?:\/|\?|$)/i.test(path)) {
           const tryGoogleParam = (p) => { const v = urlObj.searchParams.get(p); if (v) { next = decodeRedirectTarget(v); return !!next; } return false; };
           for (const p of ['adurl', 'imgurl', 'url', 'u', 'dest']) { if (tryGoogleParam(p)) break; }
@@ -2293,6 +2306,15 @@
     return url;
   }
 
+  function isOpaqueRedirectUrl(url) {
+    if (!url) return false;
+    let urlObj = null; try { urlObj = new URL(url); } catch (_) { return false; }
+    const host = urlObj.hostname.replace(/\.$/, ''); if (!/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host)) return false;
+    if (!/^\/(?:url|goto)\/?$/i.test(urlObj.pathname)) return false;
+    const target = urlObj.searchParams.get('q') || urlObj.searchParams.get('url') || urlObj.searchParams.get('u');
+    return !decodeRedirectTarget(target);
+  }
+
   function getCleanUrl(link) {
     if (!link || !link.href) return '';
     let attr = '';
@@ -2329,6 +2351,7 @@
     try {
       domain = toASCIIHostname(new URL(url).hostname);
     } catch (e) {}
+    if (domain && isOpaqueRedirectUrl(url)) domain = '';
     return { url, domain };
   }
 
@@ -2514,15 +2537,33 @@
     }
     if (foundEl && engine === 'google' && getSearchCategory() !== 'images') {
       try {
-        const u = new URL(foundEl.href, location.origin);
-        if (/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(u.hostname)) {
-          const el = result.querySelector('.lJQCTe, .XVWGNd, .R8BTeb, span.ob9lvb, .eip8Bb');
-          const txt = el ? el.textContent.trim() : '';
-          const m = txt.match(/^https?:\/\/[^\s/"']+\/?/i) || txt.match(/^(?:[a-z0-9-]+\.)+[a-z]{2,}(?=\/|$)/i);
-          if (m) {
-            const fallback = /^https?:/i.test(m[0]) ? m[0] : 'https://' + m[0] + '/';
-            const host = (() => { try { return toASCIIHostname(new URL(fallback).hostname); } catch (_) { return ''; } })();
-            if (host && !/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host)) return { href: fallback, getAttribute: a => foundEl.getAttribute(a), setAttribute: (a, v) => foundEl.setAttribute(a, v) };
+        const isNotG = (h) => !!h && !/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(h);
+        if (/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(new URL(foundEl.href, location.origin).hostname) || isOpaqueRedirectUrl(foundEl.href)) {
+          let unwrapOk = false;
+          try { const t = unwrapRedirectUrl(foundEl.href); if (t && t !== foundEl.href && isNotG(toASCIIHostname(new URL(t).hostname))) unwrapOk = true; } catch (_) {}
+          if (!unwrapOk) {
+            const el = result.querySelector('.lJQCTe, .XVWGNd, .R8BTeb, span.ob9lvb, .eip8Bb');
+            const nodes = [];
+            if (el) {
+              nodes.push(el);
+              if (typeof el.closest === 'function') { const cite = el.closest('cite'); if (cite && cite !== el) nodes.push(cite); }
+            }
+            if (typeof result.querySelectorAll === 'function') { for (const cite of result.querySelectorAll('cite')) { if (!nodes.includes(cite)) nodes.push(cite); } }
+            for (const node of nodes) {
+              const txt = node && typeof node.textContent === 'string' ? node.textContent.trim() : '';
+              if (!txt) continue;
+              const um = txt.match(/^https?:\/\/[^\s'"<>]+/i);
+              const segs = um ? [] : txt.split(/\s*(?:›|»|>|\u2026|\.{3})\s*/).map(s => s.trim()).filter(Boolean);
+              let candidate = um ? um[0] : '';
+              if (!candidate && segs.length) {
+                const dm = segs[0].match(/^((?:[a-z0-9-]+\.)+[a-z]{2,})(?::\d+)?(?:[/?#].*)?$/i);
+                if (dm) { const rest = segs.slice(1).map(s => s.replace(/^\/+|\/+$/g, '')).filter(Boolean); candidate = 'https://' + dm[1] + (rest.length ? '/' + rest.join('/') : '/'); }
+              }
+              if (!candidate) continue;
+              let ok = false;
+              try { ok = isNotG(toASCIIHostname(new URL(candidate).hostname)); } catch (_) {}
+              if (ok) return { href: candidate, getAttribute: a => foundEl.getAttribute(a), setAttribute: (a, v) => foundEl.setAttribute(a, v) };
+            }
           }
         }
       } catch (_) {}
@@ -4880,7 +4921,7 @@
       if (typeof def.match === 'string' && def.match) {
         const lit = def.match.match(/^\/(.*)\/([a-z]*)$/i); const badLit = lit ? getInvalidRegexFlags(lit[2]) : '';
         if (badLit) errors.push(t('invalidRegexFlags', { flags: badLit }));
-        else { try { new RegExp(def.match); } catch (e) { errors.push(t('selectorInvalidRegex', { key })); } }
+        else { try { lit ? new RegExp(lit[1], lit[2].toLowerCase()) : new RegExp(def.match); } catch (e) { errors.push(t('selectorInvalidRegex', { key })); } }
       } else if (def.match && typeof def.match === 'object' && typeof def.match.source === 'string' && def.match.source) {
         try { new RegExp(def.match.source, String(def.match.flags || '').toLowerCase().replace(/[^imsu]/g, '')); } catch (e) { errors.push(t('selectorInvalidRegex', { key })); }
         const badFlags = getInvalidRegexFlags(String(def.match.flags || '')); if (badFlags) errors.push(t('invalidRegexFlags', { flags: badFlags }));
@@ -4916,7 +4957,8 @@
   }
 
   function matchDefToParts(match) {
-    if (typeof match === 'string') return { source: match, flags: '' }; if (match instanceof RegExp) return { source: match.source, flags: match.flags || '' };
+    if (typeof match === 'string') { const m = match.match(/^\/(.*)\/([a-z]*)$/i); return m ? { source: m[1], flags: m[2].toLowerCase() } : { source: match, flags: '' }; }
+    if (match instanceof RegExp) return { source: match.source, flags: match.flags || '' };
     if (match && typeof match === 'object' && typeof match.source === 'string') return { source: match.source, flags: String(match.flags || '').toLowerCase() }; return { source: '', flags: '' };
   }
 
