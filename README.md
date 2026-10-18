@@ -46,7 +46,7 @@ Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、S
 1. 规则订阅更新同样后台运行，每12h拉取一次，支持`UTF-8`编码的纯文本远程链接如 [rules.txt](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt) ，订阅规则在本地规则后追加应用
 2. 兼容`.yaml`uBlacklist列表格式（`name`/`rules`/`blacklist`/`whitelist`/`matches`项）
 3. 脚本扩展有限不支持`##`/`#@#`等DOM/uBO规则，通过订阅导入会自动过滤
-4. 订阅链接非github源时需要跨域请求权限，若有权限申请弹窗选`总是允许`
+4. 订阅链接非github源时需要跨域请求权限，若有权限申请弹窗选`总是允许全部`
 
 ### 1.5 其他：
 
