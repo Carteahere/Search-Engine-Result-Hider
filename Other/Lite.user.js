@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.7.2
+// @version      8.7.3
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了所有规则订阅/webdav相关内容。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了所有规则订阅/webdav相关内容。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version has removed all content related to Rule Subscriptions and WebDAV.
@@ -53,7 +53,9 @@
   function normalizeConfig(cfg) {
     if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) cfg = {};
     if (!Array.isArray(cfg.rules)) cfg.rules = []; cfg.rules = cfg.rules.filter(rule => typeof rule === 'string');
-    for (const k in CFG_DEFAULTS) if (cfg[k] === undefined) cfg[k] = CFG_DEFAULTS[k];
+    if (typeof cfg.bubbleSize !== 'number' || !Number.isFinite(cfg.bubbleSize)) { const size = parseInt(cfg.bubbleSize, 10); cfg.bubbleSize = Number.isFinite(size) ? size : 30; }
+    if (cfg.bubbleSize < 20) cfg.bubbleSize = 30;
+    for (const k in CFG_DEFAULTS) if (cfg[k] === undefined || cfg[k] === null) cfg[k] = CFG_DEFAULTS[k];
     if (!cfg.highlightColors || typeof cfg.highlightColors !== 'object') cfg.highlightColors = {...DEFAULT_HIGHLIGHT_COLORS};
     else { const colors = {...DEFAULT_HIGHLIGHT_COLORS}; for (let i = 1; i <= 5; i++) { if (/^#[0-9A-Fa-f]{6}$/.test(String(cfg.highlightColors[i] || ''))) colors[i] = String(cfg.highlightColors[i]).toUpperCase(); } cfg.highlightColors = colors; }
     return cfg;
@@ -325,13 +327,11 @@
       bubbleStatsHint: '点击打开统计，长按打开面板',
       bubbleToggleHint: '点击显示/隐藏屏蔽结果，长按打开面板',
       stateEnabled: '启用', stateDisabled: '关闭',
-      subImportFailed: '导入失败，请检查链接或网络状态',
-      fileImportFailed: '导入失败，文件内容不是有效规则',
+      subImportFailed: '导入失败，请检查链接或网络状态', whitelistResult: '该结果为白名单',
+      fileImportFailed: '导入失败，文件内容不是有效规则', importClearConfirm: '导入的文件不含任何规则，是否清空本地全部规则？',
       highlightRules: '高亮规则', menuHighlightColor: '🎨 高亮颜色',
       hlColorTitle: '高亮颜色', hlColorReset: '重置', resetPending: '已重置，保存后生效', hlColorHint: '点击色块快速保存',
-      errorWord: '错误', warningWord: '警告',
-      statsWarnings: '发现 {count} 个规则警告: ',
-      duplicateRules: '重复规则', invalidRule: '规则无效',
+      errorWord: '错误', duplicateRules: '重复规则', invalidRule: '规则无效',
       hlColorError: '高亮级别需在 1-5 之间',
       ifParenError: '@if(...) 括号未闭合',
       condRegexError: '条件正则无效: {part}',
@@ -382,13 +382,11 @@
       bubbleStatsHint: 'Click to open stats, long-press to open panel',
       bubbleToggleHint: 'Click to show/hide blocked results, long-press to open panel',
       stateEnabled: 'Enabled', stateDisabled: 'Disabled',
-      subImportFailed: 'Import failed, check URL or network',
-      fileImportFailed: 'Import failed, file content is not valid rules',
+      subImportFailed: 'Import failed, check URL or network', whitelistResult: 'This result is whitelisted',
+      fileImportFailed: 'Import failed, file content is not valid rules', importClearConfirm: 'The imported file contains no rules. Clear all local rules?',
       highlightRules: 'Highlight Rules', menuHighlightColor: '🎨 Highlight Colors',
       hlColorTitle: 'Highlight Colors', hlColorReset: 'Reset', resetPending: 'Reset, takes effect after saving', hlColorHint: 'Click a swatch to apply it quickly.',
-      errorWord: 'Error', warningWord: 'Warning',
-      statsWarnings: 'Found {count} rule warnings: ',
-      duplicateRules: 'Duplicate Rules', invalidRule: 'Invalid rule',
+      duplicateRules: 'Duplicate Rules', invalidRule: 'Invalid rule', errorWord: 'Error',
       hlColorError: 'Highlight level must be 1-5',
       ifParenError: 'Unbalanced @if(...) parentheses',
       condRegexError: 'Invalid condition regex: {part}',
@@ -571,8 +569,8 @@
         if (ch === '#' && ifDepth === 0) {
           const prev = str[i - 1];
           if (prev === undefined || /\s/.test(prev)) {
-            if (/^#(?:#|@#|@?[$?%]{1,2}#)/.test(str.slice(i))) continue;
             let end = i; while (end > 0 && /\s/.test(str[end - 1])) end--;
+            if (/^#(?:#|@#|@?[$?%]{1,2}#)/.test(str.slice(i)) && !isScriptRuleLine(str.slice(0, end))) continue;
             if (pfxStart !== -1 && isBadRegexTail(str.slice(pfxStart, end)) && !isBadRegexTail(str.slice(pfxStart))) continue;
             return { stripped: str.slice(0, end), occurrences };
           }
@@ -655,7 +653,7 @@
         if (!node) {
           node = document.createElement('div'); node.style.position = 'relative'; node.style.color = '#a0aec0'; node.style.height = '1.4em'; frag.appendChild(node);
         }
-        const analysis = target.syntaxCheck && currentConfig.errorDetection !== false ? cachedAnalyzeRule(lines[i]) : { valid: true, errors: [], warnings: [] }; const valid = analysis.valid;
+        const analysis = target.syntaxCheck && currentConfig.errorDetection !== false ? cachedAnalyzeRule(lines[i]) : { valid: true, errors: [] }; const valid = analysis.valid;
         const errMsg = valid ? '' : analysis.errors.join(' | ');
         const html = `${i + 1}${valid ? '' : `<span class="serh-line-error" title="${escHtml(errMsg)}" data-error="${escHtml(errMsg)}" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 10px; background: #edf2f7; z-index: 1; cursor: pointer;">⚠️</span>`}`;
         if (node.dataset.v !== html) {
@@ -1136,6 +1134,10 @@
     return lines.map(line => line.trim()).filter(line => line.length > 0);
   }
 
+  function hasEffectiveRules(lines) {
+    return (Array.isArray(lines) ? lines : []).some(line => { const s = String(line || '').trim(); return s && !s.startsWith('#') && !!stripRuleComment(s).trim(); });
+  }
+
   function getRuleKey(r) {
     if (!r || typeof r !== 'string') return ''; const trimmed = r.trim(); if (trimmed.startsWith('#')) return trimmed; const stripped = stripRuleComment(trimmed); return stripped.trim();
   }
@@ -1589,7 +1591,7 @@
   }
 
   function validateCondition(condStr) {
-    const errors = []; const warnings = []; const { errors: rawErrors } = analyzeCondExpr(condStr);
+    const errors = []; const { errors: rawErrors } = analyzeCondExpr(condStr);
     for (const e of rawErrors) {
       if (e.kind === 'unknown') {
         errors.push(t('unknownIfCondition', { part: e.part }));
@@ -1601,57 +1603,57 @@
         const display = condStr.length > 60 ? condStr.slice(0, 60) + '…' : condStr; errors.push(t('condExprError', { part: display }));
       }
     }
-    return { errors, warnings };
+    return { errors };
   }
 
   function analyzeRule(rule) {
-    if (!rule || rule.trim() === '') return { valid: true, errors: [], warnings: [] };
+    if (!rule || rule.trim() === '') return { valid: true, errors: [] };
 
-    let ruleToCheck = rule.trim(); if (ruleToCheck.startsWith('#')) return { valid: true, errors: [], warnings: [] }; ruleToCheck = stripRuleComment(ruleToCheck);
-    if (!ruleToCheck) return { valid: true, errors: [], warnings: [] }; const errors = []; const warnings = [];
-    let hlN = null; const hlValMatch = ruleToCheck.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|[(!])/);
+    let ruleToCheck = rule.trim(); if (ruleToCheck.startsWith('#')) return { valid: true, errors: [] }; ruleToCheck = stripRuleComment(ruleToCheck);
+    if (!ruleToCheck) return { valid: true, errors: [] }; const errors = [];
+    let hlN = null; const hlValMatch = ruleToCheck.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|(?:[(!]|@if\b))/i);
     if (hlValMatch) {
       const N = parseInt(hlValMatch[1]);
       if (N < 1 || N > 5) {
-        return { valid: false, errors: [t('hlColorError')], warnings };
+        return { valid: false, errors: [t('hlColorError')] };
       }
-      hlN = N; ruleToCheck = ruleToCheck.substring(hlValMatch[0].length).trim(); if (!ruleToCheck) return { valid: false, errors: [t('emptyPrefixRule')], warnings };
+      hlN = N; ruleToCheck = ruleToCheck.substring(hlValMatch[0].length).trim(); if (!ruleToCheck) return { valid: false, errors: [t('emptyPrefixRule')] };
     }
 
-    if (/^@@if\b/i.test(ruleToCheck)) return { valid: false, errors: [t('invalidUrlWildcard', { rule: ruleToCheck })], warnings };
+    if (/^@@if\b/i.test(ruleToCheck)) return { valid: false, errors: [t('invalidUrlWildcard', { rule: ruleToCheck })] };
     const hasIfCond = /@if\s*\(/i.test(ruleToCheck);
     if (hasIfCond) {
         let unbalanced = false;
         for (const occ of findIfOccurrences(ruleToCheck)) {
           if (!extractBalancedParens(ruleToCheck, occ.condStart)) { unbalanced = true; break; }
         }
-        if (unbalanced) return { valid: false, errors: [t('ifParenError')], warnings };
+        if (unbalanced) return { valid: false, errors: [t('ifParenError')] };
         for (const cond of extractIfConditions(ruleToCheck)) {
           if (!cond.trim()) {
             errors.push(t('emptyIfCondition')); continue;
           }
-          const r = validateCondition(cond); errors.push(...r.errors); warnings.push(...r.warnings);
+          const r = validateCondition(cond); errors.push(...r.errors); 
         }
     }
 
     const stripped = stripIfConditions(ruleToCheck); ruleToCheck = stripped.coreRule;
     if (ruleToCheck.startsWith('@')) {
       if (ruleToCheck.startsWith('@@')) {
-        errors.push(t('invalidUrlWildcard', { rule: ruleToCheck })); return { valid: false, errors, warnings };
+        errors.push(t('invalidUrlWildcard', { rule: ruleToCheck })); return { valid: false, errors };
       }
       ruleToCheck = ruleToCheck.substring(1).trim();
       if (!ruleToCheck) {
-        if (hasIfCond) return { valid: errors.length === 0, errors, warnings }; return { valid: false, errors: [t('emptyPrefixRule')], warnings };
+        if (hasIfCond) return { valid: errors.length === 0, errors }; return { valid: false, errors: [t('emptyPrefixRule')] };
       }
     }
 
     if (!ruleToCheck) {
-      return { valid: errors.length === 0, errors, warnings };
+      return { valid: errors.length === 0, errors };
     }
 
-    if (isElementRuleLine(ruleToCheck)) { errors.push(t('elementRuleUnsupported')); return { valid: false, errors, warnings }; }
+    if (isElementRuleLine(ruleToCheck)) { errors.push(t('elementRuleUnsupported')); return { valid: false, errors }; }
     if (looksLikeCondExpr(ruleToCheck)) {
-      const r = validateCondition(ruleToCheck); errors.push(...r.errors); warnings.push(...r.warnings); return { valid: errors.length === 0, errors, warnings };
+      const r = validateCondition(ruleToCheck); errors.push(...r.errors); return { valid: errors.length === 0, errors };
     }
 
     if (ruleToCheck.startsWith('/') && ruleToCheck.lastIndexOf('/') === 0) {
@@ -1662,32 +1664,32 @@
       if (ruleToCheck.startsWith('/') && ruleToCheck.lastIndexOf('/') > 0) {
         const { pattern, flags } = ruleToRegex(ruleToCheck);
         if (!pattern.trim()) {
-          errors.push(t('regexError')); return { valid: false, errors, warnings };
+          errors.push(t('regexError')); return { valid: false, errors };
         }
         const invalidFlags = getInvalidRegexFlags(flags);
         if (invalidFlags) {
-          errors.push(t('invalidRegexFlags', { flags: invalidFlags })); return { valid: false, errors, warnings };
+          errors.push(t('invalidRegexFlags', { flags: invalidFlags })); return { valid: false, errors };
         }
         new RegExp(pattern, String(flags || '').toLowerCase());
       } else if (/^(?:text|title)\//i.test(ruleToCheck)) {
         const prefixLen = /^title\//i.test(ruleToCheck) ? 6 : 5; const { pattern, flags, flagsCandidate, unclosed } = parsePrefixedRegexRule(ruleToCheck, prefixLen);
         if (unclosed) {
-          errors.push(t('regexError')); return { valid: false, errors, warnings };
+          errors.push(t('regexError')); return { valid: false, errors };
         }
         if (!pattern.trim()) {
-          errors.push(t('emptyPrefixRule')); return { valid: false, errors, warnings };
+          errors.push(t('emptyPrefixRule')); return { valid: false, errors };
         }
         const invalidFlags = getInvalidRegexFlags(flags);
         if (invalidFlags) {
-          errors.push(t('invalidRegexFlags', { flags: invalidFlags })); return { valid: false, errors, warnings };
+          errors.push(t('invalidRegexFlags', { flags: invalidFlags })); return { valid: false, errors };
         }
         if (flagsCandidate && (isFlagsCandidateError(flagsCandidate) || (/^[imsu]+$/i.test(flagsCandidate) && getInvalidRegexFlags(flagsCandidate)))) {
-          errors.push(t('invalidRegexFlags', { flags: getInvalidRegexFlags(flagsCandidate) })); return { valid: false, errors, warnings };
+          errors.push(t('invalidRegexFlags', { flags: getInvalidRegexFlags(flagsCandidate) })); return { valid: false, errors };
         }
         new RegExp(pattern, String(flags || '').toLowerCase());
       } else {
         if (!validateUrlWildcard(ruleToCheck)) {
-          errors.push(t('invalidUrlWildcard', { rule: ruleToCheck })); return { valid: false, errors, warnings };
+          errors.push(t('invalidUrlWildcard', { rule: ruleToCheck })); return { valid: false, errors };
         }
         new RegExp(wildcardToRegex(ruleToCheck), 'i');
       }
@@ -1695,7 +1697,7 @@
       errors.push((ruleToCheck.startsWith('/') || /^(?:text|title)\//i.test(ruleToCheck)) ? t('regexError') : t('urlError'));
     }
 
-    return { valid: errors.length === 0, errors, warnings };
+    return { valid: errors.length === 0, errors };
   }
 
   function validateRule(rule) {
@@ -1945,6 +1947,9 @@
     if (compileRuleRegex._memo) compileRuleRegex._memo.clear();
     compiledRules = newCompiledRules();
     const allRules = currentConfig.rules;
+    const hlSets = {domains: compiledRules.highlightDomains, condDomains: compiledRules.highlightConditionalDomains, urls: compiledRules.highlightUrls, titles: compiledRules.highlightTitles, texts: compiledRules.highlightTexts, condRules: compiledRules.highlightConditionalRules};
+    const wlSets = {domains: compiledRules.whitelistDomains, condDomains: compiledRules.whitelistConditionalDomains, urls: compiledRules.whitelistUrlPatterns, titles: compiledRules.whitelistTitlePatterns, texts: compiledRules.whitelistTextPatterns, condRules: compiledRules.whitelistConditionalRules};
+    const blSets = {domains: compiledRules.domains, condDomains: compiledRules.conditionalDomains, urls: compiledRules.urls, titles: compiledRules.titles, texts: compiledRules.texts, condRules: compiledRules.conditionalRules};
 
     allRules.forEach((rule, ruleIndex) => {
       if (typeof rule !== 'string') { if (currentConfig.debug) console.warn('非字符串规则项, 已跳过:', rule); return; }
@@ -1961,47 +1966,48 @@
       const isLocal = true;
       const source = t('localRule');
 
-      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|[(!])/);
+      const routeRule = (sets, parsed, coreRule, extra) => {
+        const hasDynamic = parsed.dynamicConditions.length > 0;
+        const base = {originalRule: rule, source, isLocal, ...extra};
+        if (!coreRule) {
+          if (parsed.standaloneExpr || hasDynamic) sets.condRules.push({type: 'expr', conditions: parsed.dynamicConditions, ...base});
+          return;
+        }
+        if (!coreRule.startsWith('/') && !/^text\//i.test(coreRule) && !/^title\//i.test(coreRule)) {
+          const dm = matchSimpleDomain(coreRule);
+          if (dm) {
+            const map = hasDynamic ? sets.condDomains : sets.domains;
+            if (!map.has(dm.domain)) map.set(dm.domain, []);
+            map.get(dm.domain).push(hasDynamic
+              ? {type: dm.domainType, domainType: dm.domainType, domain: dm.domain, conditions: parsed.dynamicConditions, ...base}
+              : {type: dm.domainType, ...base});
+            return;
+          }
+        }
+        try {
+          const compiled = compileRuleRegex(coreRule);
+          if (hasDynamic) sets.condRules.push({type: compiled.type, regex: compiled.regex, conditions: parsed.dynamicConditions, ...base});
+          else (compiled.type === 'title' ? sets.titles : compiled.type === 'text' ? sets.texts : sets.urls).push({regex: compiled.regex, ...base});
+        } catch (e) {
+          if (currentConfig.debug) console.warn('规则编译失败:', rule, e);
+        }
+      };
+
+      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|(?:[(!]|@if\b))/i);
       if (hlMatch) {
-        const N = parseInt(hlMatch[1]); if (N < 1 || N > 5) return; let hlRule = rule.substring(hlMatch[0].length).trim(); if (!hlRule) return; let parsed;
+        const N = parseInt(hlMatch[1]); if (N < 1 || N > 5) return;
+        const hlRule = rule.substring(hlMatch[0].length).trim(); if (!hlRule) return;
+        let parsed;
         try {
           parsed = parseRuleWithConditions(hlRule);
         } catch (e) {
           if (currentConfig.debug) console.warn('高亮规则解析失败:', hlRule, e); return;
         }
-        if (!parsed.staticPass) return; let coreRule = parsed.coreRule;
+        if (!parsed.staticPass) return;
+        let coreRule = parsed.coreRule;
         const highlightWhitelist = coreRule.startsWith('@') && !coreRule.startsWith('@@');
         if (highlightWhitelist) coreRule = coreRule.substring(1).trim();
-
-        if (!coreRule && (parsed.standaloneExpr || parsed.dynamicConditions.length)) {
-          compiledRules.highlightConditionalRules.push({type: 'expr', conditions: parsed.dynamicConditions, originalRule: rule, N, source, isLocal});
-          if (!highlightWhitelist) return;
-        } else if (coreRule) {
-          const dm = matchSimpleDomain(coreRule);
-          if (dm) {
-            if (!parsed.dynamicConditions.length) {
-              if (!compiledRules.highlightDomains.has(dm.domain))
-                compiledRules.highlightDomains.set(dm.domain, []); compiledRules.highlightDomains.get(dm.domain).push({N, type: dm.domainType, originalRule: rule, source, isLocal});
-            } else {
-              const hlCondRule = {type: 'domain', domain: dm.domain, N, conditions: parsed.dynamicConditions, domainType: dm.domainType, originalRule: rule, source, isLocal};
-              if (!compiledRules.highlightConditionalDomains.has(dm.domain))
-                compiledRules.highlightConditionalDomains.set(dm.domain, []); compiledRules.highlightConditionalDomains.get(dm.domain).push(hlCondRule);
-            }
-          } else {
-            try {
-              const compiled = compileRuleRegex(coreRule); const ruleObj = {type: compiled.type, regex: compiled.regex, conditions: parsed.dynamicConditions, originalRule: rule, N, source, isLocal};
-              if (!parsed.dynamicConditions.length) {
-                if (compiled.type === 'url' || compiled.type === 'regex') compiledRules.highlightUrls.push({regex: compiled.regex, originalRule: rule, N, source, isLocal});
-                else if (compiled.type === 'title') compiledRules.highlightTitles.push({regex: compiled.regex, originalRule: rule, N, source, isLocal});
-                else if (compiled.type === 'text') compiledRules.highlightTexts.push({regex: compiled.regex, originalRule: rule, N, source, isLocal});
-              } else {
-                compiledRules.highlightConditionalRules.push(ruleObj);
-              }
-            } catch (e) {
-              if (currentConfig.debug) console.warn('高亮规则编译失败:', hlRule, e);
-            }
-          }
-        }
+        routeRule(hlSets, parsed, coreRule, {N});
         if (!highlightWhitelist) return;
         rule = hlRule;
       }
@@ -2016,88 +2022,13 @@
       }
       if (!parsed.staticPass) return;
 
-      const coreRule = parsed.coreRule; const hasDynamic = parsed.dynamicConditions.length > 0;
+      const coreRule = parsed.coreRule;
       if (coreRule.startsWith('@@')) return;
       if (coreRule.startsWith('@')) {
-        const simpleDomain = extractSimpleWhitelistDomain(coreRule);
-        if (simpleDomain) {
-          if (!hasDynamic) {
-            if (!compiledRules.whitelistDomains.has(simpleDomain.domain))
-              compiledRules.whitelistDomains.set(simpleDomain.domain, []); compiledRules.whitelistDomains.get(simpleDomain.domain).push({type: simpleDomain.type, originalRule: rule, source, isLocal});
-          } else {
-            if (!compiledRules.whitelistConditionalDomains.has(simpleDomain.domain))
-              compiledRules.whitelistConditionalDomains.set(simpleDomain.domain, []);
-            compiledRules.whitelistConditionalDomains.get(simpleDomain.domain).push({type: simpleDomain.type, conditions: parsed.dynamicConditions, originalRule: rule, source, isLocal});
-          }
-        } else {
-          const whitelistRule = coreRule.substring(1).trim();
-          if (!whitelistRule) {
-            if (parsed.standaloneExpr || hasDynamic) {
-              compiledRules.whitelistConditionalRules.push({type: 'expr', conditions: parsed.dynamicConditions, originalRule: rule, source, isLocal});
-            }
-            return;
-          }
-          try {
-            const compiled = compileRuleRegex(whitelistRule);
-            if (!hasDynamic) {
-              if (compiled.type === 'title') {
-                compiledRules.whitelistTitlePatterns.push({regex: compiled.regex, originalRule: rule, source, isLocal});
-              } else if (compiled.type === 'text') {
-                compiledRules.whitelistTextPatterns.push({regex: compiled.regex, originalRule: rule, source, isLocal});
-              } else {
-                compiledRules.whitelistUrlPatterns.push({regex: compiled.regex, originalRule: rule, source, isLocal});
-              }
-            } else {
-              compiledRules.whitelistConditionalRules.push({type: compiled.type, regex: compiled.regex, conditions: parsed.dynamicConditions, originalRule: rule, source, isLocal});
-            }
-          } catch (e) {
-            if (currentConfig.debug) console.warn('白名单规则预编译失败:', rule, e);
-          }
-        }
+        routeRule(wlSets, parsed, coreRule.substring(1).trim());
         return;
       }
-
-      let ruleObj = {
-        originalRule: rule,
-        source: source,
-        isLocal: isLocal,
-        conditions: parsed.dynamicConditions
-      };
-
-      if (!coreRule) {
-        if (parsed.standaloneExpr || hasDynamic) {
-          ruleObj.type = 'expr'; compiledRules.conditionalRules.push(ruleObj);
-        }
-        return;
-      }
-
-      if (!coreRule.startsWith('/') && !/^text\//i.test(coreRule) && !/^title\//i.test(coreRule)) {
-        const dm = matchSimpleDomain(coreRule);
-        if (dm) {
-          ruleObj.type = 'domain'; ruleObj.domain = dm.domain; ruleObj.domainType = dm.domainType;
-          if (!hasDynamic) {
-            if (!compiledRules.domains.has(dm.domain))
-              compiledRules.domains.set(dm.domain, []); compiledRules.domains.get(dm.domain).push({type: dm.domainType, originalRule: rule, source, isLocal});
-          } else {
-            if (!compiledRules.conditionalDomains.has(dm.domain))
-              compiledRules.conditionalDomains.set(dm.domain, []); compiledRules.conditionalDomains.get(dm.domain).push(ruleObj);
-          }
-          return;
-        }
-      }
-
-      try {
-        const compiled = compileRuleRegex(coreRule); ruleObj.type = compiled.type; ruleObj.regex = compiled.regex;
-        if (!hasDynamic) {
-          if (compiled.type === 'text') compiledRules.texts.push({regex: compiled.regex, originalRule: rule, source, isLocal});
-          else if (compiled.type === 'title') compiledRules.titles.push({regex: compiled.regex, originalRule: rule, source, isLocal});
-          else compiledRules.urls.push({regex: compiled.regex, originalRule: rule, source, isLocal});
-        } else {
-          compiledRules.conditionalRules.push(ruleObj);
-        }
-      } catch (e) {
-        if (currentConfig.debug) console.warn('规则预编译失败:', rule, e);
-      }
+      routeRule(blSets, parsed, coreRule);
     });
     compiledRules.indexSignature = signature;
   }
@@ -2105,7 +2036,7 @@
   function cachedAnalyzeRule(rule) {
     if (!validationCache.has(rule)) {
       try { validationCache.set(rule, analyzeRule(rule)); }
-      catch (e) { validationCache.set(rule, { valid: false, errors: [t('regexError')], warnings: [] }); }
+      catch (e) { validationCache.set(rule, { valid: false, errors: [t('regexError')] }); }
     }
     return validationCache.get(rule);
   }
@@ -2182,7 +2113,7 @@
         scanPatterns(compiledRules.whitelistUrlPatterns, url) ||
         scanPatterns(compiledRules.whitelistTitlePatterns, title) ||
         scanPatterns(compiledRules.whitelistTextPatterns, snippet) ||
-        scanConditionalDomains(compiledRules.whitelistConditionalDomains, (it, lv) => matchDomainEntryType(it.type, lv, lowerDomain)) ||
+        scanConditionalDomains(compiledRules.whitelistConditionalDomains, (it, lv) => matchDomainEntryType(it.domainType, lv, lowerDomain)) ||
         scanConditionalRules(compiledRules.whitelistConditionalRules);
     };
     const findBlocked = () => {
@@ -2194,16 +2125,16 @@
         scanConditionalRules(compiledRules.conditionalRules);
     };
 
-    let whitelistHit = findWhitelist(); let whitelisted = !!whitelistHit; let blockedInfo = null; const toBlockedInfo = (item) => ({ rule: item.originalRule, source: item.source });
+    let whitelistHit = findWhitelist(); let whitelisted = !!whitelistHit; let blockedInfo = null; const toBlockedInfo = (item) => ({ rule: item.originalRule, source: item.source, sourceKey: 'local' });
     if (!whitelisted) {
       const item = findBlocked(); if (item) blockedInfo = toBlockedInfo(item);
     }
 
-    const toHlInfo = () => (hlEntry ? {hlRule: hlEntry.originalRule, hlSource: hlEntry.source} : {});
-    if (highlightN && blockedInfo) return {highlight: highlightN, blocked: true, rule: blockedInfo.rule, source: blockedInfo.source, ...toHlInfo()};
-    if (blockedInfo) return {blocked: true, rule: blockedInfo.rule, source: blockedInfo.source};
+    const toHlInfo = () => (hlEntry ? {hlRule: hlEntry.originalRule, hlSource: hlEntry.source, hlSourceKey: hlEntry.sourceKey || 'local'} : {});
+    if (highlightN && blockedInfo) return {highlight: highlightN, blocked: true, rule: blockedInfo.rule, source: blockedInfo.source, sourceKey: blockedInfo.sourceKey, ...toHlInfo()};
+    if (blockedInfo) return {blocked: true, rule: blockedInfo.rule, source: blockedInfo.source, sourceKey: blockedInfo.sourceKey};
     if (whitelistHit) {
-      const hit = {whitelisted: true, rule: whitelistHit.originalRule, source: whitelistHit.source};
+      const hit = {whitelisted: true, rule: whitelistHit.originalRule, source: whitelistHit.source, sourceKey: whitelistHit.sourceKey || 'local'};
       if (highlightN) { hit.highlight = highlightN; Object.assign(hit, toHlInfo()); }
       return hit;
     }
@@ -2792,6 +2723,9 @@
         if (isEngineSelfDomain(targetDomain)) {
           showToast(t('cannotBlockCurrentSite', { domain: targetDomain }), 'error'); return;
         }
+        if (result.dataset.whitelistRule && (result.dataset.whitelistSourceKey || 'local') === 'local') {
+          showToast(t('whitelistResult'), 'info'); return;
+        }
       }
 
       if (isBlocked) {
@@ -2846,8 +2780,8 @@
   }
 
   function clearMatchedData(result) {
-    result.removeAttribute('data-matched-rule'); result.removeAttribute('data-matched-source');
-    result.removeAttribute('data-whitelist-rule'); result.removeAttribute('data-whitelist-source');
+    result.removeAttribute('data-matched-rule'); result.removeAttribute('data-matched-source'); result.removeAttribute('data-matched-source-key');
+    result.removeAttribute('data-whitelist-rule'); result.removeAttribute('data-whitelist-source'); result.removeAttribute('data-whitelist-source-key');
   }
 
   function saveOriginalDisplay(el) {
@@ -2880,7 +2814,7 @@
 
   function resetResultStyles(result) {
     restoreResultExtraElements(result); restoreResultCollapse(result); _hrefUrlCache.delete(result); _resultContentCache.delete(result); _resultRetryCounts.delete(result); result.removeAttribute('data-blocker-processed');
-    result.removeAttribute('data-is-blocked'); result.removeAttribute('data-is-highlighted'); result.removeAttribute('data-highlight-n'); result.removeAttribute('data-highlight-rule'); result.removeAttribute('data-highlight-source'); clearMatchedData(result);
+    result.removeAttribute('data-is-blocked'); result.removeAttribute('data-is-highlighted'); result.removeAttribute('data-highlight-n'); result.removeAttribute('data-highlight-rule'); result.removeAttribute('data-highlight-source'); result.removeAttribute('data-highlight-source-key'); clearMatchedData(result);
     result.classList.remove('serh-blocked-visible'); result.classList.remove('serh-blocked-collapsed'); result.style.outline = ''; result.style.outlineOffset = ''; const origDisplay = result.getAttribute('data-serh-orig-display');
     if (origDisplay !== null) { result.style.display = origDisplay; result.removeAttribute('data-serh-orig-display'); }
     if (result.parentElement && result.parentElement.dataset.blockerYandexParent) {
@@ -2890,7 +2824,7 @@
       const parentOrig = parent.getAttribute('data-serh-orig-display');
       if (stillHasBlockedHidden) {
         parent.style.display = 'none';
-      } else {
+      } else if (parent.getAttribute('data-is-blocked') !== 'true') {
         parent.style.display = parentOrig !== null ? parentOrig : ''; parent.removeAttribute('data-blocker-yandex-parent'); parent.removeAttribute('data-serh-orig-display');
       }
     }
@@ -2912,7 +2846,7 @@
 
   function restoreParentDisplay(parent) {
     const orig = parent.getAttribute('data-serh-orig-display'); parent.style.display = orig !== null ? orig : ''; parent.removeAttribute('data-blocker-yandex-parent');
-    parent.removeAttribute('data-blocker-google-parent'); parent.removeAttribute('data-serh-orig-display');
+    parent.removeAttribute('data-blocker-google-parent'); parent.removeAttribute('data-serh-grid-item-hidden'); parent.removeAttribute('data-serh-orig-display');
   }
 
   function restoreAllHiddenParents() {
@@ -2945,11 +2879,8 @@
           console.error('[屏蔽] 处理结果时出错:', container, e);
         }
       }
-      if (!container.hasAttribute('data-blocker-processed')) {
-        resultObserver.observe(container);
-      } else {
-        container.setAttribute('data-observed', 'true');
-      }
+      container.setAttribute('data-observed', 'true');
+      if (!container.hasAttribute('data-blocker-processed')) resultObserver.observe(container);
       reconcileHiddenParents();
     } catch (e) {
       if (currentConfig.debug) {
@@ -2967,6 +2898,7 @@
 
   function processSingleResult(result) {
     if (result.closest('.sys_algo_rs, .AlsoTry_M, [data-yga*="sugg"]')) return false;
+    if (!_engineSiteSetup) return false;
 
     if (result.hasAttribute('data-blocker-processed')) {
       return result.getAttribute('data-is-blocked') === 'true';
@@ -2990,7 +2922,7 @@
       const hlColor = currentConfig.highlightColors[matchHL]; const color = (typeof hlColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(hlColor)) ? hlColor : (DEFAULT_HIGHLIGHT_COLORS[matchHL] || '#CE2029');
       result.style.outline = `2px solid ${color}`; result.style.outlineOffset = '-2px';
       result.setAttribute('data-is-highlighted', 'true'); result.setAttribute('data-highlight-n', matchHL);
-      if (matchResult.hlRule) { result.dataset.highlightRule = matchResult.hlRule; result.dataset.highlightSource = matchResult.hlSource || ''; }
+      if (matchResult.hlRule) { result.dataset.highlightRule = matchResult.hlRule; result.dataset.highlightSource = matchResult.hlSource || ''; result.dataset.highlightSourceKey = matchResult.hlSourceKey || ''; }
     }
     if (matchResult && matchResult.blocked) {
       _resultRetryCounts.delete(result); saveOriginalDisplay(result); if (blockedShown()) restoreOriginalDisplay(result); else result.style.display = 'none'; setResultExtraElementsVisible(result, showHiddenResults);
@@ -3017,7 +2949,7 @@
         }
       }
 
-      result.dataset.matchedRule = matchResult.rule || ''; result.dataset.matchedSource = matchResult.source || '';
+      result.dataset.matchedRule = matchResult.rule || ''; result.dataset.matchedSource = matchResult.source || ''; result.dataset.matchedSourceKey = matchResult.sourceKey || '';
       if (blockedShown()) {
         if (showHiddenResults) {
           result.classList.add('serh-blocked-visible');
@@ -3033,13 +2965,13 @@
     if (matchHL) {
       _resultRetryCounts.delete(result); saveOriginalDisplay(result); restoreOriginalDisplay(result);
       result.classList.remove('serh-blocked-visible'); result.classList.remove('serh-blocked-collapsed'); result.setAttribute('data-blocker-processed', 'true'); result.removeAttribute('data-is-blocked'); clearMatchedData(result);
-      if (matchResult && matchResult.whitelisted) { result.dataset.whitelistRule = matchResult.rule || ''; result.dataset.whitelistSource = matchResult.source || ''; }
+      if (matchResult && matchResult.whitelisted) { result.dataset.whitelistRule = matchResult.rule || ''; result.dataset.whitelistSource = matchResult.source || ''; result.dataset.whitelistSourceKey = matchResult.sourceKey || ''; }
       if (currentConfig.showBlockBtn) injectBlockButton(result, engine, domain);
       return false;
     }
 
     _resultRetryCounts.delete(result); clearMatchedData(result);
-    if (matchResult && matchResult.whitelisted) { result.dataset.whitelistRule = matchResult.rule || ''; result.dataset.whitelistSource = matchResult.source || ''; }
+    if (matchResult && matchResult.whitelisted) { result.dataset.whitelistRule = matchResult.rule || ''; result.dataset.whitelistSource = matchResult.source || ''; result.dataset.whitelistSourceKey = matchResult.sourceKey || ''; }
     result.setAttribute('data-blocker-processed', 'true'); if (currentConfig.showBlockBtn) injectBlockButton(result, engine, domain); return false;
   }
 
@@ -3228,9 +3160,7 @@
             console.error('[屏蔽] 处理结果时出错:', result, e);
           }
         }
-        if (!result.hasAttribute('data-blocker-processed')) {
-          result.removeAttribute('data-observed'); resultObserver.observe(result);
-        }
+        if (!result.hasAttribute('data-blocker-processed')) resultObserver.observe(result);
       }
       if (processIdx < allResults.length) {
         requestAnimationFrame(processBatch);
@@ -3772,17 +3702,9 @@
   }
 
   function getBubbleSize() {
-    let size = 20;
-    if (typeof currentConfig.bubbleSize === 'number') {
-      size = currentConfig.bubbleSize;
-    } else {
-      switch (currentConfig.bubbleSize) {
-        case 'medium': size = 18; break; case 'large': size = 20; break; case 'larger': size = 22; break; case 'xlarge': size = 26; break;
-        default:
-          const parsed = parseInt(currentConfig.bubbleSize); size = isNaN(parsed) ? 20 : parsed;
-      }
-    }
-    return Math.max(15, Math.min(60, size));
+    let size = typeof currentConfig.bubbleSize === 'number' ? currentConfig.bubbleSize : parseInt(currentConfig.bubbleSize, 10);
+    if (!Number.isFinite(size)) size = 30;
+    return Math.max(20, Math.min(60, size));
   }
 
   function applyBubbleSize(element) {
@@ -4057,6 +3979,9 @@
     });
     const bubbleActionSelect = document.getElementById('serh-set-bubble-action');
     if (bubbleActionSelect) bubbleActionSelect.value = (currentConfig.bubbleAction === 'toggleHidden' || currentConfig.bubbleAction === 'openStats') ? currentConfig.bubbleAction : 'openPanel';
+    const uiScaleSync = document.getElementById('serh-set-ui-scale'); if (uiScaleSync) uiScaleSync.value = ['s', 'xl', 'xxl'].includes(currentConfig.uiScale) ? currentConfig.uiScale : 'l';
+    const darkModeSync = document.getElementById('serh-set-dark-mode'); if (darkModeSync) darkModeSync.value = ['light', 'dark'].includes(currentConfig.darkMode) ? currentConfig.darkMode : 'system';
+    const langSync = document.getElementById('serh-set-language'); if (langSync) langSync.value = currentConfig.language === 'en' ? 'en' : 'zh-CN';
     const textarea = document.getElementById('serh-rules');
     if (textarea && Array.isArray(currentConfig.rules)) {
       textarea.value = currentConfig.rules.join('\n'); updateLineNumbers();
@@ -4122,7 +4047,10 @@
   }
 
   function statSourceKey(s) {
-    return (s === t('localRule') || s === '本地规则' || s === 'Local Rule') ? 'local' : '';
+    if (!s) return '';
+    if (s === 'local' || /^sub:\d+$/.test(s)) return s;
+    if (s === '本地规则' || s === 'Local Rule' || s === t('localRule')) return 'local';
+    const m = /^(?:订阅|Sub)\s*(\d+)$/i.exec(s); return m ? 'sub:' + m[1] : '';
   }
 
   function updateStatsContent() {
@@ -4135,11 +4063,10 @@
       .map(rule => stripRuleComment(rule))
       .filter(rule => rule.length > 0);
 
-    const ruleErrors = new Map(); const ruleWarnings = new Map(); const ruleCounts = new Map();
+    const ruleErrors = new Map(); const ruleCounts = new Map();
     activeRules.forEach(rule => {
       if (currentConfig.errorDetection !== false) {
         const analysis = cachedAnalyzeRule(rule); if (!analysis.valid) ruleErrors.set(rule, analysis.errors.length ? analysis.errors : [t('invalidRule')]);
-        if (analysis.warnings.length) ruleWarnings.set(rule, analysis.warnings);
       }
       ruleCounts.set(rule, (ruleCounts.get(rule) || 0) + 1);
     });
@@ -4163,18 +4090,14 @@
       const ruleMap = sourceStats.rules; const entry = ruleMap.get(rule) || { count: 0, type }; ruleMap.set(rule, entry); entry.count++;
     };
     results.forEach(result => {
-      const blockedRule = (result.dataset.matchedRule || '').trim(); if (blockedRule) addRuleHit(blockedRule, result.dataset.matchedSource, null, result);
-      const wlRule = (result.dataset.whitelistRule || '').trim(); if (wlRule) addRuleHit(wlRule, result.dataset.whitelistSource, t('whitelistRules'), result);
-      const hlRule = (result.dataset.highlightRule || '').trim(); if (hlRule) addRuleHit(hlRule, result.dataset.highlightSource, t('highlightRules'), result);
+      const blockedRule = (result.dataset.matchedRule || '').trim(); if (blockedRule) addRuleHit(blockedRule, result.dataset.matchedSourceKey || result.dataset.matchedSource, null, result);
+      const wlRule = (result.dataset.whitelistRule || '').trim(); if (wlRule) addRuleHit(wlRule, result.dataset.whitelistSourceKey || result.dataset.whitelistSource, t('whitelistRules'), result);
+      const hlRule = (result.dataset.highlightRule || '').trim(); if (hlRule) addRuleHit(hlRule, result.dataset.highlightSourceKey || result.dataset.highlightSource, t('highlightRules'), result);
     });
 
     const ruleErrorsArray = [...ruleErrors].map(([rule, errors]) => ({
       rule,
       msg: errors.join(', ')
-    }));
-    const ruleWarningsArray = [...ruleWarnings].map(([rule, warnings]) => ({
-      rule,
-      msg: warnings.join(', ')
     }));
     let resultHTML = '';
 
@@ -4201,10 +4124,6 @@
 
     if (ruleErrorsArray.length > 0) {
       resultHTML += issueBlockHtml(t('statsErrors', {count: ruleErrorsArray.length}), '#c53030', '#fff5f5', 'errorWord', ruleErrorsArray);
-    }
-
-    if (ruleWarningsArray.length > 0) {
-      resultHTML += issueBlockHtml(t('statsWarnings', {count: ruleWarningsArray.length}), '#b7791f', '#fffff0', 'warningWord', ruleWarningsArray);
     }
 
     const sourceOrder = [['local', t('localRule')]];
@@ -4249,7 +4168,7 @@
       resultHTML += `</div>`;
     });
 
-    if (!hasMatches && ruleErrorsArray.length === 0 && ruleWarningsArray.length === 0) {
+    if (!hasMatches && ruleErrorsArray.length === 0) {
       resultHTML = `<div style="color: #38a169; padding: 10px; border-radius: 4px; font-size: 12px; background: #f0fff4; text-align: center;">${t('noMatch')}</div>`;
     }
 
@@ -4898,7 +4817,7 @@
   }
 
   function validateUserSelectors(config) {
-    if (!config || typeof config !== 'object' || Array.isArray(config)) return [t('selectorJsonError')]; const errors = [];
+    if (!config || typeof config !== 'object' || Array.isArray(config)) return [t('selectorJsonError')]; const errors = []; const hasUnquotedComma = (v) => typeof v === 'string' && /,/.test(v.replace(/(["'])(?:\\.|(?!\1).)*\1/g, ''));
     for (const key of Object.keys(config)) {
       const def = config[key];
       if (key === 'other') { errors.push(t('selectorReservedKey', { key })); continue; }
@@ -4909,7 +4828,7 @@
           errors.push(t('selectorFieldRequired', { key, field: 'extraElements' }));
         } else {
           for (const s of def.extraElements) {
-            if (typeof s !== 'string' || !s.trim() || s.includes(',') || hasPseudoElement(s) || !isValidCssSelector(':scope > :nth-child(1) ' + s)) {
+            if (typeof s !== 'string' || !s.trim() || hasUnquotedComma(s) || hasPseudoElement(s) || !isValidCssSelector(':scope > :nth-child(1) ' + s)) {
               errors.push(t('selectorInvalidCss', { key, field: 'extraElements', value: s }));
             }
           }
@@ -4939,7 +4858,7 @@
           errors.push(t('selectorFieldRequired', { key, field })); continue;
         }
         for (const s of normalizeSelectorList(value)) {
-          if ((field === 'snippets' && s.includes(',')) || !isValidCssSelector(s) || hasPseudoElement(s)) errors.push(t('selectorInvalidCss', { key, field, value: s }));
+          if (!isValidCssSelector(s) || hasPseudoElement(s)) errors.push(t('selectorInvalidCss', { key, field, value: s }));
         }
       }
       if (def.links === undefined || def.links === null) continue;
@@ -5137,6 +5056,17 @@
   }
 
   function pickTextFile(accept, onLoaded) {
+    const decodeText = (buffer) => {
+      const bytes = new Uint8Array(buffer);
+      if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) return new TextDecoder('utf-8').decode(bytes.subarray(3));
+      if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) return new TextDecoder('utf-16le').decode(bytes.subarray(2));
+      if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) return new TextDecoder('utf-16be').decode(bytes.subarray(2));
+      try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+      catch (e) {
+        try { return new TextDecoder('gb18030').decode(bytes); }
+        catch (e2) { return new TextDecoder('utf-8').decode(bytes); }
+      }
+    };
     preventPanelClose = true; const fileInput = document.createElement('input'); fileInput.type = 'file'; fileInput.accept = accept; fileInput.style.display = 'none';
     document.body.appendChild(fileInput);
 
@@ -5157,12 +5087,16 @@
       }
       const reader = new FileReader();
       reader.onload = (ev) => {
-        onLoaded(String(ev.target.result || '')); cleanup();
+        const raw = ev.target.result; let text = '';
+        if (typeof raw === 'string') text = raw;
+        else if (raw) { try { text = decodeText(raw); } catch (_) { text = ''; } }
+        onLoaded(String(text || '')); cleanup();
       };
       reader.onerror = () => {
         showToast(t('fileImportFailed'), 'error'); cleanup();
       };
-      reader.readAsText(file, 'UTF-8');
+      if (typeof TextDecoder !== 'undefined' && typeof reader.readAsArrayBuffer === 'function') reader.readAsArrayBuffer(file);
+      else reader.readAsText(file, 'UTF-8');
     };
     fileInput.addEventListener('cancel', cleanup); window.addEventListener('focus', onWindowFocus); fileInput.click();
   }
@@ -5262,12 +5196,13 @@
         if (val && typeof val === 'object' && typeof val.source === 'string' && flagsOk(val.flags)) { try { new RegExp(val.source, String(val.flags || '').toLowerCase()); return true; } catch (e) { return false; } }
         return false;
       };
+      const hasUnquotedComma = (v) => typeof v === 'string' && /,/.test(v.replace(/(["'])(?:\\.|(?!\1).)*\1/g, ''));
       for (const key of Object.keys(v)) {
         const def = v[key];
         if (key === 'other' || !/^[A-Za-z0-9_-]+$/.test(key)) return false;
         if (!def || typeof def !== 'object' || Array.isArray(def)) return false;
         if ((def.disabled !== undefined && def.disabled !== null && typeof def.disabled !== 'boolean') || (def.disable !== undefined && def.disable !== null && typeof def.disable !== 'boolean')) return false;
-        if (def.extraElements !== undefined && def.extraElements !== null && (!Array.isArray(def.extraElements) || !def.extraElements.every((s) => typeof s === 'string' && !!s.trim() && !s.includes(',') && probe(':scope > :nth-child(1) ' + s)))) return false;
+        if (def.extraElements !== undefined && def.extraElements !== null && (!Array.isArray(def.extraElements) || !def.extraElements.every((s) => typeof s === 'string' && !!s.trim() && !hasUnquotedComma(s) && probe(':scope > :nth-child(1) ' + s)))) return false;
         if (def.match !== undefined && def.match !== null && !reOk(def.match)) return false;
         for (const f of ['containers', 'titles', 'snippets', 'links']) if (def[f] !== undefined && def[f] !== null && !cssOk(def[f])) return false;
       }
@@ -5304,12 +5239,13 @@
     const restLines = lines.filter((_, idx) => !headerLineIndexes.has(idx)); return { config, rawScriptConfig, rawSelectors, restLines };
   }
 
-  function isNonRuleTextResponse(restLines, hasHeader = false) {
+  function isNonRuleTextResponse(restLines, hasHeader = false, allowCommentOnly = false) {
     const lines = (Array.isArray(restLines) ? restLines : [])
       .map((l) => String(l || '').trim())
       .filter((l) => l.length > 0); if (lines.length === 0) return false; if (lines.some((l) => /<\s*\/?\s*(?:!doctype|html|head|body)\b/i.test(l))) return true;
-    const ruleLines = lines.filter((l) => !l.startsWith('#')); if (ruleLines.some((l) => validateRule(l))) return false; if (lines.some((l) => /<\s*\/?\s*[a-z!?][^>\n]*>/i.test(l))) return true;
-    if (ruleLines.length === 0) return false; return !hasHeader ? true : !ruleLines.some((l) => validateRule(l.trim()) || l.startsWith('#'));
+    const ruleLike = (l) => /^[\x21-\x7E]+$/.test(l) || /[:@|./]/.test(l) || looksLikeCondExpr(l);
+    const ruleLines = lines.filter((l) => !l.startsWith('#')); if (ruleLines.some((l) => ruleLike(l) && validateRule(l))) return false; if (lines.some((l) => /<\s*\/?\s*[a-z!?][^>\n]*>/i.test(l))) return true;
+    if (ruleLines.length === 0) return allowCommentOnly ? false : !hasHeader; return !hasHeader ? true : !ruleLines.some((l) => ruleLike(l) && validateRule(l.trim()));
   }
 
   function timestampFilename(prefix, ext) {
@@ -5326,7 +5262,9 @@
     pickTextFile('.txt,text/plain', (content) => {
       const parsedHeader = parseSyncHeader(content);
       const hasHeader = !!(parsedHeader.rawScriptConfig || parsedHeader.rawSelectors);
-      if (isNonRuleTextResponse(parsedHeader.restLines, hasHeader)) { showToast(t('fileImportFailed'), 'error'); return; }
+      if (isNonRuleTextResponse(parsedHeader.restLines, hasHeader, true)) { showToast(t('fileImportFailed'), 'error'); return; }
+      const newRules = filterValidRuleLines(parsedHeader.restLines);
+      if (!hasEffectiveRules(newRules) && hasEffectiveRules(currentConfig.rules) && !confirm(t('importClearConfirm'))) return;
       const headerConfig = parsedHeader.config;
       if (headerConfig && typeof headerConfig === 'object' && !Array.isArray(headerConfig)) {
         const headerSelectors = parsedHeader.rawSelectors ? headerConfig.selectors : null;
@@ -5345,7 +5283,7 @@
       if (textarea) {
         textarea.value = parsedHeader.restLines.join('\n'); updateLineNumbers();
       }
-      currentConfig.rules = filterValidRuleLines(parsedHeader.restLines);
+      currentConfig.rules = newRules;
       const panel = document.getElementById('serh-panel'); if (panel) panel._initialRules = [...currentConfig.rules];
       persistConfig(true); applyConfigToMainPanel(); forceReprocessAll();
     });
@@ -5354,7 +5292,7 @@
   function exportRulesToFile() {
     preventPanelClose = true; const textarea = document.getElementById('serh-rules'); let content = textarea.value;
     if (!content.trim()) {
-      alert(t('noRulesExport')); preventPanelClose = false; return;
+      showToast(t('noRulesExport'), 'error'); preventPanelClose = false; return;
     }
     if (currentConfig.exportConfig === true) {
       content = '# ScriptConfig:' + JSON.stringify(getSyncSettings(currentConfig)) + '\n' + content;
@@ -5432,9 +5370,11 @@
     };
     _domObserver = new MutationObserver((records) => {
       if (!_mutationRafPending) {
-        _mutationRafPending = true; requestAnimationFrame(flushMutations);
+        _mutationRafPending = true;
+        if (document.hidden) setTimeout(flushMutations, 500); else requestAnimationFrame(flushMutations);
       }
       _pendingRecords = _pendingRecords.concat(records);
+      if (_pendingRecords.length > 2000) _pendingRecords = [{ type: 'childList', target: document.body, addedNodes: [1] }];
     });
     _domObserver.observe(document.body, {
       childList: true,
@@ -5464,15 +5404,16 @@
 
       const wrapHistoryMethod = (method) => {
         const orig = history[method];
-        if (typeof orig === 'function') {
-          history[method] = function(...args) {
-            const ret = orig.apply(this, args);
-            try {
-              window.dispatchEvent(new Event('serh:locationchange'));
-            } catch (e) {}
-            return ret;
-          };
-        }
+        if (typeof orig !== 'function' || orig._serhWrapped) return;
+        const wrapped = function(...args) {
+          const ret = orig.apply(this, args);
+          try {
+            window.dispatchEvent(new Event('serh:locationchange'));
+          } catch (e) {}
+          return ret;
+        };
+        wrapped._serhWrapped = true;
+        history[method] = wrapped;
       };
       wrapHistoryMethod('pushState'); wrapHistoryMethod('replaceState'); window.addEventListener('serh:locationchange', _urlChangeHandler);
     }
@@ -5554,5 +5495,5 @@
     }
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else setTimeout(init, 1000);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else setTimeout(init, 0);
 })();
