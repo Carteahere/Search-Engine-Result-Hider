@@ -36,7 +36,7 @@ function extractFn(text, fnName) {
   const dependencies = { stripRuleComment: ['scanRuleString'], findIfOccurrences: ['scanRuleString'], extractBalancedParens: ['findBalancedParenEnd'], scanRuleString: ['findBalancedParenEnd', 'isBadRegexTail'], buildSyncPayload: ['getSyncSettings'] };
   const scanDeps = !['findBalancedParenEnd', 'scanRuleString'].includes(fnName) && /scanRuleString\(|RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_[A-D]\b/.test(body);
   const consts = text.split('\n').filter(line => /^\s*const (?:RULE_\w+|REGEX_CTX_[A-D]) =/.test(line)).map(line => line.replace('const ', 'var ')).join('\n') + '\n';
-  const prelude = (scanDeps ? consts + rawExtract(text, 'findBalancedParenEnd') + '\n' + rawExtract(text, 'scanRuleString') + '\n' + rawExtract(text, 'isBadRegexTail') + '\n' + rawExtract(text, 'regexCloseAhead') + '\n' : '') + (fnName !== 'encodeNonAscii' && /encodeNonAscii\(/.test(body) ? rawExtract(text, 'encodeNonAscii') + '\n' : '') + (!['isUniqueFlagsStr', 'isFlagsCandidateError'].includes(fnName) && /isUniqueFlagsStr\(|isFlagsCandidateError\(/.test(body) ? ['isUniqueFlagsStr', 'isFlagsCandidateError'].map(n => rawExtract(text, n)).join('\n') + '\n' : '');
+  const prelude = (scanDeps ? consts + rawExtract(text, 'findBalancedParenEnd') + '\n' + rawExtract(text, 'scanRuleString') + '\n' + rawExtract(text, 'isBadRegexTail') + '\n' + rawExtract(text, 'regexCloseAhead') + '\n' + rawExtract(text, 'regexStartAhead') + '\n' : '') + (fnName !== 'encodeNonAscii' && /encodeNonAscii\(/.test(body) ? rawExtract(text, 'encodeNonAscii') + '\n' : '') + (!['isUniqueFlagsStr', 'isFlagsCandidateError'].includes(fnName) && /isUniqueFlagsStr\(|isFlagsCandidateError\(/.test(body) ? ['isUniqueFlagsStr', 'isFlagsCandidateError'].map(n => rawExtract(text, n)).join('\n') + '\n' : '');
   return prelude + (dependencies[fnName] || []).map(n => extractFn(text, n)).join('\n') + '\n' + body;
 }
 
@@ -57,10 +57,10 @@ const KEYS = {
 const baseSyncFns = [
   'scanRuleString', 'findBalancedParenEnd', 'getSyncSettings', 'getCloudModifiedTime',
   'subscriptionsSignature', 'buildDavPutHeaders', 'persistSyncSnapshots', 'putWebDAVRules',
-  'getRuleKey', 'filterValidRuleLines', 'getSubscriptionSyncSnapshot', 'setSubscriptionSyncSnapshot',
+  'getRuleKey', 'filterValidRuleLines', 'hasEffectiveRules', 'getSubscriptionSyncSnapshot', 'setSubscriptionSyncSnapshot',
   'getRuleSyncSnapshot', 'setRuleSyncSnapshot', 'mergeRules3Way',
   'stripRuleComment', 'isHttpsUrl', 'getWebDAVRequest', 'ensureWebDAVFolder', 'isHtmlResponse', 'isInvalidSyncResponse', 'parseSyncHeader', 'isNonRuleTextResponse',
-  'buildUploadContent', 'gmPutWebDAV',
+  'buildUploadContent', 'gmPutWebDAV', 'putWebDAVBackup',
   'getSelectorSyncSnapshot', 'setSelectorSyncSnapshot', 'selectorsEqual', 'mergeSelectors3Way',
   'firstSuccess', 'parseHttpDateHeader', 'queryNetworkTimeEndpoint', 'getNetworkTimeOffset', 'getTrustedNow',
   'extractValidCloudTimes', 'applyConfigToMainPanel',
@@ -131,6 +131,7 @@ function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], local
       return { status: 200 };
     }
     function forceReprocessAll() { state.reprocess++; }
+    const confirm = () => true;
     function persistConfig(updateModifiedTime = true) {
       store.set(CONFIG_KEY, currentConfig);
       if (updateModifiedTime) GM_setValue(LOCAL_LAST_MODIFIED_KEY, Date.now());
@@ -258,6 +259,25 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   assert('同步-019: 自动同步遇到错误响应不上传覆盖云端', !env.calls.some((c) => c.method === 'PUT'));
 }
 
+// ---- 同步-066~067: 云端200中文登录提示不被当规则 ----
+{
+  const localConfig = { rules: ['*://local.example.com/*'], enabled: true };
+  const env = makeSyncEnv({ cloudStatus: 200, cloudText: '请先登录', localRules: ['*://local.example.com/*'], localTime: 1000, storedConfig: localConfig });
+  env.setCurrent({ ...localConfig });
+  await env.run(syncCfg);
+  assert('同步-066: 云端纯文本中文提示不当作规则且保留本地规则', env.getCurrent().rules.join('|') === '*://local.example.com/*');
+  assert('同步-067: 云端纯文本中文提示不回写云端', !env.calls.some((c) => c.method === 'PUT' && String(c.data || '').includes('请先登录')));
+}
+
+// ---- 同步-074: 云端200纯注释错误文本不被当规则 ----
+{
+  const localConfig = { rules: ['*://local.example.com/*'], enabled: true };
+  const env = makeSyncEnv({ cloudStatus: 200, cloudText: '# 404 Not Found', localRules: ['*://local.example.com/*'], localTime: 1000, storedConfig: localConfig });
+  env.setCurrent({ ...localConfig });
+  await env.run(syncCfg);
+  assert('同步-074: 云端纯注释错误文本不当作规则且保留本地规则', env.getCurrent().rules.join('|') === '*://local.example.com/*' && !env.calls.some((c) => c.method === 'PUT'));
+}
+
 // ---- 同步-020~025: 手动下载遇到垃圾响应抛错且不污染本地 ----
 {
   const garbageBodies = [
@@ -313,6 +333,7 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   `)({ querySelectorAll: () => rows }, [], k => k);
   const makeRow = (url, origUrl) => ({
     dataset: { originalUrl: origUrl },
+    classList: { add() {}, remove() {} },
     querySelector: sel => sel === '.serh-subscription-url' ? { value: url } :
       sel === '.serh-subscription-enable-toggle' ? { checked: true } : {}
   });
@@ -552,6 +573,38 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   assert('同步-065: 仅本地关闭订阅时不被较新云端设置重新打开', keptOff[0].enabled === false && keptOff[0].rules[0] === 'k1');
 }
 
+// ---- 同步-070~073: 置空上传前云端规则备份为 .bak ----
+{
+  // 自动同步: 本地基于快照清空全部规则 -> 合并结果为空 -> 先备份云端再置空
+  const cloudRules = ['*://cloud.example.com/*', '*://cloud2.example.com/*'];
+  const cloudText = '# ScriptConfig:' + JSON.stringify({ syncedAt: 500 }) + '\n' + cloudRules.join('\n');
+  const env = makeSyncEnv({ cloudText, localRules: [], localTime: 1000, storedConfig: { rules: [], enabled: true }, initialSnapshot: cloudRules });
+  env.setCurrent({ rules: [], enabled: true });
+  await env.run(syncCfg);
+  const bakPut = env.calls.find((c) => c.method === 'PUT' && c.url.endsWith('.bak'));
+  const finalPut = env.calls.find((c) => c.method === 'PUT' && !c.url.endsWith('.bak'));
+  const bakIdx = env.calls.indexOf(bakPut);
+  assert('同步-070: 合并结果为空时先PUT备份后置空上传', !!bakPut && String(bakPut.data || '').includes('*://cloud.example.com/*') && bakIdx !== -1 && bakIdx < env.calls.indexOf(finalPut));
+  assert('同步-071: 备份文件名为 rules.txt.bak 且置空上传不含旧规则', !!bakPut && !!finalPut && bakPut.url.endsWith('rules.txt.bak') && finalPut.url.endsWith('rules.txt') && !String(finalPut.data || '').includes('*://cloud.example.com/*'));
+}
+{
+  // 云端已有空规则文件(scriptedEmptyCloud)或备份PUT失败 -> 不重复备份/不上传
+  const cloud = { syncedAt: 500, rulesSyncedAt: 500 };
+  const cloudText = '# ScriptConfig:' + JSON.stringify(cloud) + '\n';
+  const env = makeSyncEnv({ cloudText, localRules: [], localTime: 1000, storedConfig: { rules: [], enabled: true } });
+  env.setCurrent({ rules: [], enabled: true });
+  await env.run(syncCfg);
+  assert('同步-072: 云端已为空时不触发备份', !env.calls.some((c) => c.method === 'PUT' && c.url.endsWith('.bak')));
+}
+{
+  const cloudRules = ['*://cloud.example.com/*'];
+  const cloudText = '# ScriptConfig:' + JSON.stringify({ syncedAt: 500 }) + '\n' + cloudRules.join('\n');
+  const env = makeSyncEnv({ cloudText, localRules: [], localTime: 1000, storedConfig: { rules: [], enabled: true }, initialSnapshot: cloudRules, putFailures: 1 });
+  env.setCurrent({ rules: [], enabled: true });
+  await env.run(syncCfg);
+  assert('同步-073: 备份PUT失败时中断置空上传保护云端原文件', !env.calls.some((c) => c.method === 'PUT' && !c.url.endsWith('.bak')) && env.getCurrent().rules.length === 0);
+}
+
 // ---- 授时-001~003: 授时回退链 ----
 {
   const api = new Function(`
@@ -587,6 +640,9 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   assert('授时-003: 前两源失败时回退cloudflare ts解析', typeof offset === 'number' && offset !== null && Math.abs(offset - expect) < 1000);
 }
 
+// 易错: mergeRules3Way 依赖三方快照, 快照缺失会退化为并集从而复活已删规则
+// 易错: 每次成功上传/下载规则后必须 setRuleSyncSnapshot, 否则下次合并退化
+// 易错: 手动上传/下载为强制覆盖, 仅自动同步走三方合并
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 })();

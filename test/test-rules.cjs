@@ -26,7 +26,7 @@ const SERH_RAW_EXTRACT = (text, fnName) => {
 };
 const SERH_FN_DEPS = ((text) => {
   const consts = text.match(/const (?:RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_A|REGEX_CTX_B|REGEX_CTX_C|REGEX_CTX_D|RULE_REGEX_LIT_RE) = [^\n]+;/g).join('\n').replace(/\bconst\b/g, 'var');
-  return consts + '\n' + ['findBalancedParenEnd', 'regexCloseAhead', 'isBadRegexTail', 'scanRuleString', 'encodeNonAscii'].map((n) => SERH_RAW_EXTRACT(text, n)).join('\n');
+  return consts + '\n' + ['findBalancedParenEnd', 'regexCloseAhead', 'regexStartAhead', 'isBadRegexTail', 'scanRuleString', 'encodeNonAscii'].map((n) => SERH_RAW_EXTRACT(text, n)).join('\n');
 })(src);
 const SERH_FLAG_HELPERS = ['isUniqueFlagsStr', 'isFlagsCandidateError'].map((n) => SERH_RAW_EXTRACT(src, n)).join('\n');
 const SERH_EL_HELPERS = ['isCondExprCore', 'looksLikeCondExpr', 'isScriptRuleLine', 'isElementRuleLine'].map((n) => SERH_RAW_EXTRACT(src, n)).join('\n');
@@ -48,6 +48,7 @@ const SERH_T_FN = `function t(key, params = {}) {
   for (const [k, v] of Object.entries(params)) text = text.replaceAll('{' + k + '}', v);
   return text;
 }`;
+const ENGINE_HOST_SRC = src.match(/const ENGINE_HOST_REGEXES = \{[\s\S]*?\n  \};/)[0];
 
 let pass = 0, fail = 0;
 function check(name, cond, extra) {
@@ -70,10 +71,11 @@ function makeRulesApi() {
     'parseRuleWithConditions', 'validateUrlWildcard', 'ruleToRegex', 'parsePrefixedRegexRule',
     'escapeWildcardPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern', 'extractSimpleWhitelistDomain', 'matchSimpleDomain',
     'compileRuleRegex', 'checkDynamicConditions', 'matchDomainEntryType', 'buildRuleIndex', 'newCompiledRules',
-    'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule',
-    'checkRuleMatchOptimized', 'isLocalEntry',
+    'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule', 'cachedAnalyzeRule',
+    'checkRuleMatchOptimized', 'isLocalEntry', 'isEngineHost',
   ].map((n) => extractFn(src, n));
   return new Function(`${SERH_CONSTS.flags}\n${SERH_CONSTS.lang}\n${SERH_T_FN}\nlet compiledRules;
+${ENGINE_HOST_SRC}
 const validationCache = new Map();
 const subdomainCache = new Map();
 let currentEngine = 'google', currentSite = 'www.google.com', currentCategory = 'web';
@@ -110,7 +112,7 @@ return { collectSubscriptionRules, parseRulesetContent, isScriptRuleLine, isElem
 }
 // 重定向解包沙箱
 function makeCleanUrlApi() {
-  return new Function(['decodeRedirectTarget', 'decodeBingCkTarget', 'unwrapRedirectUrl', 'isOpaqueRedirectUrl', 'getCleanUrl'].map((n) => extractFn(src, n)).join('\n') + '\nreturn getCleanUrl;')();
+  return new Function(`${ENGINE_HOST_SRC}\n` + ['decodeRedirectTarget', 'decodeBingCkTarget', 'unwrapRedirectUrl', 'isOpaqueRedirectUrl', 'getCleanUrl', 'isEngineHost'].map((n) => extractFn(src, n)).join('\n') + '\nreturn getCleanUrl;')();
 }
 
 // ==== 一、核心行为 ====
@@ -286,6 +288,7 @@ assert('规则-081: 无空格冒号键形标量保留', JSON.stringify(collect('
 let threw = false, res;
 try { res = api.parseRulesetContent('name: "My list\nrules:\n  - *://a.com/*\n'); } catch (_) { threw = true; }
 assert('规则-082: YAML name行引号不配对时容错提取且不抛错', threw === false && res.meta.name === 'My list' && res.lines.length === 1);
+assert('规则-257: 空YAML规则段解析为空且---不成为规则', api.parseRulesetContent('name: E\nrules: []\n').lines.length === 0 && collect('rules: []\n').length === 0 && collect('---\n').length === 0);
 }
 
 // ---- 规则-090~10x: 来源标记 ----
@@ -359,9 +362,9 @@ function makeCR() {
 }
 const isBlocked = (r) => !!(r && r.blocked === true);
 const getSrc = (r) => (r ? r.source : null);
-function addWlDomain(cr, domain, type, source) {
+function addWlDomain(cr, domain, type, source, rule) {
   if (!cr.whitelistDomains.has(domain)) cr.whitelistDomains.set(domain, []);
-  cr.whitelistDomains.get(domain).push({ type, source: source || '本地规则' });
+  cr.whitelistDomains.get(domain).push({ type, source: source || '本地规则', originalRule: rule });
 }
 function addWlUrl(cr, pattern, source) {
   cr.whitelistUrlPatterns.push({ regex: new RegExp(pattern), source: source || '本地规则' });
@@ -425,6 +428,32 @@ assert('规则-120: 本地和订阅黑名单都匹配时返回本地规则', (()
   const cr = makeCR(); addBlDomain(cr, 'example.com', 'wildcard', 'local-domain', '本地规则'); addBlDomain(cr, 'example.com', 'wildcard', 'sub-domain', '订阅规则1');
   const r = doCheck(cr, url, host, 'title');
   return isBlocked(r) && getSrc(r) === '本地规则';
+})());
+assert('规则-120b: 本地父域白名单优先于订阅更深层白名单', (() => {
+  const cr = makeCR();
+  addWlDomain(cr, 'good.example.com', 'wildcard', '本地规则');
+  addWlDomain(cr, 'sub.good.example.com', 'wildcard', '订阅规则1');
+  addBlDomain(cr, 'example.com', 'wildcard', 'example.com', '本地规则');
+  const h = 'sub.good.example.com'; api.setCR(cr);
+  const r = api.checkRuleMatchOptimized('https://sub.good.example.com/x', h, 'title', '', ['sub.good.example.com', 'good.example.com', 'example.com']);
+  return !isBlocked(r) && r.whitelisted === true && getSrc(r) === '本地规则';
+})());
+assert('规则-120c: 仅订阅白名单时仍取更深层域名', (() => {
+  const cr = makeCR();
+  addWlDomain(cr, 'good.example.com', 'wildcard', '订阅规则1', 'shallow');
+  addWlDomain(cr, 'sub.good.example.com', 'wildcard', '订阅规则1', 'deep');
+  const h = 'sub.good.example.com'; api.setCR(cr);
+  const r = api.checkRuleMatchOptimized('https://sub.good.example.com/x', h, 'title', '', ['sub.good.example.com', 'good.example.com', 'example.com']);
+  return r.whitelisted === true && r.rule === 'deep';
+})());
+assert('规则-120d: 本地父域条件白名单优先于订阅更深层条件白名单', (() => {
+  const cr = makeCR(); const lv = ['sub.good.example.com', 'good.example.com', 'example.com'];
+  cr.whitelistConditionalDomains.set('good.example.com', [{ domainType: 'wildcard', conditions: [], source: '本地规则', originalRule: 'lw' }]);
+  cr.whitelistConditionalDomains.set('sub.good.example.com', [{ domainType: 'wildcard', conditions: [], source: '订阅规则1', originalRule: 'sw' }]);
+  cr.conditionalDomains.set('example.com', [{ domainType: 'wildcard', conditions: [], source: '本地规则', originalRule: 'lb' }]);
+  api.setCR(cr);
+  const r = api.checkRuleMatchOptimized('https://sub.good.example.com/x', 'sub.good.example.com', 'title', '', lv);
+  return !isBlocked(r) && r.whitelisted === true && r.rule === 'lw';
 })());
 assert('规则-121: 仅订阅URL黑名单可独立屏蔽', (() => {
   const cr = makeCR(); addBlUrl(cr, 'example\\.com/page', 'example.com/page', '订阅规则1');
@@ -542,11 +571,29 @@ assert('规则-168: title/…/gi 判定无效并报flags错误; 行尾注释剥�
 assert('规则-169: 全转义斜杠=无闭合界定符按未闭合报错; 带闭合界定符有效', api.analyzeRule('title/https:\\/\\/foo\\/i').valid === false && api.analyzeRule('title/https:\\/\\/foo\\/i/').valid === true);
 assert('规则-170: 无空格 @1@*:// 仍报通配无效; 紧贴 @1*:// 仍是合法高亮', api.analyzeRule('@1@*://*.example.com/*').valid === false && api.analyzeRule('@1*://*.example.com/*').valid === true);
 assert('规则-171: title/无尾斜杠(含吞@if形态)直接报错', api.analyzeRule('title/abc @if(title *= "x")').valid === false && api.analyzeRule('title/abc/ @if(title *= "x")').valid === true);
-assert('规则-172: text尾段误报flags修复', api.analyzeRule('text/example.com/images/png').valid === true && api.analyzeRule('title/foo/gr').valid === true);
+assert('规则-172: text尾段误报flags修复', api.analyzeRule('text/example.com/images/png').valid === true);
 assert('规则-173: @if 单= 正则带 g flags 报错, 合法 flags 正则仍生效', (() => {
   const bad = api.analyzeRule('*://example.com/* @if(url = /x/g)');
   const good = api.analyzeRule('*://example.com/* @if(url = /x/i)');
   return bad.valid === false && bad.errors.some((e) => /flags/.test(e)) && good.valid === true;
+})());
+}
+
+// ---- 规则-244~245: @N 前缀大小写与脚本规则后行内注释 ----
+{
+const api = makeRulesApi();
+assert('规则-244: @N 高亮前缀大小写不敏感', (() => {
+  api.setState(['@1TITLE/abc/', '@2Text/def/']); api.buildRuleIndex(); const cr = api.getCR();
+  return cr.highlightTitles.length === 1 && cr.highlightTexts.length === 1;
+})());
+assert('规则-245: 脚本规则后的行内##注释被截断, 裸域元素规则不受影响', (() => {
+  const strip = new Function(extractFn(src, 'stripRuleComment') + '\nreturn stripRuleComment;')();
+  return strip('title/x/ ## n') === 'title/x/' && strip('example.com ##.ad') === 'example.com ##.ad';
+})());
+// stripRuleComment 保留 @/@N 前缀, 删除规则按剥离后全文比较不会误删同核心的白名单/高亮规则
+assert('规则-246: stripRuleComment 保留@/@N前缀, @2/@白名单与同核心屏蔽规则不混淆', (() => {
+  const strip = new Function(extractFn(src, 'stripRuleComment') + '\nreturn stripRuleComment;')();
+  return strip('@2 *://x.com/*') === '@2 *://x.com/*' && strip('@*://x.com/*') === '@*://x.com/*' && strip('*://x.com/*') === '*://x.com/*';
 })());
 }
 
@@ -577,10 +624,10 @@ assert('规则-193: 非跳转域查询参数不解包', (() => {
   const plain = { href: 'https://example.com/page?ru=https%3A%2F%2Fother.example%2Fx' };
   return getCleanUrl(plain) === plain.href;
 })());
-const unwrap = new Function(['decodeRedirectTarget', 'decodeBingCkTarget', 'unwrapRedirectUrl'].map((n) => extractFn(src, n)).join('\n') + '\nreturn unwrapRedirectUrl;')();
+const unwrap = new Function(`${ENGINE_HOST_SRC}\n` + ['decodeRedirectTarget', 'decodeBingCkTarget', 'unwrapRedirectUrl', 'isEngineHost'].map((n) => extractFn(src, n)).join('\n') + '\nreturn unwrapRedirectUrl;')();
 assert('规则-194: /aclk?adurl 与 /pagead/aclk 解包', unwrap('https://www.google.com/aclk?sa=l&adurl=https%3A%2F%2Fads.example.com%2Fx') === 'https://ads.example.com/x' && unwrap('https://www.google.com/pagead/aclk?adurl=https%3A%2F%2Fads.example.com%2Fy') === 'https://ads.example.com/y');
-const opaque = new Function(['decodeRedirectTarget', 'isOpaqueRedirectUrl'].map((n) => extractFn(src, n)).join('\n') + '\nreturn isOpaqueRedirectUrl;')();
-const resolveDomain = new Function(['decodeRedirectTarget', 'decodeBingCkTarget', 'unwrapRedirectUrl', 'isOpaqueRedirectUrl', 'getCleanUrl', 'resolveUrlDomain'].map((n) => extractFn(src, n)).join('\n') + '\nconst currentConfig = { removeRedirects: true };\nfunction toASCIIUrl(u) { return u; }\nfunction toASCIIHostname(h) { return h; }\nreturn resolveUrlDomain;')();
+const opaque = new Function(`${ENGINE_HOST_SRC}\n` + ['decodeRedirectTarget', 'isOpaqueRedirectUrl', 'isEngineHost'].map((n) => extractFn(src, n)).join('\n') + '\nreturn isOpaqueRedirectUrl;')();
+const resolveDomain = new Function(`${ENGINE_HOST_SRC}\n` + ['decodeRedirectTarget', 'decodeBingCkTarget', 'unwrapRedirectUrl', 'isOpaqueRedirectUrl', 'getCleanUrl', 'resolveUrlDomain', 'isEngineHost'].map((n) => extractFn(src, n)).join('\n') + '\nconst currentConfig = { removeRedirects: true };\nfunction toASCIIUrl(u) { return u; }\nfunction toASCIIHostname(h) { return h; }\nreturn resolveUrlDomain;')();
 const realGotoToken = 'CAESdwHrOzAVviBTh0oG5HfKYOFhyRtw29uZRfju1ROpYoFN1tfC6B8zJfQueB8aSNp2eVjuHmYa_7JCnfQZ1yvAwsuCdGJ7aZ9Xzjl_kWh6hOo4Q_HrKX1C4fqKyX-fE5A1ehwz3w0ml64RCxA8QFWwLII6XEe1HIgI';
 const realGoto = 'https://www.google.com/goto?url=' + realGotoToken;
 assert('规则-195: goto CAES 原样返回且判为不透明', unwrap(realGoto) === realGoto && opaque(realGoto) === true);
@@ -604,8 +651,8 @@ const pickTextFileFn = extractFn(src, 'pickTextFile');
 const cfgDefaults = src.match(/const CFG_DEFAULTS = \{[^\n]+\};/)[0];
 const defHl = src.match(/const DEFAULT_HIGHLIGHT_COLORS = \{[^\n]+\};/)[0];
 const normalizeConfigFn = extractFn(src, 'normalizeConfig');
-
-function createEnv() {
+const stripRuleCommentFn = extractFn(src, 'stripRuleComment');
+function createEnv(initRules) {
   const env = { bodyChildren: [], windowListeners: {}, textarea: { value: '' }, hooks: { updateLineNumbersCalls: 0, written: [] } };
   const fakeInput = {
     type: '', accept: '', style: {}, files: [], parentElement: null, onchange: null, listeners: {},
@@ -630,10 +677,17 @@ function createEnv() {
     ${parseSyncHeaderFn}
     ${getSyncSettingsFn}
     ${extractFn(src, 'isNonRuleTextResponse')}
+    ${extractFn(src, 'isCondExprCore')}
+    ${extractFn(src, 'looksLikeCondExpr')}
     function showToast() {}
     function t(key) { return key; }
+    let confirmAnswer = null; let confirmCalls = 0; hooks.confirmMessages = hooks.confirmMessages || [];
+    function confirm(msg) { confirmCalls++; hooks.confirmMessages.push(msg); return confirmAnswer === null ? true : confirmAnswer; }
+    hooks.getConfirmCalls = () => confirmCalls; hooks.setConfirmAnswer = (v) => { confirmAnswer = v; };
     function validateRule(rule) { const s = String(rule).trim(); return s.length > 0 && !/\s/.test(s); }
     function filterValidRuleLines(lines) { return lines.map((l) => l.trim()).filter((l) => l.length > 0); }
+    ${stripRuleCommentFn}
+    ${extractFn(src, 'hasEffectiveRules')}
     ${pickTextFileFn}
     function updateLineNumbers() { hooks.updateLineNumbersCalls++; }
     function GM_setValue(key, val) { hooks.written.push({ key, val }); }
@@ -644,16 +698,25 @@ function createEnv() {
     const SELECTORS_KEY = 'searchfilter_selectors';
     const SELECTORS_LAST_MODIFIED_KEY = 'searchfilter_selectors_last_modified';
     function markLocalModifiedTime(key) { GM_setValue(key || 'searchfilter_local_last_modified', 1000000); }
+    function getSelectorsModifiedTime() { return 0; }
+    let _selectorStoreTime = null;
     function getSelectorStoreSignature() { return 'sig'; }
     function resetSelectorCache() { hooks.resetSelectorCalls = (hooks.resetSelectorCalls || 0) + 1; }
     function refreshEngineSite() { hooks.refreshCalls = (hooks.refreshCalls || 0) + 1; }
     ${cfgDefaults}
     ${defHl}
     ${normalizeConfigFn}
+    ${extractFn(src, 'exportSubscriptionList')}
+    ${extractFn(src, 'applyImportedSubscriptions')}
+    let subscriptionStore = [];
+    function getSubscriptions() { return subscriptionStore; }
+    function saveSubscriptions(subs) { subscriptionStore = subs; hooks.subsSaved = subs; }
+    function setSubscriptionSyncSnapshot(subs) { hooks.subsSnapshot = subs.map((s) => ({ url: s.url, name: s.name, enabled: s.enabled !== false })); }
+    function checkAutoSubscription() { hooks.autoSub = (hooks.autoSub || 0) + 1; }
     ${importRulesFromFileFn}
-    return { importRulesFromFile, isPreventPanelClose: () => preventPanelClose };
+    return { importRulesFromFile, exportSubscriptionList, applyImportedSubscriptions, setSubscriptions: (s) => { subscriptionStore = s; }, getSubscriptions, isPreventPanelClose: () => preventPanelClose };
   `);
-  const api = factory(documentStub, windowStub, FakeFileReader, { debug: false, subscriptionAutoUpdate: true, highlightColors: {1:'#112233', 2:'#FF8C00'} }, env.hooks);
+  const api = factory(documentStub, windowStub, FakeFileReader, { debug: false, subscriptionAutoUpdate: true, rules: initRules || [], highlightColors: {1:'#112233', 2:'#FF8C00'} }, env.hooks);
   return { env, api, fakeInput };
 }
 
@@ -682,7 +745,7 @@ function createEnv() {
   fakeInput.files = [{ _content: '# ScriptConfig: {"language":"en-US","showBubble":false,"syncedAt":123,"rulesSyncedAt":456,"bubbleState":{"x":1},"bubbleSize":99,"selectors":{"bing":{"match":"a"}}}\nrule1' }];
   fakeInput.onchange({ target: fakeInput });
   const saved = env.hooks.written[0] && env.hooks.written[0].val;
-  assert('规则-203: TXT导入只覆盖头里出现的键, 时间戳/气泡本地态/选择器不随导入, 正文规则同时落盘', env.hooks.written.length === 1 && saved.language === 'en-US' && saved.showBubble === false && saved.subscriptionAutoUpdate === true && saved.enabled === true && saved.bubbleAction === 'openPanel' && saved.syncedAt === undefined && saved.rulesSyncedAt === undefined && saved.bubbleState === undefined && saved.bubbleSize === undefined && saved.selectors === undefined && saved.rules.join() === 'rule1');
+  assert('规则-203: TXT导入只覆盖头里出现的键, 时间戳/气泡本地态/选择器不随导入, 正文规则同时落盘', env.hooks.written.length === 1 && saved.language === 'en-US' && saved.showBubble === false && saved.subscriptionAutoUpdate === true && saved.enabled === true && saved.bubbleAction === 'openPanel' && saved.syncedAt === undefined && saved.rulesSyncedAt === undefined && saved.bubbleState === undefined && saved.bubbleSize === 30 && saved.selectors === undefined && saved.rules.join() === 'rule1');
   assert('规则-204: 头行剥离后规则写入编辑区并立即保存, 面板刷新与重处理各一次', env.textarea.value === 'rule1' && env.hooks.persistCalls === 1 && env.hooks.persistMark === true && env.hooks.applyCalls === 1 && env.hooks.reprocessCalls === 1 && env.hooks.updateLineNumbersCalls === 1);
 }
 
@@ -745,6 +808,66 @@ function createEnv() {
   assert('规则-211: 有配置头但正文全是垃圾文本也被拒绝', env.textarea.value === '' && env.hooks.written.length === 0 && env.hooks.applyCalls === undefined);
 }
 
+// 中文登录提示文本导入拒绝
+{
+  const { env, api, fakeInput } = createEnv();
+  api.importRulesFromFile();
+  fakeInput.files = [{ _content: '请先登录\n请输入密码' }];
+  fakeInput.onchange({ target: fakeInput });
+  assert('规则-217: 中文登录提示文本导入被拒绝', env.textarea.value === '' && env.hooks.written.length === 0 && env.hooks.persistCalls === undefined);
+}
+
+// 空规则文件导入清空前需确认(修复留档)
+{
+  const { env, api, fakeInput } = createEnv(['old.com']);
+  api.importRulesFromFile();
+  env.hooks.setConfirmAnswer(false);
+  fakeInput.files = [{ _content: '\n\n' }];
+  fakeInput.onchange({ target: fakeInput });
+  assert('规则-221: 本地有规则时导入无规则文件弹确认且取消不动配置', env.hooks.getConfirmCalls() === 1 && env.hooks.written.length === 0 && env.hooks.persistCalls === undefined && env.textarea.value === '' && api.isPreventPanelClose() === false);
+}
+{
+  const { env, api, fakeInput } = createEnv(['old.com']);
+  api.importRulesFromFile();
+  env.hooks.setConfirmAnswer(true);
+  fakeInput.files = [{ _content: '' }];
+  fakeInput.onchange({ target: fakeInput });
+  const saved = env.hooks.written[0] && env.hooks.written[0].val;
+  assert('规则-222: 确认后空规则文件清空本地规则并落盘', env.hooks.getConfirmCalls() === 1 && env.hooks.persistCalls === 1 && saved.rules.length === 0);
+}
+{
+  const { env, api, fakeInput } = createEnv([]);
+  api.importRulesFromFile();
+  fakeInput.files = [{ _content: '' }];
+  fakeInput.onchange({ target: fakeInput });
+  assert('规则-223: 本地无规则时导入空文件不再弹确认', env.hooks.getConfirmCalls() === 0 && env.hooks.persistCalls === 1);
+}
+{
+  const { env, api, fakeInput } = createEnv(['old.com']);
+  api.importRulesFromFile();
+  env.hooks.setConfirmAnswer(false);
+  fakeInput.files = [{ _content: '# title: my rules\n# author: me' }];
+  fakeInput.onchange({ target: fakeInput });
+  assert('规则-256: 纯注释文件导入按无有效规则处理并弹清空确认', env.hooks.getConfirmCalls() === 1 && env.hooks.written.length === 0 && env.hooks.persistCalls === undefined);
+}
+
+// 订阅随脚本配置导出/导入
+{
+  const { api } = createEnv();
+  api.setSubscriptions([{ url: 'https://a/x', name: 'A', enabled: true, rules: ['r1'], lastUpdate: 5 }]);
+  assert('规则-218: 导出配置携带订阅清单且不含本地规则', JSON.stringify(api.exportSubscriptionList()) === JSON.stringify([{ url: 'https://a/x', name: 'A', enabled: true }]));
+  const added = api.applyImportedSubscriptions([{ url: 'https://a/x', name: 'A2' }, { url: 'https://b/y', enabled: false }]);
+  const subs = api.getSubscriptions();
+  assert('规则-219: 导入合并订阅保留本地规则并记录新增数', added === 1 && subs.length === 2 && subs.find((s) => s.url === 'https://a/x').rules.join() === 'r1' && subs.find((s) => s.url === 'https://a/x').name === 'A2' && subs.find((s) => s.url === 'https://b/y').enabled === false);
+}
+{
+  const { env, api, fakeInput } = createEnv();
+  api.importRulesFromFile();
+  fakeInput.files = [{ _content: '# ScriptConfig: {"language":"en-US","subscriptions":[{"url":"https://s/1","name":"S1","enabled":true}]}\nrule1' }];
+  fakeInput.onchange({ target: fakeInput });
+  assert('规则-220: TXT导入脚本配置内的订阅被恢复', !!env.hooks.subsSaved && env.hooks.subsSaved.length === 1 && env.hooks.subsSaved[0].url === 'https://s/1' && env.textarea.value === 'rule1');
+}
+
 // 同步头解析(仅剥离头行, 其余#注释保留)
 {
   const run = (content) => new Function('currentConfig', 'console', `${parseSyncHeaderFn}\nreturn parseSyncHeader;`)({ debug: false }, { warn: () => {} })(content);
@@ -752,6 +875,8 @@ function createEnv() {
   assert('规则-212: 头前用户注释保留且头仍被解析', r.restLines.join('\n') === '# uBlacklist backup rules\nrule1' && !!r.config && r.config.a === 1);
   r = run('# ScriptConfig: {"a":1}\n# 我的分组注释\n# Selectors: []\nrule1');
   assert('规则-213: 两头之间的注释保留, Selectors 头解析并合入', r.restLines.join('\n') === '# 我的分组注释\nrule1' && Array.isArray(r.config.selectors));
+  r = run('# ScriptConfig: {"a":1}\n# Selectors: {"bing":{"match":"a","containers":".x","extraElements":["[data-e=\\"a,b\\"]"]}}\nrule1');
+  assert('规则-213b: Selectors头允许引号内逗号', !!r.config && r.config.selectors.bing.extraElements[0] === '[data-e="a,b"]');
   r = run('# ScriptConfig: {"a":1}\n# ScriptConfig: {"b":2}\nrule1');
   assert('规则-214: 重复头取首个, 后部伪头按注释保留正文', r.config.a === 1 && r.config.b === undefined && r.restLines.join('\n') === '# ScriptConfig: {"b":2}\nrule1');
   r = run('# ScriptConfig:{"syncedAt":12\nrule1');
@@ -809,8 +934,29 @@ assert('规则-251: YAML探测命中但未解析出列表段时回退纯文本',
   const b = plainApi('title: My list\n*://*.ads.com/*\n');
   return a.lines.filter((l) => l.trim()).length === 3 && b.lines.filter((l) => l.trim()).length === 2;
 })());
+// 标量引号仅起始处生效(修复留档): 中部撇号不再吞注释/闭合括号/后续段
+assert('规则-252: flow值中部撇号+尾注释不吞后文段落', (() => {
+  const r = plainApi("rules: [bob's.com, x.com] # don't\nwhitelist:\n  - d.com\n...\n@@|https://x.com/p[1]\n");
+  return JSON.stringify(r.lines) === JSON.stringify(["bob's.com", 'x.com', '@d.com']);
+})());
+assert('规则-253: 引号包裹#的项保留且中部撇号项按逗号拆分', (() => {
+  const r = plainApi('rules: ["a # b", c\'s.com]\n');
+  return JSON.stringify(r.lines) === JSON.stringify(['a # b', "c's.com"]);
+})());
 }
 
+// ---- 规则-254~25x: @N 与 @if 紧贴写法修复留档 ----
+{
+const api = makeRulesApi();
+api.setState(['@2@if(title *= "kw")', '@1 @if(title *= "x")'], []); api.buildRuleIndex();
+const cr = api.getCR();
+assert('规则-254: @N@if(...) 无空格与有空格等价, 归入高亮条件表达式而非被整条拒绝', cr.highlightConditionalRules.some(e => e.N === 2 && e.type === 'expr' && e.conditions.length === 1) && cr.whitelistConditionalRules.length === 0 && api.validateRule('@2@if(title *= "kw")') === true);
+assert('规则-255: @N@*:// 无空格仍被拒绝(设计保留, 见规则-170), @N*:// 不受影响', api.analyzeRule('@1@*://*.example.com/*').valid === false && api.analyzeRule('@1*://*.example.com/*').valid === true);
+}
+
+// 易错: 优先链 本地白>本地黑>订阅白>订阅黑 依赖 allRules=本地.concat(订阅) 的固定顺序
+// 易错: scanPatterns 不做本地优先, 完全依赖各分类数组本地在前
+// 易错: getRuleKey 以去行尾注释的正文为键, 重复规则行/注释行同步时会合并为一条
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 

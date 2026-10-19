@@ -9,7 +9,7 @@ if (!scriptFiles.length) throw new Error('no .js script found in ' + scriptDir);
 const file = path.join(scriptDir, scriptFiles[0]);
 console.log('Testing', file);
 const src = fs.readFileSync(file, 'utf8');
-const readRepoFile = (rel) => fs.readFileSync(['', 'Other', '文档'].map((d) => path.join(scriptDir, d, rel)).find((p) => fs.existsSync(p)), 'utf8');
+const readRepoFile = (rel) => fs.readFileSync(['', 'other', '文档'].map((d) => path.join(scriptDir, d, rel)).find((p) => fs.existsSync(p)), 'utf8');
 
 // 函数体括号配对提取
 function extractFn(text, fnName) {
@@ -23,7 +23,7 @@ function extractFn(text, fnName) {
   const fn = text.slice(idx, i + 1);
   const prelude = [];
   if (!['findBalancedParenEnd', 'scanRuleString', 'encodeNonAscii'].includes(fnName)) {
-    if (/scanRuleString\(|RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_[A-D]\b/.test(fn)) prelude.push(text.split('\n').filter((l) => /^\s*const (?:RULE_\w+|REGEX_CTX_[A-D]) =/.test(l)).map((l) => l.replace('const ', 'var ')).join('\n'), rawExtract(text, 'findBalancedParenEnd'), rawExtract(text, 'scanRuleString'), rawExtract(text, 'isBadRegexTail'), rawExtract(text, 'regexCloseAhead'));
+    if (/scanRuleString\(|RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_[A-D]\b/.test(fn)) prelude.push(text.split('\n').filter((l) => /^\s*const (?:RULE_\w+|REGEX_CTX_[A-D]) =/.test(l)).map((l) => l.replace('const ', 'var ')).join('\n'), rawExtract(text, 'findBalancedParenEnd'), rawExtract(text, 'scanRuleString'), rawExtract(text, 'isBadRegexTail'), rawExtract(text, 'regexCloseAhead'), rawExtract(text, 'regexStartAhead'));
     if (/encodeNonAscii\(/.test(fn)) prelude.push(rawExtract(text, 'encodeNonAscii'));
     if (/isUniqueFlagsStr\(|isFlagsCandidateError\(/.test(fn)) prelude.push(['isUniqueFlagsStr', 'isFlagsCandidateError'].map((n) => rawExtract(text, n)).join('\n'));
   }
@@ -80,7 +80,9 @@ if (!builtinSelectorOfLine) throw new Error('builtinSelectorOf not found');
 const body = `
 const WEBDAV_SYNC_SELECTORS_KEY = 'searchfilter_webdav_sync_selectors'; const SELECTORS_KEY = 'searchfilter_selectors';
 const SUPPORTED_REGEX_FLAGS = 'imsu';
-const SELECTORS = ${selectorsObjectText}; let activeSelectors = null; let _engineCacheHost = null;
+const SELECTORS = ${selectorsObjectText}; let activeSelectors = null; let _engineCacheHost = null; let _categoryCacheHref = null; let _categoryCacheResult = 'web';
+${src.match(/const ENGINE_HOST_REGEXES = \{[\s\S]*?\n  \};/)[0]}
+function isEngineHost(engine, host) { const re = ENGINE_HOST_REGEXES[engine]; return !!re && re.test(String(host || '')); }
 ${builtinSelectorOfLine[0]} let _engineCacheResult = 'other'; let _observedSelector = '';
 const window = { location: { get hostname() { return currentHost; }, get href() { return currentHref; } } }; let currentHost = 'www.google.com'; let currentHref = 'https://www.google.com/';
 function t(key, params = {}) { let text = key; for (const [k, v] of Object.entries(params || {})) text += ':' + v; return text; } function GM_setValue(key, value) { if (key === 'searchfilter_selectors') storeRef.current = value; }
@@ -126,6 +128,7 @@ check('选择器-016: 非法 CSS 报错', api.validateUserSelectors({ e4: { matc
 check('选择器-017: 非对象配置报错', api.validateUserSelectors([1, 2]).length === 1 && api.validateUserSelectors('x').length === 1);
 check('选择器-018: containers 伪元素被拒且引号内不误报', api.validateUserSelectors({ e7: { match: 'a', containers: 'div::after' } }).length === 1 && api.validateUserSelectors({ e8: { match: 'a', containers: '[data-x="a::b"]' } }).length === 0);
 check('选择器-019: titles/snippets/links 伪元素被拒且引号内不误报', api.validateUserSelectors({ p1: { match: 'a', containers: '.x', titles: ['h3::after'] } }).length === 1 && api.validateUserSelectors({ p2: { match: 'a', containers: '.x', snippets: ['.c::before'] } }).length === 1 && api.validateUserSelectors({ p3: { match: 'a', containers: '.x', links: 'a::after' } }).length === 1 && api.validateUserSelectors({ p4: { match: 'a', containers: '.x', titles: ['[data-k="a::b"]'] } }).length === 0);
+check('选择器-019b: 引号内逗号与snippets选择器列表合法', api.validateUserSelectors({ p5: { match: 'a', containers: '.x', snippets: ['[data-s="a,b"]'], extraElements: ['[data-e="a,b"]'] } }).length === 0 && api.validateUserSelectors({ p6: { match: 'a', containers: '.x', snippets: ['.a, .b'] } }).length === 0);
 check('选择器-020: 对象match非法flags报错且合法通过', api.validateUserSelectors({ e11: { match: { source: 'a', flags: 'q' }, containers: '.x' } }).length === 1 && api.validateUserSelectors({ e12: { match: { source: 'a', flags: 'i' }, containers: '.x' } }).length === 0);
 check('选择器-021: 字符串match写成/re/g被拒且合法字面量通过', api.validateUserSelectors({ f1: { match: '/a/g', containers: '.x' } }).some((m) => m.includes('invalidRegexFlags')) && api.validateUserSelectors({ f2: { match: '/a/i', containers: '.x' } }).length === 0);
 check('选择器-022: titles字符串简写合法且links非法类型报错', api.validateUserSelectors({ e5: { match: 'a', containers: '.x', titles: 'h3', snippets: '.c' } }).length === 0 && api.validateUserSelectors({ e6: { match: 'a', containers: '.x', links: 123 } }).length === 1);
@@ -513,7 +516,20 @@ function createTeardownEnv() {
     const { calls, api } = makeFactory('return false;');
     const el2 = makeContainer();
     api.reprocessContainer(el2);
-    check('选择器-082: 未标记完成时重新观察', calls.observe === 1 && el2.hasAttribute('data-observed') === false);
+    check('选择器-082: 未标记完成时重新观察', calls.observe === 1 && calls.process === 1);
+    check('选择器-165: 重处理转交观察器时同步标记 data-observed, 观察间隙可被 teardown 覆盖(主版+Lite)', el2.getAttribute('data-observed') === 'true' && (() => {
+      const liteFn = extractFn(readRepoFile('Lite.user.js'), 'reprocessContainer');
+      const callsL = { observe: 0 };
+      const apiL = new Function('calls', 'resultObserver', `
+        const currentConfig = { debug: false }; function resetResultStyles(el) {}
+        function processSingleResult(el) { return false; } function reconcileHiddenParents() {}
+        ${liteFn}
+        return { reprocessContainer };
+      `)(callsL, { observe() { callsL.observe++; } });
+      const elL = makeContainer();
+      apiL.reprocessContainer(elL);
+      return callsL.observe === 1 && elL.getAttribute('data-observed') === 'true';
+    })());
   }
   {
     const { calls, api } = makeFactory("throw new Error('boom');");
@@ -637,11 +653,12 @@ function createTeardownEnv() {
 
 // 跨标签页选择器变更检测
 function createExternalEnv() {
-  const state = { store: { a: 1 }, throwMode: false };
+  const state = { store: { a: 1 }, ts: 1, throwMode: false };
   const counters = { reset: 0, refresh: 0 };
-  function GM_getValue() { if (state.throwMode) throw new Error('read fail'); return state.store; }
+  function GM_getValue(k) { if (state.throwMode) throw new Error('read fail'); return k === 'ts' ? state.ts : state.store; }
   const api = new Function('GM_getValue', 'counters', `
-    const SELECTORS_KEY = 'searchfilter_selectors'; let _selectorStoreSignature = null;
+    const SELECTORS_KEY = 'searchfilter_selectors'; let _selectorStoreSignature = null; let _selectorStoreTime = null;
+    function getSelectorsModifiedTime() { return GM_getValue('ts'); }
     function resetSelectorCache() { counters.reset++; } function refreshEngineSite() { counters.refresh++; }
     ${getSelectorStoreSignatureFn}
     ${checkExternalSelectorChangeFn}
@@ -651,8 +668,9 @@ function createExternalEnv() {
 }
 {
   const { api, state, counters } = createExternalEnv();
-  check('选择器-094: 首次调用仅建立基线且未变化不重装配且变化后重装配', api.checkExternalSelectorChange() === false && (() => { const r = api.checkExternalSelectorChange() === false; state.store = { a: 2 }; return r && api.checkExternalSelectorChange() === true && counters.reset === 1 && counters.refresh === 1; })());
-  check('选择器-095: 重装配后不重复且读取失败不误判为变更且恢复后继续检测', api.checkExternalSelectorChange() === false && (() => { state.throwMode = true; const r1 = api.checkExternalSelectorChange() === false && counters.reset === 1; state.throwMode = false; state.store = { a: 3 }; return r1 && api.checkExternalSelectorChange() === true && counters.reset === 2 && counters.refresh === 2; })());
+  check('选择器-094: 首次调用仅建立基线且未变化不重装配且变化后重装配', api.checkExternalSelectorChange() === false && (() => { const r = api.checkExternalSelectorChange() === false; state.store = { a: 2 }; state.ts = 2; return r && api.checkExternalSelectorChange() === true && counters.reset === 1 && counters.refresh === 1; })());
+  check('选择器-095: 重装配后不重复且读取失败不误判为变更且恢复后继续检测', api.checkExternalSelectorChange() === false && (() => { state.throwMode = true; const r1 = api.checkExternalSelectorChange() === false && counters.reset === 1; state.throwMode = false; state.store = { a: 3 }; state.ts = 3; return r1 && api.checkExternalSelectorChange() === true && counters.reset === 2 && counters.refresh === 2; })());
+  check('选择器-095b: 时间戳不变但选择器存储签名变化仍重装配', api.checkExternalSelectorChange() === false && (() => { state.store = { a: 4 }; return api.checkExternalSelectorChange() === true && counters.reset === 3 && counters.refresh === 3; })());
 }
 })();
 
@@ -943,6 +961,13 @@ await (async () => {
     check('选择器-127: 最后一个子项reset后父恢复原display', li.style.display === 'block' && !li.hasAttribute('data-blocker-yandex-parent') && !li.hasAttribute('data-serh-orig-display'));
   }
   {
+    const { root, fns } = makeParentEnv(false);
+    const li = makeTreeEl('li', '', root); li.style.display = 'none'; li.setAttribute('data-is-blocked', 'true'); li.setAttribute('data-blocker-yandex-parent', 'true'); li.setAttribute('data-serh-orig-display', '');
+    const child = makeTreeEl('div', 'Organic', li); blockEl(fns, child);
+    fns.resetResultStyles(child);
+    check('选择器-127b: 父容器自身被屏蔽时不因末子项解除而恢复', li.style.display === 'none' && li.getAttribute('data-blocker-yandex-parent') === 'true');
+  }
+  {
     const { root, fns } = makeParentEnv(true);
     const P = makeTreeEl('div', 'MjjYud', root); P.style.display = 'flex';
     blockEl(fns, makeTreeEl('div', 'g', P)); blockEl(fns, makeTreeEl('div', 'g', P));
@@ -972,12 +997,20 @@ await (async () => {
     check('选择器-131: bing图片li槽位解除屏蔽后经closest标记恢复', li.style.display === '' && !li.hasAttribute('data-serh-grid-item-hidden') && iuscp.style.display === '' && iuscp.getAttribute('data-is-blocked') === null);
   }
   {
+    const { root, fns } = makeParentEnv(false);
+    const cell = makeTreeEl('div', '', root); cell.style.display = 'none'; cell.setAttribute('data-serh-grid-item-hidden', 'true'); cell.setAttribute('data-serh-orig-display', '');
+    fns.restoreAllHiddenParents();
+    check('选择器-131b: 恢复全部隐藏父容器时同时清除网格槽标记', cell.style.display === '' && !cell.hasAttribute('data-serh-grid-item-hidden') && !cell.hasAttribute('data-serh-orig-display'));
+  }
+  {
     const linkApi = new Function('SELECTORS', `
       function toASCIIHostname(h) { return h; }
       function toASCIIUrl(u) { return u; }
       function getSelectors() { return SELECTORS; }
       const window = { location: { hostname: 'www.bing.com', href: 'https://www.bing.com/search?q=x' } };
-      let _engineCacheHost = null; let _engineCacheResult = 'other';
+      let _engineCacheHost = null; let _engineCacheResult = 'other'; let _categoryCacheHref = null; let _categoryCacheResult = 'web';
+      ${src.match(/const ENGINE_HOST_REGEXES = \{[\s\S]*?\n  \};/)[0]}
+      function isEngineHost(engine, host) { const re = ENGINE_HOST_REGEXES[engine]; return !!re && re.test(String(host || '')); }
       ${extractFn(src, 'getSearchEngine')}
       ${extractFn(src, 'getSearchCategory')}
       ${extractFn(src, 'isBingImagesPage')}
@@ -1073,6 +1106,8 @@ return { injectBlockButton };
   const defApi = new Function(`${cfgDefaultsLine}\n${hlLine}\n${extractFn(src, 'getDefaultConfig')}\nreturn { getDefaultConfig };`)();
   const normApi = new Function(`${cfgDefaultsLine}\n${hlLine}\n${extractFn(src, 'normalizeConfig')}\nreturn { normalizeConfig };`)();
   check('选择器-140: showMatchedSource默认开启且显式false被保留', defApi.getDefaultConfig().showMatchedSource === true && normApi.normalizeConfig({ rules: [], showMatchedSource: false }).showMatchedSource === false);
+  check('选择器-141: normalizeConfig 用默认值补 null 设置', normApi.normalizeConfig({ rules: [], enabled: null, language: null }).enabled === true && normApi.normalizeConfig({ rules: [], enabled: null }).language === 'zh-CN');
+  check('选择器-141b: 旧版气泡尺寸迁移为30px且数字字符串保留', normApi.normalizeConfig({ rules: [], bubbleSize: 'large' }).bubbleSize === 30 && normApi.normalizeConfig({ rules: [] }).bubbleSize === 30 && normApi.normalizeConfig({ rules: [], bubbleSize: '25' }).bubbleSize === 25);
 
   let labelAppended = null;
   const labelEl = { className: '', textContent: '' };
@@ -1081,6 +1116,7 @@ return { injectBlockButton };
 let currentConfig = {};
 const t = (k) => k;
 function ensurePositioned() {}
+${extractFn(src, 'sourceLabelOf')}
 ${extractFn(src, 'removeMatchedRuleLabel')}
 ${extractFn(src, 'addMatchedRuleLabel')}
 return { setConfig: (v) => { currentConfig = v; }, run: (r) => addMatchedRuleLabel(r) };
@@ -1117,7 +1153,31 @@ return { setConfig: (v) => { currentConfig = v; }, run: (r) => addMatchedRuleLab
     return statSourceKey;
   `)();
   const keyEn = mkFn('en'), keyZh = mkFn('zh');
-  check('选择器-143: 来源键中英混排归一为语言无关键', keyEn('本地规则') === 'local' && keyEn('订阅2') === 'sub:2' && keyZh('Local Rule') === 'local' && keyZh('Sub3') === 'sub:3' && keyEn('whatever') === '');
+  check('选择器-143: 来源键中英混排归一为语言无关键', keyEn('本地规则') === 'local' && keyEn('订阅2') === 'sub:2' && keyZh('Local Rule') === 'local' && keyZh('Sub3') === 'sub:3' && keyEn('whatever') === '' && keyEn('sub:2') === 'sub:2' && keyZh('local') === 'local');
+  const liteSrc = readRepoFile('Lite.user.js');
+  const liteStat = new Function(`
+    const t = (k) => ({ localRule: '本地规则' }[k]);
+    ${extractFn(liteSrc, 'statSourceKey')}
+    return statSourceKey;
+  `)();
+  check('选择器-143b: Lite来源键接受local且保持语言归一', liteStat('local') === 'local' && liteStat('本地规则') === 'local' && liteStat('Local Rule') === 'local' && liteStat('sub:2') === 'sub:2' && liteStat('订阅3') === 'sub:3' && liteStat('x') === '');
+  const liteClear = new Function(`${extractFn(liteSrc, 'clearMatchedData')}\nreturn clearMatchedData;`)();
+  const attrs = { 'data-matched-rule': '1', 'data-matched-source': '2', 'data-matched-source-key': 'local', 'data-whitelist-rule': '3', 'data-whitelist-source': '4', 'data-whitelist-source-key': 'local', keep: '1' };
+  liteClear({ removeAttribute(k) { delete attrs[k]; } });
+  check('选择器-143c: Lite清理命中/白名单来源键', !('data-matched-source-key' in attrs) && !('data-whitelist-source-key' in attrs) && attrs.keep === '1');
+  check('选择器-143d: Lite中英文语言包均含errorWord', /errorWord:\s*'错误'/.test(liteSrc) && /errorWord:\s*'Error'/.test(liteSrc));
+  const liteValidate = new Function(`
+    const t = (k) => k;
+    const normalizeSelectorList = (v) => Array.isArray(v) ? v.filter((s) => typeof s === 'string' && s) : (typeof v === 'string' && v ? [v] : []);
+    const isValidCssSelector = () => true;
+    const hasPseudoElement = (s) => /::/.test(String(s).replace(/(["'])(?:\\\\.|(?!\\1).)*\\1/g, ''));
+    ${extractFn(liteSrc, 'validateUserSelectors')}
+    return validateUserSelectors;
+  `)();
+  check('选择器-143e: Lite引号内逗号与snippets选择器列表合法', liteValidate({ p5: { match: 'a', containers: '.x', snippets: ['[data-s="a,b"]', '.a, .b'], extraElements: ['[data-e="a,b"]'] } }).length === 0);
+  const liteHeader = new Function('currentConfig', 'console', `${extractFn(liteSrc, 'parseSyncHeader')}\nreturn parseSyncHeader;`)({ debug: false }, { warn: () => {} });
+  const liteHeaderRes = liteHeader('# Selectors: {"bing":{"match":"a","containers":".x","extraElements":["[data-e=\\"a,b\\"]"]}}\nrule1');
+  check('选择器-143f: Lite同步头接受引号内逗号', !!liteHeaderRes.config && liteHeaderRes.config.selectors.bing.extraElements[0] === '[data-e="a,b"]');
 }
 
 // ---- 编辑区成对括号显示 ----
@@ -1164,7 +1224,10 @@ return { isJsRegexAllowed, buildBracketMatchMap, findBracketPairAt, findEnclosin
     function getSelectors() { return SELECTORS; }
     const window = { location: { hostname: 'www.google.com', href: 'https://www.google.com/search?q=x', origin: 'https://www.google.com' } };
     const location = window.location;
-    let _engineCacheHost = null; let _engineCacheResult = 'other';
+    let _engineCacheHost = null; let _engineCacheResult = 'other'; let _categoryCacheHref = null; let _categoryCacheResult = 'web';
+    ${src.match(/const ENGINE_HOST_REGEXES = \{[\s\S]*?\n  \};/)[0]}
+    function isEngineHost(engine, host) { const re = ENGINE_HOST_REGEXES[engine]; return !!re && re.test(String(host || '')); }
+    const isNotGoogleHost = (h) => !!h && !isEngineHost('google', h);
     ${extractFn(src, 'getSearchEngine')}
     ${extractFn(src, 'getSearchCategory')}
     ${extractFn(src, 'isBingImagesPage')}
@@ -1230,6 +1293,123 @@ return { isJsRegexAllowed, buildBracketMatchMap, findBracketPairAt, findEnclosin
   check('选择器-162: Lite版同步字面量解析与校验口径', pL.source === 'foo\\.bar' && pL.flags === 'i' && apiL2.sameSelectorDef({ ...base, match: '/foo/i' }, { ...base, match: /foo/i }) && apiL2.validateUserSelectors({ ok: { match: '/foo\\.bar/i', ...base } }).length === 0);
 }
 
+// ---- 选择器-166~172: 后台积压封顶 / teardown迟到回调守卫 / 批处理观察标记 / init延迟 修复留档 ----
+{
+  const liteSrc = readRepoFile('Lite.user.js');
+  // 选择器-166/167/168/169: 后台标签页(setTimeout)与前台(rAF)调度及积压封顶
+  function makeObserverEnv(hidden, fnSrc) {
+    const calls = { raf: 0, timeouts: [], scan: 0, closest: 0 };
+    const body = { closest() { calls.closest++; return null; } };
+    const documentStub = { hidden, body, querySelector() { return null; } };
+    let moCb = null;
+    class MutationObserver { constructor(cb) { moCb = cb; } observe() {} disconnect() {} }
+    const api = new Function('document', 'MutationObserver', 'requestAnimationFrame', 'setTimeout', 'calls', `
+      let _engineSiteSetup = false; let _domObserver = null; let _observedSelector = '';
+      let _searchForm = null; let _searchFormHandler = null; let _urlChangeHandler = null;
+      let _hrefUrlCache = new WeakMap(); const _hrefChangedContainers = new Set();
+      const _contentChangedContainers = new Set(); let _resultContentCache = new WeakMap();
+      let _resultRetryCounts = new WeakMap(); let showHiddenResults = false; let forceReprocessBatchId = 0;
+      const currentConfig = { enabled: true, debug: false, collapseMode: false };
+      function isEngineSite() { return true; } function injectGlobalStyles() {}
+      function buildRuleIndex() {} function exposeDebugApi() {} function updateStatus() {}
+      function scanNewResults() { calls.scan++; } function startBackgroundSync() {}
+      function forceReprocessAll() {} function resetSelectorCache() {} function refreshEngineSite() {}
+      function getSearchEngine() { return 'test'; } function getContainerSelector() { return '.x'; }
+      function getSearchCategory() { return 'web'; }
+      function peekResultUrl() { return ''; } function reprocessContainer() {} function getResultContentSignature() { return null; }
+      const location = { href: 'https://www.google.com/search?q=x' };
+      const history = { pushState() {}, replaceState() {} };
+      const window = { addEventListener() {}, dispatchEvent() {} }; const Event = class {};
+      ${fnSrc}
+      return { ensureEngineSiteSetup };
+    `)(documentStub, MutationObserver, () => { calls.raf++; }, (fn, ms) => { calls.timeouts.push({ fn, ms }); return calls.timeouts.length; }, calls);
+    api.ensureEngineSiteSetup();
+    return { calls, moCb, body };
+  }
+  {
+    const { calls, moCb, body } = makeObserverEnv(true, extractFn(src, 'ensureEngineSiteSetup'));
+    moCb(Array.from({ length: 3000 }, () => ({ type: 'childList', target: body, addedNodes: [1] })));
+    check('选择器-166: 页面隐藏时改用 setTimeout 而非 rAF 调度 flush(主版)', calls.raf === 0 && calls.timeouts.length === 1 && calls.timeouts[0].ms === 500);
+    calls.timeouts[0].fn();
+    check('选择器-167: 积压超限折叠为全量重扫信号, flush 后触发 scanNewResults(主版)', calls.closest === 1 && calls.scan === 2);
+    const { calls: callsF, moCb: moCbF } = makeObserverEnv(false, extractFn(src, 'ensureEngineSiteSetup'));
+    moCbF([{ type: 'childList', target: {}, addedNodes: [1] }]); moCbF([{ type: 'childList', target: {}, addedNodes: [1] }]);
+    check('选择器-168: 前台仍走 rAF 且 pending 期间不重复调度(主版)', callsF.raf === 1 && callsF.timeouts.length === 0);
+  }
+  {
+    const { calls, moCb, body } = makeObserverEnv(true, extractFn(liteSrc, 'ensureEngineSiteSetup'));
+    moCb(Array.from({ length: 3000 }, () => ({ type: 'childList', target: body, addedNodes: [1] })));
+    check('选择器-169: Lite 页面隐藏时 setTimeout 调度且积压封顶', calls.raf === 0 && calls.timeouts.length === 1 && calls.timeouts[0].ms === 500 && (() => { calls.timeouts[0].fn(); return calls.closest === 1 && calls.scan === 2; })());
+  }
+  // 选择器-170/171: teardown 后迟到回调不处理
+  function makeGuardApi(fnSrc, setup) {
+    const counter = { link: 0 };
+    const fn = new Function('counter', `
+      let _engineSiteSetup = ${setup}; const currentConfig = { enabled: true, debug: false };
+      function getSearchEngine() { return 'other'; }
+      function getResultLink() { counter.link++; return null; }
+      ${fnSrc}
+      return processSingleResult;
+    `)(counter);
+    return { fn, counter };
+  }
+  const stubResult = { closest: () => null, hasAttribute: () => false };
+  const guardM = makeGuardApi(extractFn(src, 'processSingleResult'), false);
+  const guardMOn = makeGuardApi(extractFn(src, 'processSingleResult'), true);
+  const guardL = makeGuardApi(extractFn(liteSrc, 'processSingleResult'), false);
+  const guardLOn = makeGuardApi(extractFn(liteSrc, 'processSingleResult'), true);
+  check('选择器-170: teardown 后 processSingleResult 直接拒绝且不提取链接(主版+Lite)', guardM.fn(stubResult) === false && guardM.counter.link === 0 && guardL.fn(stubResult) === false && guardL.counter.link === 0);
+  check('选择器-171: 装配中仍正常走到链接提取(守卫不误伤)', guardMOn.fn(stubResult) === false && guardMOn.counter.link === 1 && guardLOn.fn(stubResult) === false && guardLOn.counter.link === 1);
+  // 选择器-172: forceReprocessAll 不再抹掉 data-observed 标记(主版+Lite 源检查)
+  const frSrcM = src.slice(src.indexOf('function forceReprocessAll'), src.indexOf('const LAYOUT_CSS'));
+  const frSrcL = liteSrc.slice(liteSrc.indexOf('function forceReprocessAll'), liteSrc.indexOf('const LAYOUT_CSS'));
+  check('选择器-172: 批处理未完成结果仅补观察, 保留 data-observed 标记(主版+Lite)', !frSrcM.includes("removeAttribute('data-observed')") && frSrcM.includes('resultObserver.observe(result)') && !frSrcL.includes("removeAttribute('data-observed')") && frSrcL.includes('resultObserver.observe(result)'));
+  // init 调度: document-idle 下不再固定延迟 1s(主版+Lite 源检查)
+  check('选择器-172b: init 在 DOMContentLoaded 之外零延迟调度(主版+Lite)', /setTimeout\(init, 0\)/.test(src) && /setTimeout\(init, 0\)/.test(liteSrc) && !/setTimeout\(init, 1000\)/.test(src) && !/setTimeout\(init, 1000\)/.test(liteSrc));
+}
+
+// ---- 选择器-173: 等长正文变化仍按完整签名重处理 ----
+{
+  function makeContentFlushEnv() {
+    const calls = { reprocess: 0, status: 0, scan: 0, raf: 0, timeouts: [] };
+    const container = { isConnected: true, sig: 'new-sig', hasAttribute: () => true, closest: () => container };
+    let moCb = null;
+    class MutationObserver { constructor(cb) { moCb = cb; } observe() {} disconnect() {} }
+    const documentStub = { hidden: true, body: {}, querySelector: () => null, querySelectorAll: () => [] };
+    const api = new Function('document', 'MutationObserver', 'requestAnimationFrame', 'setTimeout', 'calls', 'container', `
+      let _engineSiteSetup = false; let _domObserver = null; let _observedSelector = '';
+      let _searchForm = null; let _searchFormHandler = null; let _urlChangeHandler = null;
+      let _hrefUrlCache = new WeakMap(); const _hrefChangedContainers = new Set();
+      const _contentChangedContainers = new Set(); let _resultContentCache = new WeakMap();
+      let _resultRetryCounts = new WeakMap(); let showHiddenResults = false; let forceReprocessBatchId = 0;
+      const currentConfig = { enabled: true, debug: false, collapseMode: false };
+      function isEngineSite() { return true; } function injectGlobalStyles() {}
+      function buildRuleIndex() {} function exposeDebugApi() {} function updateStatus() { calls.status++; }
+      function scanNewResults() { calls.scan++; } function startBackgroundSync() {}
+      function forceReprocessAll() {} function resetSelectorCache() {} function refreshEngineSite() {}
+      function getSearchEngine() { return 'test'; } function getContainerSelector() { return '.x'; }
+      function getSearchCategory() { return 'web'; }
+      function peekResultUrl() { return ''; } function reprocessContainer() { calls.reprocess++; }
+      function getResultContentSignature() { return container.sig; }
+      function peekResultTextLen() { return 4; }
+      const location = { href: 'https://www.google.com/search?q=x' };
+      const history = { pushState() {}, replaceState() {} };
+      const window = { addEventListener() {}, dispatchEvent() {} }; const Event = class {};
+      ${extractFn(src, 'ensureEngineSiteSetup')}
+      return { ensureEngineSiteSetup, setCache: (v) => _resultContentCache.set(container, v) };
+    `)(documentStub, MutationObserver, () => { calls.raf++; }, (fn, ms) => { calls.timeouts.push({ fn, ms }); return calls.timeouts.length; }, calls, container);
+    api.ensureEngineSiteSetup();
+    return { api, calls, container, get moCb() { return moCb; } };
+  }
+  const env = makeContentFlushEnv();
+  env.api.setCache({ textLen: 4, sig: 'old-sig' });
+  env.moCb([{ type: 'childList', target: env.container, addedNodes: [1] }]);
+  env.calls.timeouts[0].fn();
+  check('选择器-173: 等长正文变化仍按完整签名重处理(主版)', env.calls.reprocess === 1);
+}
+
+// 易错: buildCollapseCss 必须跳过含逗号的选择器, 否则会解析成独立顶层选择器而全局误隐藏
+// 易错: processSingleResult 以 data-blocker-processed 短路, 重新处理前必须先清除该属性
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 

@@ -25,7 +25,7 @@ const SERH_RAW_EXTRACT = (text, fnName) => {
 };
 const SERH_FN_DEPS = ((text) => {
   const consts = text.match(/const (?:RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_A|REGEX_CTX_B|REGEX_CTX_C|REGEX_CTX_D|RULE_REGEX_LIT_RE) = [^\n]+;/g).join('\n').replace(/\bconst\b/g, 'var');
-  return consts + '\n' + ['findBalancedParenEnd', 'regexCloseAhead', 'isBadRegexTail', 'scanRuleString', 'encodeNonAscii'].map((n) => SERH_RAW_EXTRACT(text, n)).join('\n');
+  return consts + '\n' + ['findBalancedParenEnd', 'regexCloseAhead', 'regexStartAhead', 'isBadRegexTail', 'scanRuleString', 'encodeNonAscii'].map((n) => SERH_RAW_EXTRACT(text, n)).join('\n');
 })(src);
 const SERH_FLAG_HELPERS = ['isUniqueFlagsStr', 'isFlagsCandidateError'].map((n) => SERH_RAW_EXTRACT(src, n)).join('\n');
 const SERH_EL_HELPERS = ['isCondExprCore', 'looksLikeCondExpr', 'isScriptRuleLine', 'isElementRuleLine'].map((n) => SERH_RAW_EXTRACT(src, n)).join('\n');
@@ -305,11 +305,11 @@ assert('条件-091: 紧贴@if剥离后只剩核心规则', m.stripIfConditions('
 assert('条件-092: 路径中@if后跟路径体不误判', m.extractIfConditions('*://example.com/api/@if(test)/*').length === 0);
 
 // ---- Lite版同步 ----
-const litePath = [path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'Other', 'Lite.user.js')].find((p) => fs.existsSync(p));
+const litePath = [path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'other', 'Lite.user.js')].find((p) => fs.existsSync(p));
 const liteSrc = fs.readFileSync(litePath, 'utf8');
 const liteM2 = new Function(
   liteSrc.match(/const (?:RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_A|REGEX_CTX_B|REGEX_CTX_C|REGEX_CTX_D|RULE_REGEX_LIT_RE) = [^\n]+;/g).join('\n').replace(/\bconst\b/g, 'var') + '\n' +
-  ['findBalancedParenEnd', 'regexCloseAhead', 'isBadRegexTail', 'scanRuleString', 'encodeNonAscii', 'isUniqueFlagsStr', 'isFlagsCandidateError', 'stripRuleComment', 'findIfOccurrences', 'extractBalancedParens', 'stripIfConditions', 'extractIfConditions'].map((n) => SERH_RAW_EXTRACT(liteSrc, n)).join('\n') +
+  ['findBalancedParenEnd', 'regexCloseAhead', 'isBadRegexTail', 'scanRuleString', 'encodeNonAscii', 'isCondExprCore', 'looksLikeCondExpr', 'isScriptRuleLine', 'isUniqueFlagsStr', 'isFlagsCandidateError', 'stripRuleComment', 'findIfOccurrences', 'extractBalancedParens', 'stripIfConditions', 'extractIfConditions'].map((n) => SERH_RAW_EXTRACT(liteSrc, n)).join('\n') +
   '\nreturn { stripIfConditions, extractIfConditions };'
 )();
 assert('条件-093: Lite版同步支持@if前空格省略', liteM2.stripIfConditions('*://x.com/*@if(title *= "kw")').coreRule === '*://x.com/*' && liteM2.extractIfConditions('*://x.com/*@if(title *= "kw")').length === 1);
@@ -604,6 +604,12 @@ assert('条件-192: 常规值与无闭合斜杠的值扫描结果不变', c9.len
 assert('条件-193: 修复后规则可校验且值仍按字面量求值', m.validateRule('*://x.com/* @if(path *= /a)b/)') === true && m.checkDynamicConditions(m.parseRuleWithConditions('*://x.com/* @if(path *= /a)b/)').dynamicConditions, 't', 'https://x.com/a)b/c') === true && m.checkDynamicConditions(m.parseRuleWithConditions('*://x.com/* @if(path *= /a)b/)').dynamicConditions, 't', 'https://x.com/a') === false);
 assert('条件-194: Lite版同步 /…/ 值括号配平不截断', liteM2.extractIfConditions('*://x.com/* @if(path *= /a)b/)')[0] === 'path *= /a)b/' && liteM2.extractIfConditions('*://x.com/* @if(host ^= /a(b/)')[0] === 'host ^= /a(b/');
 
+// ---- 条件-195: @N 与 @if 紧贴写法修复留档(与规则-254/255同步) ----
+assert('条件-195: @N@if(...) 无空格紧贴写法可校验且高亮N前缀被剥离', m.analyzeRule('@2@if(title *= "kw")').valid === true && m.analyzeRule('@2 @if(title *= "kw")').valid === true && m.analyzeRule('@1@*://*.example.com/*').valid === false);
+
+// 易错: stripIfConditions 按 @if 出现位置降序裁剪, 顺序颠倒会切错区间
+// 易错: 优先级 ! > & > | 由 parseNot/parseAnd/parseOr 的调用层级决定, 调换会静默改语义
+// 易错: 条件默认忽略大小写, 仅 =~ 由正则 flags 决定, 改动比较前的小写化会破坏兼容
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 
