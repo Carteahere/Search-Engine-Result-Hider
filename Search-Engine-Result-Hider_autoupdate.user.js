@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.7.2
+// @version      8.7.3
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -14,11 +14,6 @@
 // @license      GPL-3.0
 // @match        *://*/*
 // @connect      *
-// @connect      raw.githubusercontent.com
-// @connect      dav.jianguoyun.com
-// @connect      cloudflare.com
-// @connect      akamai.com
-// @connect      timeapi.io
 // @noframes
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -37,7 +32,7 @@
 
   if (window.top !== window.self) return; let preventPanelClose = false, _engineSiteSetup = false, _domObserver = null, _observedSelector = '';
   let _searchForm = null, _searchFormHandler = null, _urlChangeHandler = null; let _syncIntervalIds = [];
-  let _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap(); const _hrefChangedContainers = new Set(), _contentChangedContainers = new Set();
+  let _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap(), _peekUrlCache = new WeakMap(); const _hrefChangedContainers = new Set(), _contentChangedContainers = new Set();
 
   // 配置存储键
   const CONFIG_KEY = 'searchfilter_blocker', WEBDAV_KEY = 'searchfilter_webdav', SELECTORS_KEY = 'searchfilter_selectors';
@@ -71,7 +66,9 @@
   function normalizeConfig(cfg) {
     if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) cfg = {};
     if (!Array.isArray(cfg.rules)) cfg.rules = []; cfg.rules = cfg.rules.filter(rule => typeof rule === 'string');
-    for (const k in CFG_DEFAULTS) if (cfg[k] === undefined) cfg[k] = CFG_DEFAULTS[k];
+    if (typeof cfg.bubbleSize !== 'number' || !Number.isFinite(cfg.bubbleSize)) { const size = parseInt(cfg.bubbleSize, 10); cfg.bubbleSize = Number.isFinite(size) ? size : 30; }
+    if (cfg.bubbleSize < 20) cfg.bubbleSize = 30;
+    for (const k in CFG_DEFAULTS) if (cfg[k] === undefined || cfg[k] === null) cfg[k] = CFG_DEFAULTS[k];
     if (!cfg.highlightColors || typeof cfg.highlightColors !== 'object') cfg.highlightColors = {...DEFAULT_HIGHLIGHT_COLORS};
     else { const colors = {...DEFAULT_HIGHLIGHT_COLORS}; for (let i = 1; i <= 5; i++) { if (/^#[0-9A-Fa-f]{6}$/.test(String(cfg.highlightColors[i] || ''))) colors[i] = String(cfg.highlightColors[i]).toUpperCase(); } cfg.highlightColors = colors; }
     return cfg;
@@ -199,7 +196,7 @@
     }
   };
 
-  let activeSelectors = null; let _selectorStoreSignature = null;
+  let activeSelectors = null; let _selectorStoreSignature = null; let _settingsStoreTime = null;
 
   function normalizeSelectorList(value) {
     if (Array.isArray(value)) return value.filter(s => typeof s === 'string' && s); if (typeof value === 'string' && value) return [value]; return [];
@@ -262,7 +259,7 @@
   }
 
   function resetSelectorCache() {
-    activeSelectors = null; _engineCacheHost = null; _engineCacheResult = 'other'; _observedSelector = '';
+    activeSelectors = null; _engineCacheHost = null; _engineCacheResult = 'other'; _observedSelector = ''; _categoryCacheHref = null; _categoryCacheResult = 'web';
   }
 
   let _engineCacheHost = null; let _engineCacheResult = 'other';
@@ -278,7 +275,13 @@
     return (_engineCacheResult = 'other');
   }
 
+  let _categoryCacheHref = null; let _categoryCacheResult = 'web';
   function getSearchCategory(loc) {
+    if (loc === undefined) {
+      const href = String(window.location && window.location.href || '');
+      if (_categoryCacheHref === href) return _categoryCacheResult;
+      const r = getSearchCategory(window.location); _categoryCacheHref = href; _categoryCacheResult = r; return r;
+    }
     loc = loc || window.location; if (!loc) return 'web'; let path = String(loc.pathname || '').toLowerCase(); let search = String(loc.search || '').toLowerCase();
     const host = String(loc.hostname || '').toLowerCase();
     if ((!path || !search) && loc.href) {
@@ -303,6 +306,22 @@
   function isBingImagesPage(engine) {
     return engine === 'bing' && getSearchCategory() === 'images';
   }
+
+  const ENGINE_HOST_REGEXES = {
+    bing: /(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i,
+    google: /(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i,
+    google_scholar: /(?:^|\.)scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i,
+    duckduckgo: /(?:^|\.)(?:duckduckgo\.com|ddg\.gg)$/i,
+    yahoo: /(?:^|\.)(?:[a-z]{2,6}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i,
+    yahoo_jp: /(?:^|\.)(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i,
+    so360: /(?:^|\.)so\.com$/i,
+    sogou: /(?:^|\.)sogou\.com$/i,
+    toutiao: /(?:^|\.)toutiao\.com$/i
+  };
+  function isEngineHost(engine, host) {
+    const re = ENGINE_HOST_REGEXES[engine]; return !!re && re.test(String(host || ''));
+  }
+  const isNotGoogleHost = (h) => !!h && !isEngineHost('google', h);
 
   function getContainerSelector(engine) {
     if (isBingImagesPage(engine)) return 'li:has(div.iuscp), div.iuscp, div.imgpt';
@@ -357,19 +376,18 @@
       stateEnabled: '启用', stateDisabled: '关闭',
       subLinkEmpty: '链接为空', subImportSuccess: '导入成功',
       subImportFailed: '导入失败，请检查链接或网络状态',
-      fileImportFailed: '导入失败，文件内容不是有效规则',
+      fileImportFailed: '导入失败，文件内容不是有效规则', importClearConfirm: '导入的文件不含任何规则，是否清空本地全部规则？', webdavClearConfirm: '云端文件不含任何规则，是否清空本地全部规则？',
       webdavUploading: '正在上传...', webdavDownloading: '正在下载...',
       webdavUploadFailed: '上传失败: ', webdavDownloadFailed: '下载失败: ',
       webdavSyncLocked: '同步正在进行中，请稍后重试',
       webdavHttpsRequired: '安全起见，WebDAV地址必须使用https',
       networkError: '网络错误', requestTimeout: '请求超时',
-      subLinkInvalid: '链接错误', importing: '导入中',
+      subLinkInvalid: '链接错误', importing: '导入中', whitelistResult: '该结果为白名单',
       autoSync: '自动同步', syncScriptConfig: '同步配置',
       webdavUrlEmpty: 'WebDAV地址为空',
       highlightRules: '高亮规则', menuHighlightColor: '🎨 高亮颜色',
       hlColorTitle: '高亮颜色', hlColorReset: '重置', resetPending: '已重置，保存后生效', hlColorHint: '点击色块快速保存',
-      autoUpdate: '自动更新', errorWord: '错误', warningWord: '警告',
-      statsWarnings: '发现 {count} 个规则警告: ',
+      autoUpdate: '自动更新', errorWord: '错误',
       duplicateRules: '重复规则', invalidRule: '规则无效',
       hlColorError: '高亮级别需在 1-5 之间',
       ifParenError: '@if(...) 括号未闭合',
@@ -429,19 +447,18 @@
       stateEnabled: 'Enabled', stateDisabled: 'Disabled',
       subLinkEmpty: 'URL is empty', subImportSuccess: 'Import success',
       subImportFailed: 'Import failed, check URL or network',
-      fileImportFailed: 'Import failed, file content is not valid rules',
+      fileImportFailed: 'Import failed, file content is not valid rules', importClearConfirm: 'The imported file contains no rules. Clear all local rules?', webdavClearConfirm: 'The cloud file contains no rules. Clear all local rules?',
       webdavUploading: 'Uploading...', webdavDownloading: 'Downloading...',
       webdavUploadFailed: 'Upload failed: ', webdavDownloadFailed: 'Download failed: ',
       webdavSyncLocked: 'Sync is currently in progress, please try again later',
       webdavHttpsRequired: 'For security, WebDAV server must use HTTPS',
       networkError: 'Network error', requestTimeout: 'Request timeout',
-      subLinkInvalid: 'Invalid URL', importing: 'Importing',
+      subLinkInvalid: 'Invalid URL', importing: 'Importing', whitelistResult: 'This result is whitelisted',
       autoSync: 'Auto Sync', syncScriptConfig: 'Sync Config',
       webdavUrlEmpty: 'WebDAV URL is empty',
       highlightRules: 'Highlight Rules', menuHighlightColor: '🎨 Highlight Colors',
       hlColorTitle: 'Highlight Colors', hlColorReset: 'Reset', resetPending: 'Reset, takes effect after saving', hlColorHint: 'Click a swatch to apply it quickly.',
-      autoUpdate: 'Auto Update', errorWord: 'Error', warningWord: 'Warning',
-      statsWarnings: 'Found {count} rule warnings: ',
+      autoUpdate: 'Auto Update', errorWord: 'Error',
       duplicateRules: 'Duplicate Rules', invalidRule: 'Invalid rule',
       hlColorError: 'Highlight level must be 1-5',
       ifParenError: 'Unbalanced @if(...) parentheses',
@@ -541,6 +558,10 @@
   const REGEX_CTX_C = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*=$/i;
   const RULE_REGEX_LIT_RE = /^\/(?:[^/\\[\]()]|\\.|\[(?:[^\]\\]|\\.)*\]|\((?:[^/\\[\]()]|\\.)*\))+\//;
   const REGEX_CTX_D = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*(?:\^=|\$=|\*=|:)$/i;
+  function regexStartAhead(str, pos) {
+    const prev = str.slice(Math.max(0, pos - 64), pos).trimEnd();
+    return REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(str.slice(pos, Math.min(str.length, pos + 4096)))) || (REGEX_CTX_D.test(prev) && regexCloseAhead(str, pos));
+  }
   function regexCloseAhead(str, pos) {
     let inClass = false;
     for (let j = pos + 1; j < str.length; j++) {
@@ -595,8 +616,7 @@
       if (ch === "'") { inSQ = true; continue; }
       if (ch === '"') { inDQ = true; continue; }
       if (ch === '/' && !inRE) {
-        const prev = str.slice(0, i).trimEnd();
-        if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(str.slice(i))) || (REGEX_CTX_D.test(prev) && regexCloseAhead(str, i))) { inRE = true; continue; }
+        if (regexStartAhead(str, i)) { inRE = true; continue; }
       }
       if (justClosedIf) {
         if (/\s/.test(ch)) continue;
@@ -628,8 +648,8 @@
         if (ch === '#' && ifDepth === 0) {
           const prev = str[i - 1];
           if (prev === undefined || /\s/.test(prev)) {
-            if (/^#(?:#|@#|@?[$?%]{1,2}#)/.test(str.slice(i))) continue;
             let end = i; while (end > 0 && /\s/.test(str[end - 1])) end--;
+            if (/^#(?:#|@#|@?[$?%]{1,2}#)/.test(str.slice(i)) && !isScriptRuleLine(str.slice(0, end))) continue;
             if (pfxStart !== -1 && isBadRegexTail(str.slice(pfxStart, end)) && !isBadRegexTail(str.slice(pfxStart))) continue;
             return { stripped: str.slice(0, end), occurrences };
           }
@@ -655,8 +675,7 @@
       if (ch === "'") { inSQ = true; continue; }
       if (ch === '"') { inDQ = true; continue; }
       if (ch === '/') {
-        const prev = str.slice(0, i).trimEnd();
-        if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(str.slice(i))) || (REGEX_CTX_D.test(prev) && regexCloseAhead(str, i))) { inRE = true; continue; }
+        if (regexStartAhead(str, i)) { inRE = true; continue; }
       }
       if (ch === '(') depth++;
       else if (ch === ')') { depth--; if (depth === 0) return i; }
@@ -712,7 +731,7 @@
         if (!node) {
           node = document.createElement('div'); node.style.position = 'relative'; node.style.color = '#a0aec0'; node.style.height = '1.4em'; frag.appendChild(node);
         }
-        const analysis = target.syntaxCheck && currentConfig.errorDetection !== false ? cachedAnalyzeRule(lines[i]) : { valid: true, errors: [], warnings: [] }; const valid = analysis.valid;
+        const analysis = target.syntaxCheck && currentConfig.errorDetection !== false ? cachedAnalyzeRule(lines[i]) : { valid: true, errors: [] }; const valid = analysis.valid;
         const errMsg = valid ? '' : analysis.errors.join(' | ');
         const html = `${i + 1}${valid ? '' : `<span class="serh-line-error" title="${escHtml(errMsg)}" data-error="${escHtml(errMsg)}" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 10px; background: #edf2f7; z-index: 1; cursor: pointer;">⚠️</span>`}`;
         if (node.dataset.v !== html) {
@@ -878,8 +897,7 @@
           j++; continue;
         }
         if (ch === '/') {
-          const prev = text.slice(Math.max(0, j - 64), j).trimEnd();
-          if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(text.slice(j, Math.min(n, j + 4096)))) || (REGEX_CTX_D.test(prev) && regexCloseAhead(text, j))) {
+          if (regexStartAhead(text, j)) {
             const reEnd = scanRegexLiteral(j, end);
             if (reEnd !== -1) { j = reEnd + 1; continue; }
             inRe = true; inClass = false;
@@ -914,21 +932,6 @@
       return { a: i, b: m };
     }
     return null;
-  }
-
-  function buildLineStartOffsets(text) {
-    const starts = [0];
-    for (let i = 0; i < text.length; i++) { if (text.charCodeAt(i) === 10) starts.push(i + 1); }
-    return starts;
-  }
-
-  function lineIndexAt(starts, idx) {
-    let lo = 0; let hi = starts.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      if (starts[mid] <= idx) lo = mid; else hi = mid - 1;
-    }
-    return lo;
   }
 
   function setupBracketHighlight(textarea, lang) {
@@ -1141,7 +1144,7 @@
   }
 
   function persistSyncSnapshots(rules, { modifiedTime = null, settingsModifiedAt = null, subs = null, selectors = null } = {}) {
-    getSettingsModifiedTime(); if (settingsModifiedAt !== null && GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) GM_setValue(SETTINGS_LAST_MODIFIED_KEY, settingsModifiedAt);
+    if (settingsModifiedAt !== null && GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) GM_setValue(SETTINGS_LAST_MODIFIED_KEY, settingsModifiedAt);
     if (modifiedTime !== null) GM_setValue(LOCAL_LAST_MODIFIED_KEY, modifiedTime);
     setRuleSyncSnapshot(rules);
     if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) setSubscriptionSyncSnapshot(subs || getSubscriptions());
@@ -1232,6 +1235,10 @@
 
   function filterValidRuleLines(lines) {
     return lines.map(line => line.trim()).filter(line => line.length > 0);
+  }
+
+  function hasEffectiveRules(lines) {
+    return (Array.isArray(lines) ? lines : []).some(line => { const s = String(line || '').trim(); return s && !s.startsWith('#') && !!stripRuleComment(s).trim(); });
   }
 
   function getRuleKey(r) {
@@ -1484,9 +1491,7 @@
         if (cond.type === 'host') {
           const uHost = u.hostname; let unicodeHost = uHost;
           try {
-            if (typeof toUnicodeHostname === 'function') {
-              unicodeHost = toUnicodeHostname(uHost);
-            }
+            unicodeHost = toUnicodeHostname(uHost);
           } catch (_) {}
           return safeRegexTest(cond.regex, raw) || safeRegexTest(cond.regex, uHost) || safeRegexTest(cond.regex, unicodeHost);
         }
@@ -1688,7 +1693,7 @@
   }
 
   function validateCondition(condStr) {
-    const errors = []; const warnings = []; const { errors: rawErrors } = analyzeCondExpr(condStr);
+    const errors = []; const { errors: rawErrors } = analyzeCondExpr(condStr);
     for (const e of rawErrors) {
       if (e.kind === 'unknown') {
         errors.push(t('unknownIfCondition', { part: e.part }));
@@ -1700,57 +1705,57 @@
         const display = condStr.length > 60 ? condStr.slice(0, 60) + '…' : condStr; errors.push(t('condExprError', { part: display }));
       }
     }
-    return { errors, warnings };
+    return { errors };
   }
 
   function analyzeRule(rule) {
-    if (!rule || rule.trim() === '') return { valid: true, errors: [], warnings: [] };
+    if (!rule || rule.trim() === '') return { valid: true, errors: [] };
 
-    let ruleToCheck = rule.trim(); if (ruleToCheck.startsWith('#')) return { valid: true, errors: [], warnings: [] }; ruleToCheck = stripRuleComment(ruleToCheck);
-    if (!ruleToCheck) return { valid: true, errors: [], warnings: [] }; const errors = []; const warnings = [];
-    let hlN = null; const hlValMatch = ruleToCheck.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|[(!])/);
+    let ruleToCheck = rule.trim(); if (ruleToCheck.startsWith('#')) return { valid: true, errors: [] }; ruleToCheck = stripRuleComment(ruleToCheck);
+    if (!ruleToCheck) return { valid: true, errors: [] }; const errors = [];
+    let hlN = null; const hlValMatch = ruleToCheck.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|(?:[(!]|@if\b))/i);
     if (hlValMatch) {
       const N = parseInt(hlValMatch[1]);
       if (N < 1 || N > 5) {
-        return { valid: false, errors: [t('hlColorError')], warnings };
+        return { valid: false, errors: [t('hlColorError')] };
       }
-      hlN = N; ruleToCheck = ruleToCheck.substring(hlValMatch[0].length).trim(); if (!ruleToCheck) return { valid: false, errors: [t('emptyPrefixRule')], warnings };
+      hlN = N; ruleToCheck = ruleToCheck.substring(hlValMatch[0].length).trim(); if (!ruleToCheck) return { valid: false, errors: [t('emptyPrefixRule')] };
     }
 
-    if (/^@@if\b/i.test(ruleToCheck)) return { valid: false, errors: [t('invalidUrlWildcard', { rule: ruleToCheck })], warnings };
+    if (/^@@if\b/i.test(ruleToCheck)) return { valid: false, errors: [t('invalidUrlWildcard', { rule: ruleToCheck })] };
     const hasIfCond = /@if\s*\(/i.test(ruleToCheck);
     if (hasIfCond) {
         let unbalanced = false;
         for (const occ of findIfOccurrences(ruleToCheck)) {
           if (!extractBalancedParens(ruleToCheck, occ.condStart)) { unbalanced = true; break; }
         }
-        if (unbalanced) return { valid: false, errors: [t('ifParenError')], warnings };
+        if (unbalanced) return { valid: false, errors: [t('ifParenError')] };
         for (const cond of extractIfConditions(ruleToCheck)) {
           if (!cond.trim()) {
             errors.push(t('emptyIfCondition')); continue;
           }
-          const r = validateCondition(cond); errors.push(...r.errors); warnings.push(...r.warnings);
+          const r = validateCondition(cond); errors.push(...r.errors);
         }
     }
 
     const stripped = stripIfConditions(ruleToCheck); ruleToCheck = stripped.coreRule;
     if (ruleToCheck.startsWith('@')) {
       if (ruleToCheck.startsWith('@@')) {
-        errors.push(t('invalidUrlWildcard', { rule: ruleToCheck })); return { valid: false, errors, warnings };
+        errors.push(t('invalidUrlWildcard', { rule: ruleToCheck })); return { valid: false, errors };
       }
       ruleToCheck = ruleToCheck.substring(1).trim();
       if (!ruleToCheck) {
-        if (hasIfCond) return { valid: errors.length === 0, errors, warnings }; return { valid: false, errors: [t('emptyPrefixRule')], warnings };
+        if (hasIfCond) return { valid: errors.length === 0, errors }; return { valid: false, errors: [t('emptyPrefixRule')] };
       }
     }
 
     if (!ruleToCheck) {
-      return { valid: errors.length === 0, errors, warnings };
+      return { valid: errors.length === 0, errors };
     }
 
-    if (isElementRuleLine(ruleToCheck)) { errors.push(t('elementRuleUnsupported')); return { valid: false, errors, warnings }; }
+    if (isElementRuleLine(ruleToCheck)) { errors.push(t('elementRuleUnsupported')); return { valid: false, errors }; }
     if (looksLikeCondExpr(ruleToCheck)) {
-      const r = validateCondition(ruleToCheck); errors.push(...r.errors); warnings.push(...r.warnings); return { valid: errors.length === 0, errors, warnings };
+      const r = validateCondition(ruleToCheck); errors.push(...r.errors); return { valid: errors.length === 0, errors };
     }
 
     if (ruleToCheck.startsWith('/') && ruleToCheck.lastIndexOf('/') === 0) {
@@ -1761,32 +1766,32 @@
       if (ruleToCheck.startsWith('/') && ruleToCheck.lastIndexOf('/') > 0) {
         const { pattern, flags } = ruleToRegex(ruleToCheck);
         if (!pattern.trim()) {
-          errors.push(t('regexError')); return { valid: false, errors, warnings };
+          errors.push(t('regexError')); return { valid: false, errors };
         }
         const invalidFlags = getInvalidRegexFlags(flags);
         if (invalidFlags) {
-          errors.push(t('invalidRegexFlags', { flags: invalidFlags })); return { valid: false, errors, warnings };
+          errors.push(t('invalidRegexFlags', { flags: invalidFlags })); return { valid: false, errors };
         }
         new RegExp(pattern, String(flags || '').toLowerCase());
       } else if (/^(?:text|title)\//i.test(ruleToCheck)) {
         const prefixLen = /^title\//i.test(ruleToCheck) ? 6 : 5; const { pattern, flags, flagsCandidate, unclosed } = parsePrefixedRegexRule(ruleToCheck, prefixLen);
         if (unclosed) {
-          errors.push(t('regexError')); return { valid: false, errors, warnings };
+          errors.push(t('regexError')); return { valid: false, errors };
         }
         if (!pattern.trim()) {
-          errors.push(t('emptyPrefixRule')); return { valid: false, errors, warnings };
+          errors.push(t('emptyPrefixRule')); return { valid: false, errors };
         }
         const invalidFlags = getInvalidRegexFlags(flags);
         if (invalidFlags) {
-          errors.push(t('invalidRegexFlags', { flags: invalidFlags })); return { valid: false, errors, warnings };
+          errors.push(t('invalidRegexFlags', { flags: invalidFlags })); return { valid: false, errors };
         }
         if (flagsCandidate && (isFlagsCandidateError(flagsCandidate) || (/^[imsu]+$/i.test(flagsCandidate) && getInvalidRegexFlags(flagsCandidate)))) {
-          errors.push(t('invalidRegexFlags', { flags: getInvalidRegexFlags(flagsCandidate) })); return { valid: false, errors, warnings };
+          errors.push(t('invalidRegexFlags', { flags: getInvalidRegexFlags(flagsCandidate) })); return { valid: false, errors };
         }
         new RegExp(pattern, String(flags || '').toLowerCase());
       } else {
         if (!validateUrlWildcard(ruleToCheck)) {
-          errors.push(t('invalidUrlWildcard', { rule: ruleToCheck })); return { valid: false, errors, warnings };
+          errors.push(t('invalidUrlWildcard', { rule: ruleToCheck })); return { valid: false, errors };
         }
         new RegExp(wildcardToRegex(ruleToCheck), 'i');
       }
@@ -1794,7 +1799,7 @@
       errors.push((ruleToCheck.startsWith('/') || /^(?:text|title)\//i.test(ruleToCheck)) ? t('regexError') : t('urlError'));
     }
 
-    return { valid: errors.length === 0, errors, warnings };
+    return { valid: errors.length === 0, errors };
   }
 
   function validateRule(rule) {
@@ -2045,22 +2050,25 @@
       pageContext = getSearchEngine() + '|' + getSearchCategory() + '|' + String(window.location.hostname || '');
     } catch (e) {}
     const signature = JSON.stringify([currentConfig.rules, subscriptionRules, currentConfig.language, pageContext]); if (compiledRules && compiledRules.indexSignature === signature) return;
-    validationCache.clear(); subdomainCache.clear(); if (ruleToRegex._memo) ruleToRegex._memo.clear(); if (parsePrefixedRegexRule._memo) parsePrefixedRegexRule._memo.clear();
+    subdomainCache.clear(); validationCache.clear(); if (ruleToRegex._memo) ruleToRegex._memo.clear(); if (parsePrefixedRegexRule._memo) parsePrefixedRegexRule._memo.clear();
     if (compileRuleRegex._memo) compileRuleRegex._memo.clear();
     compiledRules = newCompiledRules();
     const allRules = currentConfig.rules.concat(subscriptionRules); const subscriptions = getSubscriptions();
     const localRuleCount = currentConfig.rules.length; const subscriptionSources = [];
     subscriptions.forEach((sub, idx) => {
       if (!sub.enabled || !Array.isArray(sub.rules)) return;
-      for (let i = 0; i < sub.rules.length; i++) subscriptionSources.push(`${t('subscription')}${idx + 1}`);
+      for (let i = 0; i < sub.rules.length; i++) subscriptionSources.push({ key: 'sub:' + (idx + 1), label: `${t('subscription')}${idx + 1}` });
     });
-    while (subscriptionSources.length < subscriptionRules.length) subscriptionSources.push(t('localRule'));
+    while (subscriptionSources.length < subscriptionRules.length) subscriptionSources.push({ key: 'local', label: t('localRule') });
+    const hlSets = {domains: compiledRules.highlightDomains, condDomains: compiledRules.highlightConditionalDomains, urls: compiledRules.highlightUrls, titles: compiledRules.highlightTitles, texts: compiledRules.highlightTexts, condRules: compiledRules.highlightConditionalRules};
+    const wlSets = {domains: compiledRules.whitelistDomains, condDomains: compiledRules.whitelistConditionalDomains, urls: compiledRules.whitelistUrlPatterns, titles: compiledRules.whitelistTitlePatterns, texts: compiledRules.whitelistTextPatterns, condRules: compiledRules.whitelistConditionalRules};
+    const blSets = {domains: compiledRules.domains, condDomains: compiledRules.conditionalDomains, urls: compiledRules.urls, titles: compiledRules.titles, texts: compiledRules.texts, condRules: compiledRules.conditionalRules};
 
     allRules.forEach((rule, ruleIndex) => {
       if (typeof rule !== 'string') { if (currentConfig.debug) console.warn('非字符串规则项, 已跳过:', rule); return; }
       rule = stripRuleComment(rule.trim()); if (!rule) return; let ruleValid = true;
       try {
-        ruleValid = validateRule(rule);
+        ruleValid = cachedAnalyzeRule(rule).valid;
       } catch (e) {
         ruleValid = false;
       }
@@ -2068,51 +2076,51 @@
         if (currentConfig.debug) console.warn('规则校验未通过, 已跳过:', rule); return;
       }
 
-      const isLocal = ruleIndex < localRuleCount; const source = isLocal
-        ? t('localRule')
-        : (subscriptionSources[ruleIndex - localRuleCount] || t('localRule'));
+      const isLocal = ruleIndex < localRuleCount; const sourceInfo = isLocal ? { key: 'local', label: t('localRule') } : (subscriptionSources[ruleIndex - localRuleCount] || { key: 'local', label: t('localRule') });
+      const source = sourceInfo.label; const sourceKey = sourceInfo.key;
 
-      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|[(!])/);
+      const routeRule = (sets, parsed, coreRule, extra) => {
+        const hasDynamic = parsed.dynamicConditions.length > 0;
+        const base = {originalRule: rule, source, sourceKey, isLocal, ...extra};
+        if (!coreRule) {
+          if (parsed.standaloneExpr || hasDynamic) sets.condRules.push({type: 'expr', conditions: parsed.dynamicConditions, ...base});
+          return;
+        }
+        if (!coreRule.startsWith('/') && !/^text\//i.test(coreRule) && !/^title\//i.test(coreRule)) {
+          const dm = matchSimpleDomain(coreRule);
+          if (dm) {
+            const map = hasDynamic ? sets.condDomains : sets.domains;
+            if (!map.has(dm.domain)) map.set(dm.domain, []);
+            map.get(dm.domain).push(hasDynamic
+              ? {type: dm.domainType, domainType: dm.domainType, domain: dm.domain, conditions: parsed.dynamicConditions, ...base}
+              : {type: dm.domainType, ...base});
+            return;
+          }
+        }
+        try {
+          const compiled = compileRuleRegex(coreRule);
+          if (hasDynamic) sets.condRules.push({type: compiled.type, regex: compiled.regex, conditions: parsed.dynamicConditions, ...base});
+          else (compiled.type === 'title' ? sets.titles : compiled.type === 'text' ? sets.texts : sets.urls).push({regex: compiled.regex, ...base});
+        } catch (e) {
+          if (currentConfig.debug) console.warn('规则编译失败:', rule, e);
+        }
+      };
+
+      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|(?:[(!]|@if\b))/i);
       if (hlMatch) {
-        const N = parseInt(hlMatch[1]); if (N < 1 || N > 5) return; let hlRule = rule.substring(hlMatch[0].length).trim(); if (!hlRule) return; let parsed;
+        const N = parseInt(hlMatch[1]); if (N < 1 || N > 5) return;
+        const hlRule = rule.substring(hlMatch[0].length).trim(); if (!hlRule) return;
+        let parsed;
         try {
           parsed = parseRuleWithConditions(hlRule);
         } catch (e) {
           if (currentConfig.debug) console.warn('高亮规则解析失败:', hlRule, e); return;
         }
-        if (!parsed.staticPass) return; let coreRule = parsed.coreRule;
+        if (!parsed.staticPass) return;
+        let coreRule = parsed.coreRule;
         const highlightWhitelist = coreRule.startsWith('@') && !coreRule.startsWith('@@');
         if (highlightWhitelist) coreRule = coreRule.substring(1).trim();
-
-        if (!coreRule && (parsed.standaloneExpr || parsed.dynamicConditions.length)) {
-          compiledRules.highlightConditionalRules.push({type: 'expr', conditions: parsed.dynamicConditions, originalRule: rule, N, source, isLocal});
-          if (!highlightWhitelist) return;
-        } else if (coreRule) {
-          const dm = matchSimpleDomain(coreRule);
-          if (dm) {
-            if (!parsed.dynamicConditions.length) {
-              if (!compiledRules.highlightDomains.has(dm.domain))
-                compiledRules.highlightDomains.set(dm.domain, []); compiledRules.highlightDomains.get(dm.domain).push({N, type: dm.domainType, originalRule: rule, source, isLocal});
-            } else {
-              const hlCondRule = {type: 'domain', domain: dm.domain, N, conditions: parsed.dynamicConditions, domainType: dm.domainType, originalRule: rule, source, isLocal};
-              if (!compiledRules.highlightConditionalDomains.has(dm.domain))
-                compiledRules.highlightConditionalDomains.set(dm.domain, []); compiledRules.highlightConditionalDomains.get(dm.domain).push(hlCondRule);
-            }
-          } else {
-            try {
-              const compiled = compileRuleRegex(coreRule); const ruleObj = {type: compiled.type, regex: compiled.regex, conditions: parsed.dynamicConditions, originalRule: rule, N, source, isLocal};
-              if (!parsed.dynamicConditions.length) {
-                if (compiled.type === 'url' || compiled.type === 'regex') compiledRules.highlightUrls.push({regex: compiled.regex, originalRule: rule, N, source, isLocal});
-                else if (compiled.type === 'title') compiledRules.highlightTitles.push({regex: compiled.regex, originalRule: rule, N, source, isLocal});
-                else if (compiled.type === 'text') compiledRules.highlightTexts.push({regex: compiled.regex, originalRule: rule, N, source, isLocal});
-              } else {
-                compiledRules.highlightConditionalRules.push(ruleObj);
-              }
-            } catch (e) {
-              if (currentConfig.debug) console.warn('高亮规则编译失败:', hlRule, e);
-            }
-          }
-        }
+        routeRule(hlSets, parsed, coreRule, {N});
         if (!highlightWhitelist) return;
         rule = hlRule;
       }
@@ -2127,88 +2135,13 @@
       }
       if (!parsed.staticPass) return;
 
-      const coreRule = parsed.coreRule; const hasDynamic = parsed.dynamicConditions.length > 0;
+      const coreRule = parsed.coreRule;
       if (coreRule.startsWith('@@')) return;
       if (coreRule.startsWith('@')) {
-        const simpleDomain = extractSimpleWhitelistDomain(coreRule);
-        if (simpleDomain) {
-          if (!hasDynamic) {
-            if (!compiledRules.whitelistDomains.has(simpleDomain.domain))
-              compiledRules.whitelistDomains.set(simpleDomain.domain, []); compiledRules.whitelistDomains.get(simpleDomain.domain).push({type: simpleDomain.type, originalRule: rule, source, isLocal});
-          } else {
-            if (!compiledRules.whitelistConditionalDomains.has(simpleDomain.domain))
-              compiledRules.whitelistConditionalDomains.set(simpleDomain.domain, []);
-            compiledRules.whitelistConditionalDomains.get(simpleDomain.domain).push({type: simpleDomain.type, conditions: parsed.dynamicConditions, originalRule: rule, source, isLocal});
-          }
-        } else {
-          const whitelistRule = coreRule.substring(1).trim();
-          if (!whitelistRule) {
-            if (parsed.standaloneExpr || hasDynamic) {
-              compiledRules.whitelistConditionalRules.push({type: 'expr', conditions: parsed.dynamicConditions, originalRule: rule, source, isLocal});
-            }
-            return;
-          }
-          try {
-            const compiled = compileRuleRegex(whitelistRule);
-            if (!hasDynamic) {
-              if (compiled.type === 'title') {
-                compiledRules.whitelistTitlePatterns.push({regex: compiled.regex, originalRule: rule, source, isLocal});
-              } else if (compiled.type === 'text') {
-                compiledRules.whitelistTextPatterns.push({regex: compiled.regex, originalRule: rule, source, isLocal});
-              } else {
-                compiledRules.whitelistUrlPatterns.push({regex: compiled.regex, originalRule: rule, source, isLocal});
-              }
-            } else {
-              compiledRules.whitelistConditionalRules.push({type: compiled.type, regex: compiled.regex, conditions: parsed.dynamicConditions, originalRule: rule, source, isLocal});
-            }
-          } catch (e) {
-            if (currentConfig.debug) console.warn('白名单规则预编译失败:', rule, e);
-          }
-        }
+        routeRule(wlSets, parsed, coreRule.substring(1).trim());
         return;
       }
-
-      let ruleObj = {
-        originalRule: rule,
-        source: source,
-        isLocal: isLocal,
-        conditions: parsed.dynamicConditions
-      };
-
-      if (!coreRule) {
-        if (parsed.standaloneExpr || hasDynamic) {
-          ruleObj.type = 'expr'; compiledRules.conditionalRules.push(ruleObj);
-        }
-        return;
-      }
-
-      if (!coreRule.startsWith('/') && !/^text\//i.test(coreRule) && !/^title\//i.test(coreRule)) {
-        const dm = matchSimpleDomain(coreRule);
-        if (dm) {
-          ruleObj.type = 'domain'; ruleObj.domain = dm.domain; ruleObj.domainType = dm.domainType;
-          if (!hasDynamic) {
-            if (!compiledRules.domains.has(dm.domain))
-              compiledRules.domains.set(dm.domain, []); compiledRules.domains.get(dm.domain).push({type: dm.domainType, originalRule: rule, source, isLocal});
-          } else {
-            if (!compiledRules.conditionalDomains.has(dm.domain))
-              compiledRules.conditionalDomains.set(dm.domain, []); compiledRules.conditionalDomains.get(dm.domain).push(ruleObj);
-          }
-          return;
-        }
-      }
-
-      try {
-        const compiled = compileRuleRegex(coreRule); ruleObj.type = compiled.type; ruleObj.regex = compiled.regex;
-        if (!hasDynamic) {
-          if (compiled.type === 'text') compiledRules.texts.push({regex: compiled.regex, originalRule: rule, source, isLocal});
-          else if (compiled.type === 'title') compiledRules.titles.push({regex: compiled.regex, originalRule: rule, source, isLocal});
-          else compiledRules.urls.push({regex: compiled.regex, originalRule: rule, source, isLocal});
-        } else {
-          compiledRules.conditionalRules.push(ruleObj);
-        }
-      } catch (e) {
-        if (currentConfig.debug) console.warn('规则预编译失败:', rule, e);
-      }
+      routeRule(blSets, parsed, coreRule);
     });
     compiledRules.indexSignature = signature;
   }
@@ -2216,7 +2149,7 @@
   function cachedAnalyzeRule(rule) {
     if (!validationCache.has(rule)) {
       try { validationCache.set(rule, analyzeRule(rule)); }
-      catch (e) { validationCache.set(rule, { valid: false, errors: [t('regexError')], warnings: [] }); }
+      catch (e) { validationCache.set(rule, { valid: false, errors: [t('regexError')] }); }
     }
     return validationCache.get(rule);
   }
@@ -2245,14 +2178,18 @@
     if (!subdomainLevels) subdomainLevels = getSubdomainLevels(domain);
     const lowerDomain = toASCIIHostname(domain);
 
-    const scanDomainMap = (map, filter) => {
+    const scanDomainMap = (map, filter, preferLocal) => {
+      let subHit = null;
       for (const level of subdomainLevels) {
         const entries = map.get(level); if (!entries) continue;
         for (const entry of entries) {
-          if (!filter(entry, level)) continue; return entry;
+          if (!filter(entry, level)) continue;
+          if (!preferLocal) return entry;
+          if (isLocalEntry(entry)) return entry;
+          if (!subHit) subHit = entry;
         }
       }
-      return null;
+      return subHit;
     };
     const scanPatterns = (patterns, value, filter) => {
       if (!value) return null;
@@ -2261,14 +2198,18 @@
       }
       return null;
     };
-    const scanConditionalDomains = (map, filter) => {
+    const scanConditionalDomains = (map, filter, preferLocal) => {
+      let subHit = null;
       for (const level of subdomainLevels) {
         const rules = map.get(level); if (!rules) continue;
         for (const item of rules) {
-          if (!filter(item, level)) continue; if (checkDynamicConditions(item.conditions, title, url)) return item;
+          if (!filter(item, level)) continue; if (!checkDynamicConditions(item.conditions, title, url)) continue;
+          if (!preferLocal) return item;
+          if (isLocalEntry(item)) return item;
+          if (!subHit) subHit = item;
         }
       }
-      return null;
+      return subHit;
     };
     const scanConditionalRules = (rules, filter) => {
       for (const item of rules) {
@@ -2288,39 +2229,48 @@
       scanConditionalDomains(compiledRules.highlightConditionalDomains, (it, lv) => matchDomainEntryType(it.domainType, lv, lowerDomain)) ||
       scanConditionalRules(compiledRules.highlightConditionalRules); const highlightN = hlEntry ? hlEntry.N : 0;
 
-    const findWhitelist = (wantLocal) => {
-      const want = (e) => isLocalEntry(e) === wantLocal;
-      return scanDomainMap(compiledRules.whitelistDomains, (en, lv) => want(en) && matchDomainEntryType(en.type, lv, lowerDomain)) ||
-        scanPatterns(compiledRules.whitelistUrlPatterns, url, want) ||
-        scanPatterns(compiledRules.whitelistTitlePatterns, title, want) ||
-        scanPatterns(compiledRules.whitelistTextPatterns, snippet, want) ||
-        scanConditionalDomains(compiledRules.whitelistConditionalDomains, (it, lv) => want(it) && matchDomainEntryType(it.type, lv, lowerDomain)) ||
-        scanConditionalRules(compiledRules.whitelistConditionalRules, want);
+    const findPair = (steps) => {
+      let subHit = null;
+      for (const step of steps) {
+        const item = step();
+        if (!item) continue;
+        if (isLocalEntry(item)) return [item, null];
+        if (!subHit) subHit = item;
+      }
+      return [null, subHit];
     };
-    const findBlocked = (wantLocal) => {
-      const want = (e) => isLocalEntry(e) === wantLocal;
-      return scanDomainMap(compiledRules.domains, (en, lv) => want(en) && matchDomainEntryType(en.type, lv, lowerDomain)) ||
-        scanPatterns(compiledRules.urls, url, want) ||
-        scanPatterns(compiledRules.titles, title, want) ||
-        scanPatterns(compiledRules.texts, snippet, want) ||
-        scanConditionalDomains(compiledRules.conditionalDomains, (it, lv) => want(it) && matchDomainEntryType(it.domainType, lv, lowerDomain)) ||
-        scanConditionalRules(compiledRules.conditionalRules, want);
-    };
+    const findWhitelistPair = () => findPair([
+      () => scanDomainMap(compiledRules.whitelistDomains, (en, lv) => matchDomainEntryType(en.type, lv, lowerDomain), true),
+      () => scanPatterns(compiledRules.whitelistUrlPatterns, url),
+      () => scanPatterns(compiledRules.whitelistTitlePatterns, title),
+      () => scanPatterns(compiledRules.whitelistTextPatterns, snippet),
+      () => scanConditionalDomains(compiledRules.whitelistConditionalDomains, (it, lv) => matchDomainEntryType(it.domainType, lv, lowerDomain), true),
+      () => scanConditionalRules(compiledRules.whitelistConditionalRules)
+    ]);
+    const findBlockedPair = () => findPair([
+      () => scanDomainMap(compiledRules.domains, (en, lv) => matchDomainEntryType(en.type, lv, lowerDomain), true),
+      () => scanPatterns(compiledRules.urls, url),
+      () => scanPatterns(compiledRules.titles, title),
+      () => scanPatterns(compiledRules.texts, snippet),
+      () => scanConditionalDomains(compiledRules.conditionalDomains, (it, lv) => matchDomainEntryType(it.domainType, lv, lowerDomain), true),
+      () => scanConditionalRules(compiledRules.conditionalRules)
+    ]);
 
-    let whitelistHit = findWhitelist(true); let whitelisted = !!whitelistHit; let blockedInfo = null; const toBlockedInfo = (item) => ({ rule: item.originalRule, source: item.source });
-    if (!whitelisted) {
-      const item = findBlocked(true); if (item) blockedInfo = toBlockedInfo(item);
-    }
-    if (!whitelisted && !blockedInfo) { whitelistHit = findWhitelist(false); whitelisted = !!whitelistHit; }
-    if (!whitelisted && !blockedInfo) {
-      const item = findBlocked(false); if (item) blockedInfo = toBlockedInfo(item);
+    const toBlockedInfo = (item) => ({ rule: item.originalRule, source: item.source, sourceKey: item.sourceKey });
+    const [wlLocal, wlSub] = findWhitelistPair();
+    let whitelistHit = wlLocal; let blockedInfo = null;
+    if (!whitelistHit) {
+      const [blLocal, blSub] = findBlockedPair();
+      if (blLocal) blockedInfo = toBlockedInfo(blLocal);
+      else if (wlSub) whitelistHit = wlSub;
+      else if (blSub) blockedInfo = toBlockedInfo(blSub);
     }
 
-    const toHlInfo = () => (hlEntry ? {hlRule: hlEntry.originalRule, hlSource: hlEntry.source} : {});
-    if (highlightN && blockedInfo) return {highlight: highlightN, blocked: true, rule: blockedInfo.rule, source: blockedInfo.source, ...toHlInfo()};
-    if (blockedInfo) return {blocked: true, rule: blockedInfo.rule, source: blockedInfo.source};
+    const toHlInfo = () => (hlEntry ? {hlRule: hlEntry.originalRule, hlSource: hlEntry.source, hlSourceKey: hlEntry.sourceKey} : {});
+    if (highlightN && blockedInfo) return {highlight: highlightN, blocked: true, rule: blockedInfo.rule, source: blockedInfo.source, sourceKey: blockedInfo.sourceKey, ...toHlInfo()};
+    if (blockedInfo) return {blocked: true, rule: blockedInfo.rule, source: blockedInfo.source, sourceKey: blockedInfo.sourceKey};
     if (whitelistHit) {
-      const hit = {whitelisted: true, rule: whitelistHit.originalRule, source: whitelistHit.source};
+      const hit = {whitelisted: true, rule: whitelistHit.originalRule, source: whitelistHit.source, sourceKey: whitelistHit.sourceKey};
       if (highlightN) { hit.highlight = highlightN; Object.assign(hit, toHlInfo()); }
       return hit;
     }
@@ -2365,33 +2315,26 @@
   function unwrapRedirectUrl(url) {
     const isRedirectHost = (host) => {
       host = String(host || '').replace(/\.$/, '');
-      return (
-      /(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) ||
-      /(?:^|\.)scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) ||
-      /(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) ||
-      /(?:^|\.)(?:duckduckgo\.com|ddg\.gg)$/i.test(host) ||
-      /(?:^|\.)(?:[a-z]{2,6}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) ||
-      /(?:^|\.)(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i.test(host) ||
-      /(?:^|\.)(?:so\.com|sogou\.com|toutiao\.com)$/i.test(host)
-      );
+      return ['bing', 'google_scholar', 'google', 'duckduckgo', 'yahoo', 'yahoo_jp'].some(e => isEngineHost(e, host)) ||
+        isEngineHost('so360', host) || isEngineHost('sogou', host) || isEngineHost('toutiao', host);
     };
     const seen = new Set();
     for (let depth = 0; depth < 5 && url && !seen.has(url); depth++) {
       seen.add(url); let next = '';
       try {
         const urlObj = new URL(url); const host = urlObj.hostname.replace(/\.$/, ''); const path = urlObj.pathname;
-        if (/(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) && path.startsWith('/ck/a')) {
+        if (isEngineHost('bing', host) && path.startsWith('/ck/a')) {
           const uParam = urlObj.searchParams.get('u'); next = decodeBingCkTarget(uParam); if (!next && uParam) next = decodeRedirectTarget(uParam);
-        } else if (/(?:^|\.)scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) && /\/scholar_url\/?$/i.test(path)) {
+        } else if (isEngineHost('google_scholar', host) && /\/scholar_url\/?$/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('url'));
-        } else if (/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) && /^\/(?:url|goto)\/?$/i.test(path)) {
+        } else if (isEngineHost('google', host) && /^\/(?:url|goto)\/?$/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('q') || urlObj.searchParams.get('url') || urlObj.searchParams.get('u'));
-        } else if (/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) && /^(?:\/aclk|\/imgres|\/translate|\/pagead\/aclk)(?:\/|\?|$)/i.test(path)) {
+        } else if (isEngineHost('google', host) && /^(?:\/aclk|\/imgres|\/translate|\/pagead\/aclk)(?:\/|\?|$)/i.test(path)) {
           const tryGoogleParam = (p) => { const v = urlObj.searchParams.get(p); if (v) { next = decodeRedirectTarget(v); return !!next; } return false; };
           for (const p of ['adurl', 'imgurl', 'url', 'u', 'dest']) { if (tryGoogleParam(p)) break; }
-        } else if (/(?:^|\.)(?:duckduckgo\.com|ddg\.gg)$/i.test(host) && /^\/l\/?$/i.test(path)) {
+        } else if (isEngineHost('duckduckgo', host) && /^\/l\/?$/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('uddg'));
-        } else if (/(?:^|\.)(?:[a-z]{2,6}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) || /(?:^|\.)(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i.test(host)) {
+        } else if (isEngineHost('yahoo', host) || isEngineHost('yahoo_jp', host)) {
           if (/ru=/i.test(path)) {
             const ruMatch = path.match(/(?:^|\/)RU=([\s\S]*?)(?=(?:\/(?:rk|rs|rv|ro|re|rh|rt|_ylt|_ylu)=|\/$|$))/i); if (ruMatch && ruMatch[1]) next = decodeRedirectTarget(ruMatch[1]);
           }
@@ -2404,16 +2347,16 @@
               for (const p of ['u', 'url', 'target', 'dest', 'dst', 'r']) { if (tryParam(p)) break; }
             }
           }
-        } else if (/(?:^|\.)toutiao\.com$/i.test(host) && /^\/search\/jump\/?$/i.test(path)) {
+        } else if (isEngineHost('toutiao', host) && /^\/search\/jump\/?$/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('url'));
           if (next) {
             try {
-              const inner = new URL(next); const h5 = /(?:^|\.)toutiao\.com$/i.test(inner.hostname) ? inner.searchParams.get('h5_url') : ''; if (h5) next = decodeRedirectTarget(h5) || next;
+              const inner = new URL(next); const h5 = isEngineHost('toutiao', inner.hostname) ? inner.searchParams.get('h5_url') : ''; if (h5) next = decodeRedirectTarget(h5) || next;
             } catch (_) {}
           }
-        } else if (/(?:^|\.)so\.com$/i.test(host) && /^\/jump\/?$/i.test(path)) {
+        } else if (isEngineHost('so360', host) && /^\/jump\/?$/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('u'));
-        } else if (/(?:^|\.)(?:so\.com|sogou\.com)$/i.test(host) && /(?:\/tc\b|\/jump\b|\/link\b)/i.test(path)) {
+        } else if ((isEngineHost('so360', host) || isEngineHost('sogou', host)) && /(?:\/tc\b|\/jump\b|\/link\b)/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('url'));
         }
       } catch (_) {}
@@ -2427,7 +2370,7 @@
   function isOpaqueRedirectUrl(url) {
     if (!url) return false;
     let urlObj = null; try { urlObj = new URL(url); } catch (_) { return false; }
-    const host = urlObj.hostname.replace(/\.$/, ''); if (!/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host)) return false;
+    const host = urlObj.hostname.replace(/\.$/, ''); if (!isEngineHost('google', host)) return false;
     if (!/^\/(?:url|goto)\/?$/i.test(urlObj.pathname)) return false;
     const target = urlObj.searchParams.get('q') || urlObj.searchParams.get('url') || urlObj.searchParams.get('u');
     return !decodeRedirectTarget(target);
@@ -2455,7 +2398,7 @@
     const rawHref = (link && link.href) || '';
     const keepRaw = currentConfig.removeRedirects === false;
     let rawUrl = keepRaw ? rawHref : getCleanUrl(link);
-    if (keepRaw && rawHref && typeof isEngineSelfDomain === 'function') {
+    if (keepRaw && rawHref) {
       try {
         const rawHost = toASCIIHostname(new URL(toASCIIUrl(rawHref)).hostname).toLowerCase();
         if (rawHost && isEngineSelfDomain(rawHost)) {
@@ -2473,12 +2416,23 @@
     return { url, domain };
   }
 
-  function peekResultUrl(result) {
-    try {
-      const engine = getSearchEngine(); const link = getResultLink(result, engine); if (!link || !link.href) return ''; return resolveUrlDomain(link).url || '';
-    } catch (e) {
-      return '';
-    }
+  function peekResultLink(result) {
+    try { return getResultLink(result, getSearchEngine()) || null; } catch (e) { return null; }
+  }
+
+  function peekResultRawHref(result, link) {
+    if (link === undefined) link = peekResultLink(result);
+    return (link && link.href) || '';
+  }
+
+  function peekResultUrl(result, link) {
+    if (link === undefined) link = peekResultLink(result);
+    if (!link || !link.href) return '';
+    const rawHref = link.href; const cached = _peekUrlCache.get(result);
+    if (cached && cached.rawHref === rawHref) return cached.url;
+    let url = ''; try { url = resolveUrlDomain(link).url || ''; } catch (e) { return ''; }
+    _peekUrlCache.set(result, { rawHref, url });
+    return url;
   }
 
   function buildContentSignature(url, title, snippet) {
@@ -2618,7 +2572,7 @@
     if (engine === 'bing' && foundEl && foundEl.href) {
       try {
         const u = new URL(foundEl.href);
-        if (/(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(u.hostname) && u.pathname.startsWith('/ck/a')) {
+        if (isEngineHost('bing', u.hostname) && u.pathname.startsWith('/ck/a')) {
           const unwrapTest = unwrapRedirectUrl(foundEl.href);
           if (!unwrapTest || unwrapTest === foundEl.href) {
             const attrEl = result.querySelector('.b_attribution, .b_algoheader cite, cite');
@@ -2630,13 +2584,13 @@
                  if (domainMatch[0].startsWith('http')) {
                    try {
                      const citedUrl = new URL(domainMatch[0]);
-                     if (!/(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(citedUrl.hostname)) {
+                     if (!isEngineHost('bing', citedUrl.hostname)) {
                        return { href: citedUrl.href, getAttribute: (attr) => foundEl.getAttribute(attr), setAttribute: (attr, val) => foundEl.setAttribute(attr, val) };
                      }
                    } catch (_) {}
                  }
                  const candidateDomain = domainMatch[1] || domainMatch[0];
-                if (!/(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(candidateDomain) &&
+                if (!isEngineHost('bing', candidateDomain) &&
                     !candidateDomain.includes('..') && candidateDomain.includes('.')) {
                   try {
                     const fallbackUrl = new URL(`https://${toASCIIHostname(candidateDomain)}/`).href;
@@ -2655,10 +2609,9 @@
     }
     if (foundEl && engine === 'google' && getSearchCategory() !== 'images') {
       try {
-        const isNotG = (h) => !!h && !/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(h);
-        if (/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(new URL(foundEl.href, location.origin).hostname) || isOpaqueRedirectUrl(foundEl.href)) {
+        if (isEngineHost('google', new URL(foundEl.href, location.origin).hostname) || isOpaqueRedirectUrl(foundEl.href)) {
           let unwrapOk = false;
-          try { const t = unwrapRedirectUrl(foundEl.href); if (t && t !== foundEl.href && isNotG(toASCIIHostname(new URL(t).hostname))) unwrapOk = true; } catch (_) {}
+          try { const t = unwrapRedirectUrl(foundEl.href); if (t && t !== foundEl.href && isNotGoogleHost(toASCIIHostname(new URL(t).hostname))) unwrapOk = true; } catch (_) {}
           if (!unwrapOk) {
             const el = result.querySelector('.lJQCTe, .XVWGNd, .R8BTeb, span.ob9lvb, .eip8Bb');
             const nodes = [];
@@ -2679,7 +2632,7 @@
               }
               if (!candidate) continue;
               let ok = false;
-              try { ok = isNotG(toASCIIHostname(new URL(candidate).hostname)); } catch (_) {}
+              try { ok = isNotGoogleHost(toASCIIHostname(new URL(candidate).hostname)); } catch (_) {}
               if (ok) return { href: candidate, getAttribute: a => foundEl.getAttribute(a), setAttribute: (a, v) => foundEl.setAttribute(a, v) };
             }
           }
@@ -2910,11 +2863,14 @@
         if (isEngineSelfDomain(targetDomain)) {
           showToast(t('cannotBlockCurrentSite', { domain: targetDomain }), 'error'); return;
         }
+        if (result.dataset.whitelistRule && (result.dataset.whitelistSourceKey || 'local') === 'local') {
+          showToast(t('whitelistResult'), 'info'); return;
+        }
       }
 
       if (isBlocked) {
         const opts = buildBlockRuleOptions(domain); const whitelistRule = '@' + (currentConfig.blockDomain ? opts.domainRule : opts.exactRule);
-        const matchedRule = (result.dataset.matchedRule || '').trim(); const matchedSource = (result.dataset.matchedSource || '').trim(); const isSubRule = !isLocalEntry({ source: matchedSource });
+        const matchedRule = (result.dataset.matchedRule || '').trim(); const matchedSource = (result.dataset.matchedSource || '').trim(); const matchedSourceKey = (result.dataset.matchedSourceKey || '').trim(); const isSubRule = matchedSourceKey ? matchedSourceKey.startsWith('sub:') : !isLocalEntry({ source: matchedSource });
         const deleteLocalRule = (rule) => {
           adoptStoredConfigBeforeWrite(); const cleanTarget = stripRuleComment(rule.trim()); currentConfig.rules = currentConfig.rules.filter(r => stripRuleComment(r.trim()) !== cleanTarget);
           persistConfig(true); removeRulesFromTextarea([rule]); forceReprocessAll();
@@ -2964,8 +2920,8 @@
   }
 
   function clearMatchedData(result) {
-    result.removeAttribute('data-matched-rule'); result.removeAttribute('data-matched-source');
-    result.removeAttribute('data-whitelist-rule'); result.removeAttribute('data-whitelist-source');
+    result.removeAttribute('data-matched-rule'); result.removeAttribute('data-matched-source'); result.removeAttribute('data-matched-source-key');
+    result.removeAttribute('data-whitelist-rule'); result.removeAttribute('data-whitelist-source'); result.removeAttribute('data-whitelist-source-key');
   }
 
   function saveOriginalDisplay(el) {
@@ -2997,8 +2953,8 @@
   }
 
   function resetResultStyles(result) {
-    restoreResultExtraElements(result); restoreResultCollapse(result); _hrefUrlCache.delete(result); _resultContentCache.delete(result); _resultRetryCounts.delete(result); result.removeAttribute('data-blocker-processed');
-    result.removeAttribute('data-is-blocked'); result.removeAttribute('data-is-highlighted'); result.removeAttribute('data-highlight-n'); result.removeAttribute('data-highlight-rule'); result.removeAttribute('data-highlight-source'); clearMatchedData(result);
+    restoreResultExtraElements(result); restoreResultCollapse(result); _hrefUrlCache.delete(result); _resultContentCache.delete(result); _resultRetryCounts.delete(result); _peekUrlCache.delete(result); result.removeAttribute('data-blocker-processed');
+    result.removeAttribute('data-is-blocked'); result.removeAttribute('data-is-highlighted'); result.removeAttribute('data-highlight-n'); result.removeAttribute('data-highlight-rule'); result.removeAttribute('data-highlight-source'); result.removeAttribute('data-highlight-source-key'); clearMatchedData(result);
     result.classList.remove('serh-blocked-visible'); result.classList.remove('serh-blocked-collapsed'); result.style.outline = ''; result.style.outlineOffset = ''; const origDisplay = result.getAttribute('data-serh-orig-display');
     if (origDisplay !== null) { result.style.display = origDisplay; result.removeAttribute('data-serh-orig-display'); }
     if (result.parentElement && result.parentElement.dataset.blockerYandexParent) {
@@ -3008,7 +2964,7 @@
       const parentOrig = parent.getAttribute('data-serh-orig-display');
       if (stillHasBlockedHidden) {
         parent.style.display = 'none';
-      } else {
+      } else if (parent.getAttribute('data-is-blocked') !== 'true') {
         parent.style.display = parentOrig !== null ? parentOrig : ''; parent.removeAttribute('data-blocker-yandex-parent'); parent.removeAttribute('data-serh-orig-display');
       }
     }
@@ -3030,7 +2986,7 @@
 
   function restoreParentDisplay(parent) {
     const orig = parent.getAttribute('data-serh-orig-display'); parent.style.display = orig !== null ? orig : ''; parent.removeAttribute('data-blocker-yandex-parent');
-    parent.removeAttribute('data-blocker-google-parent'); parent.removeAttribute('data-serh-orig-display');
+    parent.removeAttribute('data-blocker-google-parent'); parent.removeAttribute('data-serh-grid-item-hidden'); parent.removeAttribute('data-serh-orig-display');
   }
 
   function restoreAllHiddenParents() {
@@ -3063,11 +3019,8 @@
           console.error('[屏蔽] 处理结果时出错:', container, e);
         }
       }
-      if (!container.hasAttribute('data-blocker-processed')) {
-        resultObserver.observe(container);
-      } else {
-        container.setAttribute('data-observed', 'true');
-      }
+      container.setAttribute('data-observed', 'true');
+      if (!container.hasAttribute('data-blocker-processed')) resultObserver.observe(container);
       reconcileHiddenParents();
     } catch (e) {
       if (currentConfig.debug) {
@@ -3076,15 +3029,20 @@
     }
   }
 
+  function sourceLabelOf(key) {
+    if (key === 'local') return t('localRule'); const m = /^sub:(\d+)$/.exec(String(key || '')); return m ? `${t('subscription')}${m[1]}` : '';
+  }
+
   function addMatchedRuleLabel(result) {
     if (currentConfig.showMatchedSource === false || !result.dataset.matchedRule) return; removeMatchedRuleLabel(result); const label = document.createElement('div'); label.className = 'serh-matched-rule';
-    const sourceText = result.dataset.matchedSource || t('matchedRule'); const ruleText = result.dataset.matchedRule;
+    const sourceText = sourceLabelOf(result.dataset.matchedSourceKey) || result.dataset.matchedSource || t('matchedRule'); const ruleText = result.dataset.matchedRule;
     label.textContent = `${sourceText}: ${ruleText}`;
     ensurePositioned(result); result.appendChild(label);
   }
 
   function processSingleResult(result) {
     if (result.closest('.sys_algo_rs, .AlsoTry_M, [data-yga*="sugg"]')) return false;
+    if (!_engineSiteSetup) return false;
 
     if (result.hasAttribute('data-blocker-processed')) {
       return result.getAttribute('data-is-blocked') === 'true';
@@ -3099,7 +3057,7 @@
       return false;
     }
 
-    const { url, domain } = resolveUrlDomain(link); _hrefUrlCache.set(result, url);
+    const { url, domain } = resolveUrlDomain(link); _hrefUrlCache.set(result, { rawHref: link.href || '', url });
     const title = getResultTitle(result, engine); const snippet = getResultSnippet(result, engine); _resultContentCache.set(result, buildContentSignature(url, title, snippet));
     const lowerDomain = domain.toLowerCase(); const subdomainLevels = getSubdomainLevels(domain);
     const matchResult = checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels); _resultRetryCounts.delete(result);
@@ -3108,7 +3066,7 @@
       const hlColor = currentConfig.highlightColors[matchHL]; const color = (typeof hlColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(hlColor)) ? hlColor : (DEFAULT_HIGHLIGHT_COLORS[matchHL] || '#CE2029');
       result.style.outline = `2px solid ${color}`; result.style.outlineOffset = '-2px';
       result.setAttribute('data-is-highlighted', 'true'); result.setAttribute('data-highlight-n', matchHL);
-      if (matchResult.hlRule) { result.dataset.highlightRule = matchResult.hlRule; result.dataset.highlightSource = matchResult.hlSource || ''; }
+      if (matchResult.hlRule) { result.dataset.highlightRule = matchResult.hlRule; result.dataset.highlightSource = matchResult.hlSource || ''; result.dataset.highlightSourceKey = matchResult.hlSourceKey || ''; }
     }
     if (matchResult && matchResult.blocked) {
       _resultRetryCounts.delete(result); saveOriginalDisplay(result); if (blockedShown()) restoreOriginalDisplay(result); else result.style.display = 'none'; setResultExtraElementsVisible(result, showHiddenResults);
@@ -3135,7 +3093,7 @@
         }
       }
 
-      result.dataset.matchedRule = matchResult.rule || ''; result.dataset.matchedSource = matchResult.source || '';
+      result.dataset.matchedRule = matchResult.rule || ''; result.dataset.matchedSource = matchResult.source || ''; result.dataset.matchedSourceKey = matchResult.sourceKey || '';
       if (blockedShown()) {
         if (showHiddenResults) {
           result.classList.add('serh-blocked-visible');
@@ -3151,13 +3109,13 @@
     if (matchHL) {
       _resultRetryCounts.delete(result); saveOriginalDisplay(result); restoreOriginalDisplay(result);
       result.classList.remove('serh-blocked-visible'); result.classList.remove('serh-blocked-collapsed'); result.setAttribute('data-blocker-processed', 'true'); result.removeAttribute('data-is-blocked'); clearMatchedData(result);
-      if (matchResult && matchResult.whitelisted) { result.dataset.whitelistRule = matchResult.rule || ''; result.dataset.whitelistSource = matchResult.source || ''; }
+      if (matchResult && matchResult.whitelisted) { result.dataset.whitelistRule = matchResult.rule || ''; result.dataset.whitelistSource = matchResult.source || ''; result.dataset.whitelistSourceKey = matchResult.sourceKey || ''; }
       if (currentConfig.showBlockBtn) injectBlockButton(result, engine, domain);
       return false;
     }
 
     _resultRetryCounts.delete(result); clearMatchedData(result);
-    if (matchResult && matchResult.whitelisted) { result.dataset.whitelistRule = matchResult.rule || ''; result.dataset.whitelistSource = matchResult.source || ''; }
+    if (matchResult && matchResult.whitelisted) { result.dataset.whitelistRule = matchResult.rule || ''; result.dataset.whitelistSource = matchResult.source || ''; result.dataset.whitelistSourceKey = matchResult.sourceKey || ''; }
     result.setAttribute('data-blocker-processed', 'true'); if (currentConfig.showBlockBtn) injectBlockButton(result, engine, domain); return false;
   }
 
@@ -3346,9 +3304,7 @@
             console.error('[屏蔽] 处理结果时出错:', result, e);
           }
         }
-        if (!result.hasAttribute('data-blocker-processed')) {
-          result.removeAttribute('data-observed'); resultObserver.observe(result);
-        }
+        if (!result.hasAttribute('data-blocker-processed')) resultObserver.observe(result);
       }
       if (processIdx < allResults.length) {
         requestAnimationFrame(processBatch);
@@ -3735,6 +3691,10 @@
             flex: 1;
             margin: 0;
         }
+        .serh-subscription-row.serh-subscription-row-invalid input.serh-subscription-url {
+            border-color: #e53935 !important;
+            box-shadow: 0 0 0 1px rgba(229, 57, 53, 0.25) !important;
+        }
         .serh-subscription-delete-btn {
             background: none; border: none; font-size: 16px; cursor: pointer; color: #c53030;
             padding: 0; width: 18px; line-height: 1; text-align: center; flex-shrink: 0; opacity: 0.7; transition: opacity 0.2s;
@@ -3991,17 +3951,9 @@
   }
 
   function getBubbleSize() {
-    let size = 20;
-    if (typeof currentConfig.bubbleSize === 'number') {
-      size = currentConfig.bubbleSize;
-    } else {
-      switch (currentConfig.bubbleSize) {
-        case 'medium': size = 18; break; case 'large': size = 20; break; case 'larger': size = 22; break; case 'xlarge': size = 26; break;
-        default:
-          const parsed = parseInt(currentConfig.bubbleSize); size = isNaN(parsed) ? 20 : parsed;
-      }
-    }
-    return Math.max(15, Math.min(60, size));
+    let size = typeof currentConfig.bubbleSize === 'number' ? currentConfig.bubbleSize : parseInt(currentConfig.bubbleSize, 10);
+    if (!Number.isFinite(size)) size = 30;
+    return Math.max(20, Math.min(60, size));
   }
 
   function applyBubbleSize(element) {
@@ -4211,36 +4163,34 @@
   }
 
   function getSettingsModifiedTime() {
-    const saved = GM_getValue(SETTINGS_LAST_MODIFIED_KEY, null); if (typeof saved === 'number' && Number.isFinite(saved) && saved > 0) return saved;
+    try { const saved = GM_getValue(SETTINGS_LAST_MODIFIED_KEY, null); if (typeof saved === 'number' && Number.isFinite(saved) && saved > 0) return saved; } catch (e) {}
     return 0;
   }
 
   function getSelectorsModifiedTime() {
-    const saved = GM_getValue(SELECTORS_LAST_MODIFIED_KEY, 0); return typeof saved === 'number' && Number.isFinite(saved) && saved > 0 ? saved : 0;
+    try { const saved = GM_getValue(SELECTORS_LAST_MODIFIED_KEY, 0); return typeof saved === 'number' && Number.isFinite(saved) && saved > 0 ? saved : 0; } catch (e) { return 0; }
   }
 
   function persistConfig(updateModifiedTime = false) {
-    getSettingsModifiedTime(); const previous = normalizeConfig(GM_getValue(CONFIG_KEY, getDefaultConfig()));
+    const previous = normalizeConfig(GM_getValue(CONFIG_KEY, getDefaultConfig()));
     const rulesChanged = updateModifiedTime && JSON.stringify(previous.rules) !== JSON.stringify(currentConfig.rules);
     const settingsChanged = updateModifiedTime && !selectorsEqual(getSyncSettings(previous), getSyncSettings(currentConfig));
     GM_setValue(CONFIG_KEY, currentConfig);
     if (updateModifiedTime) {
-      if (rulesChanged) markLocalModifiedTime(); if (settingsChanged) markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY);
-      if ((rulesChanged || settingsChanged) && typeof triggerWebDAVSyncDelayed === 'function') {
+      if (rulesChanged) markLocalModifiedTime(); if (settingsChanged) { markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY); _settingsStoreTime = getSettingsModifiedTime(); }
+      if (rulesChanged || settingsChanged) {
         triggerWebDAVSyncDelayed(5000);
       }
     }
   }
 
   function markLocalModifiedTime(key = LOCAL_LAST_MODIFIED_KEY) {
-    getSettingsModifiedTime(); const prev = GM_getValue(key, 0) || 0; const now = Math.max(Date.now(), prev + 1); GM_setValue(key, now);
-    if (typeof getTrustedNow === 'function') {
-      Promise.resolve(getTrustedNow()).then(trusted => {
-        if (GM_getValue(key, 0) === now && trusted > now) {
-          GM_setValue(key, trusted);
-        }
-      }).catch(() => {});
-    }
+    const prev = GM_getValue(key, 0) || 0; const now = Math.max(Date.now(), prev + 1); GM_setValue(key, now);
+    Promise.resolve(getTrustedNow()).then(trusted => {
+      if (GM_getValue(key, 0) === now && trusted > now) {
+        GM_setValue(key, trusted);
+      }
+    }).catch(() => {});
   }
 
   const SETTINGS_PANEL_CHECKBOXES = {
@@ -4288,8 +4238,10 @@
   }
 
   function applyCollapseMode() {
-    if (document.body) document.body.classList.toggle('serh-collapse-on', currentConfig.collapseMode === true);
-    ensureCollapseStyle();
+    const on = currentConfig.collapseMode === true;
+    if (document.body) document.body.classList.toggle('serh-collapse-on', on);
+    if (on) ensureCollapseStyle();
+    else if (_collapseStyleEl) { _collapseStyleEl.remove(); _collapseStyleEl = null; }
   }
 
   function applyConfigToMainPanel() {
@@ -4306,6 +4258,9 @@
     });
     const bubbleActionSelect = document.getElementById('serh-set-bubble-action');
     if (bubbleActionSelect) bubbleActionSelect.value = (currentConfig.bubbleAction === 'toggleHidden' || currentConfig.bubbleAction === 'openStats') ? currentConfig.bubbleAction : 'openPanel';
+    const uiScaleSync = document.getElementById('serh-set-ui-scale'); if (uiScaleSync) uiScaleSync.value = ['s', 'xl', 'xxl'].includes(currentConfig.uiScale) ? currentConfig.uiScale : 'l';
+    const darkModeSync = document.getElementById('serh-set-dark-mode'); if (darkModeSync) darkModeSync.value = ['light', 'dark'].includes(currentConfig.darkMode) ? currentConfig.darkMode : 'system';
+    const langSync = document.getElementById('serh-set-language'); if (langSync) langSync.value = currentConfig.language === 'en' ? 'en' : 'zh-CN';
     const textarea = document.getElementById('serh-rules');
     if (textarea && Array.isArray(currentConfig.rules)) {
       textarea.value = currentConfig.rules.join('\n'); updateLineNumbers();
@@ -4378,9 +4333,10 @@
   }
 
   function statSourceKey(s) {
-    const sub = /^(?:订阅|Sub)(\d+)$/i.exec(s || '');
-    if (sub) return 'sub:' + sub[1];
-    return (s === t('localRule') || s === '本地规则' || s === 'Local Rule') ? 'local' : '';
+    if (!s) return '';
+    if (s === 'local' || /^sub:\d+$/.test(s)) return s;
+    if (s === '本地规则' || s === 'Local Rule' || s === t('localRule')) return 'local';
+    const m = /^(?:订阅|Sub)\s*(\d+)$/i.exec(s); return m ? 'sub:' + m[1] : '';
   }
 
   function updateStatsContent() {
@@ -4393,11 +4349,10 @@
       .map(rule => stripRuleComment(rule))
       .filter(rule => rule.length > 0);
 
-    const ruleErrors = new Map(); const ruleWarnings = new Map(); const ruleCounts = new Map();
+    const ruleErrors = new Map(); const ruleCounts = new Map();
     activeRules.forEach(rule => {
       if (currentConfig.errorDetection !== false) {
         const analysis = cachedAnalyzeRule(rule); if (!analysis.valid) ruleErrors.set(rule, analysis.errors.length ? analysis.errors : [t('invalidRule')]);
-        if (analysis.warnings.length) ruleWarnings.set(rule, analysis.warnings);
       }
       ruleCounts.set(rule, (ruleCounts.get(rule) || 0) + 1);
     });
@@ -4421,18 +4376,14 @@
       const ruleMap = sourceStats.rules; const entry = ruleMap.get(rule) || { count: 0, type }; ruleMap.set(rule, entry); entry.count++;
     };
     results.forEach(result => {
-      const blockedRule = (result.dataset.matchedRule || '').trim(); if (blockedRule) addRuleHit(blockedRule, result.dataset.matchedSource, null, result);
-      const wlRule = (result.dataset.whitelistRule || '').trim(); if (wlRule) addRuleHit(wlRule, result.dataset.whitelistSource, t('whitelistRules'), result);
-      const hlRule = (result.dataset.highlightRule || '').trim(); if (hlRule) addRuleHit(hlRule, result.dataset.highlightSource, t('highlightRules'), result);
+      const blockedRule = (result.dataset.matchedRule || '').trim(); if (blockedRule) addRuleHit(blockedRule, result.dataset.matchedSourceKey || result.dataset.matchedSource, null, result);
+      const wlRule = (result.dataset.whitelistRule || '').trim(); if (wlRule) addRuleHit(wlRule, result.dataset.whitelistSourceKey || result.dataset.whitelistSource, t('whitelistRules'), result);
+      const hlRule = (result.dataset.highlightRule || '').trim(); if (hlRule) addRuleHit(hlRule, result.dataset.highlightSourceKey || result.dataset.highlightSource, t('highlightRules'), result);
     });
 
     const ruleErrorsArray = [...ruleErrors].map(([rule, errors]) => ({
       rule,
       msg: errors.join(', ')
-    }));
-    const ruleWarningsArray = [...ruleWarnings].map(([rule, warnings]) => ({
-      rule,
-      msg: warnings.join(', ')
     }));
     let resultHTML = '';
 
@@ -4459,10 +4410,6 @@
 
     if (ruleErrorsArray.length > 0) {
       resultHTML += issueBlockHtml(t('statsErrors', {count: ruleErrorsArray.length}), '#c53030', '#fff5f5', 'errorWord', ruleErrorsArray);
-    }
-
-    if (ruleWarningsArray.length > 0) {
-      resultHTML += issueBlockHtml(t('statsWarnings', {count: ruleWarningsArray.length}), '#b7791f', '#fffff0', 'warningWord', ruleWarningsArray);
     }
 
     const sourceOrder = getSubscriptions().map((_, i) => [`sub:${i + 1}`, `${t('subscription')}${i + 1}`]).concat([['local', t('localRule')]]);
@@ -4507,7 +4454,7 @@
       resultHTML += `</div>`;
     });
 
-    if (!hasMatches && ruleErrorsArray.length === 0 && ruleWarningsArray.length === 0) {
+    if (!hasMatches && ruleErrorsArray.length === 0) {
       resultHTML = `<div style="color: #38a169; padding: 10px; border-radius: 4px; font-size: 12px; background: #f0fff4; text-align: center;">${t('noMatch')}</div>`;
     }
 
@@ -5172,7 +5119,7 @@
   }
 
   function validateUserSelectors(config) {
-    if (!config || typeof config !== 'object' || Array.isArray(config)) return [t('selectorJsonError')]; const errors = [];
+    if (!config || typeof config !== 'object' || Array.isArray(config)) return [t('selectorJsonError')]; const errors = []; const hasUnquotedComma = (v) => typeof v === 'string' && /,/.test(v.replace(/(["'])(?:\\.|(?!\1).)*\1/g, ''));
     for (const key of Object.keys(config)) {
       const def = config[key];
       if (key === 'other') { errors.push(t('selectorReservedKey', { key })); continue; }
@@ -5183,7 +5130,7 @@
           errors.push(t('selectorFieldRequired', { key, field: 'extraElements' }));
         } else {
           for (const s of def.extraElements) {
-            if (typeof s !== 'string' || !s.trim() || s.includes(',') || hasPseudoElement(s) || !isValidCssSelector(':scope > :nth-child(1) ' + s)) {
+            if (typeof s !== 'string' || !s.trim() || hasUnquotedComma(s) || hasPseudoElement(s) || !isValidCssSelector(':scope > :nth-child(1) ' + s)) {
               errors.push(t('selectorInvalidCss', { key, field: 'extraElements', value: s }));
             }
           }
@@ -5213,7 +5160,7 @@
           errors.push(t('selectorFieldRequired', { key, field })); continue;
         }
         for (const s of normalizeSelectorList(value)) {
-          if ((field === 'snippets' && s.includes(',')) || !isValidCssSelector(s) || hasPseudoElement(s)) errors.push(t('selectorInvalidCss', { key, field, value: s }));
+          if (!isValidCssSelector(s) || hasPseudoElement(s)) errors.push(t('selectorInvalidCss', { key, field, value: s }));
         }
       }
       if (def.links === undefined || def.links === null) continue;
@@ -5411,6 +5358,17 @@
   }
 
   function pickTextFile(accept, onLoaded) {
+    const decodeText = (buffer) => {
+      const bytes = new Uint8Array(buffer);
+      if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) return new TextDecoder('utf-8').decode(bytes.subarray(3));
+      if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) return new TextDecoder('utf-16le').decode(bytes.subarray(2));
+      if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) return new TextDecoder('utf-16be').decode(bytes.subarray(2));
+      try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+      catch (e) {
+        try { return new TextDecoder('gb18030').decode(bytes); }
+        catch (e2) { return new TextDecoder('utf-8').decode(bytes); }
+      }
+    };
     preventPanelClose = true; const fileInput = document.createElement('input'); fileInput.type = 'file'; fileInput.accept = accept; fileInput.style.display = 'none';
     document.body.appendChild(fileInput);
 
@@ -5431,12 +5389,16 @@
       }
       const reader = new FileReader();
       reader.onload = (ev) => {
-        onLoaded(String(ev.target.result || '')); cleanup();
+        const raw = ev.target.result; let text = '';
+        if (typeof raw === 'string') text = raw;
+        else if (raw) { try { text = decodeText(raw); } catch (_) { text = ''; } }
+        onLoaded(String(text || '')); cleanup();
       };
       reader.onerror = () => {
         showToast(t('fileImportFailed'), 'error'); cleanup();
       };
-      reader.readAsText(file, 'UTF-8');
+      if (typeof TextDecoder !== 'undefined' && typeof reader.readAsArrayBuffer === 'function') reader.readAsArrayBuffer(file);
+      else reader.readAsText(file, 'UTF-8');
     };
     fileInput.addEventListener('cancel', cleanup); window.addEventListener('focus', onWindowFocus); fileInput.click();
   }
@@ -5490,9 +5452,7 @@
 
     const applyUserSelectors = (config) => {
       GM_setValue(SELECTORS_KEY, diffUserSelectors(config)); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite(); markLocalModifiedTime(SELECTORS_LAST_MODIFIED_KEY);
-      if (typeof triggerWebDAVSyncDelayed === 'function') {
-        triggerWebDAVSyncDelayed(5000);
-      }
+      triggerWebDAVSyncDelayed(5000);
     };
 
     const showError = (messages) => {
@@ -5954,12 +5914,13 @@
         if (val && typeof val === 'object' && typeof val.source === 'string' && flagsOk(val.flags)) { try { new RegExp(val.source, String(val.flags || '').toLowerCase()); return true; } catch (e) { return false; } }
         return false;
       };
+      const hasUnquotedComma = (v) => typeof v === 'string' && /,/.test(v.replace(/(["'])(?:\\.|(?!\1).)*\1/g, ''));
       for (const key of Object.keys(v)) {
         const def = v[key];
         if (key === 'other' || !/^[A-Za-z0-9_-]+$/.test(key)) return false;
         if (!def || typeof def !== 'object' || Array.isArray(def)) return false;
         if ((def.disabled !== undefined && def.disabled !== null && typeof def.disabled !== 'boolean') || (def.disable !== undefined && def.disable !== null && typeof def.disable !== 'boolean')) return false;
-        if (def.extraElements !== undefined && def.extraElements !== null && (!Array.isArray(def.extraElements) || !def.extraElements.every((s) => typeof s === 'string' && !!s.trim() && !s.includes(',') && probe(':scope > :nth-child(1) ' + s)))) return false;
+        if (def.extraElements !== undefined && def.extraElements !== null && (!Array.isArray(def.extraElements) || !def.extraElements.every((s) => typeof s === 'string' && !!s.trim() && !hasUnquotedComma(s) && probe(':scope > :nth-child(1) ' + s)))) return false;
         if (def.match !== undefined && def.match !== null && !reOk(def.match)) return false;
         for (const f of ['containers', 'titles', 'snippets', 'links']) if (def[f] !== undefined && def[f] !== null && !cssOk(def[f])) return false;
       }
@@ -5996,12 +5957,13 @@
     const restLines = lines.filter((_, idx) => !headerLineIndexes.has(idx)); return { config, rawScriptConfig, rawSelectors, restLines };
   }
 
-  function isNonRuleTextResponse(restLines, hasHeader = false) {
+  function isNonRuleTextResponse(restLines, hasHeader = false, allowCommentOnly = false) {
     const lines = (Array.isArray(restLines) ? restLines : [])
       .map((l) => String(l || '').trim())
       .filter((l) => l.length > 0); if (lines.length === 0) return false; if (lines.some((l) => /<\s*\/?\s*(?:!doctype|html|head|body)\b/i.test(l))) return true;
-    const ruleLines = lines.filter((l) => !l.startsWith('#')); if (ruleLines.some((l) => validateRule(l))) return false; if (lines.some((l) => /<\s*\/?\s*[a-z!?][^>\n]*>/i.test(l))) return true;
-    if (ruleLines.length === 0) return false; return !hasHeader ? true : !ruleLines.some((l) => validateRule(l.trim()) || l.startsWith('#'));
+    const ruleLike = (l) => /^[\x21-\x7E]+$/.test(l) || /[:@|./]/.test(l) || looksLikeCondExpr(l);
+    const ruleLines = lines.filter((l) => !l.startsWith('#')); if (ruleLines.some((l) => ruleLike(l) && validateRule(l))) return false; if (lines.some((l) => /<\s*\/?\s*[a-z!?][^>\n]*>/i.test(l))) return true;
+    if (ruleLines.length === 0) return allowCommentOnly ? false : !hasHeader; return !hasHeader ? true : !ruleLines.some((l) => ruleLike(l) && validateRule(l.trim()));
   }
 
   function safeBase64Encode(str) {
@@ -6085,6 +6047,11 @@
     }
   }
 
+  // 置空前备份
+  async function putWebDAVBackup(fullUrl, headers, rawContent) {
+    await gmRequest('PUT', fullUrl + '.bak', { headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' }, data: rawContent });
+  }
+
   function buildUploadContent(content, syncedAt, remotePreserved) {
     syncedAt = syncedAt || Date.now(); remotePreserved = remotePreserved || {}; let prefix = ''; const syncConfig = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false);
     const syncSelectors = GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false);
@@ -6164,6 +6131,7 @@
       }
       return null;
     };
+    const isScalarEdge = (line, i) => i === 0 || /[\s,:[\]{}]/.test(line[i - 1]);
     const stripLineComment = (line) => {
       let quote = null;
       for (let i = 0; i < line.length; i++) {
@@ -6177,9 +6145,10 @@
           else if (ch === '"') quote = null;
           continue;
         }
-        if (ch === "'" || ch === '"') { quote = ch; continue; }
         if (ch === '#' && (i === 0 || /\s/.test(line[i - 1]))) return line.slice(0, i).trim();
+        if ((ch === "'" || ch === '"') && isScalarEdge(line, i)) quote = ch;
       }
+      if (quote !== null) { const m = line.match(/(^|\s)#/); if (m) return line.slice(m.index + m[1].length).trim(); }
       return line.trim();
     };
     const pushYamlItem = (rawItem, kind) => {
@@ -6221,7 +6190,7 @@
             else if (ch === '"') quote = null;
             continue;
           }
-          if (ch === "'" || ch === '"') { quote = ch; cur += ch; continue; }
+          if (ch === "'" || ch === '"') { if (i === 0 || /[\s,:[\]{}]/.test(line[i - 1])) quote = ch; cur += ch; continue; }
           if (ch === ',') { parts.push(cur.trim()); cur = ''; continue; }
           cur += ch;
         }
@@ -6306,7 +6275,7 @@
         }
       }
     }
-    if (!hasSection) return null; if (items.length) return { items, name }; return null;
+    if (!hasSection) return null; return { items, name };
   }
 
   function parseRulesetContent(content) {
@@ -6335,7 +6304,7 @@
     }
     if (isYaml) {
       const yaml = extractYamlRuleItems(lines);
-      if (yaml && yaml.items.length) {
+      if (yaml) {
         if (meta.name === undefined && yaml.name) meta.name = yaml.name; return { lines: yaml.items, meta };
       }
     }
@@ -6345,7 +6314,7 @@
 function collectSubscriptionRules(lines) {
   const validRules = [];
   for (let line of lines) {
-    if (line.length === 0) continue;
+    if (line.length === 0 || /^-{3,}$/.test(line)) continue;
     if (/^!\s*(?:[A-Z][a-zA-Z0-9_-]*)\s*[:=]/.test(line) || /^!\s*(?:site|title|url|description|version|expires|homepage)\s*[:=]/i.test(line) || /^!\s*(?:host|path|scheme)\s*:\s*\S/i.test(line)) continue;
     if (line.startsWith('!') && !looksLikeCondExpr(line)) continue; if (line.startsWith('[') && line.endsWith(']')) continue; if (line.startsWith('@@')) continue;
     if (isElementRuleLine(line)) continue; if (line.startsWith('#')) continue;
@@ -6387,7 +6356,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   if (meta.name) subData.name = meta.name; else if (existing && existing.name) subData.name = existing.name;
 
   subs[existingIndex] = subData; saveSubscriptions(subs);
-    if (showAlerts) alert(t('subscriptionSuccess', { count: validRules.length })); return { success: true, count: validRules.length };
+    if (showAlerts) showToast(t('subscriptionSuccess', { count: validRules.length }), 'success'); return { success: true, count: validRules.length };
   }
 
   function showSubscriptionPanel() {
@@ -6454,11 +6423,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       container.querySelectorAll('.serh-subscription-row').forEach(row => {
         const input = row.querySelector('.serh-subscription-url'); const url = input.value.trim(); const origUrl = row.dataset.originalUrl || '';
         const toggle = row.querySelector('.serh-subscription-enable-toggle'); const enabled = toggle ? toggle.checked : true; const msgDiv = row.querySelector('.serh-subscription-status-message');
-        if (!url) {
-          msgDiv.textContent = ''; msgDiv.className = 'serh-subscription-status-message'; return;
-        }
+        row.classList.remove('serh-subscription-row-invalid'); msgDiv.textContent = ''; msgDiv.className = 'serh-subscription-status-message';
+        if (!url) return;
         if (!/^https?:\/\//i.test(url)) {
-          msgDiv.textContent = t('subLinkInvalid'); msgDiv.className = 'serh-subscription-status-message error'; hasError = true; return;
+          row.classList.add('serh-subscription-row-invalid'); msgDiv.textContent = t('subLinkInvalid'); msgDiv.className = 'serh-subscription-status-message error'; hasError = true; return;
         }
         if (seenUrls.has(url)) {
           if (origUrl && origUrl !== url && !producedUrls.has(origUrl)) {
@@ -6488,19 +6456,18 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
 
     function persistCurrentSubscriptions() {
-      const latestSubs = getSubscriptions(); const { newSubs, hasError } = collectSubscriptionsFromRows(latestSubs, deletedUrls);
-      if (hasError) return false;
+      const latestSubs = getSubscriptions(); const { newSubs } = collectSubscriptionsFromRows(latestSubs, deletedUrls);
       const savedSubs = newSubs.filter(s => s.url);
       const subsChanged = subscriptionsSignature(savedSubs) !== subscriptionsSignature(latestSubs); saveSubscriptions(savedSubs); deletedUrls.clear(); subscriptions = getSubscriptions();
       container.querySelectorAll('.serh-subscription-row').forEach(row => {
-        const input = row.querySelector('.serh-subscription-url'); if (input) row.dataset.originalUrl = input.value.trim(); const toggle = row.querySelector('.serh-subscription-enable-toggle');
+        const input = row.querySelector('.serh-subscription-url'); const currentUrl = input ? input.value.trim() : '';
+        if (!input || !/^https?:\/\//i.test(currentUrl)) return;
+        row.dataset.originalUrl = currentUrl; const toggle = row.querySelector('.serh-subscription-enable-toggle');
         if (toggle) row.dataset.originalEnabled = String(toggle.checked);
       });
       if (subsChanged) {
-        markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY); forceReprocessAll();
-        if (typeof triggerWebDAVSyncDelayed === 'function') {
-          triggerWebDAVSyncDelayed(5000);
-        }
+        markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY); _settingsStoreTime = getSettingsModifiedTime(); forceReprocessAll();
+        triggerWebDAVSyncDelayed(5000);
       }
       return true;
     }
@@ -6523,17 +6490,17 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     let cancelDiscardsEdits = false;
 
     document.getElementById('serh-subscription-import').onclick = async () => {
-      const rows = Array.from(container.querySelectorAll('.serh-subscription-row')); if (!persistCurrentSubscriptions()) return; showToast(t('importing'), 'info');
+      const rows = Array.from(container.querySelectorAll('.serh-subscription-row')); persistCurrentSubscriptions(); showToast(t('importing'), 'info');
       for (const row of rows) {
         const input = row.querySelector('.serh-subscription-url'); const url = input.value.trim(); const msgDiv = row.querySelector('.serh-subscription-status-message');
         if (!url) {
-          msgDiv.textContent = t('subLinkEmpty'); msgDiv.className = 'serh-subscription-status-message error'; continue;
+          row.classList.remove('serh-subscription-row-invalid'); msgDiv.textContent = t('subLinkEmpty'); msgDiv.className = 'serh-subscription-status-message error'; continue;
         }
         if (!/^https?:\/\//i.test(url)) {
-          msgDiv.textContent = t('subLinkInvalid'); msgDiv.className = 'serh-subscription-status-message error'; continue;
+          row.classList.add('serh-subscription-row-invalid'); msgDiv.textContent = t('subLinkInvalid'); msgDiv.className = 'serh-subscription-status-message error'; continue;
         }
         try {
-          const result = await performSubscriptionForUrl(url, false); if (!result.success) continue; row.dataset.originalUrl = url; msgDiv.textContent = t('subImportSuccess');
+          const result = await performSubscriptionForUrl(url, false); if (!result.success) continue; row.classList.remove('serh-subscription-row-invalid'); row.dataset.originalUrl = url; msgDiv.textContent = t('subImportSuccess');
           msgDiv.className = 'serh-subscription-status-message success'; const sub = getSubscriptions().find(s => s && s.url === url);
           row.querySelector('.serh-subscription-info').textContent = formatSubInfo(sub);
         } catch (err) {
@@ -6541,12 +6508,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           msgDiv.textContent = t('subImportFailed'); msgDiv.className = 'serh-subscription-status-message error';
         }
       }
-      subscriptions = getSubscriptions(); forceReprocessAll(); const hasErrors = rows.some(r => r.querySelector('.serh-subscription-status-message.error'));
-      if (hasErrors) {
-        showToast(t('subImportFailed'), 'error');
-      } else {
-        showToast(t('saved'), 'success');
-      }
+      subscriptions = getSubscriptions(); forceReprocessAll();
+      if (!rows.some(r => r.querySelector('.serh-subscription-status-message.error'))) showToast(t('saved'), 'success');
     };
 
     document.getElementById('serh-subscription-cancel').onclick = (e) => {
@@ -6754,6 +6717,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           const serverTime = parseHttpDateHeader(resp.responseHeaders); const netOffset = await getNetworkTimeOffset();
           const trustedNow = netOffset !== null ? Date.now() + netOffset : (serverTime > 0 ? serverTime : Date.now()); const validRemoteTimes = extractValidCloudTimes(remoteConfig, trustedNow);
           const remoteSyncedAt = validRemoteTimes.length > 0 ? Math.max(...validRemoteTimes) : 0; const uploadedTime = Math.max(remoteSyncedAt + 1000, trustedNow);
+          const remoteRaw = String(resp.responseText || '');
+          if (content.trim() === '' && resp.status !== 404 && remoteRaw.trim() !== '') await putWebDAVBackup(fullUrl, headers, remoteRaw);
           await putWebDAVRules({ fullUrl, folderUrl, headers, rules: content.split('\n'), settingsModifiedAt: uploadedTime }, content, uploadedTime, remotePreserved, buildDavPutHeaders(headers, uploadedTime));
           GM_setValue(WEBDAV_LAST_SYNC_KEY, uploadedTime);
         });
@@ -6785,10 +6750,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       const config = getValidatedWebDAVConfig(); if (!config) return; const downloadBtn = document.getElementById('serh-webdav-download'); if (downloadBtn.disabled) return; setWebDAVBusy(true);
       const loadingToast = showToast(t('webdavDownloading'), 'info', 10000);
       try {
-        const lockAcquired = await runWithSyncLock('webdav', async () => performWebDAVDownload(config)); loadingToast.dismiss();
-        if (lockAcquired === false) {
+        const syncResult = await runWithSyncLock('webdav', async () => performWebDAVDownload(config)); loadingToast.dismiss();
+        if (syncResult === false) {
           showToast(t('webdavSyncLocked'), 'error', 4000);
-        } else {
+        } else if (syncResult !== 'cancelled') {
           saveSuccessfulWebDAVConfig(config); showToast(t('downloadSuccess'), 'success');
         }
       } catch (err) {
@@ -6805,9 +6770,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   }
 
   async function performWebDAVDownload(config) {
-    getSettingsModifiedTime(); adoptStoredConfigIfNewer(); const { fullUrl, headers } = getWebDAVRequest(config); const resp = await gmRequest('GET', fullUrl, { headers }); const content = resp.responseText;
+    adoptStoredConfigIfNewer(); const { fullUrl, headers } = getWebDAVRequest(config); const resp = await gmRequest('GET', fullUrl, { headers }); const content = resp.responseText;
     if (isInvalidSyncResponse(content, resp.responseHeaders)) throw new Error(t('subImportFailed')); const parsedHeader = parseSyncHeader(content);
     if (isNonRuleTextResponse(parsedHeader.restLines, !!(parsedHeader.rawScriptConfig || parsedHeader.rawSelectors))) throw new Error(t('subImportFailed')); const newRules = filterValidRuleLines(parsedHeader.restLines);
+    if (!hasEffectiveRules(newRules) && hasEffectiveRules(currentConfig.rules) && !confirm(t('webdavClearConfirm'))) return 'cancelled';
     if (parsedHeader.config) {
       const { subscriptions, selectors } = parsedHeader.config; const settings = getSyncSettings(parsedHeader.config);
 
@@ -6846,7 +6812,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     const trustedNow = await getTrustedNow(parseHttpDateHeader(resp.responseHeaders)); let cloudTime = 0; const validCloudTimes = [getCloudModifiedTime(parsedHeader.config, 'rulesSyncedAt', trustedNow)].filter(v => v > 0);
     if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) && parsedHeader.config && (Object.keys(getSyncSettings(parsedHeader.config)).length || Array.isArray(parsedHeader.config.subscriptions))) {
       const cloudSettingsTime = getCloudModifiedTime(parsedHeader.config, 'settingsModifiedAt', trustedNow);
-      if (cloudSettingsTime > 0) GM_setValue(SETTINGS_LAST_MODIFIED_KEY, cloudSettingsTime);
+      if (cloudSettingsTime > 0) { GM_setValue(SETTINGS_LAST_MODIFIED_KEY, cloudSettingsTime); _settingsStoreTime = cloudSettingsTime; }
     }
     if (validCloudTimes.length > 0) {
       cloudTime = Math.max(...validCloudTimes);
@@ -6866,18 +6832,18 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   }
 
   async function performAutoWebDAVSync(config, depth = 0) {
-    getSettingsModifiedTime(); adoptStoredConfigIfNewer(); const { folderUrl, fullUrl, headers } = getWebDAVRequest(config);
+    adoptStoredConfigIfNewer(); const { folderUrl, fullUrl, headers } = getWebDAVRequest(config);
 
     const resp = await gmRequest('GET', fullUrl, { headers, allow404: true }); const trustedNow = await getTrustedNow(parseHttpDateHeader(resp.responseHeaders));
     let cloudRules = []; let cloudConfig = null; let cloudTime = 0; let cloudSettingsTime = 0; let cloudETag = ''; let cloudLastMod = ''; let parsedHeader = null;
     if (resp.status !== 404) {
       const content = resp.responseText;
       if (isInvalidSyncResponse(content, resp.responseHeaders)) {
-        console.warn('[自动 WebDAV] 云端返回异常内容，已跳过'); return;
+        console.warn('[WebDAV] 云端返回异常内容，已跳过'); return;
       }
       parsedHeader = parseSyncHeader(content); cloudConfig = parsedHeader.config;
       if (isNonRuleTextResponse(parsedHeader.restLines, !!(parsedHeader.rawScriptConfig || parsedHeader.rawSelectors))) {
-        console.warn('[自动 WebDAV] 云端返回非规则文本，已跳过'); return;
+        console.warn('[WebDAV] 云端返回非规则文本，已跳过'); return;
       }
       cloudRules = parsedHeader.restLines.map(r => r.trim()).filter(r => r); const validHeaderTimes = [getCloudModifiedTime(parsedHeader.config, 'rulesSyncedAt', trustedNow)].filter(v => v > 0); let lastModTime = 0;
       if (resp.responseHeaders && typeof resp.responseHeaders === 'string') {
@@ -6904,7 +6870,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     const scriptedEmptyCloud = resp.status !== 404 && cloudRules.length === 0 && !!(parsedHeader && parsedHeader.config && typeof parsedHeader.config.rulesSyncedAt === 'number' && Number.isFinite(parsedHeader.config.rulesSyncedAt) && parsedHeader.config.rulesSyncedAt > 0);
     if (resp.status !== 404 && cloudRules.length === 0 && !scriptedEmptyCloud) {
       if (localRules.length > 0 && localTime > cloudTime) {
-        console.log('[自动 WebDAV] 云端文件为空且本地规则较新，上传本地规则...'); const uploadedTime = Math.max(cloudTime + 1000, localTime + 1, trustedNow);
+        console.log('[WebDAV] 云端文件为空且本地规则较新，上传本地规则...'); const uploadedTime = Math.max(cloudTime + 1000, localTime + 1, trustedNow);
         try {
           await putWebDAVRules({ fullUrl, folderUrl, headers, rules: localRules }, localRules.join('\n'), uploadedTime, {
             rawScriptConfig: parsedHeader ? parsedHeader.rawScriptConfig : null,
@@ -6913,29 +6879,29 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         } catch (err) {
           if (err && err.message && err.message.includes('412')) {
             if (depth >= WEBDAV_SYNC_MAX_RETRIES) {
-              console.warn(`[自动 WebDAV] 云端并发更新冲突 (412) 重试 ${WEBDAV_SYNC_MAX_RETRIES} 次后放弃，等待下一轮同步`);
+              console.warn(`[WebDAV] 云端并发更新冲突 (412) 重试 ${WEBDAV_SYNC_MAX_RETRIES} 次后放弃，等待下一轮同步`);
               return;
             }
-            console.warn(`[自动 WebDAV] 云端并发更新冲突 (412)，稍后重试 (${depth + 1}/${WEBDAV_SYNC_MAX_RETRIES})`);
+            console.warn(`[WebDAV] 云端并发更新冲突 (412)，稍后重试 (${depth + 1}/${WEBDAV_SYNC_MAX_RETRIES})`);
             await delay(WEBDAV_SYNC_RETRY_DELAY * Math.pow(2, depth)); return performAutoWebDAVSync(config, depth + 1);
           }
-          console.warn('[自动 WebDAV] 空云端恢复上传失败:', err.message); return;
+          console.warn('[WebDAV] 空云端恢复上传失败:', err.message); return;
         }
         forceReprocessAll(); GM_setValue(WEBDAV_LAST_SYNC_KEY, trustedNow); return;
       }
-      console.warn('[自动 WebDAV] 云端文件为空，已跳过'); GM_setValue(WEBDAV_LAST_SYNC_KEY, trustedNow); return;
+      console.warn('[WebDAV] 云端文件为空，已跳过'); GM_setValue(WEBDAV_LAST_SYNC_KEY, trustedNow); return;
     }
 
     if (resp.status === 404) {
-      console.log('[自动 WebDAV] 云端文件不存在，初始上传中...'); await ensureWebDAVFolder(folderUrl, headers);
+      console.log('[WebDAV] 云端文件不存在，初始上传中...'); await ensureWebDAVFolder(folderUrl, headers);
       try {
         await putWebDAVRules({ fullUrl, folderUrl, headers, rules: localRules }, localRules.join('\n'), trustedNow, null, buildDavPutHeaders(headers, trustedNow, { ifNoneMatch: true }));
       } catch (err) {
         if (err && err.message && err.message.includes('412') && depth < WEBDAV_SYNC_MAX_RETRIES) {
-          console.warn(`[自动 WebDAV] 云端文件被并发创建 (412)，重新同步 (${depth + 1}/${WEBDAV_SYNC_MAX_RETRIES})`);
+          console.warn(`[WebDAV] 云端文件被并发创建 (412)，重新同步 (${depth + 1}/${WEBDAV_SYNC_MAX_RETRIES})`);
           await delay(WEBDAV_SYNC_RETRY_DELAY * Math.pow(2, depth)); return performAutoWebDAVSync(config, depth + 1);
         }
-        console.warn('[自动 WebDAV] 初始上传失败:', err.message); return;
+        console.warn('[WebDAV] 初始上传失败:', err.message); return;
       }
     } else {
       const baseRules = getRuleSyncSnapshot(); let mergedRules;
@@ -6959,7 +6925,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       }
 
       if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) && cloudSettingsTime > localSettingsTime && cloudConfig) {
-        Object.assign(currentConfig, getSyncSettings(cloudConfig)); localSettingsTime = cloudSettingsTime; GM_setValue(SETTINGS_LAST_MODIFIED_KEY, localSettingsTime);
+        const cloudSettings = getSyncSettings(cloudConfig); const colors = cloudSettings.highlightColors;
+        if (colors && typeof colors === 'object' && !Array.isArray(colors)) cloudSettings.highlightColors = Object.assign({}, currentConfig.highlightColors, colors);
+        Object.assign(currentConfig, cloudSettings); localSettingsTime = cloudSettingsTime; GM_setValue(SETTINGS_LAST_MODIFIED_KEY, localSettingsTime); _settingsStoreTime = localSettingsTime;
       }
 
       currentConfig.rules = mergedRules; persistConfig(false);
@@ -6981,7 +6949,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       const shouldUpload = contentChanged || subscriptionsChanged || selectorsChanged || (syncConfig && localSettingsNewer) || (syncSelectors && localNewer);
 
       if (shouldUpload) {
-        console.log('[自动 WebDAV] 规则合并或配置更新完成，上传至云端...'); const uploadedTime = Math.max(cloudTime + 1000, localTime + 1, trustedNow);
+        console.log('[WebDAV] 规则合并或配置更新完成，上传至云端...'); const uploadedTime = Math.max(cloudTime + 1000, localTime + 1, trustedNow);
+        if (mergedRules.length === 0 && cloudRules.length > 0) {
+          try { await putWebDAVBackup(fullUrl, headers, String(resp.responseText || '')); } catch (err) { console.warn('[WebDAV] 备份失败:', err && err.message); return; }
+        }
         try {
           await putWebDAVRules({ fullUrl, folderUrl, headers, rules: mergedRules, subs: mergedSubs, selectors: mergedSelectors, rulesModifiedAt: (contentChanged || selectorsChanged) ? uploadedTime : (cloudTime || uploadedTime), settingsModifiedAt: subscriptionsChanged ? Math.max(uploadedTime, localSettingsTime) : localSettingsTime }, mergedContent, uploadedTime, {
             rawScriptConfig: parsedHeader ? parsedHeader.rawScriptConfig : null,
@@ -6990,13 +6961,13 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         } catch (err) {
           if (err && err.message && err.message.includes('412')) {
             if (depth >= WEBDAV_SYNC_MAX_RETRIES) {
-              console.warn(`[自动 WebDAV] 云端并发更新冲突 (412) 重试 ${WEBDAV_SYNC_MAX_RETRIES} 次后放弃，等待下一轮同步`);
+              console.warn(`[WebDAV] 云端并发更新冲突 (412) 重试 ${WEBDAV_SYNC_MAX_RETRIES} 次后放弃，等待下一轮同步`);
               return;
             }
-            console.warn(`[自动 WebDAV] 云端并发更新检测到版本冲突 (412)，稍后重试 (${depth + 1}/${WEBDAV_SYNC_MAX_RETRIES})`);
+            console.warn(`[WebDAV] 云端并发更新检测到版本冲突 (412)，稍后重试 (${depth + 1}/${WEBDAV_SYNC_MAX_RETRIES})`);
             await delay(WEBDAV_SYNC_RETRY_DELAY * Math.pow(2, depth)); return performAutoWebDAVSync(config, depth + 1);
           }
-          console.warn('[自动 WebDAV] 上传失败:', err.message); return;
+          console.warn('[WebDAV] 上传失败:', err.message); return;
         }
       } else {
         persistSyncSnapshots(mergedRules, { subs: mergedSubs, selectors: mergedSelectors });
@@ -7025,18 +6996,20 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       }
       runWithSyncLock('webdav', async () => {
         await performAutoWebDAVSync(config);
-      }).catch(err => console.error('[防抖 WebDAV] 同步失败:', err.message));
+      }).catch(err => console.error('[WebDAV] 同步失败:', err.message));
     }, delayMs);
   }
 
   async function checkAutoWebDAV() {
     if (!GM_getValue(WEBDAV_AUTO_SYNC_KEY, false)) return; const config = loadWebDAVConfig(); if (!config || !config.url) return; if (!isHttpsUrl(config.url)) return;
-    const now = await getTrustedNow(); let lastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0); if (lastSync > now + WEBDAV_TIME_TOLERANCE) lastSync = 0;
-    if (lastSync > 0 && now - lastSync < WEBDAV_AUTO_SYNC_INTERVAL) return; if (isSerhPanelOpen()) return;
+    let lastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0); if (lastSync > Date.now() + WEBDAV_TIME_TOLERANCE) lastSync = 0;
+    if (lastSync > 0 && Date.now() - lastSync < WEBDAV_AUTO_SYNC_INTERVAL) return; if (isSerhPanelOpen()) return;
+    const now = await getTrustedNow(); if (lastSync > now + WEBDAV_TIME_TOLERANCE) lastSync = 0;
+    if (lastSync > 0 && now - lastSync < WEBDAV_AUTO_SYNC_INTERVAL) return;
     runWithSyncLock('webdav', async () => {
       const trustedNow = await getTrustedNow(); let currentLastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0); if (currentLastSync > trustedNow + WEBDAV_TIME_TOLERANCE) currentLastSync = 0;
       if (currentLastSync > 0 && trustedNow - currentLastSync < WEBDAV_AUTO_SYNC_INTERVAL) return; await performAutoWebDAVSync(config);
-    }).catch(err => console.error('[自动 WebDAV] 同步失败:', err.message));
+    }).catch(err => console.error('[WebDAV] 同步失败:', err.message));
   }
 
   function timestampFilename(prefix, ext) {
@@ -7049,11 +7022,28 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
   }
 
+  function exportSubscriptionList() {
+    return getSubscriptions().map((s) => ({ url: s.url, name: s.name, enabled: s.enabled !== false }));
+  }
+
+  function applyImportedSubscriptions(subs) {
+    if (!Array.isArray(subs) || subs.length === 0) return 0;
+    const map = new Map(getSubscriptions().filter((s) => s && s.url).map((s) => [s.url, s]));
+    let added = 0;
+    subs.forEach((s) => {
+      if (!s || typeof s.url !== 'string' || !s.url) return; const local = map.get(s.url); if (!local) added++;
+      map.set(s.url, Object.assign({}, local || {}, { url: s.url, name: s.name !== undefined ? s.name : (local ? local.name : ''), enabled: s.enabled !== false }));
+    });
+    const merged = [...map.values()]; saveSubscriptions(merged); return added;
+  }
+
   function importRulesFromFile() {
     pickTextFile('.txt,text/plain', (content) => {
       const parsedHeader = parseSyncHeader(content);
       const hasHeader = !!(parsedHeader.rawScriptConfig || parsedHeader.rawSelectors);
-      if (isNonRuleTextResponse(parsedHeader.restLines, hasHeader)) { showToast(t('fileImportFailed'), 'error'); return; }
+      if (isNonRuleTextResponse(parsedHeader.restLines, hasHeader, true)) { showToast(t('fileImportFailed'), 'error'); return; }
+      const newRules = filterValidRuleLines(parsedHeader.restLines);
+      if (!hasEffectiveRules(newRules) && hasEffectiveRules(currentConfig.rules) && !confirm(t('importClearConfirm'))) return;
       const headerConfig = parsedHeader.config;
       if (headerConfig && typeof headerConfig === 'object' && !Array.isArray(headerConfig)) {
         const headerSelectors = parsedHeader.rawSelectors ? headerConfig.selectors : null;
@@ -7068,11 +7058,12 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           currentConfig = normalizeConfig(next);
         }
       }
+      if (headerConfig) { const importedSubs = Array.isArray(headerConfig.subscriptions) ? headerConfig.subscriptions : null; if (importedSubs && applyImportedSubscriptions(importedSubs) > 0) setTimeout(() => checkAutoSubscription(true), 1000); }
       const textarea = document.getElementById('serh-rules');
       if (textarea) {
         textarea.value = parsedHeader.restLines.join('\n'); updateLineNumbers();
       }
-      currentConfig.rules = filterValidRuleLines(parsedHeader.restLines);
+      currentConfig.rules = newRules;
       const panel = document.getElementById('serh-panel'); if (panel) panel._initialRules = [...currentConfig.rules];
       persistConfig(true); applyConfigToMainPanel(); forceReprocessAll();
     });
@@ -7081,10 +7072,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   function exportRulesToFile() {
     preventPanelClose = true; const textarea = document.getElementById('serh-rules'); let content = textarea.value;
     if (!content.trim()) {
-      alert(t('noRulesExport')); preventPanelClose = false; return;
+      showToast(t('noRulesExport'), 'error'); preventPanelClose = false; return;
     }
     if (currentConfig.exportConfig === true) {
-      content = '# ScriptConfig:' + JSON.stringify(getSyncSettings(currentConfig)) + '\n' + content;
+      content = '# ScriptConfig:' + JSON.stringify(Object.assign(getSyncSettings(currentConfig), { subscriptions: exportSubscriptionList() })) + '\n' + content;
     }
     downloadTextFile(timestampFilename('rules', 'txt'), content, 'text/plain;charset=utf-8'); preventPanelClose = false;
   }
@@ -7201,15 +7192,18 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         let statusDirty = false;
         if (_hrefChangedContainers.size) {
           for (const container of _hrefChangedContainers) {
-            if (!container.isConnected) continue; const cachedUrl = _hrefUrlCache.get(container); const currentUrl = peekResultUrl(container);
-            if (cachedUrl !== undefined && cachedUrl === currentUrl) continue; reprocessContainer(container); statusDirty = true;
+            if (!container.isConnected) continue; const cached = _hrefUrlCache.get(container); const link = peekResultLink(container); const rawHref = peekResultRawHref(container, link);
+            if (cached !== undefined && cached.rawHref === rawHref) continue;
+            if (cached !== undefined && peekResultUrl(container, link) === cached.url) { cached.rawHref = rawHref; continue; }
+            reprocessContainer(container); statusDirty = true;
           }
           _hrefChangedContainers.clear();
         }
         if (_contentChangedContainers.size) {
           for (const container of _contentChangedContainers) {
             if (!container.isConnected) continue; if (!container.hasAttribute('data-blocker-processed')) continue; const cachedSig = _resultContentCache.get(container);
-            const currentSig = getResultContentSignature(container); if (currentSig === null || cachedSig === currentSig) continue; reprocessContainer(container); statusDirty = true;
+            const currentSig = getResultContentSignature(container); if (currentSig === null || cachedSig === currentSig) continue;
+            reprocessContainer(container); statusDirty = true;
           }
           _contentChangedContainers.clear();
         }
@@ -7231,9 +7225,11 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     };
     _domObserver = new MutationObserver((records) => {
       if (!_mutationRafPending) {
-        _mutationRafPending = true; requestAnimationFrame(flushMutations);
+        _mutationRafPending = true;
+        if (document.hidden) setTimeout(flushMutations, 500); else requestAnimationFrame(flushMutations);
       }
       _pendingRecords = _pendingRecords.concat(records);
+      if (_pendingRecords.length > 2000) _pendingRecords = [{ type: 'childList', target: document.body, addedNodes: [1] }];
     });
     _domObserver.observe(document.body, {
       childList: true,
@@ -7263,15 +7259,16 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
       const wrapHistoryMethod = (method) => {
         const orig = history[method];
-        if (typeof orig === 'function') {
-          history[method] = function(...args) {
-            const ret = orig.apply(this, args);
-            try {
-              window.dispatchEvent(new Event('serh:locationchange'));
-            } catch (e) {}
-            return ret;
-          };
-        }
+        if (typeof orig !== 'function' || orig._serhWrapped) return;
+        const wrapped = function(...args) {
+          const ret = orig.apply(this, args);
+          try {
+            window.dispatchEvent(new Event('serh:locationchange'));
+          } catch (e) {}
+          return ret;
+        };
+        wrapped._serhWrapped = true;
+        history[method] = wrapped;
       };
       wrapHistoryMethod('pushState'); wrapHistoryMethod('replaceState'); window.addEventListener('serh:locationchange', _urlChangeHandler);
     }
@@ -7282,7 +7279,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     if (_domObserver) {
       _domObserver.disconnect(); _domObserver = null;
     }
-    _hrefUrlCache = new WeakMap(); _hrefChangedContainers.clear(); _resultContentCache = new WeakMap(); _resultRetryCounts = new WeakMap(); _contentChangedContainers.clear();
+    _hrefUrlCache = new WeakMap(); _hrefChangedContainers.clear(); _resultContentCache = new WeakMap(); _resultRetryCounts = new WeakMap(); _peekUrlCache = new WeakMap(); _contentChangedContainers.clear();
     if (_searchForm && _searchFormHandler) {
       _searchForm.removeEventListener('submit', _searchFormHandler);
     }
@@ -7328,11 +7325,14 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   }
 
   function checkExternalConfigChange() {
-    if (document.getElementById('serh-panel')) return false; if (!adoptStoredConfigIfNewer()) return false; applyCollapseMode(); forceReprocessAll(); return true;
+    if (document.getElementById('serh-panel')) return false;
+    const storeTime = getSettingsModifiedTime();
+    if (_settingsStoreTime !== null && storeTime === _settingsStoreTime) return false;
+    if (!adoptStoredConfigIfNewer()) return false; _settingsStoreTime = getSettingsModifiedTime(); applyCollapseMode(); forceReprocessAll(); return true;
   }
 
   function init() {
-    applyDarkModeClass(); applyUiScale(); applyCollapseMode(); migrateSubscriptions(); pruneUserSelectors(); _selectorStoreSignature = getSelectorStoreSignature();
+    applyDarkModeClass(); applyUiScale(); applyCollapseMode(); migrateSubscriptions(); pruneUserSelectors(); _selectorStoreSignature = getSelectorStoreSignature(); _settingsStoreTime = getSettingsModifiedTime();
     if (window.matchMedia) {
       try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyDarkModeClass); } catch (e) {}
     }
@@ -7354,5 +7354,5 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else setTimeout(init, 1000);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else setTimeout(init, 0);
 })();
