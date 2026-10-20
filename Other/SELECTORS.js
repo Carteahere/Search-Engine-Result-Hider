@@ -99,7 +99,7 @@
       links: ['a.qk-title a[href]', '.qk-title a[href]', 'a.qk-link-wrapper[href]', 'a[href]'],
     },
     github: {
-      match: /^(?:www\.)?github\.com$/,
+      match: /^https?:\/\/(?:www\.)?github\.com\/search\/?(?:[?#]|$)/i,
       containers: "[data-testid='results-list'] > div",
       titles: ["h3 a[data-component='Link']", 'h3 a', 'h3'],
       snippets: ['h3 ~ div', 'h3 + div', 'article .description'],
@@ -107,7 +107,7 @@
       button: false,
     },
     greasyfork: {
-      match: /^(?:www\.)?greasyfork\.org$/,
+      match: /^https?:\/\/(?:www\.)?greasyfork\.org\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?scripts\/?(?:[?#]|$)/i,
       containers: '#browse-script-list li[data-script-id]',
       titles: ['a.script-link', 'article h2 a'],
       snippets: ['.script-description', 'article .description'],
