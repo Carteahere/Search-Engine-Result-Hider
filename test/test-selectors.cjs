@@ -732,6 +732,28 @@ const cases = [
 ];
 for (const [i, [host, expected]] of cases.entries()) assert(`选择器-096-${i + 1}: ${host} -> ${expected}`, factory({ location: { hostname: host } }, selectors).getSearchEngine() === expected);
 
+const pageCases = [
+  [{ hostname: 'github.com', href: 'https://github.com/Carteahere/Search-Engine-Result-Hider' }, 'other'],
+  [{ hostname: 'github.com', href: 'https://github.com/search?q=123&type=repositories' }, 'github'],
+  [{ hostname: 'www.github.com', href: 'https://www.github.com/search?q=x' }, 'github'],
+  [{ hostname: 'github.com', href: 'https://github.com/search/advanced' }, 'other'],
+  [{ hostname: 'greasyfork.org', href: 'https://greasyfork.org/zh-CN/scripts/552394' }, 'other'],
+  [{ hostname: 'greasyfork.org', href: 'https://greasyfork.org/zh-CN/scripts?q=123' }, 'greasyfork'],
+  [{ hostname: 'greasyfork.org', href: 'https://greasyfork.org/en/scripts?q=123' }, 'greasyfork'],
+  [{ hostname: 'greasyfork.org', href: 'https://greasyfork.org/scripts?q=123' }, 'greasyfork'],
+];
+for (const [i, [location, expected]] of pageCases.entries()) assert(`选择器-096b-${i + 1}: ${location.href} -> ${expected}`, factory({ location }, selectors).getSearchEngine() === expected);
+
+{
+  const liteSrc = readRepoFile('Lite.user.js');
+  const liteFactory = new Function('window', 'SELECTORS', `let _engineCacheHost = null; let _engineCacheResult = 'other';
+    function getSelectors() { return SELECTORS; }
+    ${extractFn(liteSrc, 'getSearchEngine')}
+    return getSearchEngine;`);
+  const liteGet = (hostname, href) => liteFactory({ location: { hostname, href } }, selectors)();
+  assert('选择器-096c: Lite 同步 github/greasyfork 仅搜索页生效', liteGet('github.com', 'https://github.com/a/b') === 'other' && liteGet('github.com', 'https://github.com/search?q=123&type=repositories') === 'github' && liteGet('greasyfork.org', 'https://greasyfork.org/zh-CN/scripts/552394') === 'other' && liteGet('greasyfork.org', 'https://greasyfork.org/zh-CN/scripts?q=123') === 'greasyfork');
+}
+
 {
   const cacheWin = { location: { hostname: 'www.google.com', href: 'https://www.google.com/' } };
   const cacheEnv = factory(cacheWin, selectors);
