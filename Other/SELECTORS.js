@@ -85,7 +85,7 @@
       links: ['h3.vr-title a[href]', '.vr-title a[href]', 'a[class*="saTitle"][href]', 'h3 a[href]', 'a.citeLinkClass[href]', 'a[href]'],
     },
     toutiao: {
-      match: /^so\.toutiao\.com$/,
+      match: /^(?:so|m)\.toutiao\.com$/,
       containers: '.result-content',
       titles: ['.l-card-title a', '.l-card-title', '.cs-header a', 'a[href*="/search/jump"]'],
       snippets: ['.l-paragraph', '.cs-card-content .text-regular', '.l-source', '.cs-source'],
@@ -97,6 +97,22 @@
       titles: ['.qk-title-text', '.qk-title', 'a.qk-link-wrapper'],
       snippets: ['.qk-paragraph-text', '.qk-paragraph'],
       links: ['a.qk-title a[href]', '.qk-title a[href]', 'a.qk-link-wrapper[href]', 'a[href]'],
+    },
+    github: {
+      match: /^(?:www\.)?github\.com$/,
+      containers: "[data-testid='results-list'] > div",
+      titles: ["h3 a[data-component='Link']", 'h3 a', 'h3'],
+      snippets: ['h3 ~ div', 'h3 + div', 'article .description'],
+      links: ["h3 a[href]"],
+      button: false,
+    },
+    greasyfork: {
+      match: /^(?:www\.)?greasyfork\.org$/,
+      containers: '#browse-script-list li[data-script-id]',
+      titles: ['a.script-link', 'article h2 a'],
+      snippets: ['.script-description', 'article .description'],
+      links: ['a.script-link[href]'],
+      button: false,
     },
     other: {
       containers: '',

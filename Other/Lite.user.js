@@ -3,9 +3,9 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.7.3
-// @description        支持正则的搜索结果屏蔽工具。Lite版移除了所有规则订阅/webdav相关内容。
-// @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了所有规则订阅/webdav相关内容。
+// @version      8.7.4
+// @description        支持正则的搜索结果屏蔽工具。Lite版，移除了规则订阅/webdav同步相关内容。
+// @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版，移除了规则订阅/webdav同步相关内容。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version has removed all content related to Rule Subscriptions and WebDAV.
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjQgNCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMmM1MjgyIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIgc3R5bGU9Im92ZXJmbG93OnZpc2libGUhaW1wb3J0YW50OyI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iNyI+PC9jaXJjbGU+PGxpbmUgeDE9IjcuNDUiIHkxPSI3LjQ1IiB4Mj0iMTYuNTUiIHkyPSIxNi41NSI+PC9saW5lPjwvc3ZnPg==
 // @author       南雪莲
@@ -30,12 +30,13 @@
 
   if (window.top !== window.self) return; let preventPanelClose = false, _engineSiteSetup = false, _domObserver = null, _observedSelector = '';
   let _searchForm = null, _searchFormHandler = null, _urlChangeHandler = null;
-  let _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap(); const _hrefChangedContainers = new Set(), _contentChangedContainers = new Set();
+  let _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap(), _peekUrlCache = new WeakMap(); const _hrefChangedContainers = new Set(), _contentChangedContainers = new Set();
 
   const CONFIG_KEY = 'searchfilter_blocker', SELECTORS_KEY = 'searchfilter_selectors';
   const HL_STATS_REGEX = /^@\d+/;
   const RESULT_RETRY_LIMIT = 3, RESULT_RETRY_DELAY = 200;
 
+  // 默认配置
   const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', uiScale: 'l', darkMode: 'system', exportConfig: false, collapseMode: false, removeRedirects: true, bracketHighlight: true, language: 'zh-CN' };
   const DEFAULT_HIGHLIGHT_COLORS = {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'};
   function getDefaultConfig() {
@@ -61,14 +62,15 @@
     return cfg;
   }
   let currentConfig = normalizeConfig(GM_getValue(CONFIG_KEY, getDefaultConfig()));
-  ['searchfilter_rule_tombstones', 'searchfilter_subscription_tombstones', 'searchfilter_rule_added_times'].forEach(k => {
+  ['searchfilter_rule_tombstones', 'searchfilter_subscription_tombstones', 'searchfilter_rule_added_times', 'searchfilter_local_last_modified', 'searchfilter_settings_last_modified', 'searchfilter_selectors_last_modified', 'searchfilter_settings_time_migrated', 'searchfilter_webdav', 'searchfilter_subscription_url', 'searchfilter_subscription_last_update', 'searchfilter_subscription_rules', 'searchfilter_subscriptions', 'searchfilter_webdav_last_sync', 'searchfilter_webdav_auto_sync', 'searchfilter_webdav_sync_config', 'searchfilter_webdav_sync_selectors', 'searchfilter_webdav_sync_snapshot', 'searchfilter_subscription_sync_snapshot', 'searchfilter_webdav_last_sync_selectors'].forEach(k => {
     if (typeof GM_deleteValue === 'function') GM_deleteValue(k);
   });
   if (currentConfig && typeof currentConfig === 'object') {
-    delete currentConfig.tombstones; delete currentConfig.ruleAddedTimes; delete currentConfig.subscriptionTombstones;
+    delete currentConfig.tombstones; delete currentConfig.ruleAddedTimes; delete currentConfig.subscriptionTombstones; delete currentConfig.showSubBtn; delete currentConfig.showSyncBtn; delete currentConfig.subscriptionAutoUpdate;
   }
   let showHiddenResults = false;
 
+  // 选择器
   const SELECTORS = {
     bing: {
       match: /^(?:(?:www[2-4]?|cn|global|m)\.)?bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
@@ -156,7 +158,7 @@
       links: ['h3.vr-title a[href]', '.vr-title a[href]', 'a[class*="saTitle"][href]', 'h3 a[href]', 'a.citeLinkClass[href]', 'a[href]'],
     },
     toutiao: {
-      match: /^so\.toutiao\.com$/,
+      match: /^(?:so|m)\.toutiao\.com$/,
       containers: '.result-content',
       titles: ['.l-card-title a', '.l-card-title', '.cs-header a', 'a[href*="/search/jump"]'],
       snippets: ['.l-paragraph', '.cs-card-content .text-regular', '.l-source', '.cs-source'],
@@ -169,6 +171,22 @@
       snippets: ['.qk-paragraph-text', '.qk-paragraph'],
       links: ['a.qk-title a[href]', '.qk-title a[href]', 'a.qk-link-wrapper[href]', 'a[href]'],
     },
+    github: {
+      match: /^(?:www\.)?github\.com$/,
+      containers: "[data-testid='results-list'] > div",
+      titles: ["h3 a[data-component='Link']", 'h3 a', 'h3'],
+      snippets: ['h3 ~ div', 'h3 + div', 'article .description'],
+      links: ["h3 a[href]"],
+      button: false,
+    },
+    greasyfork: {
+      match: /^(?:www\.)?greasyfork\.org$/,
+      containers: '#browse-script-list li[data-script-id]',
+      titles: ['a.script-link', 'article h2 a'],
+      snippets: ['.script-description', 'article .description'],
+      links: ['a.script-link[href]'],
+      button: false,
+    },
     other: {
       containers: '',
       titles: [],
@@ -177,7 +195,7 @@
     }
   };
 
-  let activeSelectors = null; let _selectorStoreSignature = null;
+  let activeSelectors = null; let _selectorStoreSignature = null; let _configStoreSignature = null;
 
   function normalizeSelectorList(value) {
     if (Array.isArray(value)) return value.filter(s => typeof s === 'string' && s); if (typeof value === 'string' && value) return [value]; return [];
@@ -191,7 +209,8 @@
       titles: def.titles !== undefined ? normalizeSelectorList(def.titles) : (base.titles || []),
       snippets: def.snippets !== undefined ? normalizeSelectorList(def.snippets) : (base.snippets || []),
       extraElements: def.extraElements !== undefined ? normalizeSelectorList(def.extraElements) : (base.extraElements || []),
-      links: links.length ? links : 'a[href]'
+      links: links.length ? links : 'a[href]',
+      ...(def.button !== undefined ? { button: def.button !== false } : (base.button !== undefined ? { button: base.button !== false } : {}))
     };
   }
 
@@ -240,7 +259,7 @@
   }
 
   function resetSelectorCache() {
-    activeSelectors = null; _engineCacheHost = null; _engineCacheResult = 'other'; _observedSelector = '';
+    activeSelectors = null; _engineCacheHost = null; _engineCacheResult = 'other'; _observedSelector = ''; _categoryCacheHref = null; _categoryCacheResult = 'web';
   }
 
   let _engineCacheHost = null; let _engineCacheResult = 'other';
@@ -256,7 +275,13 @@
     return (_engineCacheResult = 'other');
   }
 
+  let _categoryCacheHref = null; let _categoryCacheResult = 'web';
   function getSearchCategory(loc) {
+    if (loc === undefined) {
+      const href = String(window.location && window.location.href || '');
+      if (_categoryCacheHref === href) return _categoryCacheResult;
+      const r = getSearchCategory(window.location); _categoryCacheHref = href; _categoryCacheResult = r; return r;
+    }
     loc = loc || window.location; if (!loc) return 'web'; let path = String(loc.pathname || '').toLowerCase(); let search = String(loc.search || '').toLowerCase();
     const host = String(loc.hostname || '').toLowerCase();
     if ((!path || !search) && loc.href) {
@@ -281,6 +306,22 @@
   function isBingImagesPage(engine) {
     return engine === 'bing' && getSearchCategory() === 'images';
   }
+
+  const ENGINE_HOST_REGEXES = {
+    bing: /(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i,
+    google: /(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i,
+    google_scholar: /(?:^|\.)scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i,
+    duckduckgo: /(?:^|\.)(?:duckduckgo\.com|ddg\.gg)$/i,
+    yahoo: /(?:^|\.)(?:[a-z]{2,6}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i,
+    yahoo_jp: /(?:^|\.)(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i,
+    so360: /(?:^|\.)so\.com$/i,
+    sogou: /(?:^|\.)sogou\.com$/i,
+    toutiao: /(?:^|\.)toutiao\.com$/i
+  };
+  function isEngineHost(engine, host) {
+    const re = ENGINE_HOST_REGEXES[engine]; return !!re && re.test(String(host || ''));
+  }
+  const isNotGoogleHost = (h) => !!h && !isEngineHost('google', h);
 
   function getContainerSelector(engine) {
     if (isBingImagesPage(engine)) return 'li:has(div.iuscp), div.iuscp, div.imgpt';
@@ -322,16 +363,15 @@
       cannotBlockCurrentSite: '无法屏蔽当前搜索引擎自身域名: {domain}',
       statsErrors: '发现 {count} 个规则错误: ',
       matchedCountLabel: '匹配', matchedCountUnit: '条',
-      menuBubbleStateShow: '显示', menuBubbleStateHide: '隐藏',
       menuBubbleActionOpen: '打开面板', menuBubbleActionStats: '打开统计', menuBubbleActionToggle: '显隐结果',
       bubbleStatsHint: '点击打开统计，长按打开面板',
       bubbleToggleHint: '点击显示/隐藏屏蔽结果，长按打开面板',
-      stateEnabled: '启用', stateDisabled: '关闭',
-      subImportFailed: '导入失败，请检查链接或网络状态', whitelistResult: '该结果为白名单',
       fileImportFailed: '导入失败，文件内容不是有效规则', importClearConfirm: '导入的文件不含任何规则，是否清空本地全部规则？',
+      whitelistResult: '该结果为白名单',
       highlightRules: '高亮规则', menuHighlightColor: '🎨 高亮颜色',
       hlColorTitle: '高亮颜色', hlColorReset: '重置', resetPending: '已重置，保存后生效', hlColorHint: '点击色块快速保存',
-      errorWord: '错误', duplicateRules: '重复规则', invalidRule: '规则无效',
+      errorWord: '错误',
+      duplicateRules: '重复规则', invalidRule: '规则无效',
       hlColorError: '高亮级别需在 1-5 之间',
       ifParenError: '@if(...) 括号未闭合',
       condRegexError: '条件正则无效: {part}',
@@ -377,16 +417,15 @@
       cannotBlockCurrentSite: 'Cannot block search engine own domain: {domain}',
       statsErrors: 'Found {count} rule errors:',
       matchedCountLabel: 'Hits', matchedCountUnit: 'Rule',
-      menuBubbleStateShow: 'Show', menuBubbleStateHide: 'Hide',
       menuBubbleActionOpen: 'Open Panel', menuBubbleActionStats: 'Open Stats', menuBubbleActionToggle: 'Show Results',
       bubbleStatsHint: 'Click to open stats, long-press to open panel',
       bubbleToggleHint: 'Click to show/hide blocked results, long-press to open panel',
-      stateEnabled: 'Enabled', stateDisabled: 'Disabled',
-      subImportFailed: 'Import failed, check URL or network', whitelistResult: 'This result is whitelisted',
       fileImportFailed: 'Import failed, file content is not valid rules', importClearConfirm: 'The imported file contains no rules. Clear all local rules?',
+      whitelistResult: 'This result is whitelisted',
       highlightRules: 'Highlight Rules', menuHighlightColor: '🎨 Highlight Colors',
       hlColorTitle: 'Highlight Colors', hlColorReset: 'Reset', resetPending: 'Reset, takes effect after saving', hlColorHint: 'Click a swatch to apply it quickly.',
-      duplicateRules: 'Duplicate Rules', invalidRule: 'Invalid rule', errorWord: 'Error',
+      errorWord: 'Error',
+      duplicateRules: 'Duplicate Rules', invalidRule: 'Invalid rule',
       hlColorError: 'Highlight level must be 1-5',
       ifParenError: 'Unbalanced @if(...) parentheses',
       condRegexError: 'Invalid condition regex: {part}',
@@ -408,6 +447,7 @@
     }
   };
 
+  // Map
   function newCompiledRules() {
     return {
       domains: new Map(), urls: [], titles: [], texts: [],
@@ -420,7 +460,7 @@
   }
   let compiledRules = newCompiledRules();
 
-  const validationCache = new Map(); const subdomainCache = new Map(); let forceReprocessBatchId = 0;
+  const validationCache = new Map(); const subdomainCache = new Map(); let forceReprocessBatchId = 0; let _hiddenParentCount = 0; let _rulesRevision = 0;
   function t(key, params = {}) {
     const lang = currentConfig.language; const texts = LANG_TEXTS[lang] || LANG_TEXTS['zh-CN']; let text = texts[key] || key;
     for (const [k, v] of Object.entries(params)) {
@@ -429,6 +469,7 @@
     return text;
   }
 
+  // 统一调用开始
   function escHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
@@ -458,7 +499,7 @@
       if (container.parentElement !== document.body) {
         document.body.appendChild(container);
       }
-      container.style.position = ''; container.style.top = ''; container.style.right = ''; container.style.left = ''; container.style.bottom = ''; container.style.width = '';
+      container.style.position = ''; container.style.top = ''; container.style.right = ''; container.style.left = ''; container.style.bottom = ''; container.style.width = ''; container.style.maxWidth = '';
     }
 
     const toast = document.createElement('div');
@@ -481,6 +522,10 @@
   const REGEX_CTX_C = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*=$/i;
   const RULE_REGEX_LIT_RE = /^\/(?:[^/\\[\]()]|\\.|\[(?:[^\]\\]|\\.)*\]|\((?:[^/\\[\]()]|\\.)*\))+\//;
   const REGEX_CTX_D = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*(?:\^=|\$=|\*=|:)$/i;
+  function regexStartAhead(str, pos) {
+    const prev = str.slice(Math.max(0, pos - 64), pos).trimEnd();
+    return REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(str.slice(pos, Math.min(str.length, pos + 4096)))) || (REGEX_CTX_D.test(prev) && regexCloseAhead(str, pos));
+  }
   function regexCloseAhead(str, pos) {
     let inClass = false;
     for (let j = pos + 1; j < str.length; j++) {
@@ -493,7 +538,6 @@
     }
     return false;
   }
-
   function isBadRegexTail(s) {
     if (!RULE_PREFIX_REGEX_RE.test(s)) return false;
     let last = -1;
@@ -536,8 +580,7 @@
       if (ch === "'") { inSQ = true; continue; }
       if (ch === '"') { inDQ = true; continue; }
       if (ch === '/' && !inRE) {
-        const prev = str.slice(0, i).trimEnd();
-        if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(str.slice(i))) || (REGEX_CTX_D.test(prev) && regexCloseAhead(str, i))) { inRE = true; continue; }
+        if (regexStartAhead(str, i)) { inRE = true; continue; }
       }
       if (justClosedIf) {
         if (/\s/.test(ch)) continue;
@@ -596,8 +639,7 @@
       if (ch === "'") { inSQ = true; continue; }
       if (ch === '"') { inDQ = true; continue; }
       if (ch === '/') {
-        const prev = str.slice(0, i).trimEnd();
-        if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(str.slice(i))) || (REGEX_CTX_D.test(prev) && regexCloseAhead(str, i))) { inRE = true; continue; }
+        if (regexStartAhead(str, i)) { inRE = true; continue; }
       }
       if (ch === '(') depth++;
       else if (ch === ')') { depth--; if (depth === 0) return i; }
@@ -819,8 +861,7 @@
           j++; continue;
         }
         if (ch === '/') {
-          const prev = text.slice(Math.max(0, j - 64), j).trimEnd();
-          if (REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(text.slice(j, Math.min(n, j + 4096)))) || (REGEX_CTX_D.test(prev) && regexCloseAhead(text, j))) {
+          if (regexStartAhead(text, j)) {
             const reEnd = scanRegexLiteral(j, end);
             if (reEnd !== -1) { j = reEnd + 1; continue; }
             inRe = true; inClass = false;
@@ -855,21 +896,6 @@
       return { a: i, b: m };
     }
     return null;
-  }
-
-  function buildLineStartOffsets(text) {
-    const starts = [0];
-    for (let i = 0; i < text.length; i++) { if (text.charCodeAt(i) === 10) starts.push(i + 1); }
-    return starts;
-  }
-
-  function lineIndexAt(starts, idx) {
-    let lo = 0; let hi = starts.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      if (starts[mid] <= idx) lo = mid; else hi = mid - 1;
-    }
-    return lo;
   }
 
   function setupBracketHighlight(textarea, lang) {
@@ -1138,6 +1164,15 @@
     return (Array.isArray(lines) ? lines : []).some(line => { const s = String(line || '').trim(); return s && !s.startsWith('#') && !!stripRuleComment(s).trim(); });
   }
 
+  function isNonRuleTextResponse(restLines, hasHeader = false, allowCommentOnly = false) {
+    const lines = (Array.isArray(restLines) ? restLines : []).map((l) => String(l || '').trim()).filter((l) => l.length > 0); if (lines.length === 0) return false;
+    if (lines.some((l) => /<\s*\/?\s*(?:!doctype|html|head|body)\b/i.test(l))) return true;
+    const ruleLike = (l) => /^[\x21-\x7E]+$/.test(l) || /[:@|./]/.test(l) || looksLikeCondExpr(l);
+    const ruleLines = lines.filter((l) => !l.startsWith('#')); if (ruleLines.some((l) => ruleLike(l) && validateRule(l))) return false;
+    if (lines.some((l) => /<\s*\/?\s*[a-z!?][^>\n]*>/i.test(l))) return true;
+    if (ruleLines.length === 0) return allowCommentOnly ? false : !hasHeader; return !hasHeader ? true : !ruleLines.some((l) => ruleLike(l) && validateRule(l.trim()));
+  }
+
   function getRuleKey(r) {
     if (!r || typeof r !== 'string') return ''; const trimmed = r.trim(); if (trimmed.startsWith('#')) return trimmed; const stripped = stripRuleComment(trimmed); return stripped.trim();
   }
@@ -1235,6 +1270,7 @@
     flushLeaf(); if (inSQ || inDQ || inRE || leafParens !== 0) return { error: true, tokens }; return { error: false, tokens };
   }
 
+  // 递归下降解析
   function parseCondExprTokens(tokens, leafParser, errors) {
     let pos = 0; let depth = 0; const peek = () => tokens[pos]; const next = () => tokens[pos++];
     const syntaxError = () => {
@@ -1284,10 +1320,11 @@
       const trimmed = text.trim();
       const regexLeafFlags = (() => {
         const m = trimmed.match(/^(?:title|url|host|path|scheme)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i); if (!m) return null;
-        const seg = m[2] || ''; return isUniqueFlagsStr(seg) ? seg.toLowerCase() : (isFlagsCandidateError(seg) ? seg : '');
+        const seg = m[2] || ''; const explicit = /^(?:title|url|host|path|scheme)\s*=\~\s*\//i.test(trimmed);
+        return isUniqueFlagsStr(seg) || (explicit && /^[a-z]+$/i.test(seg)) ? seg.toLowerCase() : (isFlagsCandidateError(seg) ? seg : '');
       })();
       if (regexLeafFlags && getInvalidRegexFlags(regexLeafFlags)) {
-        errors.push({ kind: 'flags', part: regexLeafFlags }); return { type: 'const', value: false };
+        errors.push({ kind: 'flags', part: getInvalidRegexFlags(regexLeafFlags) }); return { type: 'const', value: false };
       }
       try {
         const parsed = parseConditionPart(trimmed, engine, site, category);
@@ -1387,9 +1424,7 @@
         if (cond.type === 'host') {
           const uHost = u.hostname; let unicodeHost = uHost;
           try {
-            if (typeof toUnicodeHostname === 'function') {
-              unicodeHost = toUnicodeHostname(uHost);
-            }
+            unicodeHost = toUnicodeHostname(uHost);
           } catch (_) {}
           return safeRegexTest(cond.regex, raw) || safeRegexTest(cond.regex, uHost) || safeRegexTest(cond.regex, unicodeHost);
         }
@@ -1483,7 +1518,7 @@
     return [...new Set(invalid)].join('');
   }
   function isUniqueFlagsStr(seg) { const s = String(seg || '').toLowerCase(); return /^[imsu]+$/.test(s) && new Set(s).size === s.length; }
-  function isFlagsCandidateError(seg) { seg = String(seg || ''); return /^[gy]+$/i.test(seg) || (/^[gyimsu]+$/i.test(seg) && /[gy]/i.test(seg)); }
+  function isFlagsCandidateError(seg) { seg = String(seg || ''); return /^[imsugy]+$/i.test(seg) && !!getInvalidRegexFlags(seg); }
 
   function validateUrlWildcard(rule) {
     if (!rule || /[<>"']/.test(rule) || /\s/.test(rule)) return false; if (rule.startsWith('|') || rule.startsWith('@@')) return false; if (rule.includes('^')) return false;
@@ -1632,7 +1667,7 @@
           if (!cond.trim()) {
             errors.push(t('emptyIfCondition')); continue;
           }
-          const r = validateCondition(cond); errors.push(...r.errors); 
+          const r = validateCondition(cond); errors.push(...r.errors);
         }
     }
 
@@ -1849,7 +1884,9 @@
   }
 
   function ruleToRegex(rule) {
-    let memo = ruleToRegex._memo; if (!memo) memo = ruleToRegex._memo = new Map(); if (memo.has(rule)) return memo.get(rule); let out; if (rule.startsWith('.')) rule = '*' + rule;
+    let memo = ruleToRegex._memo;
+    const original = rule;
+    if (!memo) memo = ruleToRegex._memo = new Map(); if (memo.has(original)) return memo.get(original); let out; if (rule.startsWith('.')) rule = '*' + rule;
     if (!rule.startsWith('/') && !/^title\//i.test(rule) && !/^text\//i.test(rule) &&
       !rule.includes('://') && !rule.startsWith('.')) {
       const restMatch = rule.match(/^([^\/?#]+)([\/?#].*)?$/);
@@ -1859,23 +1896,23 @@
     }
 
     if (rule.startsWith('/') && rule.lastIndexOf('/') > 0) {
-      const lastSlash = rule.lastIndexOf('/'); const pattern = rule.slice(1, lastSlash); const flags = rule.slice(lastSlash + 1).toLowerCase(); out = { pattern, flags }; memo.set(rule, out);
+      const lastSlash = rule.lastIndexOf('/'); const pattern = rule.slice(1, lastSlash); const flags = rule.slice(lastSlash + 1).toLowerCase(); out = { pattern, flags }; memo.set(original, out);
       return out;
     }
 
     if (/^title\//i.test(rule)) {
-      out = parsePrefixedRegexRule(rule, 6); memo.set(rule, out); return out;
+      out = parsePrefixedRegexRule(rule, 6); memo.set(original, out); return out;
     }
 
     if (/^text\//i.test(rule)) {
-      out = parsePrefixedRegexRule(rule, 5); memo.set(rule, out); return out;
+      out = parsePrefixedRegexRule(rule, 5); memo.set(original, out); return out;
     }
 
     out = {
       pattern: wildcardToRegex(rule),
       flags: 'i'
     };
-    memo.set(rule, out); return out;
+    memo.set(original, out); return out;
   }
 
   function normalizeHostCandidate(host) {
@@ -1906,11 +1943,6 @@
     return null;
   }
 
-  function extractSimpleWhitelistDomain(rule) {
-    if (!rule || !rule.startsWith('@') || rule.startsWith('@@')) return null; const m = matchWildcardDomainPattern(rule.substring(1)); if (!m) return null;
-    return { domain: m.domain, type: m.domainType };
-  }
-
   function matchSimpleDomain(coreRule) {
     return matchWildcardDomainPattern(coreRule);
   }
@@ -1937,15 +1969,22 @@
       .join(''); const compiled = { type, regex: new RegExp(pattern, sanitizedFlags) }; memo.set(coreRule, compiled); return compiled;
   }
 
+  // 预编译
   function buildRuleIndex() {
-    let pageContext = ''
+    let pageContext = '';
     try {
       pageContext = getSearchEngine() + '|' + getSearchCategory() + '|' + String(window.location.hostname || '');
     } catch (e) {}
-    const signature = JSON.stringify([currentConfig.rules, currentConfig.language, pageContext]); if (compiledRules && compiledRules.indexSignature === signature) return;
-    validationCache.clear(); subdomainCache.clear(); if (ruleToRegex._memo) ruleToRegex._memo.clear(); if (parsePrefixedRegexRule._memo) parsePrefixedRegexRule._memo.clear();
-    if (compileRuleRegex._memo) compileRuleRegex._memo.clear();
-    compiledRules = newCompiledRules();
+    const signature = _rulesRevision + '|' + currentConfig.language + '|' + pageContext; if (compiledRules && compiledRules.indexSignature === signature) return;
+    const contentSignature = _rulesRevision + '|' + currentConfig.language;
+    const contentChanged = !compiledRules || compiledRules.contentSignature !== contentSignature;
+    subdomainCache.clear(); validationCache.clear();
+    if (contentChanged) {
+      if (ruleToRegex._memo) ruleToRegex._memo.clear();
+      if (parsePrefixedRegexRule._memo) parsePrefixedRegexRule._memo.clear();
+      if (compileRuleRegex._memo) compileRuleRegex._memo.clear();
+    }
+    compiledRules = newCompiledRules(); compiledRules.contentSignature = contentSignature;
     const allRules = currentConfig.rules;
     const hlSets = {domains: compiledRules.highlightDomains, condDomains: compiledRules.highlightConditionalDomains, urls: compiledRules.highlightUrls, titles: compiledRules.highlightTitles, texts: compiledRules.highlightTexts, condRules: compiledRules.highlightConditionalRules};
     const wlSets = {domains: compiledRules.whitelistDomains, condDomains: compiledRules.whitelistConditionalDomains, urls: compiledRules.whitelistUrlPatterns, titles: compiledRules.whitelistTitlePatterns, texts: compiledRules.whitelistTextPatterns, condRules: compiledRules.whitelistConditionalRules};
@@ -1955,7 +1994,7 @@
       if (typeof rule !== 'string') { if (currentConfig.debug) console.warn('非字符串规则项, 已跳过:', rule); return; }
       rule = stripRuleComment(rule.trim()); if (!rule) return; let ruleValid = true;
       try {
-        ruleValid = validateRule(rule);
+        ruleValid = cachedAnalyzeRule(rule).valid;
       } catch (e) {
         ruleValid = false;
       }
@@ -1963,12 +2002,11 @@
         if (currentConfig.debug) console.warn('规则校验未通过, 已跳过:', rule); return;
       }
 
-      const isLocal = true;
-      const source = t('localRule');
+      const source = t('localRule'); const sourceKey = 'local'; const isLocal = true;
 
       const routeRule = (sets, parsed, coreRule, extra) => {
         const hasDynamic = parsed.dynamicConditions.length > 0;
-        const base = {originalRule: rule, source, isLocal, ...extra};
+        const base = {originalRule: rule, source, sourceKey, isLocal, ...extra};
         if (!coreRule) {
           if (parsed.standaloneExpr || hasDynamic) sets.condRules.push({type: 'expr', conditions: parsed.dynamicConditions, ...base});
           return;
@@ -2069,7 +2107,8 @@
       for (const level of subdomainLevels) {
         const entries = map.get(level); if (!entries) continue;
         for (const entry of entries) {
-          if (!filter(entry, level)) continue; return entry;
+          if (!filter(entry, level)) continue;
+          return entry;
         }
       }
       return null;
@@ -2085,7 +2124,8 @@
       for (const level of subdomainLevels) {
         const rules = map.get(level); if (!rules) continue;
         for (const item of rules) {
-          if (!filter(item, level)) continue; if (checkDynamicConditions(item.conditions, title, url)) return item;
+          if (!filter(item, level)) continue; if (!checkDynamicConditions(item.conditions, title, url)) continue;
+          return item;
         }
       }
       return null;
@@ -2108,33 +2148,45 @@
       scanConditionalDomains(compiledRules.highlightConditionalDomains, (it, lv) => matchDomainEntryType(it.domainType, lv, lowerDomain)) ||
       scanConditionalRules(compiledRules.highlightConditionalRules); const highlightN = hlEntry ? hlEntry.N : 0;
 
-    const findWhitelist = () => {
-      return scanDomainMap(compiledRules.whitelistDomains, (en, lv) => matchDomainEntryType(en.type, lv, lowerDomain)) ||
-        scanPatterns(compiledRules.whitelistUrlPatterns, url) ||
-        scanPatterns(compiledRules.whitelistTitlePatterns, title) ||
-        scanPatterns(compiledRules.whitelistTextPatterns, snippet) ||
-        scanConditionalDomains(compiledRules.whitelistConditionalDomains, (it, lv) => matchDomainEntryType(it.domainType, lv, lowerDomain)) ||
-        scanConditionalRules(compiledRules.whitelistConditionalRules);
+    const findPair = (steps) => {
+      for (const step of steps) {
+        const item = step();
+        if (item) return [item, null];
+      }
+      return [null, null];
     };
-    const findBlocked = () => {
-      return scanDomainMap(compiledRules.domains, (en, lv) => matchDomainEntryType(en.type, lv, lowerDomain)) ||
-        scanPatterns(compiledRules.urls, url) ||
-        scanPatterns(compiledRules.titles, title) ||
-        scanPatterns(compiledRules.texts, snippet) ||
-        scanConditionalDomains(compiledRules.conditionalDomains, (it, lv) => matchDomainEntryType(it.domainType, lv, lowerDomain)) ||
-        scanConditionalRules(compiledRules.conditionalRules);
-    };
+    const findWhitelistPair = () => findPair([
+      () => scanDomainMap(compiledRules.whitelistDomains, (en, lv) => matchDomainEntryType(en.type, lv, lowerDomain)),
+      () => scanPatterns(compiledRules.whitelistUrlPatterns, url),
+      () => scanPatterns(compiledRules.whitelistTitlePatterns, title),
+      () => scanPatterns(compiledRules.whitelistTextPatterns, snippet),
+      () => scanConditionalDomains(compiledRules.whitelistConditionalDomains, (it, lv) => matchDomainEntryType(it.domainType, lv, lowerDomain)),
+      () => scanConditionalRules(compiledRules.whitelistConditionalRules)
+    ]);
+    const findBlockedPair = () => findPair([
+      () => scanDomainMap(compiledRules.domains, (en, lv) => matchDomainEntryType(en.type, lv, lowerDomain)),
+      () => scanPatterns(compiledRules.urls, url),
+      () => scanPatterns(compiledRules.titles, title),
+      () => scanPatterns(compiledRules.texts, snippet),
+      () => scanConditionalDomains(compiledRules.conditionalDomains, (it, lv) => matchDomainEntryType(it.domainType, lv, lowerDomain)),
+      () => scanConditionalRules(compiledRules.conditionalRules)
+    ]);
 
-    let whitelistHit = findWhitelist(); let whitelisted = !!whitelistHit; let blockedInfo = null; const toBlockedInfo = (item) => ({ rule: item.originalRule, source: item.source, sourceKey: 'local' });
-    if (!whitelisted) {
-      const item = findBlocked(); if (item) blockedInfo = toBlockedInfo(item);
+    const toBlockedInfo = (item) => ({ rule: item.originalRule, source: item.source, sourceKey: item.sourceKey });
+    let whitelistHit = null; let blockedInfo = null;
+    {
+      const [wlHit] = findWhitelistPair();
+      if (!wlHit) {
+        const [blHit] = findBlockedPair();
+        if (blHit) blockedInfo = toBlockedInfo(blHit);
+      } else whitelistHit = wlHit;
     }
 
-    const toHlInfo = () => (hlEntry ? {hlRule: hlEntry.originalRule, hlSource: hlEntry.source, hlSourceKey: hlEntry.sourceKey || 'local'} : {});
+    const toHlInfo = () => (hlEntry ? {hlRule: hlEntry.originalRule, hlSource: hlEntry.source, hlSourceKey: hlEntry.sourceKey} : {});
     if (highlightN && blockedInfo) return {highlight: highlightN, blocked: true, rule: blockedInfo.rule, source: blockedInfo.source, sourceKey: blockedInfo.sourceKey, ...toHlInfo()};
     if (blockedInfo) return {blocked: true, rule: blockedInfo.rule, source: blockedInfo.source, sourceKey: blockedInfo.sourceKey};
     if (whitelistHit) {
-      const hit = {whitelisted: true, rule: whitelistHit.originalRule, source: whitelistHit.source, sourceKey: whitelistHit.sourceKey || 'local'};
+      const hit = {whitelisted: true, rule: whitelistHit.originalRule, source: whitelistHit.source, sourceKey: whitelistHit.sourceKey};
       if (highlightN) { hit.highlight = highlightN; Object.assign(hit, toHlInfo()); }
       return hit;
     }
@@ -2175,36 +2227,30 @@
     return /^https?:\/\//i.test(realUrl) ? realUrl : '';
   }
 
+  // 去除重定向
   function unwrapRedirectUrl(url) {
     const isRedirectHost = (host) => {
       host = String(host || '').replace(/\.$/, '');
-      return (
-      /(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) ||
-      /(?:^|\.)scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) ||
-      /(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) ||
-      /(?:^|\.)(?:duckduckgo\.com|ddg\.gg)$/i.test(host) ||
-      /(?:^|\.)(?:[a-z]{2,6}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) ||
-      /(?:^|\.)(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i.test(host) ||
-      /(?:^|\.)(?:so\.com|sogou\.com|toutiao\.com)$/i.test(host)
-      );
+      return ['bing', 'google_scholar', 'google', 'duckduckgo', 'yahoo', 'yahoo_jp'].some(e => isEngineHost(e, host)) ||
+        isEngineHost('so360', host) || isEngineHost('sogou', host) || isEngineHost('toutiao', host);
     };
     const seen = new Set();
     for (let depth = 0; depth < 5 && url && !seen.has(url); depth++) {
       seen.add(url); let next = '';
       try {
         const urlObj = new URL(url); const host = urlObj.hostname.replace(/\.$/, ''); const path = urlObj.pathname;
-        if (/(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) && path.startsWith('/ck/a')) {
+        if (isEngineHost('bing', host) && path.startsWith('/ck/a')) {
           const uParam = urlObj.searchParams.get('u'); next = decodeBingCkTarget(uParam); if (!next && uParam) next = decodeRedirectTarget(uParam);
-        } else if (/(?:^|\.)scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) && /\/scholar_url\/?$/i.test(path)) {
+        } else if (isEngineHost('google_scholar', host) && /\/scholar_url\/?$/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('url'));
-        } else if (/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) && /^\/(?:url|goto)\/?$/i.test(path)) {
+        } else if (isEngineHost('google', host) && /^\/(?:url|goto)\/?$/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('q') || urlObj.searchParams.get('url') || urlObj.searchParams.get('u'));
-        } else if (/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host) && /^(?:\/aclk|\/imgres|\/translate|\/pagead\/aclk)(?:\/|\?|$)/i.test(path)) {
+        } else if (isEngineHost('google', host) && /^(?:\/aclk|\/imgres|\/translate|\/pagead\/aclk)(?:\/|\?|$)/i.test(path)) {
           const tryGoogleParam = (p) => { const v = urlObj.searchParams.get(p); if (v) { next = decodeRedirectTarget(v); return !!next; } return false; };
           for (const p of ['adurl', 'imgurl', 'url', 'u', 'dest']) { if (tryGoogleParam(p)) break; }
-        } else if (/(?:^|\.)(?:duckduckgo\.com|ddg\.gg)$/i.test(host) && /^\/l\/?$/i.test(path)) {
+        } else if (isEngineHost('duckduckgo', host) && /^\/l\/?$/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('uddg'));
-        } else if (/(?:^|\.)(?:[a-z]{2,6}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(host) || /(?:^|\.)(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i.test(host)) {
+        } else if (isEngineHost('yahoo', host) || isEngineHost('yahoo_jp', host)) {
           if (/ru=/i.test(path)) {
             const ruMatch = path.match(/(?:^|\/)RU=([\s\S]*?)(?=(?:\/(?:rk|rs|rv|ro|re|rh|rt|_ylt|_ylu)=|\/$|$))/i); if (ruMatch && ruMatch[1]) next = decodeRedirectTarget(ruMatch[1]);
           }
@@ -2217,16 +2263,16 @@
               for (const p of ['u', 'url', 'target', 'dest', 'dst', 'r']) { if (tryParam(p)) break; }
             }
           }
-        } else if (/(?:^|\.)toutiao\.com$/i.test(host) && /^\/search\/jump\/?$/i.test(path)) {
+        } else if (isEngineHost('toutiao', host) && /^\/search\/jump\/?$/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('url'));
           if (next) {
             try {
-              const inner = new URL(next); const h5 = /(?:^|\.)toutiao\.com$/i.test(inner.hostname) ? inner.searchParams.get('h5_url') : ''; if (h5) next = decodeRedirectTarget(h5) || next;
+              const inner = new URL(next); const h5 = isEngineHost('toutiao', inner.hostname) ? inner.searchParams.get('h5_url') : ''; if (h5) next = decodeRedirectTarget(h5) || next;
             } catch (_) {}
           }
-        } else if (/(?:^|\.)so\.com$/i.test(host) && /^\/jump\/?$/i.test(path)) {
+        } else if (isEngineHost('so360', host) && /^\/jump\/?$/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('u'));
-        } else if (/(?:^|\.)(?:so\.com|sogou\.com)$/i.test(host) && /(?:\/tc\b|\/jump\b|\/link\b)/i.test(path)) {
+        } else if ((isEngineHost('so360', host) || isEngineHost('sogou', host)) && /(?:\/tc\b|\/jump\b|\/link\b)/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('url'));
         }
       } catch (_) {}
@@ -2240,7 +2286,7 @@
   function isOpaqueRedirectUrl(url) {
     if (!url) return false;
     let urlObj = null; try { urlObj = new URL(url); } catch (_) { return false; }
-    const host = urlObj.hostname.replace(/\.$/, ''); if (!/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(host)) return false;
+    const host = urlObj.hostname.replace(/\.$/, ''); if (!isEngineHost('google', host)) return false;
     if (!/^\/(?:url|goto)\/?$/i.test(urlObj.pathname)) return false;
     const target = urlObj.searchParams.get('q') || urlObj.searchParams.get('url') || urlObj.searchParams.get('u');
     return !decodeRedirectTarget(target);
@@ -2268,7 +2314,7 @@
     const rawHref = (link && link.href) || '';
     const keepRaw = currentConfig.removeRedirects === false;
     let rawUrl = keepRaw ? rawHref : getCleanUrl(link);
-    if (keepRaw && rawHref && typeof isEngineSelfDomain === 'function') {
+    if (keepRaw && rawHref) {
       try {
         const rawHost = toASCIIHostname(new URL(toASCIIUrl(rawHref)).hostname).toLowerCase();
         if (rawHost && isEngineSelfDomain(rawHost)) {
@@ -2286,12 +2332,23 @@
     return { url, domain };
   }
 
-  function peekResultUrl(result) {
-    try {
-      const engine = getSearchEngine(); const link = getResultLink(result, engine); if (!link || !link.href) return ''; return resolveUrlDomain(link).url || '';
-    } catch (e) {
-      return '';
-    }
+  function peekResultLink(result) {
+    try { return getResultLink(result, getSearchEngine()) || null; } catch (e) { return null; }
+  }
+
+  function peekResultRawHref(result, link) {
+    if (link === undefined) link = peekResultLink(result);
+    return (link && link.href) || '';
+  }
+
+  function peekResultUrl(result, link) {
+    if (link === undefined) link = peekResultLink(result);
+    if (!link || !link.href) return '';
+    const rawHref = link.href; const cached = _peekUrlCache.get(result);
+    if (cached && cached.rawHref === rawHref) return cached.url;
+    let url = ''; try { url = resolveUrlDomain(link).url || ''; } catch (e) { return ''; }
+    _peekUrlCache.set(result, { rawHref, url });
+    return url;
   }
 
   function buildContentSignature(url, title, snippet) {
@@ -2431,7 +2488,7 @@
     if (engine === 'bing' && foundEl && foundEl.href) {
       try {
         const u = new URL(foundEl.href);
-        if (/(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(u.hostname) && u.pathname.startsWith('/ck/a')) {
+        if (isEngineHost('bing', u.hostname) && u.pathname.startsWith('/ck/a')) {
           const unwrapTest = unwrapRedirectUrl(foundEl.href);
           if (!unwrapTest || unwrapTest === foundEl.href) {
             const attrEl = result.querySelector('.b_attribution, .b_algoheader cite, cite');
@@ -2443,13 +2500,13 @@
                  if (domainMatch[0].startsWith('http')) {
                    try {
                      const citedUrl = new URL(domainMatch[0]);
-                     if (!/(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(citedUrl.hostname)) {
+                     if (!isEngineHost('bing', citedUrl.hostname)) {
                        return { href: citedUrl.href, getAttribute: (attr) => foundEl.getAttribute(attr), setAttribute: (attr, val) => foundEl.setAttribute(attr, val) };
                      }
                    } catch (_) {}
                  }
                  const candidateDomain = domainMatch[1] || domainMatch[0];
-                if (!/(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i.test(candidateDomain) &&
+                if (!isEngineHost('bing', candidateDomain) &&
                     !candidateDomain.includes('..') && candidateDomain.includes('.')) {
                   try {
                     const fallbackUrl = new URL(`https://${toASCIIHostname(candidateDomain)}/`).href;
@@ -2468,10 +2525,9 @@
     }
     if (foundEl && engine === 'google' && getSearchCategory() !== 'images') {
       try {
-        const isNotG = (h) => !!h && !/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(h);
-        if (/(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i.test(new URL(foundEl.href, location.origin).hostname) || isOpaqueRedirectUrl(foundEl.href)) {
+        if (isEngineHost('google', new URL(foundEl.href, location.origin).hostname) || isOpaqueRedirectUrl(foundEl.href)) {
           let unwrapOk = false;
-          try { const t = unwrapRedirectUrl(foundEl.href); if (t && t !== foundEl.href && isNotG(toASCIIHostname(new URL(t).hostname))) unwrapOk = true; } catch (_) {}
+          try { const t = unwrapRedirectUrl(foundEl.href); if (t && t !== foundEl.href && isNotGoogleHost(toASCIIHostname(new URL(t).hostname))) unwrapOk = true; } catch (_) {}
           if (!unwrapOk) {
             const el = result.querySelector('.lJQCTe, .XVWGNd, .R8BTeb, span.ob9lvb, .eip8Bb');
             const nodes = [];
@@ -2492,7 +2548,7 @@
               }
               if (!candidate) continue;
               let ok = false;
-              try { ok = isNotG(toASCIIHostname(new URL(candidate).hostname)); } catch (_) {}
+              try { ok = isNotGoogleHost(toASCIIHostname(new URL(candidate).hostname)); } catch (_) {}
               if (ok) return { href: candidate, getAttribute: a => foundEl.getAttribute(a), setAttribute: (a, v) => foundEl.setAttribute(a, v) };
             }
           }
@@ -2686,7 +2742,15 @@
     return !engineMatch;
   }
 
+  function isBlockButtonEnabledForEngine(engine) {
+    try {
+      const def = getSelectors()[engine] || SELECTORS.other;
+      return !def || def.button !== false;
+    } catch (e) { return true; }
+  }
+
   function injectBlockButton(result, engine, domain) {
+    if (!isBlockButtonEnabledForEngine(engine)) return;
     if (!domain || getSearchCategory() === 'images') return; if (result.closest('header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav')) return;
     if (engine === 'google') {
       if (result.classList.contains('isv-r') || result.querySelector('g-img')) {
@@ -2730,7 +2794,7 @@
 
       if (isBlocked) {
         const opts = buildBlockRuleOptions(domain); const whitelistRule = '@' + (currentConfig.blockDomain ? opts.domainRule : opts.exactRule);
-        const matchedRule = (result.dataset.matchedRule || '').trim();
+        const matchedRule = (result.dataset.matchedRule || '').trim(); const matchedSourceKey = (result.dataset.matchedSourceKey || '').trim(); const isSubRule = false;
         const deleteLocalRule = (rule) => {
           adoptStoredConfigBeforeWrite(); const cleanTarget = stripRuleComment(rule.trim()); currentConfig.rules = currentConfig.rules.filter(r => stripRuleComment(r.trim()) !== cleanTarget);
           persistConfig(true); removeRulesFromTextarea([rule]); forceReprocessAll();
@@ -2739,7 +2803,7 @@
         if (currentConfig.blockConfirm || !matchedRule) {
           const unblockOptions = [];
           if (matchedRule) {
-            unblockOptions.push({ label: t('bcDelete'), rule: matchedRule, action: 'delete' });
+            unblockOptions.push({ label: t('bcDelete'), rule: matchedRule, action: 'delete', disabled: false });
           }
           unblockOptions.push({ label: t('bcWhitelist'), rule: whitelistRule, action: 'whitelist' });
 
@@ -2794,7 +2858,14 @@
 
   function googleResultBlocks(parent) {
     if (!parent || typeof parent.querySelectorAll !== 'function') return [];
-    return Array.from(parent.querySelectorAll('div.g, div.tF2Cxc, div.MjjYud'));
+    return Array.from(parent.querySelectorAll('div.g, div.tF2Cxc, div.MjjYud')).filter(el => {
+      let ancestor = el.parentElement;
+      while (ancestor && ancestor !== parent) {
+        if (typeof ancestor.matches === 'function' && ancestor.matches('div.g, div.tF2Cxc, div.MjjYud')) return false;
+        ancestor = ancestor.parentElement;
+      }
+      return true;
+    });
   }
 
   function visibleUnblocked(el) {
@@ -2807,13 +2878,14 @@
 
   function hideParentIfNoVisibleSiblings(parent, children, attr) {
     const hasVisible = Array.from(children).some(visibleUnblocked);
-    if (!hasVisible) {
-      saveOriginalDisplay(parent); parent.style.display = blockedShown() ? (parent.getAttribute('data-serh-orig-display') || '') : 'none'; parent.setAttribute(attr, 'true');
-    }
+    if (hasVisible) return;
+    const alreadyHidden = parent.getAttribute(attr) === 'true';
+    saveOriginalDisplay(parent); parent.style.display = blockedShown() ? (parent.getAttribute('data-serh-orig-display') || '') : 'none'; parent.setAttribute(attr, 'true');
+    if (!alreadyHidden) _hiddenParentCount++;
   }
 
   function resetResultStyles(result) {
-    restoreResultExtraElements(result); restoreResultCollapse(result); _hrefUrlCache.delete(result); _resultContentCache.delete(result); _resultRetryCounts.delete(result); result.removeAttribute('data-blocker-processed');
+    restoreResultExtraElements(result); restoreResultCollapse(result); _hrefUrlCache.delete(result); _resultContentCache.delete(result); _resultRetryCounts.delete(result); _peekUrlCache.delete(result); result.removeAttribute('data-blocker-processed');
     result.removeAttribute('data-is-blocked'); result.removeAttribute('data-is-highlighted'); result.removeAttribute('data-highlight-n'); result.removeAttribute('data-highlight-rule'); result.removeAttribute('data-highlight-source'); result.removeAttribute('data-highlight-source-key'); clearMatchedData(result);
     result.classList.remove('serh-blocked-visible'); result.classList.remove('serh-blocked-collapsed'); result.style.outline = ''; result.style.outlineOffset = ''; const origDisplay = result.getAttribute('data-serh-orig-display');
     if (origDisplay !== null) { result.style.display = origDisplay; result.removeAttribute('data-serh-orig-display'); }
@@ -2825,11 +2897,11 @@
       if (stillHasBlockedHidden) {
         parent.style.display = 'none';
       } else if (parent.getAttribute('data-is-blocked') !== 'true') {
-        parent.style.display = parentOrig !== null ? parentOrig : ''; parent.removeAttribute('data-blocker-yandex-parent'); parent.removeAttribute('data-serh-orig-display');
+        parent.style.display = parentOrig !== null ? parentOrig : ''; parent.removeAttribute('data-blocker-yandex-parent'); parent.removeAttribute('data-serh-orig-display'); _hiddenParentCount--;
       }
     }
     const gridItem = result.closest ? result.closest('[data-serh-grid-item-hidden]') : null;
-    if (gridItem) { gridItem.style.display = ''; gridItem.removeAttribute('data-serh-grid-item-hidden'); }
+    if (gridItem) { gridItem.style.display = ''; gridItem.removeAttribute('data-serh-grid-item-hidden'); _hiddenParentCount--; }
     const googleParent = result.closest ? result.closest('[data-blocker-google-parent]') : null;
     if (googleParent) {
       const stillHasBlockedHidden = googleResultBlocks(googleParent).some(el =>
@@ -2838,7 +2910,7 @@
       if (stillHasBlockedHidden) {
         googleParent.style.display = 'none';
       } else if (googleParent.getAttribute('data-is-blocked') !== 'true') {
-        googleParent.style.display = parentOrig !== null ? parentOrig : ''; googleParent.removeAttribute('data-blocker-google-parent'); googleParent.removeAttribute('data-serh-orig-display');
+        googleParent.style.display = parentOrig !== null ? parentOrig : ''; googleParent.removeAttribute('data-blocker-google-parent'); googleParent.removeAttribute('data-serh-orig-display'); _hiddenParentCount--;
       }
     }
     removeMatchedRuleLabel(result); if (!result.querySelector('.serh-quick-block')) result.style.position = '';
@@ -2846,21 +2918,27 @@
 
   function restoreParentDisplay(parent) {
     const orig = parent.getAttribute('data-serh-orig-display'); parent.style.display = orig !== null ? orig : ''; parent.removeAttribute('data-blocker-yandex-parent');
-    parent.removeAttribute('data-blocker-google-parent'); parent.removeAttribute('data-serh-grid-item-hidden'); parent.removeAttribute('data-serh-orig-display');
+    parent.removeAttribute('data-blocker-google-parent'); parent.removeAttribute('data-serh-grid-item-hidden'); parent.removeAttribute('data-serh-orig-display'); _hiddenParentCount--;
   }
 
   function restoreAllHiddenParents() {
-    document.querySelectorAll('[data-blocker-yandex-parent], [data-blocker-google-parent], [data-serh-grid-item-hidden]').forEach(restoreParentDisplay);
+    document.querySelectorAll('[data-blocker-yandex-parent], [data-blocker-google-parent], [data-serh-grid-item-hidden]').forEach(restoreParentDisplay); _hiddenParentCount = 0;
   }
 
   function reconcileHiddenParents() {
+    if (_hiddenParentCount <= 0) return;
     document.querySelectorAll('[data-blocker-yandex-parent]').forEach(parent => {
-      const hasVisibleUnblocked = Array.from(parent.children).some(el =>
-        el.style.display !== 'none' && el.getAttribute('data-is-blocked') !== 'true');
-      if (hasVisibleUnblocked && parent.getAttribute('data-is-blocked') !== 'true') restoreParentDisplay(parent);
+      const stillHiddenBlocked = Array.from(parent.children).some(el =>
+        el.style.display === 'none' && el.getAttribute('data-is-blocked') === 'true');
+      const hasVisibleUnblocked = Array.from(parent.children).some(visibleUnblocked);
+      if (parent.getAttribute('data-is-blocked') !== 'true' && (!stillHiddenBlocked || hasVisibleUnblocked)) restoreParentDisplay(parent);
     });
     document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
-      if (parent.getAttribute('data-is-blocked') !== 'true' && googleResultBlocks(parent).some(visibleUnblocked)) restoreParentDisplay(parent);
+      const blocks = googleResultBlocks(parent);
+      const stillHiddenBlocked = blocks.some(el =>
+        el.style.display === 'none' && el.getAttribute('data-is-blocked') === 'true');
+      const hasVisibleUnblocked = blocks.some(visibleUnblocked);
+      if (parent.getAttribute('data-is-blocked') !== 'true' && (!stillHiddenBlocked || hasVisibleUnblocked)) restoreParentDisplay(parent);
     });
     document.querySelectorAll('[data-serh-grid-item-hidden]').forEach(cell => {
       const stillBlocked = Array.from(cell.querySelectorAll('[data-is-blocked="true"]')).some(el => el.style.display === 'none');
@@ -2881,7 +2959,6 @@
       }
       container.setAttribute('data-observed', 'true');
       if (!container.hasAttribute('data-blocker-processed')) resultObserver.observe(container);
-      reconcileHiddenParents();
     } catch (e) {
       if (currentConfig.debug) {
         console.error('[屏蔽] 结果重处理失败:', container, e);
@@ -2894,6 +2971,21 @@
     const sourceText = result.dataset.matchedSource || t('matchedRule'); const ruleText = result.dataset.matchedRule;
     label.textContent = `${sourceText}: ${ruleText}`;
     ensurePositioned(result); result.appendChild(label);
+  }
+
+  function markResultGridSlot(result, engine) {
+    if (engine === 'google') {
+      let cell = result.parentElement;
+      while (cell && cell.parentElement && cell.tagName !== 'BODY') { const d = getComputedStyle(cell.parentElement).display; if (d === 'grid' || d === 'inline-grid') break; cell = cell.parentElement; }
+      if (cell && cell.parentElement && cell.tagName !== 'BODY') { cell.style.display = 'none'; cell.setAttribute('data-serh-grid-item-hidden', 'true'); _hiddenParentCount++; }
+    } else if (engine === 'bing') {
+      const slot = result.closest ? result.closest('li') : null;
+      if (slot) {
+        const tops = Array.from(slot.children || []).filter(c => c.matches && c.matches('div.iuscp, div.imgpt'));
+        const targets = tops.length ? tops : (slot.querySelectorAll ? Array.from(slot.querySelectorAll('div.iuscp, div.imgpt')) : []);
+        if (targets.length && targets.every(el => el.style.display === 'none')) { slot.style.display = 'none'; slot.setAttribute('data-serh-grid-item-hidden', 'true'); _hiddenParentCount++; }
+      }
+    }
   }
 
   function processSingleResult(result) {
@@ -2913,9 +3005,9 @@
       return false;
     }
 
-    const { url, domain } = resolveUrlDomain(link); _hrefUrlCache.set(result, url);
+    const { url, domain } = resolveUrlDomain(link); _hrefUrlCache.set(result, { rawHref: link.href || '', url });
     const title = getResultTitle(result, engine); const snippet = getResultSnippet(result, engine); _resultContentCache.set(result, buildContentSignature(url, title, snippet));
-    const lowerDomain = domain.toLowerCase(); const subdomainLevels = getSubdomainLevels(domain);
+    const subdomainLevels = getSubdomainLevels(domain);
     const matchResult = checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels); _resultRetryCounts.delete(result);
     const matchHL = matchResult && matchResult.highlight;
     if (matchHL) {
@@ -2932,22 +3024,10 @@
         const parent = result.parentElement; if (parent) hideParentIfNoVisibleSiblings(parent, parent.children, 'data-blocker-yandex-parent');
       }
 
-      if (engine === 'google' && result.matches && result.matches('div.g')) {
+      if (engine === 'google' && result.matches && result.matches('div.g, div.tF2Cxc, div.MjjYud')) {
         const parent = result.closest('div.MjjYud'); if (parent && parent !== result) hideParentIfNoVisibleSiblings(parent, googleResultBlocks(parent), 'data-blocker-google-parent');
       }
-      if (engine === 'google' && getSearchCategory() === 'images' && !blockedShown()) {
-        let cell = result.parentElement;
-        while (cell && cell.parentElement && cell.tagName !== 'BODY') { const d = getComputedStyle(cell.parentElement).display; if (d === 'grid' || d === 'inline-grid') break; cell = cell.parentElement; }
-        if (cell && cell.parentElement && cell.tagName !== 'BODY') { cell.style.display = 'none'; cell.setAttribute('data-serh-grid-item-hidden', 'true'); }
-      }
-      if (engine === 'bing' && getSearchCategory() === 'images' && !blockedShown()) {
-        const slot = result.closest ? result.closest('li') : null;
-        if (slot) {
-          const tops = Array.from(slot.children || []).filter(c => c.matches && c.matches('div.iuscp, div.imgpt'));
-          const targets = tops.length ? tops : (slot.querySelectorAll ? Array.from(slot.querySelectorAll('div.iuscp, div.imgpt')) : []);
-          if (targets.length && targets.every(el => el.style.display === 'none')) { slot.style.display = 'none'; slot.setAttribute('data-serh-grid-item-hidden', 'true'); }
-        }
-      }
+      if (getSearchCategory() === 'images' && !blockedShown()) markResultGridSlot(result, engine);
 
       result.dataset.matchedRule = matchResult.rule || ''; result.dataset.matchedSource = matchResult.source || ''; result.dataset.matchedSourceKey = matchResult.sourceKey || '';
       if (blockedShown()) {
@@ -2991,7 +3071,7 @@
         if (result.hasAttribute('data-blocker-processed')) {
           observer.unobserve(result);
         } else {
-          result.removeAttribute('data-observed'); observer.unobserve(result); scheduleResultRetry(result);
+          observer.unobserve(result); scheduleResultRetry(result);
         }
       }
     });
@@ -3006,9 +3086,11 @@
   });
 
   function scheduleResultRetry(result) {
+    // 重试期间保持 data-observed，避免耗尽后又被 scanNewResults 选中
+    result.setAttribute('data-observed', 'true');
     const attempt = (_resultRetryCounts.get(result) || 0) + 1;
     if (attempt > RESULT_RETRY_LIMIT) {
-      _resultRetryCounts.delete(result); result.removeAttribute('data-observed'); resultObserver.unobserve(result); return;
+      _resultRetryCounts.delete(result); resultObserver.unobserve(result); return;
     }
     _resultRetryCounts.set(result, attempt);
     setTimeout(() => {
@@ -3047,7 +3129,7 @@
       } catch (_) {}
       return false;
     };
-    return arr.filter(el => {
+    const kept = arr.filter(el => {
       if (selector) {
         try {
           if (el.querySelector(selector) && !hasOwnLink(el)) return false;
@@ -3058,6 +3140,16 @@
       }
       return true;
     });
+    if (isBingImagesPage(getSearchEngine())) {
+      const seen = new Set();
+      return kept.filter(el => {
+        const link = getResultLink(el, 'bing'); const href = link && link.href;
+        if (!href) return true;
+        if (seen.has(href)) return false;
+        seen.add(href); return true;
+      });
+    }
+    return kept;
   }
 
   function queryUnobserved(selector) {
@@ -3174,6 +3266,7 @@
     requestAnimationFrame(processBatch);
   }
 
+  // 预留翻页高度
   const LAYOUT_CSS = `
         body { min-height: 101vh !important; }
         #rcnt, #rso { min-height: 60vh; }
@@ -3390,7 +3483,6 @@
         :is(.isv-r, .image-section, g-img, .is-extra-container) .serh-quick-block,
         :is(header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav, #extabar) .serh-quick-block { display: none !important; }
 
-        #serh-selector-panel #serh-toast-container { max-width: none; width: auto; left: 0; right: 0; }
 
     body.serh-dark-on #serh-panel .serh-option-label,
     body.serh-dark-on #serh-panel .serh-compact-row span { color: #f3f4f6 !important; }
@@ -3408,7 +3500,7 @@
         font-size: 11px !important; margin: 0 !important;
     }
 
-        #serh-hlcolor-panel h3 {
+        #serh-hlcolor-panel h3, #serh-selector-panel h3 {
             margin: 0 0 8px 0 !important; font-size: 14px !important; color: inherit !important;
             font-weight: 600 !important; padding: 0 !important; border: none !important;
             background: transparent !important; letter-spacing: normal !important;
@@ -3422,7 +3514,7 @@
             margin: 0 !important; line-height: 1.2 !important;
         }
 
-        #serh-hlcolor-panel .serh-button,
+        :is(#serh-hlcolor-panel) .serh-button,
         :is(#serh-panel, #serh-selector-panel) .serh-action-button {
             height: 30px !important; min-height: 30px !important; max-height: 30px !important; padding: 0 12px !important;
             font-size: 13px !important; font-weight: 500 !important; box-sizing: border-box !important; margin: 0 !important;
@@ -3431,6 +3523,7 @@
             appearance: none !important; -webkit-appearance: none !important; box-shadow: none !important;
             background-image: none !important;
         }
+
 
     body.serh-dark-on .serh-window {
         background: #171717 !important; color: #f3f4f6 !important; border-color: #374151 !important;
@@ -3721,7 +3814,8 @@
       ? bubbleIcon('<circle cx="12" cy="12" r="10"/>')
       : bubbleIcon(`<circle cx="12" cy="12" r="10"/>${slash}`);
 
-    let newHtml = currentConfig.showCount
+    let newHtml;
+    newHtml = currentConfig.showCount
       ? (isLeft ? `${icon} <span class="serh-bubble-number">${blocked}</span>` : `<span class="serh-bubble-number">${blocked}</span> ${icon}`)
       : icon;
     if (statusBtn._lastHtml !== newHtml) {
@@ -3888,7 +3982,11 @@
       document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
         hideParentIfNoVisibleSiblings(parent, googleResultBlocks(parent), 'data-blocker-google-parent');
       });
-      if (!blockedShown()) document.querySelectorAll('[data-serh-grid-item-hidden]').forEach(cell => { cell.style.display = 'none'; });
+      if (!blockedShown()) {
+        document.querySelectorAll('[data-serh-grid-item-hidden]').forEach(cell => { cell.style.display = 'none'; });
+        const engine = getSearchEngine();
+        if (getSearchCategory() === 'images') document.querySelectorAll('[data-is-blocked="true"]').forEach(el => markResultGridSlot(el, engine));
+      }
     }
     const status = document.getElementById('serh-status');
     if (status) {
@@ -3900,20 +3998,8 @@
     adoptStoredConfigIfNewer(); if (!Array.isArray(currentConfig.rules)) currentConfig.rules = [];
   }
 
-  function getSyncSettings(config) {
-    const { rules, bubbleState, bubbleSize, selectors, subscriptions, syncedAt, rulesSyncedAt, settingsModifiedAt, selectorsSyncedAt, tombstones, ruleAddedTimes, subscriptionTombstones, ...settings } = config || {};
-    const unsafeKey = (k) => k === '__proto__' || k === 'constructor' || k === 'prototype';
-    const cleanVal = (v) => {
-      if (!v || typeof v !== 'object' || Array.isArray(v)) return v;
-      const o = {}; for (const k of Object.keys(v)) if (!unsafeKey(k)) o[k] = cleanVal(v[k]);
-      return o;
-    };
-    const clean = {}; for (const k of Object.keys(settings)) if (!unsafeKey(k)) clean[k] = cleanVal(settings[k]);
-    return clean;
-  }
-
   function persistConfig(updateModifiedTime = false) {
-    GM_setValue(CONFIG_KEY, currentConfig);
+    _rulesRevision++; GM_setValue(CONFIG_KEY, currentConfig);
   }
 
   const SETTINGS_PANEL_CHECKBOXES = {
@@ -3961,12 +4047,15 @@
   }
 
   function applyCollapseMode() {
-    if (document.body) document.body.classList.toggle('serh-collapse-on', currentConfig.collapseMode === true);
-    ensureCollapseStyle();
+    const on = currentConfig.collapseMode === true;
+    if (document.body) document.body.classList.toggle('serh-collapse-on', on);
+    if (on) ensureCollapseStyle(); else if (_collapseStyleEl) { _collapseStyleEl.remove(); _collapseStyleEl = null; }
   }
 
+  function applyGlobalConfigUi() { applyDarkModeClass(); applyUiScale(); applyCollapseMode(); }
+
   function applyConfigToMainPanel() {
-    if (!document.getElementById('serh-panel')) return;
+    applyGlobalConfigUi(); if (!document.getElementById('serh-panel')) return;
     Object.keys(SETTINGS_PANEL_CHECKBOXES).forEach(id => {
       const el = document.getElementById(id); if (!el) return; const key = SETTINGS_PANEL_CHECKBOXES[id];
       if (id === 'serh-set-error-detection' || id === 'serh-set-bracket-highlight') {
@@ -3986,7 +4075,6 @@
     if (textarea && Array.isArray(currentConfig.rules)) {
       textarea.value = currentConfig.rules.join('\n'); updateLineNumbers();
     }
-    applyDarkModeClass(); applyCollapseMode();
   }
 
   function syncRulesTextarea() {
@@ -4046,13 +4134,6 @@
     updateStatsContent(); statsPanel.style.display = 'flex';
   }
 
-  function statSourceKey(s) {
-    if (!s) return '';
-    if (s === 'local' || /^sub:\d+$/.test(s)) return s;
-    if (s === '本地规则' || s === 'Local Rule' || s === t('localRule')) return 'local';
-    const m = /^(?:订阅|Sub)\s*(\d+)$/i.exec(s); return m ? 'sub:' + m[1] : '';
-  }
-
   function updateStatsContent() {
     const statsContent = document.getElementById('serh-stats-content'); if (!statsContent) return;
 
@@ -4077,7 +4158,7 @@
     const statsBySource = new Map(); const countedResults = new Map();
     const addRuleHit = (rule, source, type, result) => {
       if (!rule || !source) return;
-      const sourceKey = statSourceKey(source); if (!sourceKey) return;
+      const sourceKey = (source === 'local' || source === t('localRule') || source === '本地规则' || source === 'Local Rule') ? 'local' : ''; if (!sourceKey) return;
       if (!statsBySource.has(sourceKey)) {
         statsBySource.set(sourceKey, {
           total: 0,
@@ -4781,6 +4862,7 @@
         `  snippets: [${(def.snippets || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
         `  links: ${links},\n` +
         `  extraElements: [${(def.extraElements || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
+        (def.button === false ? `  button: false,\n` : '') +
         (disabled ? `  disabled: true,\n` : '') +
         `}`;
     };
@@ -4813,7 +4895,8 @@
   }
 
   function hasPseudoElement(selector) {
-    return /::/.test(String(selector).replace(/(["'])(?:\\.|(?!\1).)*\1/g, ''));
+    const s = String(selector).replace(/(["'])(?:\\.|(?!\1).)*\1/g, '');
+    return /::/.test(s) || /(^|[^:]):(?:before|after|first-line|first-letter)\b/i.test(s);
   }
 
   function validateUserSelectors(config) {
@@ -4836,6 +4919,7 @@
       }
       if (def.disabled !== undefined && def.disabled !== null && typeof def.disabled !== 'boolean') errors.push(t('selectorInvalidBool', { key, field: 'disabled' }));
       if (def.disable !== undefined && def.disable !== null && typeof def.disable !== 'boolean') errors.push(t('selectorInvalidBool', { key, field: 'disable' }));
+      if (def.button !== undefined && def.button !== null && typeof def.button !== 'boolean') errors.push(t('selectorInvalidBool', { key, field: 'button' }));
       if (def.disabled === true || def.disable === true) continue; if ((def.disabled === false || def.disable === false) && Object.keys(def).every(k => k === 'disabled' || k === 'disable')) continue;
       if (typeof def.match === 'string' && def.match) {
         const lit = def.match.match(/^\/(.*)\/([a-z]*)$/i); const badLit = lit ? getInvalidRegexFlags(lit[2]) : '';
@@ -4884,7 +4968,7 @@
   function sameSelectorDef(a, b) {
     if (!a || !b) return false; if (!!a.disabled !== !!b.disabled || !!a.disable !== !!b.disable) return false; const aM = matchDefToParts(a.match); const bM = matchDefToParts(b.match); if (aM.source !== bM.source || aM.flags !== bM.flags) return false;
     if ((a.containers || '') !== (b.containers || '')) return false; const norm = (v) => JSON.stringify(normalizeSelectorList(v)); if (norm(a.titles) !== norm(b.titles)) return false;
-    if (norm(a.snippets) !== norm(b.snippets)) return false; if (norm(a.extraElements) !== norm(b.extraElements)) return false; if (norm(a.links) !== norm(b.links)) return false; return true;
+    if (norm(a.snippets) !== norm(b.snippets)) return false; if (norm(a.extraElements) !== norm(b.extraElements)) return false; if (norm(a.links) !== norm(b.links)) return false; if ((a.button === false) !== (b.button === false)) return false; return true;
   }
 
   function diffSelectorDefFields(def, builtin) {
@@ -4899,6 +4983,7 @@
     for (const k of ['titles', 'snippets', 'extraElements', 'links']) {
       if (def[k] !== undefined && norm(def[k]) !== norm(builtin[k])) diff[k] = def[k];
     }
+    if (def.button !== undefined && (def.button !== false) !== (builtin.button !== false)) diff.button = def.button !== false;
     return diff;
   }
 
@@ -4978,8 +5063,17 @@
         }
       } catch (eJson) {}
     }
-    s = s.replace(/^const\s+SELECTORS\s*=\s*/i, '').replace(/;\s*$/, '').trim(); if (s.startsWith('{') && s.endsWith('}')) s = s.slice(1, -1); const n = s.length; let i = 0;
-    const skipWs = () => { while (i < n && /\s/.test(s[i])) i++; };
+    s = s.replace(/^(?:(?:\/\/[^\n]*\n)|(?:\/\*[\s\S]*?\*\/)|\s)+/, '').replace(/^const\s+SELECTORS\s*=\s*/i, '').replace(/^(?:(?:\/\/[^\n]*\n)|(?:\/\*[\s\S]*?\*\/)|\s)+/, '').trim();
+    s = s.replace(/([\x7d;\]])\s*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)\s*$/, '$1').replace(/;\s*$/, '').trim();
+    if (s.startsWith('{') && s.endsWith('}')) s = s.slice(1, -1); const n = s.length; let i = 0;
+    const skipWs = () => {
+      while (i < n) {
+        if (/\s/.test(s[i])) { i++; continue; }
+        if (s[i] === '/' && s[i + 1] === '/') { const j = s.indexOf('\n', i + 2); i = j === -1 ? n : j + 1; continue; }
+        if (s[i] === '/' && s[i + 1] === '*') { const j = s.indexOf('*/', i + 2); i = j === -1 ? n : j + 2; continue; }
+        break;
+      }
+    };
     const readString = () => {
       const quote = s[i]; let j = i + 1, val = '';
       while (j < n) {
@@ -5184,70 +5278,6 @@
     };
   }
 
-  function parseSyncHeader(content) {
-    const lines = String(content || '').replace(/^\uFEFF/, '').split('\n'); let config = null; let selectors = null; let rawScriptConfig = null; let rawSelectors = null;
-    const selectorPatchOk = (v) => {
-      if (Array.isArray(v)) return true; if (!v || typeof v !== 'object') return false;
-      const flagsOk = (f) => { f = String(f || '').toLowerCase(); return /^[imsu]*$/.test(f) && new Set(f).size === f.length; };
-      const probe = (s) => { if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return true; try { document.querySelector(s); return true; } catch (e) { return false; } };
-      const cssOk = (val) => { const list = typeof val === 'string' ? [val] : val; return Array.isArray(list) && list.every((s) => typeof s === 'string' && !!s.trim() && probe(s)); };
-      const reOk = (val) => {
-        if (typeof val === 'string') { const lit = val.match(/^\/(.*)\/([a-z]*)$/i); if (lit && !flagsOk(lit[2])) return false; try { new RegExp(val); return true; } catch (e) { return false; } }
-        if (val && typeof val === 'object' && typeof val.source === 'string' && flagsOk(val.flags)) { try { new RegExp(val.source, String(val.flags || '').toLowerCase()); return true; } catch (e) { return false; } }
-        return false;
-      };
-      const hasUnquotedComma = (v) => typeof v === 'string' && /,/.test(v.replace(/(["'])(?:\\.|(?!\1).)*\1/g, ''));
-      for (const key of Object.keys(v)) {
-        const def = v[key];
-        if (key === 'other' || !/^[A-Za-z0-9_-]+$/.test(key)) return false;
-        if (!def || typeof def !== 'object' || Array.isArray(def)) return false;
-        if ((def.disabled !== undefined && def.disabled !== null && typeof def.disabled !== 'boolean') || (def.disable !== undefined && def.disable !== null && typeof def.disable !== 'boolean')) return false;
-        if (def.extraElements !== undefined && def.extraElements !== null && (!Array.isArray(def.extraElements) || !def.extraElements.every((s) => typeof s === 'string' && !!s.trim() && !hasUnquotedComma(s) && probe(':scope > :nth-child(1) ' + s)))) return false;
-        if (def.match !== undefined && def.match !== null && !reOk(def.match)) return false;
-        for (const f of ['containers', 'titles', 'snippets', 'links']) if (def[f] !== undefined && def[f] !== null && !cssOk(def[f])) return false;
-      }
-      return true;
-    };
-    const headerLineIndexes = new Set();
-
-    for (let i = 0; i < Math.min(lines.length, 10); i++) {
-      const line = lines[i]; if (!line.trim()) continue;
-      if (line.startsWith('# ScriptConfig:')) {
-        const payload = line.substring('# ScriptConfig:'.length).trim(); let parsed = null;
-        if (/^[\x7B\x5B]/.test(payload)) {
-          try { parsed = JSON.parse(payload); } catch (e) { if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[配置头] 配置头解析失败:', e); }
-        }
-        if (parsed && !Array.isArray(parsed) && !config) { config = parsed; rawScriptConfig = line; headerLineIndexes.add(i); } else if (payload.startsWith('\x7B') && !config) headerLineIndexes.add(i);
-      } else if (line.startsWith('# Selectors:')) {
-        const payload = line.substring('# Selectors:'.length).trim(); let parsed = null;
-        if (/^[\x7B\x5B]/.test(payload)) {
-          try { parsed = JSON.parse(payload); } catch (e) { if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[配置头] 选择器头解析失败:', e); }
-        }
-        if (parsed && !selectors && selectorPatchOk(parsed)) { selectors = parsed; rawSelectors = line; headerLineIndexes.add(i); } else if (payload.startsWith('\x7B') && !selectors) headerLineIndexes.add(i);
-      } else if (!line.startsWith('#')) {
-        break;
-      }
-    }
-
-    if (config && selectors && !config.selectors) {
-      config.selectors = selectors;
-    } else if (!config && selectors) {
-      config = { selectors };
-    }
-    if (config && config.selectors !== undefined && !selectorPatchOk(config.selectors)) delete config.selectors;
-
-    const restLines = lines.filter((_, idx) => !headerLineIndexes.has(idx)); return { config, rawScriptConfig, rawSelectors, restLines };
-  }
-
-  function isNonRuleTextResponse(restLines, hasHeader = false, allowCommentOnly = false) {
-    const lines = (Array.isArray(restLines) ? restLines : [])
-      .map((l) => String(l || '').trim())
-      .filter((l) => l.length > 0); if (lines.length === 0) return false; if (lines.some((l) => /<\s*\/?\s*(?:!doctype|html|head|body)\b/i.test(l))) return true;
-    const ruleLike = (l) => /^[\x21-\x7E]+$/.test(l) || /[:@|./]/.test(l) || looksLikeCondExpr(l);
-    const ruleLines = lines.filter((l) => !l.startsWith('#')); if (ruleLines.some((l) => ruleLike(l) && validateRule(l))) return false; if (lines.some((l) => /<\s*\/?\s*[a-z!?][^>\n]*>/i.test(l))) return true;
-    if (ruleLines.length === 0) return allowCommentOnly ? false : !hasHeader; return !hasHeader ? true : !ruleLines.some((l) => ruleLike(l) && validateRule(l.trim()));
-  }
-
   function timestampFilename(prefix, ext) {
     const d = new Date(), pad = (n) => String(n).padStart(2, '0');
     return `${prefix}-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.${ext}`;
@@ -5258,30 +5288,52 @@
     a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
   }
 
+  function parseConfigHeader(lines) {
+    const rest = []; let settings = null, scanning = true;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i], s = line.trim();
+      if (scanning && i < 10) {
+        if (!s) {
+          rest.push(line); continue;
+        }
+        if (s.startsWith('# ScriptConfig:')) {
+          let parsed = null;
+          try { parsed = JSON.parse(s.slice('# ScriptConfig:'.length).trim()); } catch (e) {}
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            if (!settings) settings = parsed; continue;
+          }
+        }
+        if (!s.startsWith('#')) scanning = false;
+      }
+      rest.push(line);
+    }
+    return { settings, rest };
+  }
+
+  function applyImportedSettings(settings) {
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return;
+    const next = { ...currentConfig }, allowed = new Set([...Object.keys(CFG_DEFAULTS), 'showCount', 'debug', 'errorDetection', 'highlightColors']);
+    for (const key of Object.keys(settings)) if (allowed.has(key)) next[key] = settings[key];
+    if (settings.highlightColors && typeof settings.highlightColors === 'object' && !Array.isArray(settings.highlightColors)) next.highlightColors = { ...currentConfig.highlightColors, ...settings.highlightColors };
+    currentConfig = normalizeConfig(next);
+  }
+
+  function getExportSettings(config) {
+    const { rules, bubbleState, bubbleSize, selectors, subscriptions, syncedAt, rulesSyncedAt, settingsModifiedAt, selectorsSyncedAt, tombstones, ruleAddedTimes, subscriptionTombstones, ...settings } = config || {};
+    return settings;
+  }
+
   function importRulesFromFile() {
     pickTextFile('.txt,text/plain', (content) => {
-      const parsedHeader = parseSyncHeader(content);
-      const hasHeader = !!(parsedHeader.rawScriptConfig || parsedHeader.rawSelectors);
-      if (isNonRuleTextResponse(parsedHeader.restLines, hasHeader, true)) { showToast(t('fileImportFailed'), 'error'); return; }
-      const newRules = filterValidRuleLines(parsedHeader.restLines);
+      const rawLines = String(content || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n');
+      const parsedHeader = parseConfigHeader(rawLines);
+      if (isNonRuleTextResponse(parsedHeader.rest, !!parsedHeader.settings, true)) { showToast(t('fileImportFailed'), 'error'); return; }
+      const newRules = filterValidRuleLines(parsedHeader.rest);
       if (!hasEffectiveRules(newRules) && hasEffectiveRules(currentConfig.rules) && !confirm(t('importClearConfirm'))) return;
-      const headerConfig = parsedHeader.config;
-      if (headerConfig && typeof headerConfig === 'object' && !Array.isArray(headerConfig)) {
-        const headerSelectors = parsedHeader.rawSelectors ? headerConfig.selectors : null;
-        if (headerSelectors && typeof headerSelectors === 'object' && !Array.isArray(headerSelectors)) {
-          GM_setValue(SELECTORS_KEY, headerSelectors); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite();
-        }
-        const settings = getSyncSettings(headerConfig);
-        if (Object.keys(settings).length > 0) {
-          const next = Object.assign({}, currentConfig); const colors = settings.highlightColors;
-          if (colors && typeof colors === 'object' && !Array.isArray(colors)) settings.highlightColors = Object.assign({}, currentConfig.highlightColors, colors);
-          Object.assign(next, settings); next.rules = currentConfig.rules || []; next.bubbleState = currentConfig.bubbleState; next.bubbleSize = currentConfig.bubbleSize;
-          currentConfig = normalizeConfig(next);
-        }
-      }
+      if (parsedHeader.settings) applyImportedSettings(parsedHeader.settings);
       const textarea = document.getElementById('serh-rules');
       if (textarea) {
-        textarea.value = parsedHeader.restLines.join('\n'); updateLineNumbers();
+        textarea.value = parsedHeader.rest.join('\n'); updateLineNumbers();
       }
       currentConfig.rules = newRules;
       const panel = document.getElementById('serh-panel'); if (panel) panel._initialRules = [...currentConfig.rules];
@@ -5294,9 +5346,7 @@
     if (!content.trim()) {
       showToast(t('noRulesExport'), 'error'); preventPanelClose = false; return;
     }
-    if (currentConfig.exportConfig === true) {
-      content = '# ScriptConfig:' + JSON.stringify(getSyncSettings(currentConfig)) + '\n' + content;
-    }
+    if (currentConfig.exportConfig === true) content = '# ScriptConfig:' + JSON.stringify(getExportSettings(currentConfig)) + '\n' + content;
     downloadTextFile(timestampFilename('rules', 'txt'), content, 'text/plain;charset=utf-8'); preventPanelClose = false;
   }
 
@@ -5340,22 +5390,25 @@
         let statusDirty = false;
         if (_hrefChangedContainers.size) {
           for (const container of _hrefChangedContainers) {
-            if (!container.isConnected) continue; const cachedUrl = _hrefUrlCache.get(container); const currentUrl = peekResultUrl(container);
-            if (cachedUrl !== undefined && cachedUrl === currentUrl) continue; reprocessContainer(container); statusDirty = true;
+            if (!container.isConnected) continue; const cached = _hrefUrlCache.get(container); const link = peekResultLink(container); const rawHref = peekResultRawHref(container, link);
+            if (cached !== undefined && cached.rawHref === rawHref) continue;
+            if (cached !== undefined && peekResultUrl(container, link) === cached.url) { cached.rawHref = rawHref; continue; }
+            reprocessContainer(container); statusDirty = true;
           }
           _hrefChangedContainers.clear();
         }
         if (_contentChangedContainers.size) {
           for (const container of _contentChangedContainers) {
             if (!container.isConnected) continue; if (!container.hasAttribute('data-blocker-processed')) continue; const cachedSig = _resultContentCache.get(container);
-            const currentSig = getResultContentSignature(container); if (currentSig === null || cachedSig === currentSig) continue; reprocessContainer(container); statusDirty = true;
+            const currentSig = getResultContentSignature(container); if (currentSig === null || cachedSig === currentSig) continue;
+            reprocessContainer(container); statusDirty = true;
           }
           _contentChangedContainers.clear();
         }
         if (statusDirty) {
           updateStatus(document.querySelectorAll('[data-is-blocked="true"]').length);
         }
-        const hasAddedNodes = records.some(m => m.type === 'childList' && m.addedNodes.length > 0); if (hasAddedNodes) scanNewResults();
+        const hasAddedNodes = records.some(m => m.type === 'childList' && m.addedNodes.length > 0); if (hasAddedNodes) scanNewResults(); else if (statusDirty) reconcileHiddenParents();
       } finally {
         if (_engineSiteSetup && _domObserver) {
           _domObserver.observe(document.body, {
@@ -5388,35 +5441,36 @@
     if (searchForm) {
       _searchForm = searchForm; _searchFormHandler = () => setTimeout(forceReprocessAll, 800); searchForm.addEventListener('submit', _searchFormHandler);
     }
+  }
 
-    if (!_urlChangeHandler) {
-      let lastHref = location.href; let lastCategory = getSearchCategory();
-      _urlChangeHandler = () => {
-        const currentHref = location.href; const currentCat = getSearchCategory();
-        if (currentHref !== lastHref || currentCat !== lastCategory) {
-          const hashOnly = currentCat === lastCategory && currentHref.split('#')[0] === lastHref.split('#')[0];
-          lastHref = currentHref; lastCategory = currentCat;
-          if (hashOnly) return;
-          resetSelectorCache(); refreshEngineSite();
-        }
-      };
-      window.addEventListener('popstate', _urlChangeHandler); window.addEventListener('hashchange', _urlChangeHandler);
+  function ensureUrlWatcher() {
+    if (_urlChangeHandler) return;
+    let lastHref = location.href; let lastCategory = getSearchCategory();
+    _urlChangeHandler = () => {
+      const currentHref = location.href; const currentCat = getSearchCategory();
+      if (currentHref !== lastHref || currentCat !== lastCategory) {
+        const hashOnly = currentCat === lastCategory && currentHref.split('#')[0] === lastHref.split('#')[0];
+        lastHref = currentHref; lastCategory = currentCat;
+        if (hashOnly) return;
+        resetSelectorCache(); refreshEngineSite();
+      }
+    };
+    window.addEventListener('popstate', _urlChangeHandler); window.addEventListener('hashchange', _urlChangeHandler);
 
-      const wrapHistoryMethod = (method) => {
-        const orig = history[method];
-        if (typeof orig !== 'function' || orig._serhWrapped) return;
-        const wrapped = function(...args) {
-          const ret = orig.apply(this, args);
-          try {
-            window.dispatchEvent(new Event('serh:locationchange'));
-          } catch (e) {}
-          return ret;
-        };
-        wrapped._serhWrapped = true;
-        history[method] = wrapped;
+    const wrapHistoryMethod = (method) => {
+      const orig = history[method];
+      if (typeof orig !== 'function' || orig._serhWrapped) return;
+      const wrapped = function(...args) {
+        const ret = orig.apply(this, args);
+        try {
+          window.dispatchEvent(new Event('serh:locationchange'));
+        } catch (e) {}
+        return ret;
       };
-      wrapHistoryMethod('pushState'); wrapHistoryMethod('replaceState'); window.addEventListener('serh:locationchange', _urlChangeHandler);
-    }
+      wrapped._serhWrapped = true;
+      history[method] = wrapped;
+    };
+    wrapHistoryMethod('pushState'); wrapHistoryMethod('replaceState'); window.addEventListener('serh:locationchange', _urlChangeHandler);
   }
 
   function teardownEngineSite() {
@@ -5424,7 +5478,7 @@
     if (_domObserver) {
       _domObserver.disconnect(); _domObserver = null;
     }
-    _hrefUrlCache = new WeakMap(); _hrefChangedContainers.clear(); _resultContentCache = new WeakMap(); _resultRetryCounts = new WeakMap(); _contentChangedContainers.clear();
+    _hrefUrlCache = new WeakMap(); _hrefChangedContainers.clear(); _resultContentCache = new WeakMap(); _resultRetryCounts = new WeakMap(); _peekUrlCache = new WeakMap(); _contentChangedContainers.clear();
     if (_searchForm && _searchFormHandler) {
       _searchForm.removeEventListener('submit', _searchFormHandler);
     }
@@ -5466,15 +5520,22 @@
     } catch (e) {
       return false;
     }
-    currentConfig = stored; return true;
+    currentConfig = stored; _rulesRevision++; return true;
+  }
+
+  function getConfigStoreSignature() {
+    try { return JSON.stringify(GM_getValue(CONFIG_KEY) ?? null); } catch (e) { return null; }
   }
 
   function checkExternalConfigChange() {
-    if (document.getElementById('serh-panel')) return false; if (!adoptStoredConfigIfNewer()) return false; applyCollapseMode(); forceReprocessAll(); return true;
+    if (document.getElementById('serh-panel')) return false;
+    const storeSignature = getConfigStoreSignature();
+    if (_configStoreSignature !== null && storeSignature === _configStoreSignature) return false;
+    if (!adoptStoredConfigIfNewer()) return false; _configStoreSignature = storeSignature; applyGlobalConfigUi(); forceReprocessAll(); return true;
   }
 
   function init() {
-    applyDarkModeClass(); applyUiScale(); applyCollapseMode(); pruneUserSelectors(); _selectorStoreSignature = getSelectorStoreSignature();
+    applyDarkModeClass(); applyUiScale(); applyCollapseMode(); pruneUserSelectors(); _selectorStoreSignature = getSelectorStoreSignature(); _configStoreSignature = getConfigStoreSignature();
     if (window.matchMedia) {
       try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyDarkModeClass); } catch (e) {}
     }
@@ -5486,6 +5547,7 @@
 
     registerMenu();
     exposeDebugApi();
+    ensureUrlWatcher();
     if (isEngineSite()) {
       try {
         ensureEngineSiteSetup();
