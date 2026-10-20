@@ -133,7 +133,7 @@ URL通配规则按匹配模式语义从URL开头匹配，主机通配`*`不跨�
 ### 2.9 自定义引擎：
 
 通过脚本管理器菜单 `🖋️ 自定义引擎` 打开编辑面板（JS 格式，与内置 [SELECTORS](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js) 结构一致）  
-不局限于搜索引擎，理论上只要是含有容器的网页都能添加
+不局限于搜索引擎，理论上只要是含有容器的网页站点都能添加
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -143,30 +143,33 @@ URL通配规则按匹配模式语义从URL开头匹配，主机通配`*`不跨�
 | `titles` | string \| string\[\] | 可选，标题选择器列表 |
 | `snippets` | string \| string\[\] | 可选，摘要选择器列表 |
 | `extraElements` | string\[\] | 可选，CSS 相对选择器数组，以结果容器为起点选出关联元素 |
+| `button` | boolean | 可选，`button: false` 不在该引擎显示**一键屏蔽**按钮（不影响一键屏蔽开关），缺少该参数或 `button: true` 时默认允许显示按钮 |
 | `disabled` | boolean | 可选，别名 `disable`，`disabled: true` 停用该引擎，`disabled: false` 恢复内置 |
 
 **示例：**
 
 ```javascript
 example: {
-  match: /(?:^|\.)search\.example\.com$/,
+  match: /^(?:(?:www|m)\.)?example\.com$/,
   containers: '.result',
   titles: ['.title'],
   snippets: ['.content'],
   links: 'a[href]',
+  button: false,
 },
 bing: {disabled: true},
 ```
 
 **内置引擎ID：**
 
-`google`、`google_scholar`、`bing`、`duckduckgo_lite`、`duckduckgo`、`yandex`、`brave`、`ecosia`、`startpage`、`yahoo`、`so360`、`sogou`、`toutiao`、`quark`（在`@if($site=)`中，`ddg`是`duckduckgo`别名，`yahoo-japan`是`yahoo`别名）
+`google`、`google_scholar`、`bing`、`duckduckgo_lite`、`duckduckgo`、`yandex`、`brave`、`ecosia`、`startpage`、`yahoo`、`so360`、`sogou`、`toutiao`、`quark`、`github`、`greasyfork`（在`@if($site=)`中，`ddg`是`duckduckgo`别名，`yahoo-japan`是`yahoo`别名）
 
 **说明：**
 
 1. 自定义引擎支持 `$site = "引擎ID"` 条件以及屏蔽/高亮/白名单规则，选择器字段均不支持伪元素，如 `::after`
 2. 引擎ID仅允许字母/数字/`_`/`-`，`other` 为保留键不可写，与内置引擎同ID或站点重叠时会覆盖内置选择器，如匹配 `cn.bing.com` 时将优先于内置 `bing` 命中，即优先级：自定义选择器 > 内置选择器
 3. 保存时仅存储与内置有差异的键，未改动的内置不会写入存储，改回内置值或重置可恢复跟随脚本更新，选择器未匹配到时默认退回`other`（置空）
+4. 添加带搜索功能的非引擎站点（即站内搜索）时，规则建议写为仅在该站点使用，例如在 `m.example.com` 上，规则写为 `*://*.example.com/* @if(title *= "关键词")`、`title/.*关键词.*/i @if($site = "example")` 等，即目标站点为当前的非引擎站点，避免含相同关键词的结果在外站也被屏蔽
 
 **自动分析：**
 

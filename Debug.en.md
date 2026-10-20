@@ -7,14 +7,14 @@
 
 ### 3.2 Running Tests
 
-Put the `test` folder and the script in the same directory, tests auto read the first `.js` script in the parent directory, grouped by domain: conditions, rules, selectors & engines, cross-origin permissions.
+Put the `test` folder and the script in the same directory, tests auto read `.js` script in the parent directory, grouped by domain: conditional expression parsing, rule subscription & WebDAV synchronization, rules logic, selectors & engines.
 
 ```bash
 # Run all tests
 node test/test-conditions.cjs
+node test/test-connect.cjs
 node test/test-rules.cjs
 node test/test-selectors.cjs
-node test/test-connect.cjs
 
 # Run specific test
 node test/test-conditions.cjs 2>&1 | Select-String "failed"
@@ -59,9 +59,9 @@ Error output
 
 ```bash
 // Rule syntax error
-规则预编译失败: *://example.com/* Error: Invalid regex pattern
+规则编译失败: *://example.com/* Error: Unbalanced regex
 
-// Means: Rule syntax error, check the rule format
+// Means: Rule syntax error, check the rule format (common messages: Unbalanced regex / Empty regex pattern)
 ```
 
 ### 3.4 Debug API Examples

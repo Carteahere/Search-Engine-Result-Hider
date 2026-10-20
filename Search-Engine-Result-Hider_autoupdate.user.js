@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.7.3
+// @version      8.7.4
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -175,7 +175,7 @@
       links: ['h3.vr-title a[href]', '.vr-title a[href]', 'a[class*="saTitle"][href]', 'h3 a[href]', 'a.citeLinkClass[href]', 'a[href]'],
     },
     toutiao: {
-      match: /^so\.toutiao\.com$/,
+      match: /^(?:so|m)\.toutiao\.com$/,
       containers: '.result-content',
       titles: ['.l-card-title a', '.l-card-title', '.cs-header a', 'a[href*="/search/jump"]'],
       snippets: ['.l-paragraph', '.cs-card-content .text-regular', '.l-source', '.cs-source'],
@@ -188,6 +188,22 @@
       snippets: ['.qk-paragraph-text', '.qk-paragraph'],
       links: ['a.qk-title a[href]', '.qk-title a[href]', 'a.qk-link-wrapper[href]', 'a[href]'],
     },
+    github: {
+      match: /^(?:www\.)?github\.com$/,
+      containers: "[data-testid='results-list'] > div",
+      titles: ["h3 a[data-component='Link']", 'h3 a', 'h3'],
+      snippets: ['h3 ~ div', 'h3 + div', 'article .description'],
+      links: ["h3 a[href]"],
+      button: false,
+    },
+    greasyfork: {
+      match: /^(?:www\.)?greasyfork\.org$/,
+      containers: '#browse-script-list li[data-script-id]',
+      titles: ['a.script-link', 'article h2 a'],
+      snippets: ['.script-description', 'article .description'],
+      links: ['a.script-link[href]'],
+      button: false,
+    },
     other: {
       containers: '',
       titles: [],
@@ -196,7 +212,7 @@
     }
   };
 
-  let activeSelectors = null; let _selectorStoreSignature = null; let _settingsStoreTime = null;
+  let activeSelectors = null; let _selectorStoreSignature = null; let _configStoreSignature = null;
 
   function normalizeSelectorList(value) {
     if (Array.isArray(value)) return value.filter(s => typeof s === 'string' && s); if (typeof value === 'string' && value) return [value]; return [];
@@ -210,7 +226,8 @@
       titles: def.titles !== undefined ? normalizeSelectorList(def.titles) : (base.titles || []),
       snippets: def.snippets !== undefined ? normalizeSelectorList(def.snippets) : (base.snippets || []),
       extraElements: def.extraElements !== undefined ? normalizeSelectorList(def.extraElements) : (base.extraElements || []),
-      links: links.length ? links : 'a[href]'
+      links: links.length ? links : 'a[href]',
+      ...(def.button !== undefined ? { button: def.button !== false } : (base.button !== undefined ? { button: base.button !== false } : {}))
     };
   }
 
@@ -369,11 +386,9 @@
       cannotBlockCurrentSite: '无法屏蔽当前搜索引擎自身域名: {domain}',
       statsErrors: '发现 {count} 个规则错误: ',
       matchedCountLabel: '匹配', matchedCountUnit: '条',
-      menuBubbleStateShow: '显示', menuBubbleStateHide: '隐藏',
       menuBubbleActionOpen: '打开面板', menuBubbleActionStats: '打开统计', menuBubbleActionToggle: '显隐结果',
       bubbleStatsHint: '点击打开统计，长按打开面板',
       bubbleToggleHint: '点击显示/隐藏屏蔽结果，长按打开面板',
-      stateEnabled: '启用', stateDisabled: '关闭',
       subLinkEmpty: '链接为空', subImportSuccess: '导入成功',
       subImportFailed: '导入失败，请检查链接或网络状态',
       fileImportFailed: '导入失败，文件内容不是有效规则', importClearConfirm: '导入的文件不含任何规则，是否清空本地全部规则？', webdavClearConfirm: '云端文件不含任何规则，是否清空本地全部规则？',
@@ -440,11 +455,9 @@
       cannotBlockCurrentSite: 'Cannot block search engine own domain: {domain}',
       statsErrors: 'Found {count} rule errors:',
       matchedCountLabel: 'Hits', matchedCountUnit: 'Rule',
-      menuBubbleStateShow: 'Show', menuBubbleStateHide: 'Hide',
       menuBubbleActionOpen: 'Open Panel', menuBubbleActionStats: 'Open Stats', menuBubbleActionToggle: 'Show Results',
       bubbleStatsHint: 'Click to open stats, long-press to open panel',
       bubbleToggleHint: 'Click to show/hide blocked results, long-press to open panel',
-      stateEnabled: 'Enabled', stateDisabled: 'Disabled',
       subLinkEmpty: 'URL is empty', subImportSuccess: 'Import success',
       subImportFailed: 'Import failed, check URL or network',
       fileImportFailed: 'Import failed, file content is not valid rules', importClearConfirm: 'The imported file contains no rules. Clear all local rules?', webdavClearConfirm: 'The cloud file contains no rules. Clear all local rules?',
@@ -494,7 +507,7 @@
   }
   let compiledRules = newCompiledRules();
 
-  const validationCache = new Map(); const subdomainCache = new Map(); let cachedSubscriptionRules = null; let _subscriptionStoreSignature = null; let forceReprocessBatchId = 0;
+  const validationCache = new Map(); const subdomainCache = new Map(); let cachedSubscriptionRules = null; let _subscriptionStoreSignature = null; let forceReprocessBatchId = 0; let _hiddenParentCount = 0;
   function t(key, params = {}) {
     const lang = currentConfig.language; const texts = LANG_TEXTS[lang] || LANG_TEXTS['zh-CN']; let text = texts[key] || key;
     for (const [k, v] of Object.entries(params)) {
@@ -535,7 +548,7 @@
       if (container.parentElement !== document.body) {
         document.body.appendChild(container);
       }
-      container.style.position = ''; container.style.top = ''; container.style.right = ''; container.style.left = ''; container.style.bottom = ''; container.style.width = '';
+      container.style.position = ''; container.style.top = ''; container.style.right = ''; container.style.left = ''; container.style.bottom = ''; container.style.width = ''; container.style.maxWidth = '';
     }
 
     const toast = document.createElement('div');
@@ -1045,6 +1058,10 @@
       if (done) return; done = true; panel.remove(); if (onClosed) onClosed();
       if (!isSerhPanelOpen()) {
         checkAutoSubscription(); checkAutoWebDAV();
+        if (_webdavSyncPendingWhenPanelOpen) {
+          _webdavSyncPendingWhenPanelOpen = false;
+          triggerWebDAVSyncDelayed(1000);
+        }
       }
     };
     panel.addEventListener('transitionend', finish, { once: true }); setTimeout(finish, 350);
@@ -1388,10 +1405,11 @@
       const trimmed = text.trim();
       const regexLeafFlags = (() => {
         const m = trimmed.match(/^(?:title|url|host|path|scheme)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i); if (!m) return null;
-        const seg = m[2] || ''; return isUniqueFlagsStr(seg) ? seg.toLowerCase() : (isFlagsCandidateError(seg) ? seg : '');
+        const seg = m[2] || ''; const explicit = /^(?:title|url|host|path|scheme)\s*=\~\s*\//i.test(trimmed);
+        return isUniqueFlagsStr(seg) || (explicit && /^[a-z]+$/i.test(seg)) ? seg.toLowerCase() : (isFlagsCandidateError(seg) ? seg : '');
       })();
       if (regexLeafFlags && getInvalidRegexFlags(regexLeafFlags)) {
-        errors.push({ kind: 'flags', part: regexLeafFlags }); return { type: 'const', value: false };
+        errors.push({ kind: 'flags', part: getInvalidRegexFlags(regexLeafFlags) }); return { type: 'const', value: false };
       }
       try {
         const parsed = parseConditionPart(trimmed, engine, site, category);
@@ -1585,7 +1603,7 @@
     return [...new Set(invalid)].join('');
   }
   function isUniqueFlagsStr(seg) { const s = String(seg || '').toLowerCase(); return /^[imsu]+$/.test(s) && new Set(s).size === s.length; }
-  function isFlagsCandidateError(seg) { seg = String(seg || ''); return /^[gy]+$/i.test(seg) || (/^[gyimsu]+$/i.test(seg) && /[gy]/i.test(seg)); }
+  function isFlagsCandidateError(seg) { seg = String(seg || ''); return /^[imsugy]+$/i.test(seg) && !!getInvalidRegexFlags(seg); }
 
   function validateUrlWildcard(rule) {
     if (!rule || /[<>"']/.test(rule) || /\s/.test(rule)) return false; if (rule.startsWith('|') || rule.startsWith('@@')) return false; if (rule.includes('^')) return false;
@@ -1951,7 +1969,9 @@
   }
 
   function ruleToRegex(rule) {
-    let memo = ruleToRegex._memo; if (!memo) memo = ruleToRegex._memo = new Map(); if (memo.has(rule)) return memo.get(rule); let out; if (rule.startsWith('.')) rule = '*' + rule;
+    let memo = ruleToRegex._memo;
+    const original = rule;
+    if (!memo) memo = ruleToRegex._memo = new Map(); if (memo.has(original)) return memo.get(original); let out; if (rule.startsWith('.')) rule = '*' + rule;
     if (!rule.startsWith('/') && !/^title\//i.test(rule) && !/^text\//i.test(rule) &&
       !rule.includes('://') && !rule.startsWith('.')) {
       const restMatch = rule.match(/^([^\/?#]+)([\/?#].*)?$/);
@@ -1961,23 +1981,23 @@
     }
 
     if (rule.startsWith('/') && rule.lastIndexOf('/') > 0) {
-      const lastSlash = rule.lastIndexOf('/'); const pattern = rule.slice(1, lastSlash); const flags = rule.slice(lastSlash + 1).toLowerCase(); out = { pattern, flags }; memo.set(rule, out);
+      const lastSlash = rule.lastIndexOf('/'); const pattern = rule.slice(1, lastSlash); const flags = rule.slice(lastSlash + 1).toLowerCase(); out = { pattern, flags }; memo.set(original, out);
       return out;
     }
 
     if (/^title\//i.test(rule)) {
-      out = parsePrefixedRegexRule(rule, 6); memo.set(rule, out); return out;
+      out = parsePrefixedRegexRule(rule, 6); memo.set(original, out); return out;
     }
 
     if (/^text\//i.test(rule)) {
-      out = parsePrefixedRegexRule(rule, 5); memo.set(rule, out); return out;
+      out = parsePrefixedRegexRule(rule, 5); memo.set(original, out); return out;
     }
 
     out = {
       pattern: wildcardToRegex(rule),
       flags: 'i'
     };
-    memo.set(rule, out); return out;
+    memo.set(original, out); return out;
   }
 
   function normalizeHostCandidate(host) {
@@ -2006,11 +2026,6 @@
       const domain = normalizeHostCandidate(exactMatch[1]); if (domain) return { domain, domainType: 'exact' };
     }
     return null;
-  }
-
-  function extractSimpleWhitelistDomain(rule) {
-    if (!rule || !rule.startsWith('@') || rule.startsWith('@@')) return null; const m = matchWildcardDomainPattern(rule.substring(1)); if (!m) return null;
-    return { domain: m.domain, type: m.domainType };
   }
 
   function matchSimpleDomain(coreRule) {
@@ -2049,10 +2064,16 @@
     try {
       pageContext = getSearchEngine() + '|' + getSearchCategory() + '|' + String(window.location.hostname || '');
     } catch (e) {}
-    const signature = JSON.stringify([currentConfig.rules, subscriptionRules, currentConfig.language, pageContext]); if (compiledRules && compiledRules.indexSignature === signature) return;
-    subdomainCache.clear(); validationCache.clear(); if (ruleToRegex._memo) ruleToRegex._memo.clear(); if (parsePrefixedRegexRule._memo) parsePrefixedRegexRule._memo.clear();
-    if (compileRuleRegex._memo) compileRuleRegex._memo.clear();
-    compiledRules = newCompiledRules();
+    const contentSignature = getRulesModifiedTime() + '|' + (_subscriptionStoreSignature || '') + '|' + currentConfig.language;
+    const signature = contentSignature + '|' + pageContext; if (compiledRules && compiledRules.indexSignature === signature) return;
+    const contentChanged = !compiledRules || compiledRules.contentSignature !== contentSignature;
+    subdomainCache.clear(); validationCache.clear();
+    if (contentChanged) {
+      if (ruleToRegex._memo) ruleToRegex._memo.clear();
+      if (parsePrefixedRegexRule._memo) parsePrefixedRegexRule._memo.clear();
+      if (compileRuleRegex._memo) compileRuleRegex._memo.clear();
+    }
+    compiledRules = newCompiledRules(); compiledRules.contentSignature = contentSignature;
     const allRules = currentConfig.rules.concat(subscriptionRules); const subscriptions = getSubscriptions();
     const localRuleCount = currentConfig.rules.length; const subscriptionSources = [];
     subscriptions.forEach((sub, idx) => {
@@ -2826,7 +2847,15 @@
     return !engineMatch;
   }
 
+  function isBlockButtonEnabledForEngine(engine) {
+    try {
+      const def = getSelectors()[engine] || SELECTORS.other;
+      return !def || def.button !== false;
+    } catch (e) { return true; }
+  }
+
   function injectBlockButton(result, engine, domain) {
+    if (!isBlockButtonEnabledForEngine(engine)) return;
     if (!domain || getSearchCategory() === 'images') return; if (result.closest('header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav')) return;
     if (engine === 'google') {
       if (result.classList.contains('isv-r') || result.querySelector('g-img')) {
@@ -2934,7 +2963,14 @@
 
   function googleResultBlocks(parent) {
     if (!parent || typeof parent.querySelectorAll !== 'function') return [];
-    return Array.from(parent.querySelectorAll('div.g, div.tF2Cxc, div.MjjYud'));
+    return Array.from(parent.querySelectorAll('div.g, div.tF2Cxc, div.MjjYud')).filter(el => {
+      let ancestor = el.parentElement;
+      while (ancestor && ancestor !== parent) {
+        if (typeof ancestor.matches === 'function' && ancestor.matches('div.g, div.tF2Cxc, div.MjjYud')) return false;
+        ancestor = ancestor.parentElement;
+      }
+      return true;
+    });
   }
 
   function visibleUnblocked(el) {
@@ -2947,9 +2983,10 @@
 
   function hideParentIfNoVisibleSiblings(parent, children, attr) {
     const hasVisible = Array.from(children).some(visibleUnblocked);
-    if (!hasVisible) {
-      saveOriginalDisplay(parent); parent.style.display = blockedShown() ? (parent.getAttribute('data-serh-orig-display') || '') : 'none'; parent.setAttribute(attr, 'true');
-    }
+    if (hasVisible) return;
+    const alreadyHidden = parent.getAttribute(attr) === 'true';
+    saveOriginalDisplay(parent); parent.style.display = blockedShown() ? (parent.getAttribute('data-serh-orig-display') || '') : 'none'; parent.setAttribute(attr, 'true');
+    if (!alreadyHidden) _hiddenParentCount++;
   }
 
   function resetResultStyles(result) {
@@ -2965,11 +3002,11 @@
       if (stillHasBlockedHidden) {
         parent.style.display = 'none';
       } else if (parent.getAttribute('data-is-blocked') !== 'true') {
-        parent.style.display = parentOrig !== null ? parentOrig : ''; parent.removeAttribute('data-blocker-yandex-parent'); parent.removeAttribute('data-serh-orig-display');
+        parent.style.display = parentOrig !== null ? parentOrig : ''; parent.removeAttribute('data-blocker-yandex-parent'); parent.removeAttribute('data-serh-orig-display'); _hiddenParentCount--;
       }
     }
     const gridItem = result.closest ? result.closest('[data-serh-grid-item-hidden]') : null;
-    if (gridItem) { gridItem.style.display = ''; gridItem.removeAttribute('data-serh-grid-item-hidden'); }
+    if (gridItem) { gridItem.style.display = ''; gridItem.removeAttribute('data-serh-grid-item-hidden'); _hiddenParentCount--; }
     const googleParent = result.closest ? result.closest('[data-blocker-google-parent]') : null;
     if (googleParent) {
       const stillHasBlockedHidden = googleResultBlocks(googleParent).some(el =>
@@ -2978,7 +3015,7 @@
       if (stillHasBlockedHidden) {
         googleParent.style.display = 'none';
       } else if (googleParent.getAttribute('data-is-blocked') !== 'true') {
-        googleParent.style.display = parentOrig !== null ? parentOrig : ''; googleParent.removeAttribute('data-blocker-google-parent'); googleParent.removeAttribute('data-serh-orig-display');
+        googleParent.style.display = parentOrig !== null ? parentOrig : ''; googleParent.removeAttribute('data-blocker-google-parent'); googleParent.removeAttribute('data-serh-orig-display'); _hiddenParentCount--;
       }
     }
     removeMatchedRuleLabel(result); if (!result.querySelector('.serh-quick-block')) result.style.position = '';
@@ -2986,21 +3023,27 @@
 
   function restoreParentDisplay(parent) {
     const orig = parent.getAttribute('data-serh-orig-display'); parent.style.display = orig !== null ? orig : ''; parent.removeAttribute('data-blocker-yandex-parent');
-    parent.removeAttribute('data-blocker-google-parent'); parent.removeAttribute('data-serh-grid-item-hidden'); parent.removeAttribute('data-serh-orig-display');
+    parent.removeAttribute('data-blocker-google-parent'); parent.removeAttribute('data-serh-grid-item-hidden'); parent.removeAttribute('data-serh-orig-display'); _hiddenParentCount--;
   }
 
   function restoreAllHiddenParents() {
-    document.querySelectorAll('[data-blocker-yandex-parent], [data-blocker-google-parent], [data-serh-grid-item-hidden]').forEach(restoreParentDisplay);
+    document.querySelectorAll('[data-blocker-yandex-parent], [data-blocker-google-parent], [data-serh-grid-item-hidden]').forEach(restoreParentDisplay); _hiddenParentCount = 0;
   }
 
   function reconcileHiddenParents() {
+    if (_hiddenParentCount <= 0) return;
     document.querySelectorAll('[data-blocker-yandex-parent]').forEach(parent => {
-      const hasVisibleUnblocked = Array.from(parent.children).some(el =>
-        el.style.display !== 'none' && el.getAttribute('data-is-blocked') !== 'true');
-      if (hasVisibleUnblocked && parent.getAttribute('data-is-blocked') !== 'true') restoreParentDisplay(parent);
+      const stillHiddenBlocked = Array.from(parent.children).some(el =>
+        el.style.display === 'none' && el.getAttribute('data-is-blocked') === 'true');
+      const hasVisibleUnblocked = Array.from(parent.children).some(visibleUnblocked);
+      if (parent.getAttribute('data-is-blocked') !== 'true' && (!stillHiddenBlocked || hasVisibleUnblocked)) restoreParentDisplay(parent);
     });
     document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
-      if (parent.getAttribute('data-is-blocked') !== 'true' && googleResultBlocks(parent).some(visibleUnblocked)) restoreParentDisplay(parent);
+      const blocks = googleResultBlocks(parent);
+      const stillHiddenBlocked = blocks.some(el =>
+        el.style.display === 'none' && el.getAttribute('data-is-blocked') === 'true');
+      const hasVisibleUnblocked = blocks.some(visibleUnblocked);
+      if (parent.getAttribute('data-is-blocked') !== 'true' && (!stillHiddenBlocked || hasVisibleUnblocked)) restoreParentDisplay(parent);
     });
     document.querySelectorAll('[data-serh-grid-item-hidden]').forEach(cell => {
       const stillBlocked = Array.from(cell.querySelectorAll('[data-is-blocked="true"]')).some(el => el.style.display === 'none');
@@ -3021,7 +3064,6 @@
       }
       container.setAttribute('data-observed', 'true');
       if (!container.hasAttribute('data-blocker-processed')) resultObserver.observe(container);
-      reconcileHiddenParents();
     } catch (e) {
       if (currentConfig.debug) {
         console.error('[屏蔽] 结果重处理失败:', container, e);
@@ -3038,6 +3080,21 @@
     const sourceText = sourceLabelOf(result.dataset.matchedSourceKey) || result.dataset.matchedSource || t('matchedRule'); const ruleText = result.dataset.matchedRule;
     label.textContent = `${sourceText}: ${ruleText}`;
     ensurePositioned(result); result.appendChild(label);
+  }
+
+  function markResultGridSlot(result, engine) {
+    if (engine === 'google') {
+      let cell = result.parentElement;
+      while (cell && cell.parentElement && cell.tagName !== 'BODY') { const d = getComputedStyle(cell.parentElement).display; if (d === 'grid' || d === 'inline-grid') break; cell = cell.parentElement; }
+      if (cell && cell.parentElement && cell.tagName !== 'BODY') { cell.style.display = 'none'; cell.setAttribute('data-serh-grid-item-hidden', 'true'); _hiddenParentCount++; }
+    } else if (engine === 'bing') {
+      const slot = result.closest ? result.closest('li') : null;
+      if (slot) {
+        const tops = Array.from(slot.children || []).filter(c => c.matches && c.matches('div.iuscp, div.imgpt'));
+        const targets = tops.length ? tops : (slot.querySelectorAll ? Array.from(slot.querySelectorAll('div.iuscp, div.imgpt')) : []);
+        if (targets.length && targets.every(el => el.style.display === 'none')) { slot.style.display = 'none'; slot.setAttribute('data-serh-grid-item-hidden', 'true'); _hiddenParentCount++; }
+      }
+    }
   }
 
   function processSingleResult(result) {
@@ -3059,7 +3116,7 @@
 
     const { url, domain } = resolveUrlDomain(link); _hrefUrlCache.set(result, { rawHref: link.href || '', url });
     const title = getResultTitle(result, engine); const snippet = getResultSnippet(result, engine); _resultContentCache.set(result, buildContentSignature(url, title, snippet));
-    const lowerDomain = domain.toLowerCase(); const subdomainLevels = getSubdomainLevels(domain);
+    const subdomainLevels = getSubdomainLevels(domain);
     const matchResult = checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels); _resultRetryCounts.delete(result);
     const matchHL = matchResult && matchResult.highlight;
     if (matchHL) {
@@ -3076,22 +3133,10 @@
         const parent = result.parentElement; if (parent) hideParentIfNoVisibleSiblings(parent, parent.children, 'data-blocker-yandex-parent');
       }
 
-      if (engine === 'google' && result.matches && result.matches('div.g')) {
+      if (engine === 'google' && result.matches && result.matches('div.g, div.tF2Cxc, div.MjjYud')) {
         const parent = result.closest('div.MjjYud'); if (parent && parent !== result) hideParentIfNoVisibleSiblings(parent, googleResultBlocks(parent), 'data-blocker-google-parent');
       }
-      if (engine === 'google' && getSearchCategory() === 'images' && !blockedShown()) {
-        let cell = result.parentElement;
-        while (cell && cell.parentElement && cell.tagName !== 'BODY') { const d = getComputedStyle(cell.parentElement).display; if (d === 'grid' || d === 'inline-grid') break; cell = cell.parentElement; }
-        if (cell && cell.parentElement && cell.tagName !== 'BODY') { cell.style.display = 'none'; cell.setAttribute('data-serh-grid-item-hidden', 'true'); }
-      }
-      if (engine === 'bing' && getSearchCategory() === 'images' && !blockedShown()) {
-        const slot = result.closest ? result.closest('li') : null;
-        if (slot) {
-          const tops = Array.from(slot.children || []).filter(c => c.matches && c.matches('div.iuscp, div.imgpt'));
-          const targets = tops.length ? tops : (slot.querySelectorAll ? Array.from(slot.querySelectorAll('div.iuscp, div.imgpt')) : []);
-          if (targets.length && targets.every(el => el.style.display === 'none')) { slot.style.display = 'none'; slot.setAttribute('data-serh-grid-item-hidden', 'true'); }
-        }
-      }
+      if (getSearchCategory() === 'images' && !blockedShown()) markResultGridSlot(result, engine);
 
       result.dataset.matchedRule = matchResult.rule || ''; result.dataset.matchedSource = matchResult.source || ''; result.dataset.matchedSourceKey = matchResult.sourceKey || '';
       if (blockedShown()) {
@@ -3135,7 +3180,7 @@
         if (result.hasAttribute('data-blocker-processed')) {
           observer.unobserve(result);
         } else {
-          result.removeAttribute('data-observed'); observer.unobserve(result); scheduleResultRetry(result);
+          observer.unobserve(result); scheduleResultRetry(result);
         }
       }
     });
@@ -3150,9 +3195,10 @@
   });
 
   function scheduleResultRetry(result) {
+    result.setAttribute('data-observed', 'true');
     const attempt = (_resultRetryCounts.get(result) || 0) + 1;
     if (attempt > RESULT_RETRY_LIMIT) {
-      _resultRetryCounts.delete(result); result.removeAttribute('data-observed'); resultObserver.unobserve(result); return;
+      _resultRetryCounts.delete(result); resultObserver.unobserve(result); return;
     }
     _resultRetryCounts.set(result, attempt);
     setTimeout(() => {
@@ -3191,7 +3237,7 @@
       } catch (_) {}
       return false;
     };
-    return arr.filter(el => {
+    const kept = arr.filter(el => {
       if (selector) {
         try {
           if (el.querySelector(selector) && !hasOwnLink(el)) return false;
@@ -3202,6 +3248,16 @@
       }
       return true;
     });
+    if (isBingImagesPage(getSearchEngine())) {
+      const seen = new Set();
+      return kept.filter(el => {
+        const link = getResultLink(el, 'bing'); const href = link && link.href;
+        if (!href) return true;
+        if (seen.has(href)) return false;
+        seen.add(href); return true;
+      });
+    }
+    return kept;
   }
 
   function queryUnobserved(selector) {
@@ -4138,7 +4194,11 @@
       document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
         hideParentIfNoVisibleSiblings(parent, googleResultBlocks(parent), 'data-blocker-google-parent');
       });
-      if (!blockedShown()) document.querySelectorAll('[data-serh-grid-item-hidden]').forEach(cell => { cell.style.display = 'none'; });
+      if (!blockedShown()) {
+        document.querySelectorAll('[data-serh-grid-item-hidden]').forEach(cell => { cell.style.display = 'none'; });
+        const engine = getSearchEngine();
+        if (getSearchCategory() === 'images') document.querySelectorAll('[data-is-blocked="true"]').forEach(el => markResultGridSlot(el, engine));
+      }
     }
     const status = document.getElementById('serh-status');
     if (status) {
@@ -4162,6 +4222,10 @@
     return clean;
   }
 
+  function getRulesModifiedTime() {
+    try { const saved = GM_getValue(LOCAL_LAST_MODIFIED_KEY, 0); return typeof saved === 'number' && Number.isFinite(saved) && saved > 0 ? saved : 0; } catch (e) { return 0; }
+  }
+
   function getSettingsModifiedTime() {
     try { const saved = GM_getValue(SETTINGS_LAST_MODIFIED_KEY, null); if (typeof saved === 'number' && Number.isFinite(saved) && saved > 0) return saved; } catch (e) {}
     return 0;
@@ -4177,7 +4241,7 @@
     const settingsChanged = updateModifiedTime && !selectorsEqual(getSyncSettings(previous), getSyncSettings(currentConfig));
     GM_setValue(CONFIG_KEY, currentConfig);
     if (updateModifiedTime) {
-      if (rulesChanged) markLocalModifiedTime(); if (settingsChanged) { markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY); _settingsStoreTime = getSettingsModifiedTime(); }
+      if (rulesChanged) markLocalModifiedTime(); if (settingsChanged) markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY);
       if (rulesChanged || settingsChanged) {
         triggerWebDAVSyncDelayed(5000);
       }
@@ -4244,8 +4308,10 @@
     else if (_collapseStyleEl) { _collapseStyleEl.remove(); _collapseStyleEl = null; }
   }
 
+  function applyGlobalConfigUi() { applyDarkModeClass(); applyUiScale(); applyCollapseMode(); }
+
   function applyConfigToMainPanel() {
-    if (!document.getElementById('serh-panel')) return;
+    applyGlobalConfigUi(); if (!document.getElementById('serh-panel')) return;
     Object.keys(SETTINGS_PANEL_CHECKBOXES).forEach(id => {
       const el = document.getElementById(id); if (!el) return; const key = SETTINGS_PANEL_CHECKBOXES[id];
       if (id === 'serh-set-error-detection' || id === 'serh-set-bracket-highlight') {
@@ -4265,7 +4331,7 @@
     if (textarea && Array.isArray(currentConfig.rules)) {
       textarea.value = currentConfig.rules.join('\n'); updateLineNumbers();
     }
-    applyDarkModeClass(); applyCollapseMode(); applySubSyncBtnVisibility();
+    applySubSyncBtnVisibility();
   }
 
   function collectMainPanelConfigState() {
@@ -5083,6 +5149,7 @@
         `  snippets: [${(def.snippets || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
         `  links: ${links},\n` +
         `  extraElements: [${(def.extraElements || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
+        (def.button === false ? `  button: false,\n` : '') +
         (disabled ? `  disabled: true,\n` : '') +
         `}`;
     };
@@ -5115,7 +5182,8 @@
   }
 
   function hasPseudoElement(selector) {
-    return /::/.test(String(selector).replace(/(["'])(?:\\.|(?!\1).)*\1/g, ''));
+    const s = String(selector).replace(/(["'])(?:\\.|(?!\1).)*\1/g, '');
+    return /::/.test(s) || /(^|[^:]):(?:before|after|first-line|first-letter)\b/i.test(s);
   }
 
   function validateUserSelectors(config) {
@@ -5138,6 +5206,7 @@
       }
       if (def.disabled !== undefined && def.disabled !== null && typeof def.disabled !== 'boolean') errors.push(t('selectorInvalidBool', { key, field: 'disabled' }));
       if (def.disable !== undefined && def.disable !== null && typeof def.disable !== 'boolean') errors.push(t('selectorInvalidBool', { key, field: 'disable' }));
+      if (def.button !== undefined && def.button !== null && typeof def.button !== 'boolean') errors.push(t('selectorInvalidBool', { key, field: 'button' }));
       if (def.disabled === true || def.disable === true) continue; if ((def.disabled === false || def.disable === false) && Object.keys(def).every(k => k === 'disabled' || k === 'disable')) continue;
       if (typeof def.match === 'string' && def.match) {
         const lit = def.match.match(/^\/(.*)\/([a-z]*)$/i); const badLit = lit ? getInvalidRegexFlags(lit[2]) : '';
@@ -5186,7 +5255,7 @@
   function sameSelectorDef(a, b) {
     if (!a || !b) return false; if (!!a.disabled !== !!b.disabled || !!a.disable !== !!b.disable) return false; const aM = matchDefToParts(a.match); const bM = matchDefToParts(b.match); if (aM.source !== bM.source || aM.flags !== bM.flags) return false;
     if ((a.containers || '') !== (b.containers || '')) return false; const norm = (v) => JSON.stringify(normalizeSelectorList(v)); if (norm(a.titles) !== norm(b.titles)) return false;
-    if (norm(a.snippets) !== norm(b.snippets)) return false; if (norm(a.extraElements) !== norm(b.extraElements)) return false; if (norm(a.links) !== norm(b.links)) return false; return true;
+    if (norm(a.snippets) !== norm(b.snippets)) return false; if (norm(a.extraElements) !== norm(b.extraElements)) return false; if (norm(a.links) !== norm(b.links)) return false; if ((a.button === false) !== (b.button === false)) return false; return true;
   }
 
   function diffSelectorDefFields(def, builtin) {
@@ -5201,6 +5270,7 @@
     for (const k of ['titles', 'snippets', 'extraElements', 'links']) {
       if (def[k] !== undefined && norm(def[k]) !== norm(builtin[k])) diff[k] = def[k];
     }
+    if (def.button !== undefined && (def.button !== false) !== (builtin.button !== false)) diff.button = def.button !== false;
     return diff;
   }
 
@@ -5280,8 +5350,17 @@
         }
       } catch (eJson) {}
     }
-    s = s.replace(/^const\s+SELECTORS\s*=\s*/i, '').replace(/;\s*$/, '').trim(); if (s.startsWith('{') && s.endsWith('}')) s = s.slice(1, -1); const n = s.length; let i = 0;
-    const skipWs = () => { while (i < n && /\s/.test(s[i])) i++; };
+    s = s.replace(/^(?:(?:\/\/[^\n]*\n)|(?:\/\*[\s\S]*?\*\/)|\s)+/, '').replace(/^const\s+SELECTORS\s*=\s*/i, '').replace(/^(?:(?:\/\/[^\n]*\n)|(?:\/\*[\s\S]*?\*\/)|\s)+/, '').trim();
+    s = s.replace(/([\x7d;\]])\s*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)\s*$/, '$1').replace(/;\s*$/, '').trim();
+    if (s.startsWith('{') && s.endsWith('}')) s = s.slice(1, -1); const n = s.length; let i = 0;
+    const skipWs = () => {
+      while (i < n) {
+        if (/\s/.test(s[i])) { i++; continue; }
+        if (s[i] === '/' && s[i + 1] === '/') { const j = s.indexOf('\n', i + 2); i = j === -1 ? n : j + 1; continue; }
+        if (s[i] === '/' && s[i + 1] === '*') { const j = s.indexOf('*/', i + 2); i = j === -1 ? n : j + 2; continue; }
+        break;
+      }
+    };
     const readString = () => {
       const quote = s[i]; let j = i + 1, val = '';
       while (j < n) {
@@ -5514,18 +5593,22 @@
   }
 
   function saveSubscriptions(subscriptions) {
-    cachedSubscriptionRules = null; _subscriptionStoreSignature = null; GM_setValue(SUBSCRIPTIONS_KEY, subscriptions);
+    cachedSubscriptionRules = null; _subscriptionStoreSignature = null; GM_setValue(SUBSCRIPTIONS_KEY, subscriptions); _subscriptionStoreSignature = getSubscriptionStoreSignature();
   }
 
   function getAllSubscriptionRules() {
-    const signature = getSubscriptionStoreSignature();
-    if (cachedSubscriptionRules && _subscriptionStoreSignature === signature) return cachedSubscriptionRules;
-    cachedSubscriptionRules = null;
+    if (cachedSubscriptionRules) {
+      const stored = _subscriptionStoreSignature; const fresh = getSubscriptionStoreSignature();
+      if (fresh === stored) return cachedSubscriptionRules;
+      _subscriptionStoreSignature = fresh;
+    } else {
+      _subscriptionStoreSignature = getSubscriptionStoreSignature();
+    }
     const subs = getSubscriptions(); const rules = [];
     subs.filter(s => s.enabled).forEach(s => {
       if (s.rules && Array.isArray(s.rules)) rules.push(...s.rules);
     });
-    cachedSubscriptionRules = rules; _subscriptionStoreSignature = signature; return rules;
+    cachedSubscriptionRules = rules; return rules;
   }
 
   function getSubscriptionSyncSnapshot() {
@@ -5767,6 +5850,9 @@
         }
         result[key] = local[key]; return;
       }
+      if (inLocal && inCloud) {
+        result[key] = preferLocal ? local[key] : cloud[key]; return;
+      }
       if (inLocal) {
         result[key] = local[key]; return;
       }
@@ -5844,12 +5930,30 @@
     const noteInsert = (key, anchor) => {
       if (place.has(key)) return; place.set(key, anchor); if (!pendingByAnchor.has(anchor)) pendingByAnchor.set(anchor, []); pendingByAnchor.get(anchor).push(key);
     };
+    const srcOf = (rows) => {
+      const map = new Map(); const prev = []; let p = null;
+      rows.forEach((row, i) => { prev[i] = p; if (baseIndex.has(row.key)) p = row.key; });
+      const next = new Array(rows.length); let n = null;
+      for (let i = rows.length - 1; i >= 0; i--) { next[i] = n; if (baseIndex.has(rows[i].key)) n = rows[i].key; }
+      rows.forEach((row, i) => {
+        if (baseIndex.has(row.key) || map.has(row.key)) return;
+        const lo = prev[i] ? baseIndex.get(prev[i]) : -1; const hi = next[i] ? baseIndex.get(next[i]) : 1e9; let cand = null; let amb = false;
+        for (const [bk, bi] of baseIndex) {
+          if (bi <= lo || bi >= hi || !localDeleted.has(bk) || !cloudDeleted.has(bk)) continue;
+          if (cand) { amb = true; break; } cand = bk;
+        }
+        if (cand && !amb) map.set(row.key, cand);
+      });
+      return map;
+    };
+    const localSrc = srcOf(localRows); const cloudSrc = srcOf(cloudRows); const cloudDup = new Set();
+    cloudSrc.forEach((bk, k) => { for (const [k2, b2] of localSrc) { if (b2 === bk && k2 !== k) { cloudDup.add(k); break; } } });
     const orderedRows = orderSide === cloudMeta ? cloudRows : localRows; const otherRows = orderSide === cloudMeta ? localRows : cloudRows;
     orderedRows.forEach((row, i) => {
-      if (baseIndex.has(row.key) || deleted(row.key)) return; noteInsert(row.key, anchorBefore(orderedRows, i));
+      if (baseIndex.has(row.key) || deleted(row.key) || cloudDup.has(row.key)) return; noteInsert(row.key, anchorBefore(orderedRows, i));
     });
     otherRows.forEach((row, i) => {
-      if (baseIndex.has(row.key) || deleted(row.key) || place.has(row.key)) return; const before = anchorBefore(otherRows, i); const after = anchorAfter(otherRows, i);
+      if (baseIndex.has(row.key) || deleted(row.key) || place.has(row.key) || cloudDup.has(row.key)) return; const before = anchorBefore(otherRows, i); const after = anchorAfter(otherRows, i);
       if (before !== null && after === null) noteInsert(row.key, END); else noteInsert(row.key, before);
     });
 
@@ -6047,7 +6151,7 @@
     }
   }
 
-  // 置空前备份
+  // 同步备份
   async function putWebDAVBackup(fullUrl, headers, rawContent) {
     await gmRequest('PUT', fullUrl + '.bak', { headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' }, data: rawContent });
   }
@@ -6063,7 +6167,8 @@
         if (parsedRemote && typeof parsedRemote.selectorsSyncedAt === 'number' && Number.isFinite(parsedRemote.selectorsSyncedAt)) remoteSelectorsSyncedAt = parsedRemote.selectorsSyncedAt;
       } catch (_) {}
     }
-    const selectorsSyncedAt = syncSelectors ? syncedAt : Math.max(getSelectorsModifiedTime(), remoteSelectorsSyncedAt);
+    const selectorBase = syncSelectors ? getSelectorSyncSnapshot() : null; const selectorsChanged = !!syncSelectors && (!selectorBase || !selectorsEqual(selectorBase, getUserSelectors()));
+    const selectorsSyncedAt = selectorsChanged ? syncedAt : (remoteSelectorsSyncedAt || getSelectorsModifiedTime());
 
     if (syncConfig) {
       const payload = buildSyncPayload(remotePreserved.settingsModifiedAt ?? getSettingsModifiedTime()); payload.rulesSyncedAt = syncedAt; payload.selectorsSyncedAt = selectorsSyncedAt; prefix += '# ScriptConfig:' + JSON.stringify(payload) + '\n';
@@ -6114,7 +6219,7 @@
       return s;
     };
     const listKeyOf = (line) => {
-      const m = line.match(/^(\s*)(rules|blacklist|whitelist|matches)\s*:\s*(?:#.*)?$/i); return m ? { key: m[2].toLowerCase(), indent: m[1].length } : null;
+      const m = line.match(/^(\s*)(rules|blacklist|whitelist|matches)\s*:\s*(?:([|>])([-+]?\d*)\s*)?(?:#.*)?$/i); return m ? { key: m[2].toLowerCase(), indent: m[1].length, block: m[3] || '' } : null;
     };
     const flowKeyOf = (line) => {
       const m = line.match(/^(\s*)(rules|blacklist|whitelist|matches)\s*:\s*\[(.*?)\]\s*(?:#.*)?$/i); return m ? { key: m[2].toLowerCase(), payload: m[3], open: false } : null;
@@ -6225,7 +6330,18 @@
       }
       const match = listKeyOf(line);
       if (match) {
-        hasSection = true; inSection = true; sectionKind = match.key; sectionIndent = match.indent; continue;
+        hasSection = true; inSection = true; sectionKind = match.key; sectionIndent = match.indent;
+        if (match.block) {
+          let j = idx + 1; const blockLines = [];
+          for (; j < lines.length; j++) {
+            const raw = lines[j]; if (!raw.trim()) { blockLines.push(''); continue; }
+            if (raw.search(/\S/) <= match.indent) break; blockLines.push(raw.trim());
+          }
+          if (match.block === '|') { for (const bl of blockLines) if (bl) pushYamlItem(bl, match.key); }
+          else pushYamlItem(blockLines.filter(Boolean).join(' '), match.key);
+          idx = j - 1;
+        }
+        continue;
       }
       if (!inSection) {
         if (name === undefined) {
@@ -6279,16 +6395,16 @@
   }
 
   function parseRulesetContent(content) {
-    let lines = String(content || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n'); let meta = {}; let isYaml = false; const firstContentIdx = lines.findIndex((l) => l.trim() !== '');
+    let lines = String(content || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n'); let meta = {}; let isYaml = false; let headLines = null; const firstContentIdx = lines.findIndex((l) => l.trim() !== '');
     if (firstContentIdx !== -1 && lines[firstContentIdx].trim() === '---') {
       const endIndex = lines.findIndex((l, i) => i > firstContentIdx && l.trim() === '---');
       if (endIndex !== -1) {
-        const head = lines.slice(firstContentIdx + 1, endIndex).join('\n'); const nameMatch = head.match(/^name\s*:\s*(.+?)\s*$/m);
+        headLines = lines.slice(firstContentIdx + 1, endIndex); const head = headLines.join('\n'); const nameMatch = head.match(/^name\s*:\s*(.+?)\s*$/m);
         if (nameMatch) {
           const raw = nameMatch[1].trim(); const quoted = (raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'")); meta.name = quoted ? raw.slice(1, -1) : raw;
         }
         if (/(?:^|\n)\s*(?:rules|blacklist|whitelist|matches)\s*:/i.test(head)) isYaml = true;
-        else lines = lines.slice(endIndex + 1);
+        lines = lines.slice(endIndex + 1);
       } else {
         isYaml = true;
       }
@@ -6303,9 +6419,11 @@
       }
     }
     if (isYaml) {
-      const yaml = extractYamlRuleItems(lines);
-      if (yaml) {
-        if (meta.name === undefined && yaml.name) meta.name = yaml.name; return { lines: yaml.items, meta };
+      const headYaml = headLines ? extractYamlRuleItems(headLines) : null; const bodyYaml = extractYamlRuleItems(lines);
+      if (headYaml || bodyYaml) {
+        const items = (headYaml ? headYaml.items : []).concat(bodyYaml ? bodyYaml.items : lines);
+        if (meta.name === undefined) meta.name = (bodyYaml && bodyYaml.name) || (headYaml && headYaml.name);
+        return { lines: items, meta };
       }
     }
     return { lines, meta };
@@ -6315,7 +6433,7 @@ function collectSubscriptionRules(lines) {
   const validRules = [];
   for (let line of lines) {
     if (line.length === 0 || /^-{3,}$/.test(line)) continue;
-    if (/^!\s*(?:[A-Z][a-zA-Z0-9_-]*)\s*[:=]/.test(line) || /^!\s*(?:site|title|url|description|version|expires|homepage)\s*[:=]/i.test(line) || /^!\s*(?:host|path|scheme)\s*:\s*\S/i.test(line)) continue;
+    if (/^!\s*site\s*[:=]/i.test(line)) continue;
     if (line.startsWith('!') && !looksLikeCondExpr(line)) continue; if (line.startsWith('[') && line.endsWith(']')) continue; if (line.startsWith('@@')) continue;
     if (isElementRuleLine(line)) continue; if (line.startsWith('#')) continue;
 
@@ -6466,7 +6584,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         if (toggle) row.dataset.originalEnabled = String(toggle.checked);
       });
       if (subsChanged) {
-        markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY); _settingsStoreTime = getSettingsModifiedTime(); forceReprocessAll();
+        markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY); forceReprocessAll();
         triggerWebDAVSyncDelayed(5000);
       }
       return true;
@@ -6812,7 +6930,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     const trustedNow = await getTrustedNow(parseHttpDateHeader(resp.responseHeaders)); let cloudTime = 0; const validCloudTimes = [getCloudModifiedTime(parsedHeader.config, 'rulesSyncedAt', trustedNow)].filter(v => v > 0);
     if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) && parsedHeader.config && (Object.keys(getSyncSettings(parsedHeader.config)).length || Array.isArray(parsedHeader.config.subscriptions))) {
       const cloudSettingsTime = getCloudModifiedTime(parsedHeader.config, 'settingsModifiedAt', trustedNow);
-      if (cloudSettingsTime > 0) { GM_setValue(SETTINGS_LAST_MODIFIED_KEY, cloudSettingsTime); _settingsStoreTime = cloudSettingsTime; }
+      if (cloudSettingsTime > 0) { GM_setValue(SETTINGS_LAST_MODIFIED_KEY, cloudSettingsTime); }
     }
     if (validCloudTimes.length > 0) {
       cloudTime = Math.max(...validCloudTimes);
@@ -6869,8 +6987,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     const localRules = currentConfig.rules || [];
     const scriptedEmptyCloud = resp.status !== 404 && cloudRules.length === 0 && !!(parsedHeader && parsedHeader.config && typeof parsedHeader.config.rulesSyncedAt === 'number' && Number.isFinite(parsedHeader.config.rulesSyncedAt) && parsedHeader.config.rulesSyncedAt > 0);
     if (resp.status !== 404 && cloudRules.length === 0 && !scriptedEmptyCloud) {
-      if (localRules.length > 0 && localTime > cloudTime) {
-        console.log('[WebDAV] 云端文件为空且本地规则较新，上传本地规则...'); const uploadedTime = Math.max(cloudTime + 1000, localTime + 1, trustedNow);
+      if (localRules.length > 0) {
+        console.log('[WebDAV] 云端文件为空，上传本地规则...'); const uploadedTime = Math.max(cloudTime + 1000, localTime + 1, trustedNow);
         try {
           await putWebDAVRules({ fullUrl, folderUrl, headers, rules: localRules }, localRules.join('\n'), uploadedTime, {
             rawScriptConfig: parsedHeader ? parsedHeader.rawScriptConfig : null,
@@ -6927,7 +7045,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) && cloudSettingsTime > localSettingsTime && cloudConfig) {
         const cloudSettings = getSyncSettings(cloudConfig); const colors = cloudSettings.highlightColors;
         if (colors && typeof colors === 'object' && !Array.isArray(colors)) cloudSettings.highlightColors = Object.assign({}, currentConfig.highlightColors, colors);
-        Object.assign(currentConfig, cloudSettings); localSettingsTime = cloudSettingsTime; GM_setValue(SETTINGS_LAST_MODIFIED_KEY, localSettingsTime); _settingsStoreTime = localSettingsTime;
+        Object.assign(currentConfig, cloudSettings); localSettingsTime = cloudSettingsTime; GM_setValue(SETTINGS_LAST_MODIFIED_KEY, localSettingsTime);
       }
 
       currentConfig.rules = mergedRules; persistConfig(false);
@@ -6977,23 +7095,24 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       }
     }
 
-    forceReprocessAll(); GM_setValue(WEBDAV_LAST_SYNC_KEY, trustedNow);
+    forceReprocessAll(); applyGlobalConfigUi(); GM_setValue(WEBDAV_LAST_SYNC_KEY, trustedNow);
   }
 
   function isSerhPanelOpen() {
     return ['serh-panel', 'serh-subscription-panel', 'serh-webdav-panel', 'serh-selector-panel', 'serh-settings-panel', 'serh-hlcolor-panel'].some(id => document.getElementById(id));
   }
 
-  let _webdavSyncDelayedTimer = null;
+  let _webdavSyncDelayedTimer = null; let _webdavSyncPendingWhenPanelOpen = false;
   function triggerWebDAVSyncDelayed(delayMs = 5000) {
-    if (!GM_getValue(WEBDAV_AUTO_SYNC_KEY, false)) return; const config = loadWebDAVConfig(); if (!config || !config.url || !isHttpsUrl(config.url)) return;
+    if (!GM_getValue(WEBDAV_AUTO_SYNC_KEY, false)) return;
 
     if (_webdavSyncDelayedTimer) clearTimeout(_webdavSyncDelayedTimer);
+    if (isSerhPanelOpen()) { _webdavSyncPendingWhenPanelOpen = true; return; }
     _webdavSyncDelayedTimer = setTimeout(() => {
       _webdavSyncDelayedTimer = null;
-      if (isSerhPanelOpen()) {
-        triggerWebDAVSyncDelayed(3000); return;
-      }
+      if (!GM_getValue(WEBDAV_AUTO_SYNC_KEY, false)) return;
+      const config = loadWebDAVConfig(); if (!config || !config.url || !isHttpsUrl(config.url)) return;
+      if (isSerhPanelOpen()) { _webdavSyncPendingWhenPanelOpen = true; return; }
       runWithSyncLock('webdav', async () => {
         await performAutoWebDAVSync(config);
       }).catch(err => console.error('[WebDAV] 同步失败:', err.message));
@@ -7133,7 +7252,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   function checkAutoSubscription(force = false) {
     if (!force && !currentConfig.subscriptionAutoUpdate) return; if (!force && isSerhPanelOpen()) return; const subs = getSubscriptions(); if (!subs || subs.length === 0) return;
     const now = Date.now(); const isDue = (s) => s.enabled && now - (s.lastAttempt || 0) >= AUTO_UPDATE_INTERVAL && (!s.rules || s.rules.length === 0 || now - s.lastUpdate >= AUTO_UPDATE_INTERVAL); if (!subs.some(isDue)) return;
-    runWithSyncLock('subscription', async () => {
+    runWithSyncLock('webdav', async () => {
       const pending = getSubscriptions().filter(isDue); if (!pending.length) return;
       for (const sub of pending) {
         console.log(`[订阅] 开始更新: ${sub.url}`);
@@ -7210,7 +7329,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         if (statusDirty) {
           updateStatus(document.querySelectorAll('[data-is-blocked="true"]').length);
         }
-        const hasAddedNodes = records.some(m => m.type === 'childList' && m.addedNodes.length > 0); if (hasAddedNodes) scanNewResults();
+        const hasAddedNodes = records.some(m => m.type === 'childList' && m.addedNodes.length > 0); if (hasAddedNodes) scanNewResults(); else if (statusDirty) reconcileHiddenParents();
       } finally {
         if (_engineSiteSetup && _domObserver) {
           _domObserver.observe(document.body, {
@@ -7243,35 +7362,36 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     if (searchForm) {
       _searchForm = searchForm; _searchFormHandler = () => setTimeout(forceReprocessAll, 800); searchForm.addEventListener('submit', _searchFormHandler);
     }
+  }
 
-    if (!_urlChangeHandler) {
-      let lastHref = location.href; let lastCategory = getSearchCategory();
-      _urlChangeHandler = () => {
-        const currentHref = location.href; const currentCat = getSearchCategory();
-        if (currentHref !== lastHref || currentCat !== lastCategory) {
-          const hashOnly = currentCat === lastCategory && currentHref.split('#')[0] === lastHref.split('#')[0];
-          lastHref = currentHref; lastCategory = currentCat;
-          if (hashOnly) return;
-          resetSelectorCache(); refreshEngineSite();
-        }
-      };
-      window.addEventListener('popstate', _urlChangeHandler); window.addEventListener('hashchange', _urlChangeHandler);
+  function ensureUrlWatcher() {
+    if (_urlChangeHandler) return;
+    let lastHref = location.href; let lastCategory = getSearchCategory();
+    _urlChangeHandler = () => {
+      const currentHref = location.href; const currentCat = getSearchCategory();
+      if (currentHref !== lastHref || currentCat !== lastCategory) {
+        const hashOnly = currentCat === lastCategory && currentHref.split('#')[0] === lastHref.split('#')[0];
+        lastHref = currentHref; lastCategory = currentCat;
+        if (hashOnly) return;
+        resetSelectorCache(); refreshEngineSite();
+      }
+    };
+    window.addEventListener('popstate', _urlChangeHandler); window.addEventListener('hashchange', _urlChangeHandler);
 
-      const wrapHistoryMethod = (method) => {
-        const orig = history[method];
-        if (typeof orig !== 'function' || orig._serhWrapped) return;
-        const wrapped = function(...args) {
-          const ret = orig.apply(this, args);
-          try {
-            window.dispatchEvent(new Event('serh:locationchange'));
-          } catch (e) {}
-          return ret;
-        };
-        wrapped._serhWrapped = true;
-        history[method] = wrapped;
+    const wrapHistoryMethod = (method) => {
+      const orig = history[method];
+      if (typeof orig !== 'function' || orig._serhWrapped) return;
+      const wrapped = function(...args) {
+        const ret = orig.apply(this, args);
+        try {
+          window.dispatchEvent(new Event('serh:locationchange'));
+        } catch (e) {}
+        return ret;
       };
-      wrapHistoryMethod('pushState'); wrapHistoryMethod('replaceState'); window.addEventListener('serh:locationchange', _urlChangeHandler);
-    }
+      wrapped._serhWrapped = true;
+      history[method] = wrapped;
+    };
+    wrapHistoryMethod('pushState'); wrapHistoryMethod('replaceState'); window.addEventListener('serh:locationchange', _urlChangeHandler);
   }
 
   function teardownEngineSite() {
@@ -7324,15 +7444,19 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     currentConfig = stored; return true;
   }
 
+  function getConfigStoreSignature() {
+    try { return JSON.stringify(GM_getValue(CONFIG_KEY) ?? null); } catch (e) { return null; }
+  }
+
   function checkExternalConfigChange() {
     if (document.getElementById('serh-panel')) return false;
-    const storeTime = getSettingsModifiedTime();
-    if (_settingsStoreTime !== null && storeTime === _settingsStoreTime) return false;
-    if (!adoptStoredConfigIfNewer()) return false; _settingsStoreTime = getSettingsModifiedTime(); applyCollapseMode(); forceReprocessAll(); return true;
+    const storeSignature = getConfigStoreSignature();
+    if (_configStoreSignature !== null && storeSignature === _configStoreSignature) return false;
+    if (!adoptStoredConfigIfNewer()) return false; _configStoreSignature = storeSignature; applyGlobalConfigUi(); forceReprocessAll(); return true;
   }
 
   function init() {
-    applyDarkModeClass(); applyUiScale(); applyCollapseMode(); migrateSubscriptions(); pruneUserSelectors(); _selectorStoreSignature = getSelectorStoreSignature(); _settingsStoreTime = getSettingsModifiedTime();
+    applyDarkModeClass(); applyUiScale(); applyCollapseMode(); migrateSubscriptions(); pruneUserSelectors(); _selectorStoreSignature = getSelectorStoreSignature(); _configStoreSignature = getConfigStoreSignature();
     if (window.matchMedia) {
       try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyDarkModeClass); } catch (e) {}
     }
@@ -7345,6 +7469,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     startBackgroundSync();
     registerMenu();
     exposeDebugApi();
+    ensureUrlWatcher();
     if (isEngineSite()) {
       try {
         ensureEngineSiteSetup();

@@ -7,14 +7,14 @@
 
 ### 3.2 运行测试
 
-将`test`文件夹和脚本放至同一目录运行，测试会自动读取上一级目录第一个 `.js` 脚本，按功能域分为：条件表达式、规则、选择器与引擎、跨域权限
+将`test`文件夹和脚本放至同一目录运行，测试会自动读取上一级目录 `.js` 脚本，按功能域分为：条件表达式解析、规则订阅与WebDAV同步、规则逻辑、选择器与引擎
 
 ```bash
 # 运行所有测试
 node test/test-conditions.cjs
+node test/test-connect.cjs
 node test/test-rules.cjs
 node test/test-selectors.cjs
-node test/test-connect.cjs
 
 # 运行特定测试
 node test/test-conditions.cjs 2>&1 | Select-String "failed"
@@ -59,9 +59,9 @@ d.checkRuleMatchOptimized(
 
 ```bash
 // 规则语法错误
-规则预编译失败: *://example.com/* Error: Invalid regex pattern
+规则编译失败: *://example.com/* Error: Unbalanced regex
 
-// 表示：规则语法有误，需要检查规则格式
+// 表示：规则语法有误，需要检查规则格式（常见错误信息如 Unbalanced regex / Empty regex pattern）
 ```
 ### 3.4 Debug API示例
 

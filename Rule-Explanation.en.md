@@ -133,7 +133,7 @@ Notes:
 ### 2.9 Custom Engine:
 
 Open the edit panel via script manager menu `🖋️ Custom Engine` (JS format, same structure as built-in [SELECTORS](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js)).  
-Not limited to search engines, theoretically, any web page containing a container can be added.
+Not limited to search engines, theoretically any web sites containing a container can be added.
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -143,29 +143,32 @@ Not limited to search engines, theoretically, any web page containing a containe
 | `titles` | string \| string\[\] | Optional, title selector |
 | `snippets` | string \| string\[\] | Optional, snippet selector list |
 | `extraElements` | string\[\] | Optional, array of relative CSS selectors starting from each result container to pick associated elements. |
+| `button` | boolean | Optional, `button: false` will not display the **One-click Block** button in this engine (without affecting the one-click block switch). When this parameter is missing or `button: true`, the button is allowed to be displayed by default. |
 | `disabled` | boolean | Optional, alias `disable`, `disabled: true` disables the engine, writing `disabled: false` alone restores the built-in. |
 
 **Examples:**
 
 ```javascript
 example: {
-  match: /(?:^|\.)search\.example\.com$/,
+  match: /^(?:(?:www|m)\.)?example\.com$/,
   containers: '.result',
   titles: ['.title'],
   snippets: ['.content'],
   links: 'a[href]',
+  button: false,
 },
 bing: {disabled: true},
 ```
 
 **Built-in engine IDs:**  
-`google`, `google_scholar`, `bing`, `duckduckgo_lite`, `duckduckgo`, `yandex`, `brave`, `ecosia`, `startpage`, `yahoo`, `so360`, `sogou`, `toutiao`, `quark` (in `@if($site=)`, `ddg` is an alias for `duckduckgo`, `yahoo-japan` is an alias for `yahoo`).
+`google`, `google_scholar`, `bing`, `duckduckgo_lite`, `duckduckgo`, `yandex`, `brave`, `ecosia`, `startpage`, `yahoo`, `so360`, `sogou`, `toutiao`, `quark`, `github`, `greasyfork` (in `@if($site=)`, `ddg` is an alias for `duckduckgo`, `yahoo-japan` is an alias for `yahoo`).
 
 **Description:**
 
 1. Custom engines support the `$site = "Engine ID"` condition as well as block/highlight/whitelist rules; `titles`/`snippets` can be omitted, all selector fields are unsupported pseudo-elements like `::after`.
 2. Engine IDs allow only letters/digits/`_`/`-`; `other` is a reserved key and cannot be used. The same ID as a built-in engine, or an overlapping site, overrides the built-in selectors, e.g. matching `cn.bing.com` takes priority over built-in `bing`. Priority: Custom selectors > Built-in selectors.
 3. On save, only keys that differ from the built-ins are stored; unmodified built-ins are not written to storage. Changing an override back to the built-in value or using Reset restores following script updates. When no selector matches, it falls back to `other` (empty) by default.
+4. When adding a non-engine site with search functionality (in-site search), it is recommended to write the rule to be used only on that site. For example, on `m.example.com`, the rule could be written as `*://*.example.com/* @if(title *= "keyword")` or `title/.*keyword.*/i @if($site = "example")`, indicating that the target site is the current non-engine site, thereby avoiding blocking results containing the same keyword on external sites.
 
 **Auto-analysis:**
 
