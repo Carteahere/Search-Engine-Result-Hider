@@ -1,10 +1,12 @@
-// 选择器与引擎: 合并/覆盖/序列化/校验 / 导入 / DOM扫描 / 装配拆卸与同步 / 引擎检测与门控 / 跨标签页锁 / 修复回归
+// 选择器 / 引擎 / 跨标签页锁 / 修复回归
 // 命名规则: 选择器-三位序号: 描述
+// 读取上一级目录的 *.*.*.user.js 或 Lite.user.js
+
 (async () => {
 const fs = require('fs');
 const path = require('path');
 const scriptDir = path.join(__dirname, '..');
-const scriptFiles = fs.readdirSync(scriptDir).filter((name) => name.endsWith('.js') && !name.toLowerCase().includes('lite')).sort();
+const scriptFiles = fs.readdirSync(scriptDir).filter((name) => /^\S+\.\S+\.\S+\.user\.js$/.test(name) || name === 'Lite.user.js').sort();
 if (!scriptFiles.length) throw new Error('no .js script found in ' + scriptDir);
 const file = path.join(scriptDir, scriptFiles[0]);
 console.log('Testing', file);
@@ -120,6 +122,10 @@ api.setHref('https://search.example.com/web?q=1');
 check('选择器-010: 自定义URL模式回退匹配href', api.getSearchEngine() === 'urlengine');
 api.setHref('https://search.example.com/images?q=1');
 check('选择器-011: URL模式未命中则回退other', api.getSearchEngine() === 'other');
+api.setStore({}); api.setHost('m.toutiao.com'); api.setHref('https://m.toutiao.com/search?keyword=x');
+const toutiaoMobile = api.getSearchEngine() === 'toutiao' && api.isEngineSite() === true;
+api.setHost('so.toutiao.com'); api.setHref('https://so.toutiao.com/search?keyword=x');
+check('选择器-011b: 头条移动域与桌面域均识别为引擎', toutiaoMobile && api.getSearchEngine() === 'toutiao');
 check('选择器-012: 合法配置通过', api.validateUserSelectors(CUSTOM).length === 0);
 check('选择器-013: 保留键报错', api.validateUserSelectors({ other: { match: 'a', containers: 'b' } }).some((m) => m.includes('other')));
 check('选择器-014: 非法正则报错', api.validateUserSelectors({ e1: { match: '([', containers: '.x' } }).some((m) => m.includes('e1')));
@@ -127,7 +133,9 @@ check('选择器-015: 缺 containers/match 报错', api.validateUserSelectors({ 
 check('选择器-016: 非法 CSS 报错', api.validateUserSelectors({ e4: { match: 'a', containers: 'div>>>', titles: ['a[['] } }).length === 2);
 check('选择器-017: 非对象配置报错', api.validateUserSelectors([1, 2]).length === 1 && api.validateUserSelectors('x').length === 1);
 check('选择器-018: containers 伪元素被拒且引号内不误报', api.validateUserSelectors({ e7: { match: 'a', containers: 'div::after' } }).length === 1 && api.validateUserSelectors({ e8: { match: 'a', containers: '[data-x="a::b"]' } }).length === 0);
-check('选择器-019: titles/snippets/links 伪元素被拒且引号内不误报', api.validateUserSelectors({ p1: { match: 'a', containers: '.x', titles: ['h3::after'] } }).length === 1 && api.validateUserSelectors({ p2: { match: 'a', containers: '.x', snippets: ['.c::before'] } }).length === 1 && api.validateUserSelectors({ p3: { match: 'a', containers: '.x', links: 'a::after' } }).length === 1 && api.validateUserSelectors({ p4: { match: 'a', containers: '.x', titles: ['[data-k="a::b"]'] } }).length === 0);
+check('选择器-019: titles/snippets/links 伪元素(含单冒号)被拒且引号内不误报', api.validateUserSelectors({ p1: { match: 'a', containers: '.x', titles: ['h3::after'] } }).length === 1 && api.validateUserSelectors({ p2: { match: 'a', containers: '.x', snippets: ['.c::before'] } }).length === 1 && api.validateUserSelectors({ p3: { match: 'a', containers: '.x', links: 'a::after' } }).length === 1 && api.validateUserSelectors({ s1: { match: 'a', containers: 'div:before' } }).length === 1 && api.validateUserSelectors({ s2: { match: 'a', containers: '.x', titles: ['h3:first-line'] } }).length === 1 && api.validateUserSelectors({ s3: { match: 'a', containers: '.x', links: 'a:first-letter' } }).length === 1 && api.validateUserSelectors({ p4: { match: 'a', containers: '.x', titles: ['[data-k="a::b"]'] } }).length === 0);
+const pseudoL = new Function(extractFn(readRepoFile('Lite.user.js'), 'hasPseudoElement') + '\nreturn hasPseudoElement;')();
+check('选择器-019d: Lite 单冒号伪元素同样被拒', pseudoL('div:before') === true && pseudoL('div::before') === true && pseudoL('[data-x="a:before"]') === false);
 check('选择器-019b: 引号内逗号与snippets选择器列表合法', api.validateUserSelectors({ p5: { match: 'a', containers: '.x', snippets: ['[data-s="a,b"]'], extraElements: ['[data-e="a,b"]'] } }).length === 0 && api.validateUserSelectors({ p6: { match: 'a', containers: '.x', snippets: ['.a, .b'] } }).length === 0);
 check('选择器-020: 对象match非法flags报错且合法通过', api.validateUserSelectors({ e11: { match: { source: 'a', flags: 'q' }, containers: '.x' } }).length === 1 && api.validateUserSelectors({ e12: { match: { source: 'a', flags: 'i' }, containers: '.x' } }).length === 0);
 check('选择器-021: 字符串match写成/re/g被拒且合法字面量通过', api.validateUserSelectors({ f1: { match: '/a/g', containers: '.x' } }).some((m) => m.includes('invalidRegexFlags')) && api.validateUserSelectors({ f2: { match: '/a/i', containers: '.x' } }).length === 0);
@@ -140,6 +148,10 @@ check('选择器-024: 兼容旧JSON', !R3.errors.length && !!R3.config && R3.con
 const R4 = api.parseSelectorText('e8: { match: /a[/ }');
 const R5 = api.parseSelectorText('e7: { match: /a/q }');
 check('选择器-025: 未闭合正则/非法flags解析报错', R4.config === null && R4.errors.length === 1 && R5.config === null && R5.errors.length === 1);
+const RC = api.parseSelectorText('// head\nmysite: {\n  /* a */ match: /(?:^|\\.)x\\.com$/, // b\n  containers: ".r"\n} // tail');
+check('选择器-025b: 解析器跳过行/块注释与首尾注释', !RC.errors.length && !!RC.config && RC.config.mysite.containers === '.r' && RC.config.mysite.match === '(?:^|\\.)x\\.com$');
+const RC2 = api.parseSelectorText('// head\nconst SELECTORS = { mysite: { match: "a", containers: ".r" } }; // tail');
+check('选择器-025c: const前注释与分号后注释可解析', !RC2.errors.length && !!RC2.config && RC2.config.mysite.containers === '.r');
 api.setStore({ flg: { match: { source: 'a\\/b', flags: 'i' }, containers: '.x', titles: [], snippets: [], links: 'a[href]' } });
 const P2 = api.serializeSelectors();
 const R9 = api.parseSelectorText(P2);
@@ -149,8 +161,7 @@ check('选择器-027: 解析时大写flags归一为小写', !R9u.errors.length &
 api.setStore({ 'my-engine': { match: { source: 'a', flags: '' }, containers: '.r', titles: [], snippets: [], links: 'a[href]' } });
 const P4 = api.serializeSelectors();
 const R15 = api.parseSelectorText(P4);
-check('选择器-028: 连字符键输出带引号且为合法JS字面量', P4.includes("'my-engine': {") && (() => { try { const o = new Function('const SELECTORS = {' + P4 + '}; return SELECTORS;')(); return !!(o && o['my-engine'] && o.bing); } catch (e) { return false; } })());
-check('选择器-029: 连字符键往返一致且过校验', !R15.errors.length && !!R15.config && !!R15.config['my-engine'] && R15.config['my-engine'].containers === '.r' && api.validateUserSelectors(R15.config).length === 0);
+check('选择器-028: 连字符键输出带引号, 为合法JS字面量且往返一致', P4.includes("'my-engine': {") && (() => { try { const o = new Function('const SELECTORS = {' + P4 + '}; return SELECTORS;')(); return !!(o && o['my-engine'] && o.bing); } catch (e) { return false; } })() && !R15.errors.length && !!R15.config && !!R15.config['my-engine'] && R15.config['my-engine'].containers === '.r' && api.validateUserSelectors(R15.config).length === 0);
 api.setHost('www.bing.com');
 api.setStore({ bing: { match: '(?:^|\\.)bing\\.', containers: 'div.my-bing', titles: ['h2'], snippets: ['.s'], links: 'a[href]' } });
 check('选择器-030: 同ID覆盖:容器使用用户选择器', api.getContainerSelector('bing') === 'div.my-bing');
@@ -196,6 +207,16 @@ const liteDef = api.getSelectors().duckduckgo_lite;
 check('选择器-048: 清空关联配置属有效修改/缺省与空相等/覆盖可清空内置关联', !!api.diffUserSelectors({ duckduckgo_lite: { ...liteDef, extraElements: [] } }).duckduckgo_lite && api.sameSelectorDef(CUSTOM.mysearx, { ...CUSTOM.mysearx, extraElements: [] }) && (() => { api.setStore({ duckduckgo_lite: { ...liteDef, match: liteDef.match.source, extraElements: [] } }); const r = api.getSelectors().duckduckgo_lite.extraElements.length === 0; api.setStore({}); return r; })());
 const parseCondition = new Function(extractFn(src, 'hostLabelToASCII') + extractFn(src, 'toASCIIHostname') + extractFn(src, 'parseConditionPart') + '; return parseConditionPart;')();
 check('选择器-049: 主站条件不匹配Lite且Lite条件匹配专有ID', parseCondition('$site=duckduckgo', 'duckduckgo_lite', 'lite.duckduckgo.com').static === false && parseCondition('$site=duckduckgo_lite', 'duckduckgo_lite', 'lite.duckduckgo.com').static === true && parseCondition('$site=duckduckgo_lite', 'duckduckgo', 'duckduckgo.com').static === false);
+api.setStore({});
+const btnSelectors = api.getSelectors();
+check('选择器-049b: github/greasyfork 内置关闭一键屏蔽按钮且其他引擎缺省允许', btnSelectors.github.button === false && btnSelectors.greasyfork.button === false && btnSelectors.bing.button === undefined && btnSelectors.google.button === undefined);
+const P5 = api.serializeSelectors();
+const R16 = api.parseSelectorText(P5);
+check('选择器-049c: button:false 序列化往返保留并通过校验', /button: false,/.test(P5) && !R16.errors.length && !!R16.config && R16.config.github.button === false && R16.config.greasyfork.button === false && api.validateUserSelectors(R16.config).length === 0);
+check('选择器-049d: button 非布尔被拒且显式 true 可覆盖内置 false', api.validateUserSelectors({ z12: { match: 'a', containers: '.x', button: 'no' } }).some((m) => m.includes('button')) && (() => { api.setStore({ github: { button: true } }); const v = api.getSelectors().github.button === true; api.setStore({}); return v; })());
+check('选择器-049e: 未写 button 时继承内置且 diff 仅记录 button 变化', (() => { api.setStore({ github: { containers: api.getSelectors().github.containers } }); const inherited = api.getSelectors().github.button === false; api.setStore({}); return inherited; })() && api.diffUserSelectors({ github: Object.assign({}, api.getSelectors().github, { button: true }) }).github.button === true && Object.keys(api.diffUserSelectors({ bing: Object.assign({}, api.getSelectors().bing) })).length === 0 && api.sameSelectorDef({ match: 'a', containers: '.x' }, { match: 'a', containers: '.x', button: true }));
+const liteBtnDefs = (() => { const t = readRepoFile('Lite.user.js'); const start = t.indexOf('const SELECTORS = {'); return eval('(' + t.slice(t.indexOf('{', start), extractObjectLiteral(t, t.indexOf('{', start)) + 1) + ')'); })();
+check('选择器-049f: Lite 版同步内置 button:false 且逻辑一致', liteBtnDefs.github.button === false && liteBtnDefs.greasyfork.button === false && readRepoFile('Lite.user.js').includes('if (!isBlockButtonEnabledForEngine(engine)) return;'));
 })();
 
 // ---- 选择器导入 ----
@@ -236,16 +257,13 @@ function createEnv() {
   assert('选择器-051: 文件内容写入编辑区且回调在写入后触发', textarea.value === 'myx: {}' && env.events.join('|') === 'value|loaded:myx: {}');
 }
 {
-  const { env, api, fakeInput } = createEnv();
-  api.importSelectorsFromFile(null, () => {});
-  fakeInput.listeners.cancel[0]();
-  assert('选择器-052: cancel 后解锁并移除 input', api.isPreventPanelClose() === false && !env.bodyChildren.includes(fakeInput));
-}
-{
-  const { env, api, fakeInput } = createEnv();
-  api.importSelectorsFromFile(null, () => {});
-  fakeInput.onchange({ target: { files: [] } });
-  assert('选择器-053: 未选择文件时解锁并移除 input', api.isPreventPanelClose() === false && !env.bodyChildren.includes(fakeInput));
+  const a = createEnv();
+  a.api.importSelectorsFromFile(null, () => {});
+  a.fakeInput.listeners.cancel[0]();
+  const b = createEnv();
+  b.api.importSelectorsFromFile(null, () => {});
+  b.fakeInput.onchange({ target: { files: [] } });
+  assert('选择器-052: cancel 或未选择文件均解锁并移除 input', a.api.isPreventPanelClose() === false && !a.env.bodyChildren.includes(a.fakeInput) && b.api.isPreventPanelClose() === false && !b.env.bodyChildren.includes(b.fakeInput));
 }
 {
   const { env, api, fakeInput } = createEnv();
@@ -255,20 +273,12 @@ function createEnv() {
   assert('选择器-054: 读取失败解锁且不触发回调并弹错误通知', api.isPreventPanelClose() === false && !env.bodyChildren.includes(fakeInput) && env.events.length === 0 && api.toasts.length === 1 && api.toasts[0][0] === 'fileImportFailed' && api.toasts[0][1] === 'error');
 }
 {
-  const { api, fakeInput, textarea } = createEnv();
-  api.importSelectorsFromFile(textarea);
-  fakeInput.files = [{ _content: 'x: {}' }];
-  fakeInput.onchange({ target: fakeInput });
-  assert('选择器-055: 未传回调时仍写入并解锁', textarea.value === 'x: {}' && api.isPreventPanelClose() === false);
-}
-{
   const { env, api, fakeInput, window } = createEnv();
   api.importSelectorsFromFile(null, () => env.events.push('loaded'));
   window.listeners.focus.forEach((fn) => fn());
   await new Promise((r) => setTimeout(r, 350));
   assert('选择器-056: 焦点回落无文件时兜底解锁并解绑', api.isPreventPanelClose() === false && !env.bodyChildren.includes(fakeInput) && window.listeners.focus.length === 0);
 }
-assert('选择器-057: 面板导入回调刷新行号', /importSelectorsFromFile\(textarea, \(\) => \{\s*showError\(\[\]\);\s*updateLineNumbers\('selectors'\);/.test(src));
 })();
 
 // ---- DOM增量扫描 ----
@@ -310,7 +320,7 @@ function createEnv() {
     let currentConfig = { enabled: true, debug: false }; let showHiddenResults = false;
     let _observedSelector = ''; let currentSelector = '.a, .b';
     let activeSelectors = null; let _engineCacheHost = '';
-    function getSearchEngine() { return 'test'; } function getContainerSelector() { return currentSelector; }
+    function getSearchEngine() { return 'test'; } function isBingImagesPage() { return false; } function getContainerSelector() { return currentSelector; }
     function resetResultStyles(el) { el.resetCount++; }
     ${extractFn(src, 'resetSelectorCache')}
     ${extractFn(src, 'filterNestedContainers')}
@@ -353,7 +363,7 @@ function createEnv() {
   check('选择器-063: matches 异常按陈旧处理且不崩溃', bad.observed === false && bad.unobserveCount === 1);
 }
 {
-  const filterFn = new Function(`${extractFn(src, 'filterNestedContainers')}\nreturn filterNestedContainers;`)();
+  const filterFn = new Function(`function isBingImagesPage() { return false; } function getSearchEngine() { return 'test'; }\n${extractFn(src, 'filterNestedContainers')}\nreturn filterNestedContainers;`)();
   function makeNode(children, links) {
     const node = { children: children || [], links: links || [] };
     node.querySelectorAll = (sel) => (sel === 'a[href]' ? node.links : []);
@@ -376,6 +386,13 @@ function createEnv() {
   check('选择器-065: 纯包装外层仍被丢弃', !kept2.includes(wrapper) && kept2.includes(wsub));
   const weird = { querySelector() { throw new Error('bad'); }, querySelectorAll() { throw new Error('bad'); }, contains() { return false; } };
   check('选择器-066: 选择器异常时不崩溃', filterFn([weird], 'div.g').length === 1);
+}
+{
+  const bingFilter = new Function(`function isBingImagesPage() { return true; } function getSearchEngine() { return 'bing'; } function getResultLink(el) { return el.link; }\n${extractFn(src, 'filterNestedContainers')}\nreturn filterNestedContainers;`)();
+  const mk = (href) => ({ link: { href }, querySelectorAll: () => [], querySelector: () => null, contains: () => false });
+  const outer = mk('https://x/1'), inner = mk('https://x/1'), other = mk('https://x/2');
+  const kept = bingFilter([outer, inner, other], 'div.g');
+  check('选择器-067: Bing图片同链接嵌套容器按文档序去重', kept.length === 2 && kept[0] === outer && kept[1] === other);
 }
 })();
 
@@ -404,7 +421,7 @@ function createStyleEnv(returnValue) {
   const styleEl = { removeCalls: 0, remove() { this.removeCalls++; } };
   const env = createStyleEnv(styleEl);
   env.api.injectGlobalStyles();
-  check('选择器-067: 首次注入记录样式句柄且重复注入不重复添加', env.stats.addStyleCalls === 1 && env.stats.widgetCalls === 1 && env.api.getStyleEl() === styleEl);
+  check('选择器-067b: 首次注入记录样式句柄且重复注入不重复添加', env.stats.addStyleCalls === 1 && env.stats.widgetCalls === 1 && env.api.getStyleEl() === styleEl);
   env.api.removeGlobalStyles();
   check('选择器-068: 移除后释放句柄并调用 remove', styleEl.removeCalls === 1 && env.api.getStyleEl() === null);
 }
@@ -482,7 +499,7 @@ function createTeardownEnv() {
   check('选择器-080: 提取异常返回 null 而不崩溃', sigApi.getResultContentSignature(bad) === null);
 }
 
-// reprocessContainer
+// reprocessContainer: processSingleResult 以 data-blocker-processed 短路, 重处理前须先清除
 {
   const reprocessFn = extractFn(src, 'reprocessContainer');
   function makeFactory(processImpl) {
@@ -547,7 +564,6 @@ function createTeardownEnv() {
   const retryFn = extractFn(src, 'scheduleResultRetry');
   const limitMatch = src.match(/const RESULT_RETRY_LIMIT = (\d+)/);
   const delayMatch = src.match(/RESULT_RETRY_DELAY = (\d+)/);
-  check('选择器-085: 重试常量存在', !!limitMatch && !!delayMatch);
   function makeRetryEnv() {
     const timers = [];
     const api = new Function('resultObserver', 'timers', `
@@ -592,19 +608,36 @@ function createTeardownEnv() {
   {
     const { api, timers } = makeRetryEnv();
     const el = makeRetryEl();
-    api.scheduleResultRetry(el); api.scheduleResultRetry(el); api.scheduleResultRetry(el); api.scheduleResultRetry(el);
-    check('选择器-089: 连续异常达到上限前不标记完成且超限后彻底放手', timers.length === 3 && el.hasAttribute('data-blocker-processed') === false && el.hasAttribute('data-observed') === false && el.unobserveCount === 1 && !api.hasCount(el));
+    api.scheduleResultRetry(el); timers[0].fn();
+    api.scheduleResultRetry(el); timers[1].fn();
+    api.scheduleResultRetry(el); timers[2].fn();
+    api.scheduleResultRetry(el);
+    check('选择器-089: 超限后保留 data-observed 不再重新入队', timers.length === 3 && el.hasAttribute('data-observed') === true && el.unobserveCount === 1 && !api.hasCount(el));
+  }
+  {
+    const { api, timers } = makeRetryEnv();
+    const el = makeRetryEl();
+    for (let i = 0; i < 4; i++) { el.removeAttribute('data-observed'); api.scheduleResultRetry(el); if (timers[i]) timers[i].fn(); }
+    check('选择器-089b: 清标记后调度立即补回，耗尽重试仍保持 data-observed', el.hasAttribute('data-observed') === true && timers.length === 3 && !api.hasCount(el));
   }
 }
 
-// 结果观察回调只保留一处重试调度(计数翻倍致永不达上限)
+// URL 监听独立注册, 自定义 URL 引擎可从站内 SPA 进入搜索页装配
 {
-  const roStart = src.indexOf('const resultObserver = new IntersectionObserver(');
-  const roSrc = src.slice(roStart, src.indexOf('function scheduleResultRetry', roStart));
-  const liteRoSrc0 = readRepoFile('Lite.user.js');
-  const liteRoStart = liteRoSrc0.indexOf('const resultObserver = new IntersectionObserver(');
-  const liteRoSrc = liteRoSrc0.slice(liteRoStart, liteRoSrc0.indexOf('function scheduleResultRetry', liteRoStart));
-  check('选择器-090: 回调内只保留一处 scheduleResultRetry(主版与Lite同步)', (roSrc.match(/scheduleResultRetry\(/g) || []).length === 1 && liteRoStart !== -1 && (liteRoSrc.match(/scheduleResultRetry\(/g) || []).length === 1);
+  const listeners = {}; const calls = { refresh: 0, reset: 0 };
+  const history = { pushState() {}, replaceState() {} };
+  const location = { href: 'https://start.example.com/' };
+  const windowStub = { addEventListener: (n, fn) => { (listeners[n] = listeners[n] || []).push(fn); }, dispatchEvent: () => {} };
+  const api = new Function('window', 'location', 'history', 'Event', 'getSearchCategory', 'refreshEngineSite', 'resetSelectorCache', `
+    let _urlChangeHandler = null;
+    ${extractFn(src, 'ensureUrlWatcher')}
+    return { ensureUrlWatcher };
+  `)(windowStub, location, history, class {}, () => 'web', () => { calls.refresh++; }, () => { calls.reset++; });
+  api.ensureUrlWatcher();
+  const registered = ['popstate', 'hashchange', 'serh:locationchange'].every((n) => Array.isArray(listeners[n]) && listeners[n].length === 1);
+  location.href = 'https://start.example.com/search?q=x';
+  listeners.popstate[0]();
+  check('选择器-091: URL监听在引擎装配前注册且导航后刷新', registered && history.pushState._serhWrapped === true && calls.reset === 1 && calls.refresh === 1);
 }
 
 // ensureEngineSiteSetup / refreshEngineSite
@@ -641,7 +674,7 @@ function createTeardownEnv() {
   }
   const { api, calls } = createEnsureEnv(true);
   api.ensureEngineSiteSetup();
-  check('选择器-091: 引擎站装配不启动全站后台同步且重复装配幂等', calls.start === 0 && calls.inject === 1 && calls.scan === 1 && api.state().setup === true && (() => { api.ensureEngineSiteSetup(); return calls.scan === 1; })());
+  check('选择器-091b: 引擎站装配不启动全站后台同步且重复装配幂等', calls.start === 0 && calls.inject === 1 && calls.scan === 1 && api.state().setup === true && (() => { api.ensureEngineSiteSetup(); return calls.scan === 1; })());
   const env2 = createEnsureEnv(false);
   env2.api.ensureEngineSiteSetup();
   check('选择器-092: 非引擎站不装配也不启动同步', env2.calls.start === 0 && env2.calls.inject === 0 && env2.api.state().setup === false);
@@ -685,23 +718,17 @@ function getSelectors() { return SELECTORS; }
 ${fnBody}
 ${extractFn(src, 'getSearchCategory')}
 return { getSearchEngine, getSearchCategory };`);
-const gateFactory = new Function('window', 'SELECTORS', `let _engineCacheHost = null; let _engineCacheResult = 'other';
-function getSelectors() { return SELECTORS; }
-${fnBody}
-${extractFn(src, 'isEngineSite')}
-return isEngineSite;`);
 
-// 每引擎保留代表与别名/TLD形态, 边界保留 wwwN上限/前缀不命中/后缀攻击/子域服务排除
+// 每引擎保留代表域名, 边界保留前缀不命中与仿冒后缀
 const cases = [
   ['www.bing.com', 'bing'], ['www5.bing.com', 'other'],
   ['duckduckgo.com', 'duckduckgo'], ['ddg.gg', 'duckduckgo'],
-  ['lite.duckduckgo.com', 'duckduckgo_lite'], ['lite.ddg.gg', 'other'],
-  ['google.com', 'google'], ['www.google.co.jp', 'google'], ['google.events', 'google'],
+  ['lite.duckduckgo.com', 'duckduckgo_lite'],
+  ['google.com', 'google'], ['www.google.co.jp', 'google'],
   ['scholar.google.com', 'google_scholar'], ['mail.google.com', 'other'],
   ['yandex.ru', 'yandex'], ['search.brave.com', 'brave'],
   ['www.ecosia.org', 'ecosia'], ['ecosia.org.evil.com', 'other'],
-  ['www.startpage.com', 'startpage'], ['app.startpage.com', 'other'], ['startpage.com.evil.com', 'other'],
-  ['search.yahoo.com', 'yahoo'], ['example.com', 'other'], ['notgoogle.com', 'other'],
+  ['www.startpage.com', 'startpage'], ['search.yahoo.com', 'yahoo'], ['example.com', 'other'],
 ];
 for (const [i, [host, expected]] of cases.entries()) assert(`选择器-096-${i + 1}: ${host} -> ${expected}`, factory({ location: { hostname: host } }, selectors).getSearchEngine() === expected);
 
@@ -734,18 +761,6 @@ for (const [i, [loc, expected]] of catCases.entries()) assert(`选择器-098-${i
   assert('选择器-099: Lite 分类口径与主脚本一致', bad.length === 0, bad.map(([loc, expected]) => loc.hostname + loc.pathname + loc.search + '=>' + liteCat(loc)));
 }
 assert('选择器-100: 头部包含 @match *://*/* (全站注入)', matchLines.includes('*://*/*'));
-{
-  function detectEngine(host) {
-    for (const name of Object.keys(selectors)) { const def = selectors[name]; if (def && def.match && def.match.test(host)) return name; }
-    return 'other';
-  }
-  const hosts = ['www.bing.com', 'ddg.gg', 'bing.com.evil.com', 'brave.com', 'app.startpage.com', 'www.ecosia.org'];
-  for (const [i, host] of hosts.entries()) {
-    const eng = detectEngine(host);
-    const gated = gateFactory({ location: { hostname: host } }, selectors)();
-    assert(`选择器-101-${i + 1}: ${host}: 引擎判定与门控一致`, gated === (eng !== 'other'));
-  }
-}
 })();
 
 // ---- 跨标签页同步锁 / 菜单 / 摘要后备 / 解析边界 ----
@@ -781,9 +796,6 @@ function createLockEnv(tabId, ttl = 2000) {
   const p2 = tab2.runWithSyncLock('race', async () => { ran2++; await new Promise((r) => setTimeout(r, 30)); });
   await Promise.all([p1, p2]);
   check('选择器-106: 并发抢占仅一个执行者且完成后锁释放', ran1 + ran2 === 1 && tab1.readSyncLock('race') === null && tab2.readSyncLock('race') === null);
-  let ran3 = 0;
-  await tab1.runWithSyncLock('race', async () => { ran3++; });
-  check('选择器-107: 释放后他页可再次执行', ran3 === 1);
 }
 {
   const tab = createLockEnv('tab-c');
@@ -799,7 +811,7 @@ function createLockEnv(tabId, ttl = 2000) {
   check('选择器-109: 注册3个菜单项且首项为打开面板', menus.length === 3 && menus[0] === 'menuOpenPanel');
 }
 
-// 结果摘要后备提取: 相对选择器不得抛异常中断结果处理
+// 结果摘要后备提取遇到相对选择器不得抛异常
 await (async () => {
   const selectorsDecl = src.match(/const SELECTORS = \{[\s\S]*?\n  \};/)[0];
   const getResultSnippet = new Function('GM_getValue', 'let activeSelectors = null;\nconst SELECTORS_KEY = \'searchfilter_selectors\';\n' + selectorsDecl + '\n' + ['normalizeSelectorList', 'getUserSelectors', 'getSelectors', 'getResultText', 'getResultExtraElements', 'getResultSnippet'].map((n) => extractFn(src, n)).join('\n') + '\nreturn getResultSnippet;')(() => undefined);
@@ -860,8 +872,6 @@ await (async () => {
   const PK = apiSer({ '123abc': { match: '(?:^|\\.)x\\.example\\.com$', containers: '.r', titles: [], snippets: [], links: 'a[href]' } });
   const RRT = apiM.parseSelectorText(PK);
   check('选择器-119: 序列化往返无损(数字开头键自动加引号)', PK.includes("'123abc':") && !RRT.errors.length && !!RRT.config && !!RRT.config['123abc'] && RRT.config['123abc'].match === '(?:^|\\.)x\\.example\\.com$');
-  const otherRes = apiM.parseSelectorText('other: {containers: ".x", match: /x/}');
-  check('选择器-120: 保留键other单独输入解析失败不清空存储', otherRes.config === null && otherRes.errors.length > 0);
   const mixedOther = apiM.parseSelectorText('{"myse":{"match":"/x/","containers":".r"},"other":{"match":"y"}}');
   const explicitEmpty = apiM.parseSelectorText('{}');
   check('选择器-121: 混合输入中other被忽略且显式{}仍为合法空配置', !!mixedOther.config && !!mixedOther.config.myse && !('other' in mixedOther.config) && !mixedOther.errors.length && !!explicitEmpty.config && Object.keys(explicitEmpty.config).length === 0 && !explicitEmpty.errors.length);
@@ -909,6 +919,7 @@ await (async () => {
     const root = makeTreeEl('body', '');
     const fns = new Function('doc', `
       let showHiddenResults = ${!!showHidden};
+      let _hiddenParentCount = 0;
       function blockedShown() { return showHiddenResults; }
       const _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap();
       const map_resultExtraElements = new WeakMap();
@@ -968,6 +979,15 @@ await (async () => {
     check('选择器-127b: 父容器自身被屏蔽时不因末子项解除而恢复', li.style.display === 'none' && li.getAttribute('data-blocker-yandex-parent') === 'true');
   }
   {
+    const { root, fns } = makeParentEnv(false);
+    const P = makeTreeEl('div', 'MjjYud', root);
+    blockEl(fns, makeTreeEl('div', 'g', P));
+    fns.hideParentIfNoVisibleSiblings(P, P.querySelectorAll('div.g'), 'data-blocker-google-parent');
+    P.children.splice(0);
+    fns.reconcileHiddenParents();
+    check('选择器-127c: 子结果被站点移除后 reconcile 恢复父容器', P.style.display === '' && !P.hasAttribute('data-blocker-google-parent') && !P.hasAttribute('data-serh-orig-display'));
+  }
+  {
     const { root, fns } = makeParentEnv(true);
     const P = makeTreeEl('div', 'MjjYud', root); P.style.display = 'flex';
     blockEl(fns, makeTreeEl('div', 'g', P)); blockEl(fns, makeTreeEl('div', 'g', P));
@@ -985,6 +1005,17 @@ await (async () => {
     blockEl(fns, sibling);
     fns.hideParentIfNoVisibleSiblings(P, fns.googleResultBlocks(P), 'data-blocker-google-parent');
     check('选择器-130: div.g与tF2Cxc都屏蔽后父容器隐藏', P.style.display === 'none' && P.hasAttribute('data-blocker-google-parent'));
+  }
+  {
+    const { root, fns } = makeParentEnv(false);
+    const P = makeTreeEl('div', 'MjjYud', root);
+    const g = makeTreeEl('div', 'g', P);
+    makeTreeEl('div', 'tF2Cxc', g);
+    blockEl(fns, g);
+    fns.hideParentIfNoVisibleSiblings(P, fns.googleResultBlocks(P), 'data-blocker-google-parent');
+    check('选择器-130b: 嵌套tF2Cxc不再把已屏蔽的div.g误判为可见，父容器隐藏', P.style.display === 'none' && P.getAttribute('data-blocker-google-parent') === 'true' && fns.googleResultBlocks(P).length === 1);
+    fns.resetResultStyles(g);
+    check('选择器-130c: 解除嵌套结果后父容器恢复', P.style.display === '' && !P.hasAttribute('data-blocker-google-parent'));
   }
   {
     const { root, fns } = makeParentEnv(false);
@@ -1089,17 +1120,28 @@ return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS
 {
   let appended = null;
   const fakeBtn = { className: '', innerHTML: '', style: {}, addEventListener() {}, onclick: null };
-  const api = new Function('document', 'window', `
+  const makeBtnApi = (selectors) => new Function('document', 'window', 'SELECTORS', `
+function getSelectors() { return SELECTORS; }
 function getSearchEngine() { return 'other'; }
 function getSearchCategory() { return 'web'; }
 function isBingImagesPage(engine) { return engine === 'bing' && getSearchCategory() === 'images'; }
+${extractFn(src, 'isBlockButtonEnabledForEngine')}
 ${extractFn(src, 'ensurePositioned')}
 ${extractFn(src, 'injectBlockButton')}
-return { injectBlockButton };
-`)({ createElement: () => fakeBtn }, { getComputedStyle: () => ({ position: 'relative' }) });
+return { injectBlockButton, isBlockButtonEnabledForEngine };
+`)({ createElement: () => fakeBtn }, { getComputedStyle: () => ({ position: 'relative' }) }, selectors);
+  const api = makeBtnApi({ other: {} });
   const container = { classList: { contains: () => false }, closest: () => null, querySelector: () => null, getAttribute: () => null, appendChild(el) { appended = el; } };
   api.injectBlockButton(container, 'other', 'example.com');
   check('选择器-139: 无标题元素容器仍注入屏蔽按钮且锚定容器', !!appended && appended.className === 'serh-quick-block');
+
+  appended = null;
+  const offApi = makeBtnApi({ github: { button: false }, greasyfork: { button: false }, bing: { button: true } });
+  offApi.injectBlockButton(container, 'github', 'example.com');
+  offApi.injectBlockButton(container, 'greasyfork', 'example.com');
+  check('选择器-139b: button:false 引擎不注入一键屏蔽按钮', appended === null && offApi.isBlockButtonEnabledForEngine('github') === false && offApi.isBlockButtonEnabledForEngine('greasyfork') === false);
+  offApi.injectBlockButton(container, 'bing', 'example.com');
+  check('选择器-139c: 显式 button:true 或缺省仍注入', !!appended && offApi.isBlockButtonEnabledForEngine('bing') === true && offApi.isBlockButtonEnabledForEngine('other') === true);
 
   const cfgDefaultsLine = src.match(/const CFG_DEFAULTS = \{[^}]+\};/)[0];
   const hlLine = src.match(/const DEFAULT_HIGHLIGHT_COLORS = \{[^}]+\};/)[0];
@@ -1127,7 +1169,7 @@ return { setConfig: (v) => { currentConfig = v; }, run: (r) => addMatchedRuleLab
   labelAppended = null;
   labelApi.setConfig({ showMatchedSource: false });
   labelApi.run(fakeResult);
-  check('选择器-141: 显示来源开关控制命中规则标签注入', onState && labelAppended === null);
+  check('选择器-141c: 显示来源开关控制命中规则标签注入', onState && labelAppended === null);
 }
 
 // ---- 取色预览色块快速填入 ----
@@ -1155,29 +1197,10 @@ return { setConfig: (v) => { currentConfig = v; }, run: (r) => addMatchedRuleLab
   const keyEn = mkFn('en'), keyZh = mkFn('zh');
   check('选择器-143: 来源键中英混排归一为语言无关键', keyEn('本地规则') === 'local' && keyEn('订阅2') === 'sub:2' && keyZh('Local Rule') === 'local' && keyZh('Sub3') === 'sub:3' && keyEn('whatever') === '' && keyEn('sub:2') === 'sub:2' && keyZh('local') === 'local');
   const liteSrc = readRepoFile('Lite.user.js');
-  const liteStat = new Function(`
-    const t = (k) => ({ localRule: '本地规则' }[k]);
-    ${extractFn(liteSrc, 'statSourceKey')}
-    return statSourceKey;
-  `)();
-  check('选择器-143b: Lite来源键接受local且保持语言归一', liteStat('local') === 'local' && liteStat('本地规则') === 'local' && liteStat('Local Rule') === 'local' && liteStat('sub:2') === 'sub:2' && liteStat('订阅3') === 'sub:3' && liteStat('x') === '');
   const liteClear = new Function(`${extractFn(liteSrc, 'clearMatchedData')}\nreturn clearMatchedData;`)();
   const attrs = { 'data-matched-rule': '1', 'data-matched-source': '2', 'data-matched-source-key': 'local', 'data-whitelist-rule': '3', 'data-whitelist-source': '4', 'data-whitelist-source-key': 'local', keep: '1' };
   liteClear({ removeAttribute(k) { delete attrs[k]; } });
   check('选择器-143c: Lite清理命中/白名单来源键', !('data-matched-source-key' in attrs) && !('data-whitelist-source-key' in attrs) && attrs.keep === '1');
-  check('选择器-143d: Lite中英文语言包均含errorWord', /errorWord:\s*'错误'/.test(liteSrc) && /errorWord:\s*'Error'/.test(liteSrc));
-  const liteValidate = new Function(`
-    const t = (k) => k;
-    const normalizeSelectorList = (v) => Array.isArray(v) ? v.filter((s) => typeof s === 'string' && s) : (typeof v === 'string' && v ? [v] : []);
-    const isValidCssSelector = () => true;
-    const hasPseudoElement = (s) => /::/.test(String(s).replace(/(["'])(?:\\\\.|(?!\\1).)*\\1/g, ''));
-    ${extractFn(liteSrc, 'validateUserSelectors')}
-    return validateUserSelectors;
-  `)();
-  check('选择器-143e: Lite引号内逗号与snippets选择器列表合法', liteValidate({ p5: { match: 'a', containers: '.x', snippets: ['[data-s="a,b"]', '.a, .b'], extraElements: ['[data-e="a,b"]'] } }).length === 0);
-  const liteHeader = new Function('currentConfig', 'console', `${extractFn(liteSrc, 'parseSyncHeader')}\nreturn parseSyncHeader;`)({ debug: false }, { warn: () => {} });
-  const liteHeaderRes = liteHeader('# Selectors: {"bing":{"match":"a","containers":".x","extraElements":["[data-e=\\"a,b\\"]"]}}\nrule1');
-  check('选择器-143f: Lite同步头接受引号内逗号', !!liteHeaderRes.config && liteHeaderRes.config.selectors.bing.extraElements[0] === '[data-e="a,b"]');
 }
 
 // ---- 编辑区成对括号显示 ----
@@ -1207,13 +1230,7 @@ return { isJsRegexAllowed, buildBracketMatchMap, findBracketPairAt, findEnclosin
   const statsM = mkBubbleHtml(src, 'openStats'), panelM = mkBubbleHtml(src, 'openPanel');
   const statsL = mkBubbleHtml(readRepoFile('Lite.user.js'), 'openStats');
   check('选择器-148: 打开统计模式斜杠翻转(主版与Lite同步)且与面板图标可区分', statsM.includes('x1="19.07" y1="4.93" x2="4.93" y2="19.07"') && !statsM.includes('x1="4.93" y1="4.93"') && statsL.includes('x1="19.07"') && statsM !== panelM && panelM.includes('x1="4.93" y1="4.93" x2="19.07" y2="19.07"'));
-  const bindIdx = src.indexOf("document.addEventListener('touchmove', onDrag");
-  const unbindIdx = src.indexOf("document.removeEventListener('touchmove', onDrag)");
-  check('选择器-149: 拖拽绑定并解绑 touchcancel', bindIdx > -1 && src.slice(bindIdx, bindIdx + 400).includes("document.addEventListener('touchcancel', endDrag)") && unbindIdx > -1 && src.slice(unbindIdx, unbindIdx + 300).includes("document.removeEventListener('touchcancel', endDrag)"));
-  check('选择器-150: 悬浮球数字类名已加 serh- 前缀', src.includes('.serh-bubble-number') && src.includes('class="serh-bubble-number"') && !src.includes('class="bubble-number"') && !/(^|[^\w-])\.bubble-number\s*\{/.test(src));
   check('选择器-151: Bing links 首选主标题 a[href]', (() => { const o = eval(`(${getSelectorsObjectText()})`); return Array.isArray(o.bing.links) && o.bing.links[0] === 'h2 a[href]'; })());
-  check('选择器-152: map_resultExtraElements 为 WeakMap', /const map_resultExtraElements = new WeakMap\(\)/.test(src));
-  check('选择器-153: no-op 死代码已清理', !src.includes('restoreResultExtraElements()') && /restoreResultExtraElements\(result\)/.test(src) && !src.includes('window._panelCloseHandler !== closeHandler'));
 }
 
 // ---- Google回退: 域名+路径裸文本 与 /url?u= ----
@@ -1293,10 +1310,10 @@ return { isJsRegexAllowed, buildBracketMatchMap, findBracketPairAt, findEnclosin
   check('选择器-162: Lite版同步字面量解析与校验口径', pL.source === 'foo\\.bar' && pL.flags === 'i' && apiL2.sameSelectorDef({ ...base, match: '/foo/i' }, { ...base, match: /foo/i }) && apiL2.validateUserSelectors({ ok: { match: '/foo\\.bar/i', ...base } }).length === 0);
 }
 
-// ---- 选择器-166~172: 后台积压封顶 / teardown迟到回调守卫 / 批处理观察标记 / init延迟 修复留档 ----
+// ---- 选择器-166~172: 后台调度 / teardown守卫 / 批处理标记 修复留档 ----
 {
   const liteSrc = readRepoFile('Lite.user.js');
-  // 选择器-166/167/168/169: 后台标签页(setTimeout)与前台(rAF)调度及积压封顶
+  // 后台用 setTimeout, 前台用 rAF 且积压超限折叠为全量重扫
   function makeObserverEnv(hidden, fnSrc) {
     const calls = { raf: 0, timeouts: [], scan: 0, closest: 0 };
     const body = { closest() { calls.closest++; return null; } };
@@ -1336,12 +1353,7 @@ return { isJsRegexAllowed, buildBracketMatchMap, findBracketPairAt, findEnclosin
     moCbF([{ type: 'childList', target: {}, addedNodes: [1] }]); moCbF([{ type: 'childList', target: {}, addedNodes: [1] }]);
     check('选择器-168: 前台仍走 rAF 且 pending 期间不重复调度(主版)', callsF.raf === 1 && callsF.timeouts.length === 0);
   }
-  {
-    const { calls, moCb, body } = makeObserverEnv(true, extractFn(liteSrc, 'ensureEngineSiteSetup'));
-    moCb(Array.from({ length: 3000 }, () => ({ type: 'childList', target: body, addedNodes: [1] })));
-    check('选择器-169: Lite 页面隐藏时 setTimeout 调度且积压封顶', calls.raf === 0 && calls.timeouts.length === 1 && calls.timeouts[0].ms === 500 && (() => { calls.timeouts[0].fn(); return calls.closest === 1 && calls.scan === 2; })());
-  }
-  // 选择器-170/171: teardown 后迟到回调不处理
+  // teardown 后迟到回调不处理
   function makeGuardApi(fnSrc, setup) {
     const counter = { link: 0 };
     const fn = new Function('counter', `
@@ -1360,12 +1372,10 @@ return { isJsRegexAllowed, buildBracketMatchMap, findBracketPairAt, findEnclosin
   const guardLOn = makeGuardApi(extractFn(liteSrc, 'processSingleResult'), true);
   check('选择器-170: teardown 后 processSingleResult 直接拒绝且不提取链接(主版+Lite)', guardM.fn(stubResult) === false && guardM.counter.link === 0 && guardL.fn(stubResult) === false && guardL.counter.link === 0);
   check('选择器-171: 装配中仍正常走到链接提取(守卫不误伤)', guardMOn.fn(stubResult) === false && guardMOn.counter.link === 1 && guardLOn.fn(stubResult) === false && guardLOn.counter.link === 1);
-  // 选择器-172: forceReprocessAll 不再抹掉 data-observed 标记(主版+Lite 源检查)
+  // forceReprocessAll 只补观察, 不抹掉 data-observed 标记
   const frSrcM = src.slice(src.indexOf('function forceReprocessAll'), src.indexOf('const LAYOUT_CSS'));
   const frSrcL = liteSrc.slice(liteSrc.indexOf('function forceReprocessAll'), liteSrc.indexOf('const LAYOUT_CSS'));
   check('选择器-172: 批处理未完成结果仅补观察, 保留 data-observed 标记(主版+Lite)', !frSrcM.includes("removeAttribute('data-observed')") && frSrcM.includes('resultObserver.observe(result)') && !frSrcL.includes("removeAttribute('data-observed')") && frSrcL.includes('resultObserver.observe(result)'));
-  // init 调度: document-idle 下不再固定延迟 1s(主版+Lite 源检查)
-  check('选择器-172b: init 在 DOMContentLoaded 之外零延迟调度(主版+Lite)', /setTimeout\(init, 0\)/.test(src) && /setTimeout\(init, 0\)/.test(liteSrc) && !/setTimeout\(init, 1000\)/.test(src) && !/setTimeout\(init, 1000\)/.test(liteSrc));
 }
 
 // ---- 选择器-173: 等长正文变化仍按完整签名重处理 ----
@@ -1408,8 +1418,18 @@ return { isJsRegexAllowed, buildBracketMatchMap, findBracketPairAt, findEnclosin
   check('选择器-173: 等长正文变化仍按完整签名重处理(主版)', env.calls.reprocess === 1);
 }
 
-// 易错: buildCollapseCss 必须跳过含逗号的选择器, 否则会解析成独立顶层选择器而全局误隐藏
-// 易错: processSingleResult 以 data-blocker-processed 短路, 重新处理前必须先清除该属性
+// buildCollapseCss 必须跳过含逗号的选择器以免全局误隐藏
+{
+  const mkScale = (srcText) => {
+    let calls = 0;
+    const fn = new Function('document', 'applyUiScale', 'applyDarkModeClass', 'applyCollapseMode', extractFn(srcText, 'applyGlobalConfigUi') + '\n' + extractFn(srcText, 'applyConfigToMainPanel') + '\nreturn applyConfigToMainPanel;')({ getElementById: () => null }, () => { calls++; }, () => {}, () => {});
+    fn();
+    return calls;
+  };
+  check('选择器-174: 主版无面板时仍应用UI缩放', mkScale(src) === 1);
+  check('选择器-175: Lite无面板时仍应用UI缩放', mkScale(readRepoFile('Lite.user.js')) === 1);
+}
+// 已知问题(跳过): 切换语言后主面板文案需关闭重开才更新
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 

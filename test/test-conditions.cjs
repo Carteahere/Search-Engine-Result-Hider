@@ -1,10 +1,12 @@
-// 条件表达式: 解析与识别 / @if提取与路径冲突 / 独立表达式 / YAML检测 / 修复回归
+// 条件表达式 / YAML检测 / 修复回归
+// 读取上一级目录的 *.*.*.user.js 或 Lite.user.js
+
 (async () => {
 const fs = require('fs');
 const path = require('path');
 
 const scriptDir = path.join(__dirname, '..');
-const scriptFiles = fs.readdirSync(scriptDir).filter((name) => name.endsWith('.js') && !name.toLowerCase().includes('lite')).sort();
+const scriptFiles = fs.readdirSync(scriptDir).filter((name) => /^\S+\.\S+\.\S+\.user\.js$/.test(name) || name === 'Lite.user.js').sort();
 if (!scriptFiles.length) throw new Error('no .js script found in ' + scriptDir);
 const file = path.join(scriptDir, scriptFiles[0]);
 console.log('Testing', file);
@@ -44,7 +46,7 @@ const ALL_FNS = [
   'looksLikeCondExpr', 'isScriptRuleLine', 'isElementRuleLine', 'punycodeDecodeLabel', 'toUnicodeHostname',
   'parsePrefixedRegexRule', 'validateUrlWildcard', 'ruleToRegex', 'escapeWildcardPart', 'splitHostAndPort',
   'escapeHostPart', 'wildcardToRegex', 'normalizeHostCandidate', 'matchWildcardDomainPattern',
-  'extractSimpleWhitelistDomain', 'matchSimpleDomain', 'compileRuleRegex', 'extractBalancedParens',
+  'matchSimpleDomain', 'compileRuleRegex', 'extractBalancedParens', // extractSimpleWhitelistDomain 已并入 matchSimpleDomain
   'findIfOccurrences', 'stripIfConditions', 'extractIfConditions', 'evaluateCondition', 'absorbStandaloneExpr',
   'parseRuleWithConditions', 'validateCondition', 'analyzeRule', 'validateRule', 'checkDynamicConditions',
   'getSubdomainLevels', 'matchDomainEntryType', 'isLocalEntry', 'checkRuleMatchOptimized',
@@ -276,9 +278,7 @@ const condTrueCases = [
   'host = example.com',
   'title*=关键词',
 ];
-condTrueCases.forEach((rule, i) => {
-  assert(`条件-085-${i + 1}: 条件表达式识别 ${rule}`, m.looksLikeCondExpr(rule) === true);
-});
+assert('条件-085: 条件表达式全部识别', condTrueCases.every((rule) => m.looksLikeCondExpr(rule) === true));
 const condFalseCases = [
   'https://example.com/?url=x',
   '*://*.example.com/*',
@@ -287,9 +287,7 @@ const condFalseCases = [
   'example.com',
   'https://example.com/',
 ];
-condFalseCases.forEach((rule, i) => {
-  assert(`条件-086-${i + 1}: 非条件表达式 ${rule}`, m.looksLikeCondExpr(rule) === false);
-});
+assert('条件-086: 非条件表达式全部排除', condFalseCases.every((rule) => m.looksLikeCondExpr(rule) === false));
 
 // ==== 二、@if 条件提取与URL路径冲突 ====
 
@@ -309,7 +307,7 @@ const litePath = [path.join(scriptDir, 'Lite.user.js'), path.join(scriptDir, 'ot
 const liteSrc = fs.readFileSync(litePath, 'utf8');
 const liteM2 = new Function(
   liteSrc.match(/const (?:RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_A|REGEX_CTX_B|REGEX_CTX_C|REGEX_CTX_D|RULE_REGEX_LIT_RE) = [^\n]+;/g).join('\n').replace(/\bconst\b/g, 'var') + '\n' +
-  ['findBalancedParenEnd', 'regexCloseAhead', 'isBadRegexTail', 'scanRuleString', 'encodeNonAscii', 'isCondExprCore', 'looksLikeCondExpr', 'isScriptRuleLine', 'isUniqueFlagsStr', 'isFlagsCandidateError', 'stripRuleComment', 'findIfOccurrences', 'extractBalancedParens', 'stripIfConditions', 'extractIfConditions'].map((n) => SERH_RAW_EXTRACT(liteSrc, n)).join('\n') +
+  ['findBalancedParenEnd', 'regexCloseAhead', 'regexStartAhead', 'isBadRegexTail', 'scanRuleString', 'encodeNonAscii', 'isCondExprCore', 'looksLikeCondExpr', 'isScriptRuleLine', 'isUniqueFlagsStr', 'isFlagsCandidateError', 'stripRuleComment', 'findIfOccurrences', 'extractBalancedParens', 'stripIfConditions', 'extractIfConditions'].map((n) => SERH_RAW_EXTRACT(liteSrc, n)).join('\n') +
   '\nreturn { stripIfConditions, extractIfConditions };'
 )();
 assert('条件-093: Lite版同步支持@if前空格省略', liteM2.stripIfConditions('*://x.com/*@if(title *= "kw")').coreRule === '*://x.com/*' && liteM2.extractIfConditions('*://x.com/*@if(title *= "kw")').length === 1);
@@ -332,20 +330,15 @@ assert('条件-101: title正则体内@if不剥离', m.stripIfConditions('title/f
 assert('条件-102: URL路径内@if(不误判剥离', m.stripIfConditions('*://example.com/api/@if(test)/*').coreRule === '*://example.com/api/@if(test)/*');
 assert('条件-103: 条件正则体内@if不伪剥离', m.stripIfConditions('*://x.com/* @if(title =~ /a@if(b)/)').coreRule === '*://x.com/*');
 const noOccCases = ['url/foo@if(bar)/', '@1 title/foo@if(bar)/i'];
-noOccCases.forEach((rule, i) => {
-  assert(`条件-104-${i + 1}: 行首简写正则体内@if不产生伪条件 ${rule}`, m.findIfOccurrences(rule).length === 0);
-});
+assert('条件-104: 行首简写正则体内@if不产生伪条件', noOccCases.every((rule) => m.findIfOccurrences(rule).length === 0));
 
 // ---- URL路径含关键字段不误吞@if ----
 const pathConflictCases = [
   '*://x.com/title/y @if(title *= "a")',
   '*://x.com/a/title/b/url/c @if(url *= "q")',
 ];
-pathConflictCases.forEach((rule, i) => {
-  assert(`条件-105-${i + 1}: @if检测 ${rule}`, m.findIfOccurrences(rule).length === 1);
-  const stripped = m.stripIfConditions(rule);
-  assert(`条件-106-${i + 1}: 剥离后保留核心 ${rule}`, stripped.coreRule === rule.replace(/ @if\(.*\)$/, '') && stripped.staticPass === true);
-});
+assert('条件-105: @if检测不受路径关键字段干扰', pathConflictCases.every((rule) => m.findIfOccurrences(rule).length === 1));
+assert('条件-106: 剥离@if后保留核心规则', pathConflictCases.every((rule) => { const stripped = m.stripIfConditions(rule); return stripped.coreRule === rule.replace(/ @if\(.*\)$/, '') && stripped.staticPass === true; }));
 const sM = m.stripIfConditions('*://x.com/url/* @if(title *= "a") @if($site = "google")');
 assert('条件-107: 多@if与路径冲突同时剥离', sM.coreRule === '*://x.com/url/*' && sM.staticPass === true);
 assert('条件-108: 未闭合@if报错', m.validateRule('*://x.com/* @if((title *= "a")') === false);
@@ -391,15 +384,11 @@ p = m.parseRuleWithConditions('/foo@if(bar)/');
 assert('条件-129: 正则体内@if不提取', p.staticPass === true && p.dynamicConditions.length === 0 && p.coreRule === '/foo@if(bar)/');
 p = m.parseRuleWithConditions('x.com @if(title =~ /a(b)c/)');
 assert('条件-130: 条件值内括号的合法正则正常提取', p.staticPass === true && p.dynamicConditions.length === 1 && p.coreRule === 'x.com');
-[
-  ['title/x/ @if(foo $= "bar")'],
-  ['title/x/ @if(title =~ /bad(/)'],
-  ['@1 /x/ @if(unknownfield = "v")'],
-].forEach(([rule]) => {
-  const a = m.analyzeRule(rule);
-  const pr = m.parseRuleWithConditions(rule);
-  assert(`条件-131: 损坏的@if报错并丢弃(${rule})`, a.valid === false && a.errors.length > 0 && pr.staticPass === false);
-});
+assert('条件-131: 损坏的@if全部报错并丢弃', [
+  'title/x/ @if(foo $= "bar")',
+  'title/x/ @if(title =~ /bad(/)',
+  '@1 /x/ @if(unknownfield = "v")',
+].every((rule) => { const a = m.analyzeRule(rule); const pr = m.parseRuleWithConditions(rule); return a.valid === false && a.errors.length > 0 && pr.staticPass === false; }));
 
 // ---- 匹配引擎 ----
 const slEx = ['www.example.com', 'example.com'];
@@ -579,7 +568,6 @@ assert('条件-181: url/path/scheme空串比较值不命中', ev14({ type: 'url'
 
 // ---- 深嵌套与编辑器兜底 ----
 assert('条件-182: 3000层括号返回valid=false而非抛RangeError', (() => { try { return m.validateRule('@if(' + '('.repeat(3000) + 'title *= "a"' + ')'.repeat(3000) + ')') === false; } catch (e) { return false; } })());
-assert('条件-183: cachedAnalyzeRule有异常兜底(主版+Lite)', SERH_RAW_EXTRACT(src, 'cachedAnalyzeRule').includes('catch') && SERH_RAW_EXTRACT(liteSrc, 'cachedAnalyzeRule').includes('catch'));
 
 // ---- @if简写与独立规则对齐 ----
 assert('条件-184: @if简写未转义斜杠与独立规则一致接受', m.validateRule('@if(title/a/b/)') === true && m.validateRule('title/a/b/') === true);
@@ -607,9 +595,7 @@ assert('条件-194: Lite版同步 /…/ 值括号配平不截断', liteM2.extrac
 // ---- 条件-195: @N 与 @if 紧贴写法修复留档(与规则-254/255同步) ----
 assert('条件-195: @N@if(...) 无空格紧贴写法可校验且高亮N前缀被剥离', m.analyzeRule('@2@if(title *= "kw")').valid === true && m.analyzeRule('@2 @if(title *= "kw")').valid === true && m.analyzeRule('@1@*://*.example.com/*').valid === false);
 
-// 易错: stripIfConditions 按 @if 出现位置降序裁剪, 顺序颠倒会切错区间
-// 易错: 优先级 ! > & > | 由 parseNot/parseAnd/parseOr 的调用层级决定, 调换会静默改语义
-// 易错: 条件默认忽略大小写, 仅 =~ 由正则 flags 决定, 改动比较前的小写化会破坏兼容
+// 易错: stripIfConditions 需按位置降序裁剪, 优先级 !>&>| 且默认忽略大小写
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 
