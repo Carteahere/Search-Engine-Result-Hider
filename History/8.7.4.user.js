@@ -187,7 +187,7 @@
       links: ['a.qk-title a[href]', '.qk-title a[href]', 'a.qk-link-wrapper[href]', 'a[href]'],
     },
     github: {
-      match: /^(?:www\.)?github\.com$/,
+      match: /^https?:\/\/(?:www\.)?github\.com\/search\/?(?:[?#]|$)/i,
       containers: "[data-testid='results-list'] > div",
       titles: ["h3 a[data-component='Link']", 'h3 a', 'h3'],
       snippets: ['h3 ~ div', 'h3 + div', 'article .description'],
@@ -195,7 +195,7 @@
       button: false,
     },
     greasyfork: {
-      match: /^(?:www\.)?greasyfork\.org$/,
+      match: /^https?:\/\/(?:www\.)?greasyfork\.org\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?scripts\/?(?:[?#]|$)/i,
       containers: '#browse-script-list li[data-script-id]',
       titles: ['a.script-link', 'article h2 a'],
       snippets: ['.script-description', 'article .description'],
@@ -282,10 +282,9 @@
     const loc = window.location || {}; const hostname = String(loc.hostname || ''); const href = String(loc.href || ''); const cacheKey = href || hostname;
     if (_engineCacheHost === cacheKey) return _engineCacheResult; _engineCacheHost = cacheKey; const defs = getSelectors();
     for (const name of Object.keys(defs)) {
-      const def = defs[name]; if (!def || def.disabled || !def.match) continue; if (def.match.test(hostname)) return (_engineCacheResult = name);
-      if (def !== SELECTORS[name] && href && /:(?:\\?\/){2}/i.test(def.match.source) && def.match.test(href)) {
-        return (_engineCacheResult = name);
-      }
+      const def = defs[name]; if (!def || def.disabled || !def.match) continue;
+      if (def.match.test(hostname)) return (_engineCacheResult = name);
+      if (href && /:(?:\\?\/){2}/i.test(def.match.source) && def.match.test(href)) return (_engineCacheResult = name);
     }
     return (_engineCacheResult = 'other');
   }
