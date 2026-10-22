@@ -72,15 +72,19 @@ const getSelectorsObjectText = () => {
 await (async () => {
 const selectorsObjectText = getSelectorsObjectText();
 const selectors = eval(`(${selectorsObjectText})`);
-const storeRef = { current: undefined };
-function GM_getValue(key, defaultValue) { return key === 'searchfilter_selectors' ? (storeRef.current === undefined ? defaultValue : storeRef.current) : defaultValue; }
+const storeRef = { current: undefined }; const subStoreRef = { current: undefined };
+function GM_getValue(key, defaultValue) {
+  if (key === 'searchfilter_selectors') return storeRef.current === undefined ? defaultValue : storeRef.current;
+  if (key === 'searchfilter_engine_subscriptions') return subStoreRef.current === undefined ? defaultValue : subStoreRef.current;
+  return defaultValue;
+}
 const badCss = new Set(['div>>>', 'a[[', 'p:unknownpseudo(']);
 global.document = { querySelector(selector) { if (badCss.has(selector)) { const e = new Error('invalid selector'); e.name = 'SyntaxError'; throw e; } return null; } };
-const fns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'getSearchCategory', 'isBingImagesPage', 'isEngineSite', 'getContainerSelector', 'isValidCssSelector', 'hasPseudoElement', 'validateUserSelectors', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'normalizeMatchLiteral', 'parseSelectorText', 'sameSelectorDef', 'diffSelectorDefFields', 'diffUserSelectors', 'pruneUserSelectors'].map((n) => extractFn(src, n));
+const fns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getEngineSubscriptions', 'saveEngineSubscriptions', 'parseSelectorMatch', 'coerceSelectorDef', 'getSubscribedSelectors', 'getBaseSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'getSearchCategory', 'isBingImagesPage', 'isEngineSite', 'getContainerSelector', 'isValidCssSelector', 'hasPseudoElement', 'validateUserSelectors', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'normalizeMatchLiteral', 'parseSelectorText', 'sameSelectorDef', 'diffSelectorDefFields', 'diffUserSelectors', 'pruneUserSelectors'].map((n) => extractFn(src, n));
 const builtinSelectorOfLine = src.match(/const builtinSelectorOf = .+?;/);
 if (!builtinSelectorOfLine) throw new Error('builtinSelectorOf not found');
 const body = `
-const WEBDAV_SYNC_SELECTORS_KEY = 'searchfilter_webdav_sync_selectors'; const SELECTORS_KEY = 'searchfilter_selectors';
+const ENGINE_SUBSCRIPTIONS_KEY = 'searchfilter_engine_subscriptions'; const BUILTIN_ENGINE_SUB_URL = 'https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js'; const SELECTORS_KEY = 'searchfilter_selectors';
 const SUPPORTED_REGEX_FLAGS = 'imsu';
 const SELECTORS = ${selectorsObjectText}; let activeSelectors = null; let _engineCacheHost = null; let _categoryCacheHref = null; let _categoryCacheResult = 'web';
 ${src.match(/const ENGINE_HOST_REGEXES = \{[\s\S]*?\n  \};/)[0]}
@@ -90,9 +94,9 @@ const window = { location: { get hostname() { return currentHost; }, get href() 
 function t(key, params = {}) { let text = key; for (const [k, v] of Object.entries(params || {})) text += ':' + v; return text; } function GM_setValue(key, value) { if (key === 'searchfilter_selectors') storeRef.current = value; }
 ${fns.join('\n')}
 return { getSelectors, getUserSelectors, getSearchEngine, isEngineSite, getContainerSelector, validateUserSelectors, resetSelectorCache, normalizeSelectorList, serializeSelectors, parseSelectorText, diffUserSelectors, pruneUserSelectors, sameSelectorDef,
-  setHost: (h) => { currentHost = h; currentHref = 'https://' + h + '/'; }, setHref: (h) => { currentHref = h; }, setStore: (obj) => { storeRef.current = obj; resetSelectorCache(); } };
+  setHost: (h) => { currentHost = h; currentHref = 'https://' + h + '/'; }, setHref: (h) => { currentHref = h; }, setStore: (obj) => { storeRef.current = obj; resetSelectorCache(); }, setSubStore: (obj) => { subStoreRef.current = obj; resetSelectorCache(); } };
 `;
-const api = new Function('GM_getValue', 'storeRef', body)(GM_getValue, storeRef);
+const api = new Function('GM_getValue', 'storeRef', 'subStoreRef', body)(GM_getValue, storeRef, subStoreRef);
 const CUSTOM = { mysearx: { match: '(?:^|\\.)searx\\.example\\.com$', containers: '.result', titles: ['h3'], snippets: ['.content'], links: 'a[href]' } };
 
 check('选择器-001: getContainerSelector 内置', api.getContainerSelector('bing') === 'li.b_algo, div.b_algo');
@@ -126,6 +130,14 @@ api.setStore({}); api.setHost('m.toutiao.com'); api.setHref('https://m.toutiao.c
 const toutiaoMobile = api.getSearchEngine() === 'toutiao' && api.isEngineSite() === true;
 api.setHost('so.toutiao.com'); api.setHref('https://so.toutiao.com/search?keyword=x');
 check('选择器-011b: 头条移动域与桌面域均识别为引擎', toutiaoMobile && api.getSearchEngine() === 'toutiao');
+api.setHost('www.google.com');
+api.setStore({ myuser: { match: '(?:^|\\.)google\\.com$', containers: 'div.user', titles: ['h3'] } });
+api.setSubStore([{ url: 'https://example.com/subs.js', enabled: true, selectors: { mysub: { match: '(?:^|\\.)google\\.com$', containers: 'div.sub', titles: ['h3'] } } }]);
+check('选择器-011c: 站点重叠时自定义引擎优先于订阅与内置', api.getSearchEngine() === 'myuser' && api.getContainerSelector('myuser') === 'div.user');
+api.setStore({});
+check('选择器-011d: 无自定义时订阅引擎优先于内置', api.getSearchEngine() === 'mysub' && api.getContainerSelector('mysub') === 'div.sub');
+api.setSubStore([]);
+check('选择器-011e: 无自定义与订阅时回退内置引擎', api.getSearchEngine() === 'google' && api.getContainerSelector('google') === 'div.g, div.MjjYud');
 check('选择器-012: 合法配置通过', api.validateUserSelectors(CUSTOM).length === 0);
 check('选择器-013: 保留键报错', api.validateUserSelectors({ other: { match: 'a', containers: 'b' } }).some((m) => m.includes('other')));
 check('选择器-014: 非法正则报错', api.validateUserSelectors({ e1: { match: '([', containers: '.x' } }).some((m) => m.includes('e1')));
@@ -178,6 +190,12 @@ const bingCopy = allBuiltins.bing;
 check('选择器-032: 未改动键丢弃/改动键保留/新增键保留', !('bing' in api.diffUserSelectors(allBuiltins)) && 'bing' in api.diffUserSelectors(Object.assign({}, allBuiltins, { bing: Object.assign({}, bingCopy, { containers: '.x' }) })) && 'myx' in api.diffUserSelectors(Object.assign({}, allBuiltins, { myx: { match: 'a', containers: '.x' } })));
 check('选择器-033: 缺失内置键视为未改动/other始终丢弃/空配置无disabled', !('yahoo' in api.diffUserSelectors({ bing: bingCopy })) && !('other' in api.diffUserSelectors(Object.assign({}, allBuiltins, { other: { match: 'a', containers: '.x' } }))) && Object.keys(api.diffUserSelectors({})).length === 0);
 check('选择器-034: 显式 disabled 标记被保留', (() => { const d = api.diffUserSelectors(Object.assign({}, allBuiltins, { yahoo: Object.assign({}, allBuiltins.yahoo, { disabled: true }) })); return d.yahoo && d.yahoo.disabled === true; })());
+check('选择器-179: 保存时可传入打开面板时的基线，避免把订阅值固化为用户覆盖', (() => {
+  const base = api.getSelectors();
+  const openBase = Object.assign({}, base, { bing: Object.assign({}, base.bing, { containers: '.from-sub' }) });
+  const currentBase = Object.assign({}, base, { bing: Object.assign({}, base.bing, { containers: '.builtin-later' }) });
+  return Object.keys(api.diffUserSelectors(openBase, openBase)).length === 0 && Object.keys(api.diffUserSelectors(openBase, currentBase)).length === 1;
+})());
 api.setStore({ yahoo: { disabled: true } });
 check('选择器-035: disabled 内置引擎不被加载也不匹配站点', api.getSelectors().yahoo.disabled === true && (() => { api.setHost('search.yahoo.com'); const r = api.getSearchEngine() === 'other'; api.setHost('www.google.com'); return r; })());
 const P3 = api.serializeSelectors();
@@ -217,6 +235,12 @@ check('选择器-049d: button 非布尔被拒且显式 true 可覆盖内置 fals
 check('选择器-049e: 未写 button 时继承内置且 diff 仅记录 button 变化', (() => { api.setStore({ github: { containers: api.getSelectors().github.containers } }); const inherited = api.getSelectors().github.button === false; api.setStore({}); return inherited; })() && api.diffUserSelectors({ github: Object.assign({}, api.getSelectors().github, { button: true }) }).github.button === true && Object.keys(api.diffUserSelectors({ bing: Object.assign({}, api.getSelectors().bing) })).length === 0 && api.sameSelectorDef({ match: 'a', containers: '.x' }, { match: 'a', containers: '.x', button: true }));
 const liteBtnDefs = (() => { const t = readRepoFile('Lite.user.js'); const start = t.indexOf('const SELECTORS = {'); return eval('(' + t.slice(t.indexOf('{', start), extractObjectLiteral(t, t.indexOf('{', start)) + 1) + ')'); })();
 check('选择器-049f: Lite 版同步内置 button:false 且逻辑一致', liteBtnDefs.github.button === false && liteBtnDefs.greasyfork.button === false && readRepoFile('Lite.user.js').includes('if (!isBlockButtonEnabledForEngine(engine)) return;'));
+check('选择器-049g: button:true 覆盖序列化后往返与 diff 均保留', (() => {
+  api.setStore({ github: { button: true } });
+  const text = api.serializeSelectors(); const parsed = api.parseSelectorText(text); const diff = api.diffUserSelectors(parsed.config);
+  api.setStore({});
+  return /button: true,/.test(text) && !parsed.errors.length && parsed.config.github.button === true && diff.github && diff.github.button === true;
+})());
 })();
 
 // ---- 选择器导入 ----
@@ -389,10 +413,15 @@ function createEnv() {
 }
 {
   const bingFilter = new Function(`function isBingImagesPage() { return true; } function getSearchEngine() { return 'bing'; } function getResultLink(el) { return el.link; }\n${extractFn(src, 'filterNestedContainers')}\nreturn filterNestedContainers;`)();
-  const mk = (href) => ({ link: { href }, querySelectorAll: () => [], querySelector: () => null, contains: () => false });
-  const outer = mk('https://x/1'), inner = mk('https://x/1'), other = mk('https://x/2');
+  const mk = (iusc) => ({ iusc, querySelectorAll: () => [], querySelector: (sel) => (sel === 'a.iusc' ? iusc : null), contains: () => false });
+  const shared = { id: 'iusc-1' }, otherIusc = { id: 'iusc-2' };
+  const outer = mk(shared), inner = mk(shared), other = mk(otherIusc);
   const kept = bingFilter([outer, inner, other], 'div.g');
-  check('选择器-067: Bing图片同链接嵌套容器按文档序去重', kept.length === 2 && kept[0] === outer && kept[1] === other);
+  check('选择器-067: Bing图片同一卡片的嵌套容器按 a.iusc 文档序去重', kept.length === 2 && kept[0] === outer && kept[1] === other);
+  check('选择器-176: Bing图片同来源页的不同图片不被去重', bingFilter([mk({ id: 'i1' }), mk({ id: 'i2' })], 'div.g').length === 2);
+  check('选择器-177: Bing图片容器无 a.iusc 时保留', bingFilter([mk(null)], 'div.g').length === 1);
+  const liteFilter = new Function(`function isBingImagesPage() { return true; } function getSearchEngine() { return 'bing'; }\n${extractFn(readRepoFile('Lite.user.js'), 'filterNestedContainers')}\nreturn filterNestedContainers;`)();
+  check('选择器-180: Lite同来源页不同图片同样不被去重且同锚点仍去重', liteFilter([mk({ id: 'l1' }), mk({ id: 'l2' })], 'div.g').length === 2 && liteFilter([mk(shared), mk(shared)], 'div.g').length === 1);
 }
 })();
 
@@ -410,10 +439,10 @@ function createStyleEnv(returnValue) {
   function injectWidgetStyles() { stats.widgetCalls++; }
   const api = new Function('GM_addStyle', 'injectWidgetStyles', 'state', `
     const LAYOUT_CSS = 'body{}'; const SELECTORS = { google: {}, bing: {} };
-    let _globalStyleEl = null; function getSearchEngine() { return state.engine; }
+    let _globalStyleEl = null; function getSearchEngine() { return state.engine; } function getSelectors() { return state.defs || SELECTORS; }
     ${extractFn(src, 'injectGlobalStyles')}
     ${extractFn(src, 'removeGlobalStyles')}
-    return { injectGlobalStyles, removeGlobalStyles, getStyleEl: () => _globalStyleEl, setEngine: (e) => { state.engine = e; } };
+    return { injectGlobalStyles, removeGlobalStyles, getStyleEl: () => _globalStyleEl, setEngine: (e) => { state.engine = e; }, setDefs: (d) => { state.defs = d; } };
   `)(GM_addStyle, injectWidgetStyles, state);
   return { api, stats, styleEl };
 }
@@ -434,12 +463,28 @@ function createStyleEnv(returnValue) {
 {
   const styleEl = { removeCalls: 0, remove() { this.removeCalls++; } };
   const env = createStyleEnv(styleEl);
-  env.api.setEngine('mysearx');
+  env.api.setEngine('mysearx'); env.api.setDefs({ mysearx: { containers: '.r' }, google: {} });
   env.api.injectGlobalStyles();
-  check('选择器-070: 自定义引擎不注入布局样式但注入组件样式', env.stats.addStyleCalls === 0 && env.stats.widgetCalls === 1 && env.api.getStyleEl() === null);
+  check('选择器-070: 自定义引擎存在选择器时注入布局样式', env.stats.addStyleCalls === 1 && env.stats.widgetCalls === 1 && env.api.getStyleEl() === styleEl);
   env.api.setEngine('google');
   env.api.injectGlobalStyles();
-  check('选择器-071: 自定义切内置时重新注入布局样式', env.stats.addStyleCalls === 1 && env.api.getStyleEl() === styleEl);
+  check('选择器-071: 自定义切内置时保留已注入的布局样式', env.stats.addStyleCalls === 1 && env.api.getStyleEl() === styleEl);
+}
+{
+  const env = createStyleEnv(undefined);
+  env.api.setEngine('other'); env.api.injectGlobalStyles();
+  check('选择器-071b: 非引擎页不注入布局样式仅注入组件样式', env.stats.addStyleCalls === 0 && env.stats.widgetCalls === 1 && env.api.getStyleEl() === null);
+}
+{
+  const liteSrc = readRepoFile('Lite.user.js'); const stats = { addStyleCalls: 0 };
+  const liteApi = new Function('stats', `
+    const LAYOUT_CSS = 'body{}'; const SELECTORS = { google: {}, bing: {} }; const state = { engine: 'mysearx', defs: { mysearx: { containers: '.r' } } };
+    let _globalStyleEl = null; function GM_addStyle() { stats.addStyleCalls++; } function injectWidgetStyles() {}
+    function getSearchEngine() { return state.engine; } function getSelectors() { return state.defs; }
+    ${extractFn(liteSrc, 'injectGlobalStyles')}
+    return () => { injectGlobalStyles(); return stats.addStyleCalls; };
+  `)(stats);
+  check('选择器-071c: Lite 自定义引擎同样注入布局样式', liteApi() === 1);
 }
 
 function createTeardownEnv() {
@@ -568,10 +613,11 @@ function createTeardownEnv() {
     const timers = [];
     const api = new Function('resultObserver', 'timers', `
       let _engineSiteSetup = true; let _resultRetryCounts = new WeakMap();
+      let _resultContentCache = new WeakMap(); function getResultContentSignature() { return 'sig'; }
       const RESULT_RETRY_LIMIT = ${limitMatch ? limitMatch[1] : 3};
       const RESULT_RETRY_DELAY = ${delayMatch ? delayMatch[1] : 200}; const setTimeout = (fn, ms) => { timers.push({ fn, ms }); return timers.length; };
       ${retryFn}
-      return { scheduleResultRetry, hasCount: (el) => _resultRetryCounts.has(el) };
+      return { scheduleResultRetry, hasCount: (el) => _resultRetryCounts.has(el), hasCached: (el) => _resultContentCache.has(el) };
     `)({ observe(el) { el.observeCount = (el.observeCount || 0) + 1; }, unobserve(el) { el.unobserveCount = (el.unobserveCount || 0) + 1; } }, timers);
     return { api, timers };
   }
@@ -587,7 +633,7 @@ function createTeardownEnv() {
     const { api, timers } = makeRetryEnv();
     const el = makeRetryEl();
     api.scheduleResultRetry(el);
-    check('选择器-086: 首次异常安排延迟重试且重试后保持 data-observed 不变量', timers.length === 1 && timers[0].ms === Number(delayMatch[1]) && (() => { timers[0].fn(); return el.observeCount === 1 && el.hasAttribute('data-observed') === true && api.hasCount(el); })());
+    check('选择器-086: 首次异常安排延迟重试且重试后保持 data-observed 不变量', timers.length === 1 && timers[0].ms === Number(delayMatch[1]) && (() => { timers[0].fn(); return el.observeCount === 1 && el.hasAttribute('data-observed') === true && el.hasAttribute('data-retry-exhausted') === false && api.hasCount(el); })());
   }
   {
     const { api, timers } = makeRetryEnv();
@@ -612,13 +658,13 @@ function createTeardownEnv() {
     api.scheduleResultRetry(el); timers[1].fn();
     api.scheduleResultRetry(el); timers[2].fn();
     api.scheduleResultRetry(el);
-    check('选择器-089: 超限后保留 data-observed 不再重新入队', timers.length === 3 && el.hasAttribute('data-observed') === true && el.unobserveCount === 1 && !api.hasCount(el));
+    check('选择器-089: 超限后保留 data-observed 并标记待正文变化复活', timers.length === 3 && el.hasAttribute('data-observed') === true && el.hasAttribute('data-retry-exhausted') === true && api.hasCached(el) && el.unobserveCount === 1 && !api.hasCount(el));
   }
   {
     const { api, timers } = makeRetryEnv();
     const el = makeRetryEl();
     for (let i = 0; i < 4; i++) { el.removeAttribute('data-observed'); api.scheduleResultRetry(el); if (timers[i]) timers[i].fn(); }
-    check('选择器-089b: 清标记后调度立即补回，耗尽重试仍保持 data-observed', el.hasAttribute('data-observed') === true && timers.length === 3 && !api.hasCount(el));
+    check('选择器-089b: 清标记后调度立即补回，耗尽重试仍保留复活标记', el.hasAttribute('data-observed') === true && el.hasAttribute('data-retry-exhausted') === true && api.hasCached(el) && timers.length === 3 && !api.hasCount(el));
   }
 }
 
@@ -787,7 +833,7 @@ assert('选择器-100: 头部包含 @match *://*/* (全站注入)', matchLines.i
 
 // ---- 跨标签页同步锁 / 菜单 / 摘要后备 / 解析边界 ----
 await (async () => {
-const lockFnNames = ['delay', 'readSyncLock', 'writeSyncLock', 'tryAcquireSyncLock', 'acquireSyncLock', 'renewSyncLock', 'releaseSyncLock', 'runWithSyncLock'];
+const lockFnNames = ['delay', 'readSyncLock', 'writeSyncLock', 'tryAcquireSyncLock', 'acquireSyncLock', 'renewSyncLock', 'releaseSyncLock', 'runWithSyncLock', 'runBackgroundSync'];
 const lockFns = lockFnNames.map((n) => {
   const body = extractFn(src, n);
   const idx = src.indexOf(`function ${n}(`);
@@ -797,7 +843,8 @@ const lockStore = new Map();
 function createLockEnv(tabId, ttl = 2000) {
   return new Function('GM_getValue', 'GM_setValue', 'SYNC_LOCK_KEY_PREFIX', 'SYNC_LOCK_TTL', 'SYNC_TAB_ID', `
     ${lockFns.join('\n')}
-    return { readSyncLock, tryAcquireSyncLock, acquireSyncLock, renewSyncLock, releaseSyncLock, runWithSyncLock };
+    const _syncLocalChains = new Map();
+    return { readSyncLock, tryAcquireSyncLock, acquireSyncLock, renewSyncLock, releaseSyncLock, runWithSyncLock, runBackgroundSync };
   `)((key, defaultValue) => (lockStore.has(key) ? lockStore.get(key) : defaultValue), (key, value) => lockStore.set(key, value), 'test_lock_', ttl, tabId);
 }
 {
@@ -826,6 +873,14 @@ function createLockEnv(tabId, ttl = 2000) {
   check('选择器-108: 任务异常仍释放锁', threw === true && tab.readSyncLock('fail') === null);
 }
 {
+  const tab = createLockEnv('tab-q');
+  const order = [];
+  const p1 = tab.runBackgroundSync('q', async () => { order.push(1); await new Promise((r) => setTimeout(r, 40)); order.push(2); });
+  const p2 = tab.runBackgroundSync('q', async () => { order.push(3); });
+  await Promise.all([p1, p2]);
+  check('选择器-178: 后台同步任务同标签页串行执行而非被锁丢弃', JSON.stringify(order) === '[1,2,3]' && tab.readSyncLock('q') === null);
+}
+{
   const regMenuFn = extractFn(src, 'registerMenu');
   const registered = [];
   const menuEnv = new Function('registered', 'GM_registerMenuCommand', 't', 'showConfigPanel', 'showSelectorPanel', 'showHighlightColorPanel', `let _menuCommandIds = []; ${regMenuFn} registerMenu(); return registered;`);
@@ -836,7 +891,7 @@ function createLockEnv(tabId, ttl = 2000) {
 // 结果摘要后备提取遇到相对选择器不得抛异常
 await (async () => {
   const selectorsDecl = src.match(/const SELECTORS = \{[\s\S]*?\n  \};/)[0];
-  const getResultSnippet = new Function('GM_getValue', 'let activeSelectors = null;\nconst SELECTORS_KEY = \'searchfilter_selectors\';\n' + selectorsDecl + '\n' + ['normalizeSelectorList', 'getUserSelectors', 'getSelectors', 'getResultText', 'getResultExtraElements', 'getResultSnippet'].map((n) => extractFn(src, n)).join('\n') + '\nreturn getResultSnippet;')(() => undefined);
+  const getResultSnippet = new Function('GM_getValue', 'let activeSelectors = null;\nconst SELECTORS_KEY = \'searchfilter_selectors\'; const ENGINE_SUBSCRIPTIONS_KEY = \'searchfilter_engine_subscriptions\'; const BUILTIN_ENGINE_SUB_URL = \'https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js\'; function t(key) { return key; } function resetSelectorCache() { activeSelectors = null; }\n' + selectorsDecl + '\n' + src.match(/const builtinSelectorOf = .+?;/)[0] + '\n' + ['normalizeSelectorList', 'getUserSelectors', 'getEngineSubscriptions', 'saveEngineSubscriptions', 'parseSelectorMatch', 'coerceSelectorDef', 'getSubscribedSelectors', 'getBaseSelectors', 'getSelectors', 'getResultText', 'getResultExtraElements', 'getResultSnippet'].map((n) => extractFn(src, n)).join('\n') + '\nreturn getResultSnippet;')(() => undefined);
   const throwIfRel = (fn) => (sel) => { if (sel.startsWith('+')) { const e = new Error(sel + ' is not a valid selector'); e.name = 'SyntaxError'; throw e; } return fn(sel); };
   let threw = false, out = '';
   const extraRow = { textContent: '  extra text  ', matches: throwIfRel(() => false), querySelector: throwIfRel(() => null), contains: () => false };
@@ -950,6 +1005,7 @@ await (async () => {
       ${extractFn(src, 'googleResultBlocks')}
       ${extractFn(src, 'visibleUnblocked')}
       ${extractFn(src, 'hideParentIfNoVisibleSiblings')}
+      ${extractFn(src, 'markResultGridSlot')}
       ${extractFn(src, 'resetResultStyles')}
       ${extractFn(src, 'restoreParentDisplay')}
       ${extractFn(src, 'restoreAllHiddenParents')}
@@ -959,7 +1015,7 @@ await (async () => {
       ${extractFn(src, 'restoreResultExtraElements')}
       ${extractFn(src, 'restoreResultCollapse')}
       const document = { querySelectorAll: (s) => doc.querySelectorAll(s) };
-      return { saveOriginalDisplay, googleResultBlocks, visibleUnblocked, hideParentIfNoVisibleSiblings, resetResultStyles, restoreParentDisplay, restoreAllHiddenParents, reconcileHiddenParents };
+      return { saveOriginalDisplay, googleResultBlocks, visibleUnblocked, hideParentIfNoVisibleSiblings, markResultGridSlot, resetResultStyles, restoreParentDisplay, restoreAllHiddenParents, reconcileHiddenParents };
     `)(root);
     return { root, fns };
   }
@@ -1051,6 +1107,35 @@ await (async () => {
   }
   {
     const { root, fns } = makeParentEnv(false);
+    const li = makeTreeEl('li', '', root);
+    const iuscp = makeTreeEl('div', 'iuscp', li);
+    const imgpt = makeTreeEl('div', 'imgpt', iuscp);
+    makeTreeEl('a', 'iusc', imgpt);
+    blockEl(fns, imgpt);
+    fns.markResultGridSlot(imgpt, 'bing');
+    check('选择器-131c: bing图片仅最内层imgpt屏蔽时li槽位仍隐藏', li.style.display === 'none' && li.getAttribute('data-serh-grid-item-hidden') === 'true');
+    const li2 = makeTreeEl('li', '', root);
+    const inner1 = makeTreeEl('div', 'imgpt', makeTreeEl('div', 'iuscp', li2));
+    const inner2 = makeTreeEl('div', 'imgpt', makeTreeEl('div', 'iuscp', li2));
+    makeTreeEl('a', 'iusc', inner1); makeTreeEl('a', 'iusc', inner2);
+    blockEl(fns, inner1);
+    fns.markResultGridSlot(inner1, 'bing');
+    check('选择器-131d: bing图片仍有可见imgpt时不隐藏li槽位', li2.style.display === '' && !li2.hasAttribute('data-serh-grid-item-hidden'));
+  }
+  {
+    const liteFns = new Function(`
+      let _hiddenParentCount = 0; function getComputedStyle() { return { display: '' }; }
+      ${extractFn(readRepoFile('Lite.user.js'), 'markResultGridSlot')}
+      return { markResultGridSlot };
+    `)();
+    const root = makeTreeEl('body', ''); const li = makeTreeEl('li', '', root);
+    const imgpt = makeTreeEl('div', 'imgpt', makeTreeEl('div', 'iuscp', li));
+    makeTreeEl('a', 'iusc', imgpt); blockEl({ saveOriginalDisplay: () => {} }, imgpt);
+    liteFns.markResultGridSlot(imgpt, 'bing');
+    check('选择器-131e: Lite bing图片同样隐藏最外层li槽位', li.style.display === 'none' && li.getAttribute('data-serhl-grid-item-hidden') === 'true');
+  }
+  {
+    const { root, fns } = makeParentEnv(false);
     const cell = makeTreeEl('div', '', root); cell.style.display = 'none'; cell.setAttribute('data-serh-grid-item-hidden', 'true'); cell.setAttribute('data-serh-orig-display', '');
     fns.restoreAllHiddenParents();
     check('选择器-131b: 恢复全部隐藏父容器时同时清除网格槽标记', cell.style.display === '' && !cell.hasAttribute('data-serh-grid-item-hidden') && !cell.hasAttribute('data-serh-orig-display'));
@@ -1094,9 +1179,9 @@ await (async () => {
   check('选择器-133: 仅多disabled:true判为不同且无disabled副本判为相同', pruneProbe.sameSelectorDef(Object.assign({}, builtinBing, { disabled: true }), builtinBing) === false && pruneProbe.sameSelectorDef(Object.assign({}, builtinBing), builtinBing) === true);
 
   const selStore = { current: undefined };
-  const selFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getSelectors', 'resetSelectorCache', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'normalizeMatchLiteral', 'parseSelectorText', 'sameSelectorDef', 'diffSelectorDefFields', 'diffUserSelectors'].map((n) => extractFn(src, n));
+  const selFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getEngineSubscriptions', 'saveEngineSubscriptions', 'parseSelectorMatch', 'coerceSelectorDef', 'getSubscribedSelectors', 'getBaseSelectors', 'getSelectors', 'resetSelectorCache', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'normalizeMatchLiteral', 'parseSelectorText', 'sameSelectorDef', 'diffSelectorDefFields', 'diffUserSelectors'].map((n) => extractFn(src, n));
   const selApi = new Function('GM_getValue', 'storeRef', `
-const SELECTORS_KEY = 'searchfilter_selectors';
+const SELECTORS_KEY = 'searchfilter_selectors'; const ENGINE_SUBSCRIPTIONS_KEY = 'searchfilter_engine_subscriptions'; const BUILTIN_ENGINE_SUB_URL = 'https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js';
 const SUPPORTED_REGEX_FLAGS = 'imsu';
 const SELECTORS = ${getSelectorsObjectText()};
 let activeSelectors = null;
@@ -1116,7 +1201,7 @@ return { getSelectors, parseSelectorText, diffUserSelectors };
   check('选择器-135: 仅改一个字段时diff只保留该字段(升级内置可跟随)', 'bing' in diff && pinningFields.length === 0 && diff.bing.containers === 'div.custom');
 
   const fixApi = new Function(`
-const SELECTORS_KEY = 'searchfilter_selectors';
+const SELECTORS_KEY = 'searchfilter_selectors'; const ENGINE_SUBSCRIPTIONS_KEY = 'searchfilter_engine_subscriptions'; const BUILTIN_ENGINE_SUB_URL = 'https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js';
 const SELECTORS = ${getSelectorsObjectText()};
 let activeSelectors = null; let _engineCacheHost = null; let _engineCacheResult = 'other'; let _observedSelector = '';
 let stored = undefined;
@@ -1125,7 +1210,8 @@ const GM_setValue = (key, val) => { if (key === SELECTORS_KEY) stored = val; };
 const t = (key) => key;
 const isValidCssSelector = () => true;
 const hasPseudoElement = (s) => /::/.test(String(s));
-${['normalizeSelectorList', 'getInvalidRegexFlags', 'matchDefToParts', 'resetSelectorCache', 'getUserSelectors', 'parseSelectorText', 'validateUserSelectors', 'sameSelectorDef', 'pruneUserSelectors'].map((n) => extractFn(src, n)).join('\n')}
+const builtinSelectorOf = (key) => (SELECTORS[key] && typeof SELECTORS[key] === 'object') ? SELECTORS[key] : {};
+${['normalizeSelectorList', 'getInvalidRegexFlags', 'matchDefToParts', 'resetSelectorCache', 'getUserSelectors', 'getEngineSubscriptions', 'saveEngineSubscriptions', 'parseSelectorMatch', 'coerceSelectorDef', 'getSubscribedSelectors', 'getBaseSelectors', 'parseSelectorText', 'validateUserSelectors', 'sameSelectorDef', 'pruneUserSelectors'].map((n) => extractFn(src, n)).join('\n')}
 return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS, getStored: () => stored, setStored: (v) => { stored = v; } };
   `)();
   const parsedTrue = fixApi.parseSelectorText('{"bing": true}');
@@ -1402,9 +1488,9 @@ return { isJsRegexAllowed, buildBracketMatchMap, findBracketPairAt, findEnclosin
 
 // ---- 选择器-173: 等长正文变化仍按完整签名重处理 ----
 {
-  function makeContentFlushEnv() {
+  function makeContentFlushEnv(fnSrcText = src, hasAttr = () => true) {
     const calls = { reprocess: 0, status: 0, scan: 0, raf: 0, timeouts: [] };
-    const container = { isConnected: true, sig: 'new-sig', hasAttribute: () => true, closest: () => container };
+    const container = { isConnected: true, sig: 'new-sig', hasAttribute: hasAttr, closest: () => container };
     let moCb = null;
     class MutationObserver { constructor(cb) { moCb = cb; } observe() {} disconnect() {} }
     const documentStub = { hidden: true, body: {}, querySelector: () => null, querySelectorAll: () => [] };
@@ -1427,7 +1513,7 @@ return { isJsRegexAllowed, buildBracketMatchMap, findBracketPairAt, findEnclosin
       const location = { href: 'https://www.google.com/search?q=x' };
       const history = { pushState() {}, replaceState() {} };
       const window = { addEventListener() {}, dispatchEvent() {} }; const Event = class {};
-      ${extractFn(src, 'ensureEngineSiteSetup')}
+      ${extractFn(fnSrcText, 'ensureEngineSiteSetup')}
       return { ensureEngineSiteSetup, setCache: (v) => _resultContentCache.set(container, v) };
     `)(documentStub, MutationObserver, () => { calls.raf++; }, (fn, ms) => { calls.timeouts.push({ fn, ms }); return calls.timeouts.length; }, calls, container);
     api.ensureEngineSiteSetup();
@@ -1438,6 +1524,23 @@ return { isJsRegexAllowed, buildBracketMatchMap, findBracketPairAt, findEnclosin
   env.moCb([{ type: 'childList', target: env.container, addedNodes: [1] }]);
   env.calls.timeouts[0].fn();
   check('选择器-173: 等长正文变化仍按完整签名重处理(主版)', env.calls.reprocess === 1);
+  {
+    const liteSrc = readRepoFile('Lite.user.js');
+    const onlyExhausted = (name) => name === 'data-retry-exhausted';
+    const mainEnv = makeContentFlushEnv(src, onlyExhausted);
+    mainEnv.api.setCache({ textLen: 0, sig: 'old-sig' });
+    mainEnv.moCb([{ type: 'childList', target: mainEnv.container, addedNodes: [1] }]);
+    mainEnv.calls.timeouts[0].fn();
+    const liteEnv = makeContentFlushEnv(liteSrc, onlyExhausted);
+    liteEnv.api.setCache({ textLen: 0, sig: 'old-sig' });
+    liteEnv.moCb([{ type: 'childList', target: liteEnv.container, addedNodes: [1] }]);
+    liteEnv.calls.timeouts[0].fn();
+    const sameEnv = makeContentFlushEnv(src, onlyExhausted);
+    sameEnv.api.setCache('new-sig');
+    sameEnv.moCb([{ type: 'childList', target: sameEnv.container, addedNodes: [1] }]);
+    sameEnv.calls.timeouts[0].fn();
+    check('选择器-176: 重试耗尽结果正文变化时重新处理且签名未变不重复处理(主版+Lite)', mainEnv.calls.reprocess === 1 && liteEnv.calls.reprocess === 1 && sameEnv.calls.reprocess === 0);
+  }
 }
 
 // buildCollapseCss 必须跳过含逗号的选择器以免全局误隐藏
@@ -1451,7 +1554,7 @@ return { isJsRegexAllowed, buildBracketMatchMap, findBracketPairAt, findEnclosin
   check('选择器-174: 主版无面板时仍应用UI缩放', mkScale(src) === 1);
   check('选择器-175: Lite无面板时仍应用UI缩放', mkScale(readRepoFile('Lite.user.js')) === 1);
 }
-// 已知问题(跳过): 切换语言后主面板文案需关闭重开才更新
+// 忽略该问题: 切换语言后主面板文案需关闭重开才更新，此为故意设计
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 

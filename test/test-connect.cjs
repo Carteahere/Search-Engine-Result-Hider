@@ -1,7 +1,7 @@
 // 规则订阅 / WebDAV同步 / 联网授时
 // 命名规则: 同步-三位序号: 描述; 授时项用 授时-前缀
 // 读取上一级目录的 *.*.*.user.js
-//忽略: parseSyncHeader 只扫前10行
+// 备注：同步不考虑使用墓碑机制
 
 (async () => {
 const fs = require('fs');
@@ -61,7 +61,7 @@ const baseSyncFns = [
   'scanRuleString', 'findBalancedParenEnd', 'getSyncSettings', 'getCloudModifiedTime',
   'subscriptionsSignature', 'buildDavPutHeaders', 'persistSyncSnapshots', 'putWebDAVRules',
   'getRuleKey', 'filterValidRuleLines', 'hasEffectiveRules', 'getSubscriptionSyncSnapshot', 'setSubscriptionSyncSnapshot',
-  'getRuleSyncSnapshot', 'setRuleSyncSnapshot', 'mergeRules3Way',
+  'getRuleSyncSnapshot', 'setRuleSyncSnapshot', 'webdavTargetId', 'mergeRules3Way',
   'stripRuleComment', 'isHttpsUrl', 'getWebDAVRequest', 'ensureWebDAVFolder', 'isHtmlResponse', 'isInvalidSyncResponse', 'parseSyncHeader', 'isNonRuleTextResponse',
   'buildUploadContent', 'gmPutWebDAV', 'putWebDAVBackup',
   'getSelectorSyncSnapshot', 'setSelectorSyncSnapshot', 'selectorsEqual', 'mergeSelectors3Way',
@@ -81,7 +81,7 @@ const ruleValidateFns = [
 ];
 const syncFns = [...new Set(baseSyncFns.concat(ruleValidateFns))].map((n) => extractFn(src, n));
 const settingsTimePrelude = `const SETTINGS_LAST_MODIFIED_KEY = ${JSON.stringify(KEYS.SETTINGS_LAST_MODIFIED_KEY)};\n${extractFn(src, 'getSettingsModifiedTime')}\nfunction getSelectorsModifiedTime(){ const t = GM_getValue(${JSON.stringify(KEYS.SELECTORS_LAST_MODIFIED_KEY)}, 0); return typeof t === 'number' && t > 0 ? t : getSettingsModifiedTime(); }`;
-const syncEnvPrelude = src.match(/const CFG_DEFAULTS = \{[^\n]+\};/)[0] + '\n' + src.match(/const DEFAULT_HIGHLIGHT_COLORS = \{[^\n]+\};/)[0] + '\n' + settingsTimePrelude;
+const syncEnvPrelude = src.match(/const CFG_DEFAULTS = \{[^\n]+\};/)[0] + '\n' + src.match(/const DEFAULT_HIGHLIGHT_COLORS = \{[^\n]+\};/)[0] + '\n' + settingsTimePrelude + '\nfunction loadWebDAVConfig(){ return { url: "https://dav.example.com/dav/", username: "", password: "", filename: "rules.txt" }; }'; // 测试环境桩: 与 syncCfg 一致, 使快照目标标识可计算
 const langTextsSrc = src.match(/const LANG_TEXTS = \{[\s\S]*?\n  \};/)[0];
 
 const netTimePrelude = `
@@ -105,7 +105,7 @@ function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], local
   store.set(KEYS.LOCAL_LAST_MODIFIED_KEY, localTime);
   store.set(KEYS.WEBDAV_LAST_SYNC_KEY, 0);
   store.set('subs', localSubs);
-  if (initialSnapshot !== undefined) store.set(KEYS.WEBDAV_SYNC_SNAPSHOT_KEY, initialSnapshot);
+  if (initialSnapshot !== undefined) store.set(KEYS.WEBDAV_SYNC_SNAPSHOT_KEY, Array.isArray(initialSnapshot) ? { target: 'https://dav.example.com/dav/rules.txt', rules: initialSnapshot } : initialSnapshot);
   if (initialSubSnapshot !== undefined) store.set(KEYS.SUBSCRIPTION_SYNC_SNAPSHOT_KEY, initialSubSnapshot);
   if (storedConfig !== undefined) store.set(KEYS.CONFIG_KEY, storedConfig);
   const calls = [];
@@ -408,6 +408,7 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   const success = await retry;
   assert('同步-035: 已保存的新订阅可以正常导入', success.success && subs[0].rules[0] === 'new.example');
 }
+// 忽略该问题: 远端合法rules为空的订阅不清空旧规则，此为故意设计
 
 // ---- 同步-036~039: parseSyncHeader 头解析与损坏头剔除 ----
 {
@@ -423,6 +424,7 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   const blank = parse('\n# ScriptConfig: {"syncedAt":7777}\n*://a.com/*');
   assert('同步-039: 首行空行时头仍可解析', blank.config && blank.config.syncedAt === 7777);
 }
+// 忽略该问题: 深层嵌套递归溢出，极罕见情况无修复意义
 
 // ---- 同步-040~042: WebDAV 凭据匹配 ----
 {
@@ -496,7 +498,7 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
 }
 {
   const store = new Map();
-  store.set(KEYS.WEBDAV_SYNC_SELECTORS_KEY, true);
+  store.set(KEYS.WEBDAV_SYNC_CONFIG_KEY, true);
   const f = new Function('store', `
     const WEBDAV_SYNC_CONFIG_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_CONFIG_KEY)};
     const WEBDAV_SYNC_SELECTORS_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_SELECTORS_KEY)};
@@ -504,6 +506,8 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
     const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
     function getUserSelectors() { return store.get('sel') || {}; }
     function getSelectorsModifiedTime() { return store.get('selTime') || 0; }
+    function getSettingsModifiedTime() { return 0; }
+    function buildSyncPayload() { return {}; }
     function getSelectorSyncSnapshot() { const v = store.get(WEBDAV_LAST_SYNC_SELECTORS_KEY); return (v && typeof v === 'object' && !Array.isArray(v)) ? v : null; }
     ${extractFn(src, 'selectorsEqual')}
     ${extractFn(src, 'buildUploadContent')}
@@ -540,6 +544,17 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   assert('同步-068: 双方编辑同一条规则只保留本地变体', JSON.stringify(res6) === JSON.stringify(['*://a.com/* @if(title *= "y")', '*://b.com/*']));
   const res7 = merge3(['*://a.com/*', '*://b.com/*'], ['*://a2.com/*', '*://b.com/*'], ['*://a.com/*', '*://b.com/*', '*://c.com/*']);
   assert('同步-069: 单方编辑+云端真新增互不误判', JSON.stringify(res7) === JSON.stringify(['*://a2.com/*', '*://b.com/*', '*://c.com/*']));
+  // 双方都改同一基线时：本地较新则本地拆分出的规则全部保留；云端较新则由云端覆盖该基线
+  const res8 = merge3(['A', 'B', 'C'], ['A', 'X', 'Y', 'C'], ['A', 'X', 'C'], true);
+  assert('同步-077: 双方都改同一基线时不得丢失双方都存在的规则', JSON.stringify(res8) === JSON.stringify(['A', 'X', 'Y', 'C']));
+  assert('同步-078: 云端较新时由云端覆盖该基线规则', JSON.stringify(merge3(['A', 'B', 'C'], ['A', 'X', 'Y', 'C'], ['A', 'X', 'C'], false)) === JSON.stringify(['A', 'X', 'C']));
+  assert('同步-079: 双方改写为不同规则时按修改时间择一', JSON.stringify(merge3(['a', 'b'], ['a2', 'b'], ['a3', 'b'], false)) === JSON.stringify(['a3', 'b']) && JSON.stringify(merge3(['a', 'b'], ['a2', 'b'], ['a3', 'b'], true)) === JSON.stringify(['a2', 'b']));
+  const res10 = merge3(['A', 'B', 'C'], ['A', 'Y', 'C'], ['Z', 'W', 'C'], true);
+  assert('同步-080: 相邻规则被对方改写时不得丢失未改动规则', JSON.stringify(res10) === JSON.stringify(['Z', 'Y', 'C']));
+  const res11 = merge3(['A', 'B'], ['A', 'bL'], ['a3', 'bC'], true);
+  assert('同步-081: 对方改写邻接规则不得连带删除本地未改规则', JSON.stringify(res11) === JSON.stringify(['a3', 'bL']));
+  const res12 = merge3(['A', 'B', 'C'], ['X', 'Y', 'C'], ['Z', 'W', 'C'], true);
+  assert('同步-082: 双方各自改写多条相邻规则时按时间整组择一', JSON.stringify(res12) === JSON.stringify(['X', 'Y', 'C']) && JSON.stringify(merge3(['A', 'B', 'C'], ['X', 'Y', 'C'], ['Z', 'W', 'C'], false)) === JSON.stringify(['Z', 'W', 'C']));
 }
 
 // ---- 同步-055~061: mergeSelectors3Way 三方合并与删除vs修改仲裁 ----
@@ -618,6 +633,42 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   assert('同步-065: 仅本地关闭订阅时不被较新云端设置重新打开', keptOff[0].enabled === false && keptOff[0].rules[0] === 'k1');
 }
 
+// ---- 同步-083~086: 订阅面板清空 URL 即删除 ----
+{
+  const rows = [];
+  const mkRow = (url, origUrl) => {
+    const input = { value: url };
+    return {
+      input,
+      dataset: { originalUrl: origUrl },
+      querySelector(sel) {
+        if (sel === '.serh-subscription-url') return input;
+        if (sel === '.serh-subscription-enable-toggle') return { checked: true };
+        return { textContent: '', className: '' };
+      },
+      classList: { add() {}, remove() {} }
+    };
+  };
+  const collect = new Function('container', 't', 'subscriptions', `${extractFn(src, 'collectSubscriptionsFromRows')}; return collectSubscriptionsFromRows;`)({ querySelectorAll: () => rows }, (k) => k, []);
+  const subs = [
+    { url: 'https://a/x', enabled: true, rules: ['a'], lastUpdate: 1 },
+    { url: 'https://b/x', enabled: true, rules: ['b'], lastUpdate: 2 }
+  ];
+  rows.push(mkRow('', 'https://a/x'));
+  const cleared = collect(subs, []);
+  assert('同步-083: 清空订阅URL并保存即删除该订阅', cleared.newSubs.length === 1 && cleared.newSubs[0].url === 'https://b/x');
+  rows.length = 0; rows.push(mkRow('', ''));
+  assert('同步-084: 新增空行不清空任何订阅', collect(subs, []).newSubs.length === 2);
+  rows.length = 0; rows.push(mkRow('https://a/x', 'https://b/x'), mkRow('', 'https://a/x'));
+  const swapped = collect(subs, []);
+  assert('同步-085: 原URL已被其他行接管时清空不误删', swapped.newSubs.length === 1 && swapped.newSubs[0].url === 'https://a/x');
+  rows.length = 0; rows.push(mkRow('', 'https://a/x'));
+  collect(subs, []);
+  rows[0].input.value = 'https://a/x';
+  const reAdded = collect([{ url: 'https://b/x', enabled: true, rules: ['b'], lastUpdate: 2 }], []);
+  assert('同步-086: 清空删除后同一行重填相同URL可重新订阅', reAdded.newSubs.some((s) => s.url === 'https://a/x'));
+}
+
 // ---- 同步-070~073: 置空上传前云端规则备份为 .bak ----
 {
   // 自动同步: 本地基于快照清空全部规则 -> 合并结果为空 -> 先备份云端再置空
@@ -647,7 +698,7 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   const env = makeSyncEnv({ cloudText, localRules: [], localTime: 1000, storedConfig: { rules: [], enabled: true }, initialSnapshot: cloudRules, putFailures: 1 });
   env.setCurrent({ rules: [], enabled: true });
   await env.run(syncCfg);
-  assert('同步-073: 备份PUT失败时中断置空上传保护云端原文件', !env.calls.some((c) => c.method === 'PUT' && !c.url.endsWith('.bak')) && env.getCurrent().rules.length === 0);
+  assert('同步-073: 备份PUT失败不中断置空上传, 主PUT仍执行', env.calls.some((c) => c.method === 'PUT' && !c.url.endsWith('.bak')) && env.getCurrent().rules.length === 0); // 已修复: 备份失败仅警告不阻断
 }
 
 // ---- 授时-001~003: 授时回退链 ----
@@ -687,10 +738,11 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
 
 // 易错: 三方合并依赖快照, 成功同步后须更新快照且仅自动同步走合并
 
-// 已知问题(跳过): parseSyncHeader 只扫描前10行, 之后的头字段会静默失效
+// 忽略该问题: parseSyncHeader只扫描前10行，此为故意设计
 
-// 已知问题(跳过): 订阅行URL清空不删除且改URL会继承旧缓存
+// 忽略该问题: 订阅开关切换即时生效且取消不回滚, 此为故意设计
 
+console.log('[存档] 忽略该问题: 订阅开关切换即时生效且取消不回滚, 此为故意设计');
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 })();

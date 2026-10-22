@@ -582,6 +582,7 @@ const flowC3 = m.parseRulesetContent('matches: [\n  a.com # 参考 [1]\n]\n');
 assert('条件-188: matches多行flow注释行末项完整', nz(flowC3.lines).join(',') === 'a.com');
 const flowC4 = m.parseRulesetContent('rules: [a.com # c]\n');
 assert('条件-189: 注释先于]的旧容错提取不回归', nz(flowC4.lines).join(',') === 'a.com');
+// 忽略该问题: 未闭合flow序列逐字符重扫
 const c7 = m.extractIfConditions('*://x.com/* @if(path *= /a)b/)');
 assert('条件-190: *= 后 /…/ 含右括号不截断条件', c7.length === 1 && c7[0] === 'path *= /a)b/');
 const c8 = m.extractIfConditions('*://x.com/* @if(host ^= /a(b/)');

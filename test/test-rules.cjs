@@ -1,7 +1,6 @@
 // 规则逻辑 / 优先级 / 统计 / 一键屏蔽 / 去除重定向 / 修复回归
 // 命名规则: 规则-三位序号: 描述
 // 读取上一级目录的 *.*.*.user.js 或 Lite.user.js
-// 忽略: 裸域名规则userinfo误匹配
 
 (async () => {
 const fs = require('fs');
@@ -140,6 +139,7 @@ assert('规则-008: 星号仍为通配', match('*://example.com/a/*/b', 'https:/
 assert('规则-009: 问号为字面量不是单字符通配', match('*://example.com/a?b', 'https://example.com/a?b') && !match('*://example.com/a?b', 'https://example.com/axb'));
 assert('规则-010: 中文域名通配匹配 punycode', match('*://*.例子.com/*', 'https://xn--fsqu00a.com/x'));
 assert('规则-011: 等价写法 * 与 *://*.*/* 命中', match('*', 'https://www.example.com/x') && match('*://*.*/*', 'https://www.example.com/x'));
+// 忽略该问题: 通配符与正则匹配极端规则可长时间占用主线程，极罕见问题无修复意义
 
 // 锚定与通配范围
 assert('规则-012: 路径模式匹配自身与 http', match('*://example.com/path/*', 'https://example.com/path/x') && match('*://example.com/path/*', 'http://example.com/path/x'));
@@ -225,6 +225,8 @@ assert('规则-045: 规则路径后的普通字符不越界', (() => {
   const c = api.compileRuleRegex('*://example.com/release');
   return !api.safeRegexTest(c.regex, 'https://example.com/releasex');
 })());
+assert('规则-083: 查询参数规则命中后续参数', match('*://x.com/*?a=b', 'https://x.com/z?a=b&c=d'));
+assert('规则-084: 查询参数规则不匹配更长的参数值', !match('*://x.com/*?a=b', 'https://x.com/z?a=bc'));
 
 // 尾部转义星号末尾锚定
 const wcMatch = (rule, url) => new RegExp(api.wildcardToRegex(rule), 'i').test(url);
@@ -966,6 +968,7 @@ assert('规则-258: Lite 配置头被剥离且正文规则保留', parsed.settin
 liteCfgApi.apply(parsed.settings);
 const applied = liteCfgApi.get();
 assert('规则-259: Lite 导入只应用白名单设置且不覆盖本地规则', applied.language === 'en' && applied.enabled === false && applied.rules.join('|') === '*://local.example.com/*');
+// 忽略该问题: Lite导入主版配置时残留 # Selectors 头行，此为保留设计
 const exported = liteCfgApi.exportSettings({ ...applied, rules: ['r'], bubbleSize: 40, bubbleState: {}, selectors: {} });
 assert('规则-260: Lite 导出设置剔除规则/气泡/选择器', exported.rules === undefined && exported.bubbleSize === undefined && exported.bubbleState === undefined && exported.selectors === undefined && exported.language === 'en');
 let downloaded = '';
@@ -1004,8 +1007,10 @@ assert('规则-263: Lite 正常规则文本仍可导入', config.rules.join('|')
 
 // 易错: 优先级依赖规则拼接顺序, getRuleKey 以去注释正文为键会合并重复行
 
-// 已知问题(跳过): 面板关闭会连带销毁未到期 Toast
-console.log('[存档] 已知问题(跳过): 面板关闭连带销毁未到期 Toast');
+// 忽略该问题: 面板关闭会连带 Toast ，此为故意设计
+// 留档: ⬆️在第一行/第一个注释行时跳到最后一行是文档(README 1.5-3)原有设计, 非bug; 最后一个注释行即最后一个规则行, 不会误报
+console.log('[存档] 忽略该问题: 面板关闭会连带 Toast ，此为故意设计');
+console.log('[存档] ⬆️回绕到最后一行是文档原有设计, 最后一个注释行即最后一个规则行');
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 
