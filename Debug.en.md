@@ -7,7 +7,7 @@
 
 ### 3.2 Running Tests
 
-Put the `test` folder and the script in the same directory, tests auto read `.js` script in the parent directory, grouped by domain: conditional expression parsing, rule subscription & WebDAV synchronization, rules logic, selectors & engines.
+Put the `test` folder and the script in the same directory, tests auto read `.js` script in the parent directory, grouped by domain: conditional expression parsing, WebDAV synchronization & subscription, rules logic, selectors & engines.
 
 ```bash
 # Run all tests
@@ -27,7 +27,10 @@ Success output looks like `10 passed, 0 failed`
 Enable script debug mode, use the [Web Debug](https://greasyfork.org/zh-CN/scripts/475228) script or browser F12 DevTools → Console tab to view output.
 
 ```javascript
+// Release version
 const d = window.__SERH_DEBUG__;
+// Lite version
+const d = window.__SERHL_DEBUG__;
 
 // View current config
 console.log('Config:', d.config);
@@ -66,7 +69,7 @@ Error output
 
 ### 3.4 Debug API Examples
 
-`window.__SERH_DEBUG__` is only mounted after debug mode is enabled, and is removed automatically when debug mode is turned off.
+`window.__SERH_DEBUG__` (Lite: `window.__SERHL_DEBUG__`) is only mounted after debug mode is enabled, and is removed automatically when debug mode is turned off.
 
 | API | Signature | Return / Description |
 | --- | --- | --- |

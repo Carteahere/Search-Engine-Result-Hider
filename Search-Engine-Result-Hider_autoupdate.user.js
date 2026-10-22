@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.7.4
+// @version      8.7.5
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -31,17 +31,18 @@
   'use strict';
 
   if (window.top !== window.self) return; let preventPanelClose = false, _engineSiteSetup = false, _domObserver = null, _observedSelector = '';
-  let _searchForm = null, _searchFormHandler = null, _urlChangeHandler = null; let _syncIntervalIds = [];
-  let _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap(), _peekUrlCache = new WeakMap(); const _hrefChangedContainers = new Set(), _contentChangedContainers = new Set();
+  let _searchForm = null, _searchFormHandler = null, _urlChangeHandler = null, _panelCloseHandler = null, _panelPressHandler = null, _panelCloseTimer = null; let _syncIntervalIds = [];
+  let _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap(), _peekUrlCache = new WeakMap(); const _hrefChangedContainers = new Set(), _contentChangedContainers = new Set(); let _pendingSubRefresh = false;
 
-  // 配置存储键
+  // 存储配置
   const CONFIG_KEY = 'searchfilter_blocker', WEBDAV_KEY = 'searchfilter_webdav', SELECTORS_KEY = 'searchfilter_selectors';
   const SUBSCRIPTION_URL_KEY = 'searchfilter_subscription_url', SUBSCRIPTION_LAST_UPDATE_KEY = 'searchfilter_subscription_last_update';
   const SUBSCRIPTION_RULES_KEY = 'searchfilter_subscription_rules', SUBSCRIPTIONS_KEY = 'searchfilter_subscriptions';
   const WEBDAV_LAST_SYNC_KEY = 'searchfilter_webdav_last_sync', LOCAL_LAST_MODIFIED_KEY = 'searchfilter_local_last_modified';
   const SETTINGS_LAST_MODIFIED_KEY = 'searchfilter_settings_last_modified', SELECTORS_LAST_MODIFIED_KEY = 'searchfilter_selectors_last_modified', SETTINGS_TIME_MIGRATED_KEY = 'searchfilter_settings_time_migrated';
   const WEBDAV_AUTO_SYNC_KEY = 'searchfilter_webdav_auto_sync', WEBDAV_SYNC_CONFIG_KEY = 'searchfilter_webdav_sync_config';
-  const WEBDAV_SYNC_SELECTORS_KEY = 'searchfilter_webdav_sync_selectors', WEBDAV_SYNC_SNAPSHOT_KEY = 'searchfilter_webdav_sync_snapshot';
+  const WEBDAV_SYNC_SNAPSHOT_KEY = 'searchfilter_webdav_sync_snapshot', ENGINE_SUBSCRIPTIONS_KEY = 'searchfilter_engine_subscriptions';
+  const BUILTIN_ENGINE_SUB_URL = 'https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js';
   const SUBSCRIPTION_SYNC_SNAPSHOT_KEY = 'searchfilter_subscription_sync_snapshot'; const WEBDAV_LAST_SYNC_SELECTORS_KEY = 'searchfilter_webdav_last_sync_selectors'; const HL_STATS_REGEX = /^@\d+/;
   const AUTO_UPDATE_INTERVAL = 12 * 60 * 60 * 1000, WEBDAV_AUTO_SYNC_INTERVAL = 1 * 60 * 60 * 1000;
   const WEBDAV_SYNC_MAX_RETRIES = 3, WEBDAV_SYNC_RETRY_DELAY = 2000, WEBDAV_TIME_TOLERANCE = 5 * 60 * 1000; const NET_TIME_CACHE_TTL = 30 * 60 * 1000, NET_TIME_FAIL_TTL = 10 * 60 * 1000;
@@ -57,7 +58,7 @@
       bubbleSize: 30,
       debug: false,
       bubbleState: null,
-      subscriptionAutoUpdate: false,
+      subscriptionAutoUpdate: true, engineSubAutoUpdate: true,
       errorDetection: true,
       ...CFG_DEFAULTS,
       highlightColors: { ...DEFAULT_HIGHLIGHT_COLORS }
@@ -235,31 +236,73 @@
     const raw = GM_getValue(SELECTORS_KEY); if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}; return raw;
   }
 
+  function getEngineSubscriptions() {
+    const raw = GM_getValue(ENGINE_SUBSCRIPTIONS_KEY, null); const list = Array.isArray(raw) ? raw.filter(s => s && typeof s === 'object' && typeof s.url === 'string' && s.url) : [];
+    let builtin = list.find(s => s.builtin) || list.find(s => s.url === BUILTIN_ENGINE_SUB_URL) || { url: BUILTIN_ENGINE_SUB_URL, enabled: true, lastUpdate: 0, lastAttempt: 0, selectors: null };
+    let rest = list.filter(s => s !== builtin && s.url !== BUILTIN_ENGINE_SUB_URL);
+    if (builtin.url !== BUILTIN_ENGINE_SUB_URL) {
+      builtin = { ...builtin, url: BUILTIN_ENGINE_SUB_URL, lastUpdate: 0, lastAttempt: 0, selectors: null };
+      rest = rest.filter(s => !s.builtin && s.url !== BUILTIN_ENGINE_SUB_URL);
+      saveEngineSubscriptions([{ ...builtin, builtin: true, name: builtin.name || t('builtinEngineSub') }, ...rest]);
+    }
+    return [{ ...builtin, builtin: true, name: builtin.name || t('builtinEngineSub') }, ...rest];
+  }
+
+  function saveEngineSubscriptions(subs) {
+    if (!Array.isArray(subs)) return; GM_setValue(ENGINE_SUBSCRIPTIONS_KEY, subs); resetSelectorCache();
+  }
+
+  function parseSelectorMatch(def, base) {
+    let match = (base && base.match) || null;
+    try {
+      if (typeof def.match === 'string' && def.match) {
+        const m = def.match.match(/^\/(.*)\/([a-z]*)$/i);
+        match = m ? new RegExp(m[1], m[2].toLowerCase().replace(/[^imsu]/g, '')) : new RegExp(def.match);
+      } else if (def.match && typeof def.match === 'object' && typeof def.match.source === 'string' && def.match.source) {
+        match = new RegExp(def.match.source, String(def.match.flags || '').toLowerCase().replace(/[^imsu]/g, ''));
+      }
+    } catch (e) { match = null; }
+    return match;
+  }
+
+  function coerceSelectorDef(def, base) {
+    const merged = { ...mergeSelectorDef(def, base || {}), match: parseSelectorMatch(def, base || {}) };
+    if (def.disabled === true || def.disable === true) merged.disabled = true;
+    return merged;
+  }
+
+  function getSubscribedSelectors() {
+    const defs = {};
+    for (const sub of getEngineSubscriptions()) {
+      if (sub.enabled === false || !sub.selectors || typeof sub.selectors !== 'object' || Array.isArray(sub.selectors)) continue;
+      for (const key of Object.keys(sub.selectors)) {
+        if (key === 'other') continue; const def = sub.selectors[key];
+        if (!def || typeof def !== 'object' || Array.isArray(def)) continue;
+        defs[key] = coerceSelectorDef(def, defs[key] || builtinSelectorOf(key));
+      }
+    }
+    return defs;
+  }
+
+  function getBaseSelectors() {
+    const merged = {}; for (const key of Object.keys(SELECTORS)) merged[key] = SELECTORS[key];
+    return Object.assign(merged, getSubscribedSelectors());
+  }
+
   function getSelectors() {
-    if (activeSelectors) return activeSelectors; const merged = {}; const user = getUserSelectors(); const userKeys = Object.keys(user).filter(k => k !== 'other');
-    for (const key of userKeys) {
-      const def = user[key]; if (!def || typeof def !== 'object' || Array.isArray(def)) continue;
+    if (activeSelectors) return activeSelectors; const builtin = SELECTORS; const subscribed = getSubscribedSelectors(); const user = getUserSelectors(); const merged = {};
+    for (const key of Object.keys(user)) {
+      if (key === 'other') continue; const def = user[key]; if (!def || typeof def !== 'object' || Array.isArray(def)) continue;
+      const base = subscribed[key] || builtin[key] || {};
       if (def.disabled === true || def.disable === true) {
-        const base = builtinSelectorOf(key); merged[key] = { ...mergeSelectorDef(def, base), match: def.match !== undefined ? def.match : base.match, disabled: true }; continue;
+        merged[key] = { ...coerceSelectorDef(def, base), disabled: true }; continue;
       }
       const defContentKeys = Object.keys(def).filter(k => k !== 'disabled' && k !== 'disable' && def[k] !== undefined && def[k] !== null && def[k] !== '');
-      if (!defContentKeys.length) {
-        if (SELECTORS[key]) merged[key] = SELECTORS[key]; continue;
-      }
-      const base = builtinSelectorOf(key); let match = base.match || null;
-      try {
-        if (typeof def.match === 'string' && def.match) {
-          const m = def.match.match(/^\/(.*)\/([a-z]*)$/i);
-          match = m ? new RegExp(m[1], m[2].toLowerCase().replace(/[^imsu]/g, '')) : new RegExp(def.match);
-        } else if (def.match && typeof def.match === 'object' && typeof def.match.source === 'string' && def.match.source) {
-          match = new RegExp(def.match.source, String(def.match.flags || '').toLowerCase().replace(/[^imsu]/g, ''));
-        }
-      } catch (e) { match = null; }
-      merged[key] = { ...mergeSelectorDef(def, base), match };
+      if (!defContentKeys.length) { if (subscribed[key] || builtin[key]) merged[key] = subscribed[key] || builtin[key]; continue; }
+      merged[key] = coerceSelectorDef(def, base);
     }
-    for (const key of Object.keys(SELECTORS)) {
-      if (!(key in merged)) merged[key] = SELECTORS[key];
-    }
+    for (const key of Object.keys(subscribed)) if (!(key in merged)) merged[key] = subscribed[key];
+    for (const key of Object.keys(builtin)) if (!(key in merged)) merged[key] = builtin[key];
     const keys = Object.keys(merged); const gIdx = keys.indexOf('google'); const gsIdx = keys.indexOf('google_scholar');
     if (gIdx !== -1 && gsIdx !== -1 && gIdx < gsIdx) {
       const fixed = {};
@@ -376,7 +419,7 @@
       whitelistRules: '白名单规则',
       menuOpenPanel: '⚙️ 打开面板', menuErrorDetection: '规则自检',
       menuCenter: '面板居中', menuBubble: '显示悬浮球', menuBubbleAction: '悬浮球功能', menuLanguage: 'Language',
-      subscriptionSuccess: '订阅成功！已更新 {count} 条规则。',
+      subscriptionSuccess: '订阅成功！已更新 {count}',
       saved: '已保存', uploadSuccess: '上传成功！',
       downloadSuccess: '下载成功！规则已保存',
       noRulesExport: '没有规则可导出',
@@ -388,6 +431,7 @@
       menuBubbleActionOpen: '打开面板', menuBubbleActionStats: '打开统计', menuBubbleActionToggle: '显隐结果',
       bubbleStatsHint: '点击打开统计，长按打开面板',
       bubbleToggleHint: '点击显示/隐藏屏蔽结果，长按打开面板',
+      bubbleSelectorsHint: '点击打开自定义引擎，长按打开面板',
       subLinkEmpty: '链接为空', subImportSuccess: '导入成功',
       subImportFailed: '导入失败，请检查链接或网络状态',
       fileImportFailed: '导入失败，文件内容不是有效规则', importClearConfirm: '导入的文件不含任何规则，是否清空本地全部规则？', webdavClearConfirm: '云端文件不含任何规则，是否清空本地全部规则？',
@@ -412,7 +456,8 @@
       emptyIfCondition: '@if() 条件不能为空', unknownIfCondition: '未知 @if 条件: {part}',
       condExprError: '@if 表达式语法错误: {part}',
       invalidUrlWildcard: 'URL 通配符格式无效: {rule}', elementRuleUnsupported: '不支持元素规则',
-      menuCustomSelectors: '🖋️ 自定义引擎', selectorPanelTitle: '引擎选择器',
+      menuCustomSelectors: '自定义引擎', selectorPanelTitle: '引擎选择器',
+      subscribe: '订阅', engineSubTitle: '引擎订阅', builtinEngineSub: '内置引擎',
       selectorHint: '如果不知道有什么用，请勿修改。',
       selectorJsonError: '解析失败，请检查格式',
       selectorReservedKey: '保留键不可使用: {key}',
@@ -445,7 +490,7 @@
       whitelistRules: 'Whitelist Rules',
       menuOpenPanel: '⚙️ Open Panel', menuErrorDetection: 'Rules Detection',
       menuCenter: 'Center Panel', menuBubble: 'Show Bubble', menuBubbleAction: 'Bubble Action', menuLanguage: 'Language',
-      subscriptionSuccess: 'Subscription successful! Updated {count} rules.',
+      subscriptionSuccess: 'Subscription successful! Updated {count}',
       saved: 'Saved', uploadSuccess: 'Upload successful!',
       downloadSuccess: 'Download successful! Rules saved.',
       noRulesExport: 'No rules to export',
@@ -457,6 +502,7 @@
       menuBubbleActionOpen: 'Open Panel', menuBubbleActionStats: 'Open Stats', menuBubbleActionToggle: 'Show Results',
       bubbleStatsHint: 'Click to open stats, long-press to open panel',
       bubbleToggleHint: 'Click to show/hide blocked results, long-press to open panel',
+      bubbleSelectorsHint: 'Click to open custom engine, long-press to open panel',
       subLinkEmpty: 'URL is empty', subImportSuccess: 'Import success',
       subImportFailed: 'Import failed, check URL or network',
       fileImportFailed: 'Import failed, file content is not valid rules', importClearConfirm: 'The imported file contains no rules. Clear all local rules?', webdavClearConfirm: 'The cloud file contains no rules. Clear all local rules?',
@@ -481,7 +527,8 @@
       emptyIfCondition: '@if() condition cannot be empty', unknownIfCondition: 'Unknown @if condition: {part}',
       condExprError: 'Syntax error in @if expression: {part}',
       invalidUrlWildcard: 'Invalid URL wildcard format: {rule}', elementRuleUnsupported: 'Element rules are not supported',
-      menuCustomSelectors: '🖋️ Custom Engine', selectorPanelTitle: 'Engine Selectors',
+      menuCustomSelectors: 'Custom Engine', selectorPanelTitle: 'Engine Selectors',
+      subscribe: 'Subscribe', engineSubTitle: 'Engine Subscriptions', builtinEngineSub: 'Built-in Engines',
       selectorHint: 'If you don\'t know what it is for, do not modify it.',
       selectorJsonError: 'Failed to parse, check the format',
       selectorReservedKey: 'Reserved key not allowed: {key}',
@@ -528,6 +575,7 @@
 
     const panel = document.getElementById('serh-webdav-panel') ||
       document.getElementById('serh-subscription-panel') ||
+      document.getElementById('serh-engine-sub-panel') ||
       document.getElementById('serh-hlcolor-panel') ||
       document.getElementById('serh-selector-panel') ||
       document.getElementById('serh-settings-panel') ||
@@ -1077,6 +1125,8 @@
         pressStartedInside = false; return;
       }
       if (currentConfig.bubbleAction !== 'toggleHidden' && e.target && e.target.closest && e.target.closest('#serh-status')) return;
+      const otherPanel = e.target && e.target.closest && e.target.closest('.serh-window');
+      if (panel.id === 'serh-selector-panel' && otherPanel && otherPanel.id === 'serh-engine-sub-panel') return;
       if (!panel.contains(e.target)) closePanel();
     };
     const closePanel = () => {
@@ -1117,9 +1167,9 @@
 
   function openSerhPanels() { return Array.from(document.querySelectorAll('.serh-window')).filter(p => !p._fading); }
   function closeAllSerhPanels() {
-    if (window._panelCloseTimer) { clearTimeout(window._panelCloseTimer); window._panelCloseTimer = null; }
-    if (window._panelCloseHandler) { document.removeEventListener('click', window._panelCloseHandler); window._panelCloseHandler = null; }
-    if (window._panelPressHandler) { document.removeEventListener('pointerdown', window._panelPressHandler); document.removeEventListener('mousedown', window._panelPressHandler); window._panelPressHandler = null; }
+    if (_panelCloseTimer) { clearTimeout(_panelCloseTimer); _panelCloseTimer = null; }
+    if (_panelCloseHandler) { document.removeEventListener('click', _panelCloseHandler); _panelCloseHandler = null; }
+    if (_panelPressHandler) { document.removeEventListener('pointerdown', _panelPressHandler); document.removeEventListener('mousedown', _panelPressHandler); _panelPressHandler = null; }
     openSerhPanels().forEach(p => {
       if (typeof p._cleanupClick === 'function') p._cleanupClick();
       if (typeof p._beforeClose === 'function') { try { p._beforeClose(); } catch (err) { console.error('[面板] 关闭前回调失败:', err); } p._beforeClose = null; }
@@ -1135,6 +1185,7 @@
     if (statsPanel && mainAlive && statsPanel.style.display === 'flex') return 'closeAll';
     if (currentConfig.bubbleAction === 'openStats' && mainAlive) return 'stats';
     if (openSerhPanels().length) return 'closeAll';
+    if (currentConfig.bubbleAction === 'openSelectors') return 'selectors';
     return currentConfig.bubbleAction === 'openStats' ? 'stats' : 'panel';
   }
 
@@ -1159,20 +1210,20 @@
     return putHeaders;
   }
 
-  function persistSyncSnapshots(rules, { modifiedTime = null, settingsModifiedAt = null, subs = null, selectors = null } = {}) {
+  function persistSyncSnapshots(rules, { modifiedTime = null, settingsModifiedAt = null, subs = null, selectors = null, config = null } = {}) {
     if (settingsModifiedAt !== null && GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) GM_setValue(SETTINGS_LAST_MODIFIED_KEY, settingsModifiedAt);
     if (modifiedTime !== null) GM_setValue(LOCAL_LAST_MODIFIED_KEY, modifiedTime);
-    setRuleSyncSnapshot(rules);
+    setRuleSyncSnapshot(rules, config);
     if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) setSubscriptionSyncSnapshot(subs || getSubscriptions());
-    if (GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false) && selectors !== null) setSelectorSyncSnapshot(selectors);
+    if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) && selectors !== null) setSelectorSyncSnapshot(selectors);
   }
 
   async function putWebDAVRules(ctx, content, uploadedTime, remotePreserved, putHeaders) {
     const settingsModifiedAt = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) ? (ctx.settingsModifiedAt ?? getSettingsModifiedTime()) : null;
-    const rulesModifiedAt = ctx.rulesModifiedAt ?? uploadedTime; const selectors = GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false) ? getUserSelectors() : null;
+    const rulesModifiedAt = ctx.rulesModifiedAt ?? uploadedTime; const selectors = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) ? getUserSelectors() : null;
     const uploadData = buildUploadContent(content, rulesModifiedAt, { ...remotePreserved, settingsModifiedAt });
     await gmPutWebDAV(ctx.fullUrl, { headers: putHeaders, data: uploadData }, ctx.folderUrl, ctx.headers);
-    persistSyncSnapshots(ctx.rules, { modifiedTime: rulesModifiedAt, settingsModifiedAt, subs: ctx.subs, selectors });
+    persistSyncSnapshots(ctx.rules, { modifiedTime: rulesModifiedAt, settingsModifiedAt, subs: ctx.subs, selectors, config: ctx.config || null });
   }
   // 统一调用结束
 
@@ -1962,9 +2013,9 @@
           return escapeWildcardPart(part, false);
         })
         .join('\\/'); let bs = 0; for (let i = pattern.length - 2; i >= 0 && pattern[i] === '\\'; i--) bs++;
-        return pattern.endsWith('*') && bs % 2 === 0 ? regexStr : regexStr + '(?:[\\/?#:]|$)';
+        return pattern.endsWith('*') && bs % 2 === 0 ? regexStr : regexStr + '(?:[\\/?#:&]|$)';
     }
-    return prefix + (hostIsFirst ? escapeHostPart(pattern) : escapeWildcardPart(pattern, false)) + '(?:[\\/?#:]|$)';
+    return prefix + (hostIsFirst ? escapeHostPart(pattern) : escapeWildcardPart(pattern, false)) + '(?:[\\/?#:&]|$)';
   }
 
   function ruleToRegex(rule) {
@@ -2989,7 +3040,7 @@
   }
 
   function resetResultStyles(result) {
-    restoreResultExtraElements(result); restoreResultCollapse(result); _hrefUrlCache.delete(result); _resultContentCache.delete(result); _resultRetryCounts.delete(result); _peekUrlCache.delete(result); result.removeAttribute('data-blocker-processed');
+    restoreResultExtraElements(result); restoreResultCollapse(result); _hrefUrlCache.delete(result); _resultContentCache.delete(result); _resultRetryCounts.delete(result); _peekUrlCache.delete(result); result.removeAttribute('data-blocker-processed'); result.removeAttribute('data-retry-exhausted');
     result.removeAttribute('data-is-blocked'); result.removeAttribute('data-is-highlighted'); result.removeAttribute('data-highlight-n'); result.removeAttribute('data-highlight-rule'); result.removeAttribute('data-highlight-source'); result.removeAttribute('data-highlight-source-key'); clearMatchedData(result);
     result.classList.remove('serh-blocked-visible'); result.classList.remove('serh-blocked-collapsed'); result.style.outline = ''; result.style.outlineOffset = ''; const origDisplay = result.getAttribute('data-serh-orig-display');
     if (origDisplay !== null) { result.style.display = origDisplay; result.removeAttribute('data-serh-orig-display'); }
@@ -3088,10 +3139,12 @@
       if (cell && cell.parentElement && cell.tagName !== 'BODY') { cell.style.display = 'none'; cell.setAttribute('data-serh-grid-item-hidden', 'true'); _hiddenParentCount++; }
     } else if (engine === 'bing') {
       const slot = result.closest ? result.closest('li') : null;
-      if (slot) {
-        const tops = Array.from(slot.children || []).filter(c => c.matches && c.matches('div.iuscp, div.imgpt'));
-        const targets = tops.length ? tops : (slot.querySelectorAll ? Array.from(slot.querySelectorAll('div.iuscp, div.imgpt')) : []);
-        if (targets.length && targets.every(el => el.style.display === 'none')) { slot.style.display = 'none'; slot.setAttribute('data-serh-grid-item-hidden', 'true'); _hiddenParentCount++; }
+      if (slot && slot !== result) {
+        const leafItems = slot.querySelectorAll ? Array.from(slot.querySelectorAll('div.iuscp, div.imgpt')).filter(el => el.querySelector('a.iusc') && !Array.from(el.querySelectorAll('div.iuscp, div.imgpt')).some(child => child.querySelector('a.iusc'))) : [];
+        const targets = leafItems.length ? leafItems : [result];
+        if (targets.every(el => el.style.display === 'none' || !!(el.closest && el.closest('[data-is-blocked="true"]')))) {
+          slot.style.display = 'none'; slot.setAttribute('data-serh-grid-item-hidden', 'true'); _hiddenParentCount++;
+        }
       }
     }
   }
@@ -3116,7 +3169,7 @@
     const { url, domain } = resolveUrlDomain(link); _hrefUrlCache.set(result, { rawHref: link.href || '', url });
     const title = getResultTitle(result, engine); const snippet = getResultSnippet(result, engine); _resultContentCache.set(result, buildContentSignature(url, title, snippet));
     const subdomainLevels = getSubdomainLevels(domain);
-    const matchResult = checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels); _resultRetryCounts.delete(result);
+    const matchResult = checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels); _resultRetryCounts.delete(result); result.removeAttribute('data-retry-exhausted');
     const matchHL = matchResult && matchResult.highlight;
     if (matchHL) {
       const hlColor = currentConfig.highlightColors[matchHL]; const color = (typeof hlColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(hlColor)) ? hlColor : (DEFAULT_HIGHLIGHT_COLORS[matchHL] || '#CE2029');
@@ -3194,10 +3247,10 @@
   });
 
   function scheduleResultRetry(result) {
-    result.setAttribute('data-observed', 'true');
+    result.setAttribute('data-observed', 'true'); result.removeAttribute('data-retry-exhausted');
     const attempt = (_resultRetryCounts.get(result) || 0) + 1;
     if (attempt > RESULT_RETRY_LIMIT) {
-      _resultRetryCounts.delete(result); resultObserver.unobserve(result); return;
+      _resultRetryCounts.delete(result); resultObserver.unobserve(result); result.setAttribute('data-retry-exhausted', 'true'); _resultContentCache.set(result, getResultContentSignature(result)); return;
     }
     _resultRetryCounts.set(result, attempt);
     setTimeout(() => {
@@ -3250,10 +3303,10 @@
     if (isBingImagesPage(getSearchEngine())) {
       const seen = new Set();
       return kept.filter(el => {
-        const link = getResultLink(el, 'bing'); const href = link && link.href;
-        if (!href) return true;
-        if (seen.has(href)) return false;
-        seen.add(href); return true;
+        const iusc = el.querySelector ? el.querySelector('a.iusc') : null;
+        if (!iusc) return true;
+        if (seen.has(iusc)) return false;
+        seen.add(iusc); return true;
       });
     }
     return kept;
@@ -3399,7 +3452,7 @@
             font-size: 13px !important; background: #ffffff !important; color: #2d3748 !important;
             border: 1px solid #e2e8f0 !important; border-radius: 8px !important;
             box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important; text-align: left !important; line-height: 1.5 !important;
-            transition: all 0.3s ease;
+            transition: all 0.15s ease;
         }
 
         #serh-settings-panel * { line-height: 1.2 !important; }
@@ -3499,9 +3552,9 @@
         .serh-bracket-enclosing { background: rgba(100, 116, 139, 0.16); }
 
         :is(#serh-rules, #serh-sel-rules)::-webkit-scrollbar { width: 6px; height: 0px; }
-        :is(#serh-rules, #serh-sel-rules, #serh-stats-content, #serh-subscription-rows-container)::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
-        :is(#serh-rules, #serh-sel-rules, #serh-stats-content, #serh-subscription-rows-container)::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
-        :is(#serh-rules, #serh-sel-rules, #serh-stats-content, #serh-subscription-rows-container)::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+        :is(#serh-rules, #serh-sel-rules, #serh-stats-content, #serh-subscription-rows-container, #serh-engine-sub-rows)::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
+        :is(#serh-rules, #serh-sel-rules, #serh-stats-content, #serh-subscription-rows-container, #serh-engine-sub-rows)::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
+        :is(#serh-rules, #serh-sel-rules, #serh-stats-content, #serh-subscription-rows-container, #serh-engine-sub-rows)::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
 
         #serh-stats-panel {
             position: absolute; top: 10px; left: 15px; right: 15px; bottom: 50px;
@@ -3513,6 +3566,9 @@
         #serh-stats-content {
             padding: 12px; overflow-y: auto; flex: 1; scrollbar-width: thin;
         }
+
+        .serh-stats-title { color: #2d3748; }
+        .serh-stats-item { color: #4a5568; }
 
         #serh-stats-content::-webkit-scrollbar { width: 6px; }
 
@@ -3590,8 +3646,8 @@
         :is(.isv-r, .image-section, g-img, .is-extra-container) .serh-quick-block,
         :is(header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav, #extabar) .serh-quick-block { display: none !important; }
 
-        :is(#serh-webdav-panel, #serh-subscription-panel) { height: 332px; overflow: visible; }
-        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-selector-panel) #serh-toast-container { max-width: none; width: auto; left: 0; right: 0; }
+        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel) { height: 332px; overflow: visible; }
+        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel, #serh-selector-panel) #serh-toast-container { max-width: none; width: auto; left: 0; right: 0; }
 
     body.serh-dark-on #serh-panel .serh-option-label,
     body.serh-dark-on #serh-panel .serh-compact-row span { color: #f3f4f6 !important; }
@@ -3603,13 +3659,14 @@
     body.serh-dark-on .serh-bracket-enclosing { background: rgba(148, 163, 184, 0.22); }
     body.serh-dark-on #serh-stats-panel { background: #171717 !important; border-color: #374151 !important; }
     body.serh-dark-on #serh-stats-content { color: #f3f4f6 !important; }
+    body.serh-dark-on #serh-stats-content :is(.serh-stats-title, .serh-stats-item) { color: #f3f4f6 !important; }
     body.serh-dark-on #serh-panel .serh-compact-row button.serh-button {
         height: auto !important; min-height: 0 !important; width: auto !important; min-width: 0 !important;
         flex: 0 0 auto !important; line-height: normal !important; padding: 3px 8px !important;
         font-size: 11px !important; margin: 0 !important;
     }
 
-        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-hlcolor-panel) h3 {
+        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel, #serh-hlcolor-panel) h3 {
             margin: 0 0 8px 0 !important; font-size: 14px !important; color: inherit !important;
             font-weight: 600 !important; padding: 0 !important; border: none !important;
             background: transparent !important; letter-spacing: normal !important;
@@ -3628,13 +3685,13 @@
             border: none !important; background: transparent !important; display: block !important;
         }
 
-        :is(#serh-webdav-panel, #serh-subscription-panel) label {
+        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel) label {
             display: block !important; margin: 0 0 4px 0 !important; color: #4a5568 !important;
             font-size: 12px !important; font-weight: normal !important; line-height: 1.2 !important;
         }
 
-        :is(#serh-webdav-panel, #serh-subscription-panel) input[type="text"],
-        :is(#serh-webdav-panel, #serh-subscription-panel) input[type="password"] {
+        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel) input[type="text"],
+        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel) input[type="password"] {
             width: 100% !important; padding: 6px 8px !important; margin: 0 !important;
             border: 1px solid #e2e8f0 !important; border-radius: 4px !important;
             font-size: 13px !important; background: #ffffff !important; color: #2d3748 !important;
@@ -3642,7 +3699,7 @@
             outline: none !important; display: block !important;
         }
 
-        :is(#serh-webdav-panel, #serh-subscription-panel) input:focus {
+        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel) input:focus {
             border-color: #3182ce !important;
         }
 
@@ -3650,7 +3707,7 @@
             display: flex !important; gap: 8px !important; justify-content: flex-end !important; margin-top: 12px !important;
         }
 
-        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-hlcolor-panel) .serh-button,
+        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel, #serh-hlcolor-panel) .serh-button,
         :is(#serh-panel, #serh-selector-panel) .serh-action-button {
             height: 30px !important; min-height: 30px !important; max-height: 30px !important; padding: 0 12px !important;
             font-size: 13px !important; font-weight: 500 !important; box-sizing: border-box !important; margin: 0 !important;
@@ -3670,6 +3727,7 @@
     }
     body.serh-dark-on #serh-webdav-panel label,
     body.serh-dark-on #serh-subscription-panel label,
+    body.serh-dark-on #serh-engine-sub-panel label,
     body.serh-dark-on #serh-settings-panel label,
     body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row label {
         color: #9ca3af !important;
@@ -3677,12 +3735,14 @@
     body.serh-dark-on #serh-webdav-panel input[type="text"],
     body.serh-dark-on #serh-webdav-panel input[type="password"],
     body.serh-dark-on #serh-subscription-panel input[type="text"],
+    body.serh-dark-on #serh-engine-sub-panel input[type="text"],
     body.serh-dark-on #serh-settings-panel select,
     body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row input {
         background: #374151 !important; border-color: #4b5563 !important; color: #f3f4f6 !important;
     }
     body.serh-dark-on #serh-webdav-panel input:focus,
     body.serh-dark-on #serh-subscription-panel input:focus,
+    body.serh-dark-on #serh-engine-sub-panel input:focus,
     body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row input:focus {
         border-color: #60a5fa !important;
     }
@@ -3697,7 +3757,7 @@
         .serh-panel-fade {
             opacity: 0;
             transform: translate(-50%, -48%);
-            transition: all 0.3s ease;
+            transition: all 0.15s ease;
             pointer-events: none;
         }
         .serh-panel-fade.show {
@@ -3716,11 +3776,11 @@
         .serh-subscription-panel-header h3 {
             margin: 0 !important;
         }
-        #serh-subscription-rows-container {
+        :is(#serh-subscription-rows-container, #serh-engine-sub-rows) {
             flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
             scrollbar-width: thin; padding-right: 2px;
         }
-        #serh-subscription-rows-container::-webkit-scrollbar { width: 6px; }
+        :is(#serh-subscription-rows-container, #serh-engine-sub-rows)::-webkit-scrollbar { width: 6px; }
         .serh-subscription-row {
             display: flex;
             flex-direction: column;
@@ -3757,6 +3817,12 @@
         .serh-subscription-delete-btn:hover {
             opacity: 1;
         }
+        .serh-subscription-delete-btn:disabled {
+            color: #a0aec0; cursor: not-allowed; opacity: 0.5;
+        }
+        .serh-subscription-input-row input.serh-subscription-url[readonly] {
+            color: #718096 !important; background: #f7fafc !important;
+        }
         .serh-subscription-status-message {
             font-size: 11px; color: #4a5568; margin-left: 8px; line-height: 1.2; white-space: nowrap;
             overflow: hidden; text-overflow: ellipsis;
@@ -3774,6 +3840,7 @@
             flex: 1 !important;
         }
     body.serh-dark-on :is(.serh-subscription-index, .serh-subscription-info) { color: #9ca3af; }
+    body.serh-dark-on .serh-subscription-input-row input.serh-subscription-url[readonly] { color: #9ca3af !important; background: #2d3748 !important; }
 
         /* 屏蔽灰底 */
         .serh-blocked-visible,
@@ -3978,7 +4045,7 @@
   }
 
   function injectGlobalStyles() {
-    const engine = getSearchEngine(); const applyLayout = engine !== 'other' && !!SELECTORS[engine];
+    const engine = getSearchEngine(); const applyLayout = engine !== 'other' && !!getSelectors()[engine];
     if (applyLayout) {
       if (!_globalStyleEl) {
         const el = GM_addStyle(LAYOUT_CSS); if (el && typeof el.remove === 'function') _globalStyleEl = el;
@@ -4017,12 +4084,13 @@
   }
 
   function updateBubbleContent(statusBtn, blocked) {
-    const isLeft = currentConfig.bubbleState ? currentConfig.bubbleState.isLeftHalf : true; const isToggleMode = currentConfig.bubbleAction === 'toggleHidden';
+    const isLeft = currentConfig.bubbleState ? currentConfig.bubbleState.isLeftHalf : true; const isToggleMode = currentConfig.bubbleAction === 'toggleHidden'; const isEngineMode = currentConfig.bubbleAction === 'openSelectors';
 
     const bubbleIcon = (inner) => `<span style="display: inline-block; width: 1em; height: 1em; vertical-align: -0.15em; flex-shrink: 0; line-height: 0;"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg></span>`;
     const slash = currentConfig.bubbleAction === 'openStats' ? '<line x1="19.07" y1="4.93" x2="4.93" y2="19.07"/>' : '<line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>';
     const icon = isToggleMode
       ? bubbleIcon('<circle cx="12" cy="12" r="10"/>')
+      : isEngineMode ? bubbleIcon('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>')
       : bubbleIcon(`<circle cx="12" cy="12" r="10"/>${slash}`);
 
     let newHtml;
@@ -4075,7 +4143,7 @@
         });
         document.addEventListener('touchend', endDrag); document.addEventListener('touchcancel', endDrag);
 
-        if (currentConfig.bubbleAction === 'toggleHidden' || currentConfig.bubbleAction === 'openStats') {
+        if (['toggleHidden', 'openStats', 'openSelectors'].includes(currentConfig.bubbleAction)) {
           longPressTimer = setTimeout(() => {
             if (!isDragging) {
               hasLongPressed = true; status.style.transform = 'scale(1.15)';
@@ -4110,7 +4178,7 @@
 
         if (e.type === 'touchend') e.preventDefault(); document.removeEventListener('mousemove', onDrag); document.removeEventListener('mouseup', endDrag);
         document.removeEventListener('touchmove', onDrag); document.removeEventListener('touchend', endDrag); document.removeEventListener('touchcancel', endDrag); status.style.cursor = 'grab';
-        status.style.transition = 'opacity 0.2s, text-shadow 0.2s, transform 0.2s, left 0.3s ease, right 0.3s ease, top 0.3s ease, color 0.2s';
+        status.style.transition = 'opacity 0.2s, text-shadow 0.2s, transform 0.2s, left 0.15s ease, right 0.15s ease, top 0.15s ease, color 0.2s';
         if (e.type === 'touchcancel') {
           applyBubbleStatePosition(status); return;
         }
@@ -4142,6 +4210,7 @@
                 const action = resolveBubblePanelAction();
                 if (action === 'closeAll') closeAllSerhPanels();
                 else if (action === 'stats') showStatsPanel();
+                else if (action === 'selectors') showSelectorPanel();
                 else if (action === 'panel') showConfigPanel();
               }, 50);
             }
@@ -4322,7 +4391,7 @@
       }
     });
     const bubbleActionSelect = document.getElementById('serh-set-bubble-action');
-    if (bubbleActionSelect) bubbleActionSelect.value = (currentConfig.bubbleAction === 'toggleHidden' || currentConfig.bubbleAction === 'openStats') ? currentConfig.bubbleAction : 'openPanel';
+    if (bubbleActionSelect) bubbleActionSelect.value = ['toggleHidden', 'openStats', 'openSelectors'].includes(currentConfig.bubbleAction) ? currentConfig.bubbleAction : 'openPanel';
     const uiScaleSync = document.getElementById('serh-set-ui-scale'); if (uiScaleSync) uiScaleSync.value = ['s', 'xl', 'xxl'].includes(currentConfig.uiScale) ? currentConfig.uiScale : 'l';
     const darkModeSync = document.getElementById('serh-set-dark-mode'); if (darkModeSync) darkModeSync.value = ['light', 'dark'].includes(currentConfig.darkMode) ? currentConfig.darkMode : 'system';
     const langSync = document.getElementById('serh-set-language'); if (langSync) langSync.value = currentConfig.language === 'en' ? 'en' : 'zh-CN';
@@ -4462,13 +4531,13 @@
     }
 
     function statsSectionStartHtml(title, badge) {
-      return `<div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #e2e8f0;"><div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #cbd5e0;"><span style="font-weight: bold; color: #2d3748; font-size: 14px;">${title}</span><span style="background: #2c5282; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px;">${badge}</span></div>`;
+      return `<div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #e2e8f0;"><div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #cbd5e0;"><span class="serh-stats-title" style="font-weight: bold; font-size: 14px;">${title}</span><span style="background: #2c5282; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px;">${badge}</span></div>`;
     }
 
     const rulesSectionHtml = (title, badge, items) => {
       if (!items.length) return ''; let html = statsSectionStartHtml(title, badge);
       for (const item of items) {
-        html += `<div style="font-size: 11px; color: #4a5568; word-break: break-all; font-family: 'Consolas', monospace;">${item}</div>`;
+        html += `<div class="serh-stats-item" style="font-size: 11px; word-break: break-all; font-family: 'Consolas', monospace;">${item}</div>`;
       }
       return html + '</div>';
     };
@@ -4485,7 +4554,7 @@
 
       resultHTML += `<div style="margin-bottom: 16px;">`;
       resultHTML += `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #cbd5e0;">`;
-      resultHTML += `<span style="font-weight: bold; color: #2d3748; font-size: 14px;">${sourceLabel}</span>`;
+      resultHTML += `<span class="serh-stats-title" style="font-weight: bold; font-size: 14px;">${sourceLabel}</span>`;
       resultHTML += `<span style="background: #2c5282; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px;">${t('matchedCountLabel')} ${sourceStats.total} ${t('matchedCountUnit')}</span>`;
       resultHTML += `</div>`;
 
@@ -4537,14 +4606,14 @@
 
   function showConfigPanel() {
     const clearPanelCloseTimers = () => {
-      if (window._panelCloseTimer) {
-        clearTimeout(window._panelCloseTimer); window._panelCloseTimer = null;
+      if (_panelCloseTimer) {
+        clearTimeout(_panelCloseTimer); _panelCloseTimer = null;
       }
-      if (window._panelCloseHandler) {
-        document.removeEventListener('click', window._panelCloseHandler); window._panelCloseHandler = null;
+      if (_panelCloseHandler) {
+        document.removeEventListener('click', _panelCloseHandler); _panelCloseHandler = null;
       }
-      if (window._panelPressHandler) {
-        document.removeEventListener('pointerdown', window._panelPressHandler); document.removeEventListener('mousedown', window._panelPressHandler); window._panelPressHandler = null;
+      if (_panelPressHandler) {
+        document.removeEventListener('pointerdown', _panelPressHandler); document.removeEventListener('mousedown', _panelPressHandler); _panelPressHandler = null;
       }
     };
     clearPanelCloseTimers();
@@ -4707,7 +4776,7 @@
       });
     }
 
-    const closeZoneSelector = '#serh-status, #serh-webdav-panel, #serh-subscription-panel, #serh-hlcolor-panel, #serh-selector-panel, #serh-block-confirm-dialog, #serh-settings-panel, .serh-quick-block';
+    const closeZoneSelector = '#serh-status, #serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel, #serh-hlcolor-panel, #serh-selector-panel, #serh-block-confirm-dialog, #serh-settings-panel, .serh-quick-block';
     const isPanelZone = (target) => panel.contains(target) || !!(target.closest && target.closest(closeZoneSelector)); let pressStartedInside = false;
     const pressHandler = (e) => {
       if (e.isTrusted === false) return; pressStartedInside = isPanelZone(e.target);
@@ -4719,10 +4788,10 @@
       }
       if (!isPanelZone(e.target)) closePanel();
     };
-    window._panelCloseHandler = closeHandler; window._panelPressHandler = pressHandler; if (window._panelCloseTimer) clearTimeout(window._panelCloseTimer);
-    window._panelCloseTimer = setTimeout(() => {
-      window._panelCloseTimer = null;
-      if (panel.isConnected && window._panelCloseHandler === closeHandler) {
+    _panelCloseHandler = closeHandler; _panelPressHandler = pressHandler; if (_panelCloseTimer) clearTimeout(_panelCloseTimer);
+    _panelCloseTimer = setTimeout(() => {
+      _panelCloseTimer = null;
+      if (panel.isConnected && _panelCloseHandler === closeHandler) {
         document.addEventListener('pointerdown', pressHandler); document.addEventListener('mousedown', pressHandler); document.addEventListener('click', closeHandler);
       }
     }, 200);
@@ -4835,9 +4904,10 @@
                 <div style="flex: 1; min-width: 0; margin: 0; padding: 0;">
                     <label for="serh-set-bubble-action" style="display: block; margin: 0 0 4px; padding: 0; cursor: pointer; font-size: 12px; color: #4a5568;">${t('menuBubbleAction')}</label>
                     <select id="serh-set-bubble-action" style="width: 100%; min-width: 0; margin: 0; font-size: 12px; padding: 3px 4px; border: 1px solid #cbd5e0; border-radius: 4px; background: #fff; color: #2d3748; cursor: pointer; outline: none; font-family: inherit;">
-                        <option value="openPanel" ${(currentConfig.bubbleAction !== 'openStats' && currentConfig.bubbleAction !== 'toggleHidden') ? 'selected' : ''}>${t('menuBubbleActionOpen')}</option>
+                        <option value="openPanel" ${!['openStats', 'toggleHidden', 'openSelectors'].includes(currentConfig.bubbleAction) ? 'selected' : ''}>${t('menuBubbleActionOpen')}</option>
                         <option value="openStats" ${currentConfig.bubbleAction === 'openStats' ? 'selected' : ''}>${t('menuBubbleActionStats')}</option>
                         <option value="toggleHidden" ${currentConfig.bubbleAction === 'toggleHidden' ? 'selected' : ''}>${t('menuBubbleActionToggle')}</option>
+                        <option value="openSelectors" ${currentConfig.bubbleAction === 'openSelectors' ? 'selected' : ''}>${t('menuCustomSelectors')}</option>
                     </select>
                 </div>
                 <div style="flex: 1; min-width: 0; margin: 0; padding: 0;">
@@ -4918,6 +4988,7 @@
         const statusBtn = document.getElementById('serh-status'); if (statusBtn) updateBubbleContent(statusBtn, parseInt(statusBtn.dataset.blockedCount || 0));
         if (this.value === 'toggleHidden') showToast(t('bubbleToggleHint'), 'info');
         else if (this.value === 'openStats') showToast(t('bubbleStatsHint'), 'info');
+        else if (this.value === 'openSelectors') showToast(t('bubbleSelectorsHint'), 'info');
       });
     }
 
@@ -5148,7 +5219,7 @@
         `  snippets: [${(def.snippets || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
         `  links: ${links},\n` +
         `  extraElements: [${(def.extraElements || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
-        (def.button === false ? `  button: false,\n` : '') +
+        (def.button !== undefined ? `  button: ${def.button !== false},\n` : '') +
         (disabled ? `  disabled: true,\n` : '') +
         `}`;
     };
@@ -5163,7 +5234,7 @@
           parts.push(`${keyToText(key)}: ${defToText(def, true)}`);
           continue;
         }
-        const builtin = SELECTORS[key];
+        const builtin = getBaseSelectors()[key];
         parts.push(`${keyToText(key)}: ${builtin ? defToText(builtin, true) : `{\n  disabled: true,\n}`}`);
         continue;
       }
@@ -5273,10 +5344,10 @@
     return diff;
   }
 
-  function diffUserSelectors(config) {
-    const out = {}; if (!config || typeof config !== 'object' || Array.isArray(config)) return out;
+  function diffUserSelectors(config, baseDefs = null) {
+    const out = {}; if (!config || typeof config !== 'object' || Array.isArray(config)) return out; const base = baseDefs || getBaseSelectors();
     for (const key of Object.keys(config)) {
-      if (key === 'other') continue; const def = config[key]; if (!def || typeof def !== 'object' || Array.isArray(def)) continue; const builtin = SELECTORS[key]; const rest = { ...def };
+      if (key === 'other') continue; const def = config[key]; if (!def || typeof def !== 'object' || Array.isArray(def)) continue; const builtin = base[key]; const rest = { ...def };
       if (rest.disable !== undefined) {
         if (rest.disabled === undefined) rest.disabled = rest.disable; delete rest.disable;
       }
@@ -5291,10 +5362,10 @@
   }
 
   function pruneUserSelectors() {
-    const user = getUserSelectors(); let changed = false; const next = {};
+    const user = getUserSelectors(); const baseDefs = getBaseSelectors(); let changed = false; const next = {};
     for (const key of Object.keys(user)) {
       const def = user[key];
-      if (key !== 'other' && SELECTORS[key] && sameSelectorDef(def, SELECTORS[key])) { changed = true; continue; }
+      if (key !== 'other' && baseDefs[key] && sameSelectorDef(def, baseDefs[key])) { changed = true; continue; }
       next[key] = def;
     }
     if (changed) {
@@ -5491,18 +5562,13 @@
     hideStatsPanel();
     const opened = openPanel('serh-selector-panel');
     if (!opened) return;
-    const { panel, closePanel } = opened; const syncSelectorsEnabled = GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false);
+    const { panel, closePanel } = opened;
+    let baseAtOpen = getBaseSelectors();
     panel.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                 <h3 style="margin:0;font-size:14px;line-height:1.2;">${t('selectorPanelTitle')}</h3>
                 <div style="display:flex;align-items:center;gap:6px;">
-                    <label style="display:flex !important;align-items:center;font-size:12px;color:#4a5568;cursor:pointer;margin:0;white-space:nowrap;line-height:1;">
-                        <span class="serh-switch">
-                            <input type="checkbox" id="serh-selector-sync" ${syncSelectorsEnabled ? 'checked' : ''}>
-                            <span class="serh-slider"></span>
-                        </span>
-                        <span style="line-height:1;">${t('sync')}</span>
-                    </label>
+                    <button id="serh-selector-subscribe" class="serh-button serh-button-secondary" style="padding: 3px 8px; border: 1px solid transparent;">${t('subscribe')}</button>
                     <button id="serh-selector-import" class="serh-button serh-button-secondary" style="padding: 3px 8px; border: 1px solid transparent;">${t('import')}</button>
                     <button id="serh-selector-export" class="serh-button serh-button-success" style="padding: 3px 8px; border: 1px solid transparent;">${t('export')}</button>
                 </div>
@@ -5529,7 +5595,7 @@
     setupBracketHighlight(textarea, 'js');
 
     const applyUserSelectors = (config) => {
-      GM_setValue(SELECTORS_KEY, diffUserSelectors(config)); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite(); markLocalModifiedTime(SELECTORS_LAST_MODIFIED_KEY);
+      GM_setValue(SELECTORS_KEY, diffUserSelectors(config, baseAtOpen)); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite(); markLocalModifiedTime(SELECTORS_LAST_MODIFIED_KEY);
       triggerWebDAVSyncDelayed(5000);
     };
 
@@ -5537,8 +5603,8 @@
       if (!messages || !messages.length) return; showToast(messages.join('\n'), 'error', 5000);
     };
 
-    document.getElementById('serh-selector-sync').onchange = (e) => {
-      GM_setValue(WEBDAV_SYNC_SELECTORS_KEY, e.target.checked);
+    document.getElementById('serh-selector-subscribe').onclick = (e) => {
+      e.stopPropagation(); showEngineSubscriptionPanel();
     };
 
     document.getElementById('serh-selector-import').onclick = () => {
@@ -5568,7 +5634,8 @@
     };
 
     document.getElementById('serh-selector-reset').onclick = () => {
-      textarea.value = serializeSelectors(SELECTORS); showError([]); updateLineNumbers('selectors'); showToast(t('resetPending'), 'success');
+      baseAtOpen = getBaseSelectors();
+      textarea.value = serializeSelectors(baseAtOpen); showError([]); updateLineNumbers('selectors'); showToast(t('resetPending'), 'success');
     };
 
     document.getElementById('serh-selector-cancel').onclick = (e) => {
@@ -5800,12 +5867,15 @@
     const offset = await getNetworkTimeOffset(); if (offset !== null) return Date.now() + offset; if (serverTime > 0) return serverTime; return Date.now();
   }
 
+  function webdavTargetId(config) { try { return getWebDAVRequest(config).fullUrl; } catch (e) { return ''; } }
+
   function getRuleSyncSnapshot() {
-    const raw = GM_getValue(WEBDAV_SYNC_SNAPSHOT_KEY, null); return Array.isArray(raw) ? raw : null;
+    const raw = GM_getValue(WEBDAV_SYNC_SNAPSHOT_KEY, null); if (!raw || typeof raw !== 'object' || typeof raw.target !== 'string' || !Array.isArray(raw.rules)) return null;
+    return raw.target === webdavTargetId(loadWebDAVConfig()) ? raw.rules : null;
   }
 
-  function setRuleSyncSnapshot(rules) {
-    if (!Array.isArray(rules)) return; GM_setValue(WEBDAV_SYNC_SNAPSHOT_KEY, rules);
+  function setRuleSyncSnapshot(rules, config = null) {
+    if (!Array.isArray(rules)) return; GM_setValue(WEBDAV_SYNC_SNAPSHOT_KEY, { target: webdavTargetId(config || loadWebDAVConfig()), rules });
   }
 
   function getSelectorSyncSnapshot() {
@@ -5862,7 +5932,7 @@
     return result;
   }
 
-  function mergeRules3Way(baseRules, localRules, cloudRules) {
+  function mergeRules3Way(baseRules, localRules, cloudRules, preferLocal = true) {
     baseRules = Array.isArray(baseRules) ? baseRules : []; localRules = Array.isArray(localRules) ? localRules : []; cloudRules = Array.isArray(cloudRules) ? cloudRules : [];
 
     const baseKeys = new Set(baseRules.map(getRuleKey).filter(Boolean)); const localKeys = new Set(localRules.map(getRuleKey).filter(Boolean));
@@ -5929,30 +5999,40 @@
     const noteInsert = (key, anchor) => {
       if (place.has(key)) return; place.set(key, anchor); if (!pendingByAnchor.has(anchor)) pendingByAnchor.set(anchor, []); pendingByAnchor.get(anchor).push(key);
     };
-    const srcOf = (rows) => {
-      const map = new Map(); const prev = []; let p = null;
-      rows.forEach((row, i) => { prev[i] = p; if (baseIndex.has(row.key)) p = row.key; });
-      const next = new Array(rows.length); let n = null;
-      for (let i = rows.length - 1; i >= 0; i--) { next[i] = n; if (baseIndex.has(rows[i].key)) n = rows[i].key; }
-      rows.forEach((row, i) => {
-        if (baseIndex.has(row.key) || map.has(row.key)) return;
-        const lo = prev[i] ? baseIndex.get(prev[i]) : -1; const hi = next[i] ? baseIndex.get(next[i]) : 1e9; let cand = null; let amb = false;
-        for (const [bk, bi] of baseIndex) {
-          if (bi <= lo || bi >= hi || !localDeleted.has(bk) || !cloudDeleted.has(bk)) continue;
-          if (cand) { amb = true; break; } cand = bk;
-        }
-        if (cand && !amb) map.set(row.key, cand);
+    const srcOf = (rows, gone) => {
+      const map = new Map(); let run = []; let lo = -1;
+      const flush = (hi) => {
+        const cand = []; for (const [bk, bi] of baseIndex) if (bi > lo && bi < hi && gone.has(bk)) cand.push(bk);
+        cand.sort((a, b) => baseIndex.get(a) - baseIndex.get(b));
+        const both = cand.filter(bk => localDeleted.has(bk) && cloudDeleted.has(bk));
+        if (cand.length === 1) run.forEach(row => map.set(row.key, cand[0]));
+        else if (cand.length !== run.length && both.length === 1) run.forEach(row => map.set(row.key, both[0]));
+        else for (let i = 0; i < run.length && i < cand.length; i++) map.set(run[i].key, cand[i]);
+        run = [];
+      };
+      rows.forEach(row => {
+        if (!baseIndex.has(row.key)) { run.push(row); return; }
+        const at = baseIndex.get(row.key); flush(at); lo = at;
       });
-      return map;
+      flush(baseRows.length); return map;
     };
-    const localSrc = srcOf(localRows); const cloudSrc = srcOf(cloudRows); const cloudDup = new Set();
-    cloudSrc.forEach((bk, k) => { for (const [k2, b2] of localSrc) { if (b2 === bk && k2 !== k) { cloudDup.add(k); break; } } });
+    const localSrc = srcOf(localRows, localDeleted); const cloudSrc = srcOf(cloudRows, cloudDeleted);
+    const groupBySrc = (srcMap) => {
+      const groups = new Map(); srcMap.forEach((bk, key) => { if (!groups.has(bk)) groups.set(bk, []); groups.get(bk).push(key); }); return groups;
+    };
+    const localGroups = groupBySrc(localSrc); const cloudGroups = groupBySrc(cloudSrc); const mappedKeys = new Set([...localSrc.keys(), ...cloudSrc.keys()]);
+    const pickedByBase = new Map();
+    const pickGroup = (bk) => {
+      const localKeys = localGroups.get(bk) || []; const cloudKeys = cloudGroups.get(bk) || [];
+      if (!cloudKeys.length) return localKeys; if (!localKeys.length) return cloudKeys; return preferLocal ? localKeys : cloudKeys;
+    };
+    new Set([...localGroups.keys(), ...cloudGroups.keys()]).forEach(bk => pickedByBase.set(bk, pickGroup(bk)));
     const orderedRows = orderSide === cloudMeta ? cloudRows : localRows; const otherRows = orderSide === cloudMeta ? localRows : cloudRows;
     orderedRows.forEach((row, i) => {
-      if (baseIndex.has(row.key) || deleted(row.key) || cloudDup.has(row.key)) return; noteInsert(row.key, anchorBefore(orderedRows, i));
+      if (baseIndex.has(row.key) || deleted(row.key) || mappedKeys.has(row.key)) return; noteInsert(row.key, anchorBefore(orderedRows, i));
     });
     otherRows.forEach((row, i) => {
-      if (baseIndex.has(row.key) || deleted(row.key) || place.has(row.key) || cloudDup.has(row.key)) return; const before = anchorBefore(otherRows, i); const after = anchorAfter(otherRows, i);
+      if (baseIndex.has(row.key) || deleted(row.key) || place.has(row.key) || mappedKeys.has(row.key)) return; const before = anchorBefore(otherRows, i); const after = anchorAfter(otherRows, i);
       if (before !== null && after === null) noteInsert(row.key, END); else noteInsert(row.key, before);
     });
 
@@ -5965,11 +6045,16 @@
     };
 
     emitPending(null);
-    const skeleton = orderSide
-      ? (orderSide === localMeta ? localRows : cloudRows).filter(row => baseIndex.has(row.key) && !deleted(row.key))
-      : baseRows.filter(row => !deleted(row.key));
-    skeleton.forEach(row => {
-      emit(row.key); emitPending(row.key);
+    const slots = []; const slotSeen = new Set();
+    const addSlot = (key) => { if (!slotSeen.has(key)) { slotSeen.add(key); slots.push(key); } };
+    (orderSide ? (orderSide === localMeta ? localRows : cloudRows) : baseRows).forEach(row => {
+      if (baseIndex.has(row.key) && (!deleted(row.key) || pickedByBase.has(row.key))) addSlot(row.key);
+    });
+    baseRows.forEach(row => { if (pickedByBase.has(row.key)) addSlot(row.key); });
+    slots.forEach(key => {
+      const picked = pickedByBase.get(key);
+      if (picked) { picked.forEach(emit); seen.add(key); } else emit(key);
+      emitPending(key);
     });
     emitPending(END); for (const key of place.keys()) emit(key); baseRows.forEach((row) => emit(row.key)); return result;
   }
@@ -6157,7 +6242,7 @@
 
   function buildUploadContent(content, syncedAt, remotePreserved) {
     syncedAt = syncedAt || Date.now(); remotePreserved = remotePreserved || {}; let prefix = ''; const syncConfig = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false);
-    const syncSelectors = GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false);
+    const syncSelectors = syncConfig;
 
     let remoteSelectorsSyncedAt = 0;
     if (remotePreserved.rawScriptConfig) {
@@ -6476,6 +6561,24 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     if (showAlerts) showToast(t('subscriptionSuccess', { count: validRules.length }), 'success'); return { success: true, count: validRules.length };
   }
 
+  async function performEngineSubscriptionForUrl(url, showAlerts = true) {
+    const existing = getEngineSubscriptions().find(s => s.url === url);
+    if (!existing) return { success: false, cancelled: true, count: 0 };
+    const resp = await gmRequest('GET', url); const content = resp.responseText;
+    if (isHtmlResponse(content)) throw new Error(t('subImportFailed'));
+    const parsed = parseSelectorText(content);
+    if (!parsed.config || parsed.errors.length) throw new Error((parsed.errors && parsed.errors[0]) || t('subImportFailed'));
+    const errors = validateUserSelectors(parsed.config); if (errors.length) throw new Error(errors[0]);
+    const count = Object.keys(parsed.config).length; if (!count) throw new Error(t('subImportFailed'));
+    const subs = getEngineSubscriptions().map(s => s.url === url ? {
+      ...s, selectors: parsed.config, lastUpdate: Date.now(), lastAttempt: Date.now(),
+      name: s.builtin ? (s.name || t('builtinEngineSub')) : s.name
+    } : s);
+    saveEngineSubscriptions(subs); refreshEngineSite();
+    if (showAlerts) showToast(t('subscriptionSuccess', { count }), 'success');
+    return { success: true, count };
+  }
+
   function showSubscriptionPanel() {
     hideStatsPanel();
     const opened = openPanel('serh-subscription-panel', { padding: '20px', beforeClose: () => { if (!cancelDiscardsEdits) persistCurrentSubscriptions(); } });
@@ -6541,7 +6644,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         const input = row.querySelector('.serh-subscription-url'); const url = input.value.trim(); const origUrl = row.dataset.originalUrl || '';
         const toggle = row.querySelector('.serh-subscription-enable-toggle'); const enabled = toggle ? toggle.checked : true; const msgDiv = row.querySelector('.serh-subscription-status-message');
         row.classList.remove('serh-subscription-row-invalid'); msgDiv.textContent = ''; msgDiv.className = 'serh-subscription-status-message';
-        if (!url) return;
+        if (!url) { row.dataset.originalUrl = ''; if (origUrl && !producedUrls.has(origUrl)) { const at = newSubs.findIndex(s => s && s.url === origUrl); if (at >= 0) newSubs.splice(at, 1); } return; }
         if (!/^https?:\/\//i.test(url)) {
           row.classList.add('serh-subscription-row-invalid'); msgDiv.textContent = t('subLinkInvalid'); msgDiv.className = 'serh-subscription-status-message error'; hasError = true; return;
         }
@@ -6589,6 +6692,20 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       return true;
     }
 
+    function bindToggleEvents() {
+      container.querySelectorAll('.serh-subscription-enable-toggle').forEach(toggle => {
+        toggle.onchange = () => {
+          const row = toggle.closest('.serh-subscription-row'); const url = (row.querySelector('.serh-subscription-url').value || '').trim();
+          if (!/^https?:\/\//i.test(url)) return;
+          const subs = getSubscriptions(); const at = subs.findIndex(s => s && s.url === url); if (at < 0) return;
+          if ((subs[at].enabled !== false) === toggle.checked) return;
+          subs[at].enabled = toggle.checked; saveSubscriptions(subs); subscriptions = getSubscriptions();
+          row.dataset.originalEnabled = String(toggle.checked);
+          markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY); forceReprocessAll(); triggerWebDAVSyncDelayed(5000);
+        };
+      });
+    }
+
     function bindDeleteEvents() {
       container.querySelectorAll('.serh-subscription-delete-btn').forEach(btn => {
         btn.onclick = (e) => {
@@ -6600,10 +6717,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
 
     addBtn.onclick = () => {
-      container.appendChild(createSubscriptionRow()); reindexRows(); bindDeleteEvents(); container.scrollTop = container.scrollHeight;
+      container.appendChild(createSubscriptionRow()); reindexRows(); bindDeleteEvents(); bindToggleEvents(); container.scrollTop = container.scrollHeight;
     };
 
-    reindexRows(); bindDeleteEvents();
+    reindexRows(); bindDeleteEvents(); bindToggleEvents();
     let cancelDiscardsEdits = false;
 
     document.getElementById('serh-subscription-import').onclick = async () => {
@@ -6633,6 +6750,170 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       e.stopPropagation(); cancelDiscardsEdits = true; closePanel();
     };
 
+  }
+
+  function showEngineSubscriptionPanel() {
+    hideStatsPanel();
+    let cancelDiscardsEdits = false;
+    const opened = openPanel('serh-engine-sub-panel', { padding: '20px', beforeClose: () => { if (!cancelDiscardsEdits) persistCurrent(); } });
+    if (!opened) return;
+    const { panel, closePanel } = opened;
+    let subscriptions = getEngineSubscriptions(); const deletedUrls = new Set();
+
+    const createRow = (sub = {}) => {
+      const url = sub.url || ''; const enabled = sub.enabled !== false; const row = document.createElement('div');
+      row.className = 'serh-subscription-row'; row.dataset.builtin = sub.builtin ? '1' : '';
+      row.dataset.originalUrl = url; row.dataset.originalEnabled = String(enabled);
+      row.innerHTML = `<div class="serh-subscription-meta-row"><span class="serh-subscription-index"></span><div class="serh-subscription-status-message"></div><span class="serh-subscription-info"></span></div><div class="serh-subscription-input-row"><label class="serh-switch serh-subscription-toggle-switch" style="margin:0 2px 0 0;"><input type="checkbox" class="serh-subscription-enable-toggle" ${enabled ? 'checked' : ''}><span class="serh-slider"></span></label><input type="text" class="serh-subscription-url" placeholder="https://example.com/selectors.js" ${sub.builtin ? 'readonly' : ''}><button class="serh-subscription-delete-btn" ${sub.builtin ? 'disabled' : ''}>❌</button></div>`;
+      row.querySelector('.serh-subscription-url').value = url;
+      return row;
+    };
+
+    panel.innerHTML = `
+            <div class="serh-subscription-panel-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0;">
+                <h3 style="margin:0;font-size:16px;color:#2d3748;line-height:1;">${t('engineSubTitle')}</h3>
+                <label style="display:flex !important;align-items:center;font-size:12px;color:#4a5568;cursor:pointer;margin:0;white-space:nowrap;line-height:1;">
+                    <span class="serh-switch">
+                        <input type="checkbox" id="serh-engine-sub-auto-update" ${currentConfig.engineSubAutoUpdate ? 'checked' : ''}>
+                        <span class="serh-slider"></span>
+                    </span>
+                    <span style="line-height:1;">${t('autoUpdate')}</span>
+                </label>
+            </div>
+            <div id="serh-engine-sub-rows"></div>
+            <div class="serh-subscription-btn-group">
+                <button id="serh-engine-sub-import" class="serh-button serh-button-primary">${t('import')}</button>
+                <button id="serh-engine-sub-add" class="serh-button serh-button-success">+</button>
+                <button id="serh-engine-sub-cancel" class="serh-button serh-button-secondary">${t('cancel')}</button>
+            </div>
+        `;
+
+    const container = document.getElementById('serh-engine-sub-rows');
+    subscriptions.forEach(sub => container.appendChild(createRow(sub)));
+
+    const formatSubInfo = (sub) => {
+      if (!sub || !sub.lastUpdate) return ''; const d = new Date(sub.lastUpdate);
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      return `${dateStr} - ${sub.selectors && typeof sub.selectors === 'object' ? Object.keys(sub.selectors).length : 0}`;
+    };
+
+    function reindexRows() {
+      container.querySelectorAll('.serh-subscription-row').forEach((row, index) => {
+        const sub = subscriptions.find(s => s.url === row.dataset.originalUrl);
+        row.querySelector('.serh-subscription-index').textContent = sub && sub.builtin ? t('builtinEngineSub') : ((sub && sub.name) || `${t('subscription')}${index + 1}`);
+        row.querySelector('.serh-subscription-info').textContent = formatSubInfo(sub);
+      });
+    }
+
+    function collectFromRows(latestSubs, removedUrls) {
+      const removed = new Set(removedUrls); const newSubs = latestSubs.filter(s => s.builtin || !removed.has(s.url));
+      const seen = new Set(); let hasError = false;
+      container.querySelectorAll('.serh-subscription-row').forEach(row => {
+        const input = row.querySelector('.serh-subscription-url'); const url = input.value.trim(); const origUrl = row.dataset.originalUrl || '';
+        const builtin = row.dataset.builtin === '1'; const enabled = row.querySelector('.serh-subscription-enable-toggle').checked;
+        const msgDiv = row.querySelector('.serh-subscription-status-message'); row.classList.remove('serh-subscription-row-invalid');
+        msgDiv.textContent = ''; msgDiv.className = 'serh-subscription-status-message';
+        if (!url) { if (origUrl && !builtin) { const at = newSubs.findIndex(s => s && s.url === origUrl && !s.builtin); if (at >= 0) newSubs.splice(at, 1); } return; }
+        if (!/^https?:\/\//i.test(url)) {
+          row.classList.add('serh-subscription-row-invalid'); msgDiv.textContent = t('subLinkInvalid'); msgDiv.className = 'serh-subscription-status-message error'; hasError = true; return;
+        }
+        if (seen.has(url)) return; seen.add(url);
+        const existing = latestSubs.find(s => s.url === url) || (builtin ? latestSubs.find(s => s.builtin) : null) || {};
+        if (origUrl && origUrl !== url && !builtin) {
+          const oldIndex = newSubs.findIndex(s => s.url === origUrl && !s.builtin); if (oldIndex >= 0) newSubs.splice(oldIndex, 1);
+        }
+        const subData = {
+          url,
+          name: builtin ? t('builtinEngineSub') : (existing.name || ''),
+          enabled, builtin: builtin || existing.builtin || undefined,
+          lastUpdate: existing.lastUpdate || 0, lastAttempt: existing.lastAttempt || 0,
+          selectors: existing.selectors || null
+        };
+        const at = newSubs.findIndex(s => s.url === url); if (at >= 0) newSubs[at] = subData; else newSubs.push(subData);
+      });
+      return { newSubs: [...newSubs.filter(s => s.builtin), ...newSubs.filter(s => !s.builtin)], hasError };
+    }
+
+    function persistCurrent() {
+      const latest = getEngineSubscriptions(); const { newSubs } = collectFromRows(latest, deletedUrls);
+      const signature = (list) => JSON.stringify(list.map(s => [s.url, s.enabled !== false, s.name || '']));
+      const before = signature(latest); saveEngineSubscriptions(newSubs);
+      deletedUrls.clear(); subscriptions = getEngineSubscriptions();
+      container.querySelectorAll('.serh-subscription-row').forEach(row => {
+        const input = row.querySelector('.serh-subscription-url'); const currentUrl = input ? input.value.trim() : '';
+        if (!input || !/^https?:\/\//i.test(currentUrl)) return;
+        row.dataset.originalUrl = currentUrl; const toggle = row.querySelector('.serh-subscription-enable-toggle');
+        if (toggle) row.dataset.originalEnabled = String(toggle.checked);
+      });
+      reindexRows();
+      if (before !== signature(subscriptions)) { refreshEngineSite(); forceReprocessAll(); }
+      return true;
+    }
+
+    function bindToggleEvents() {
+      container.querySelectorAll('.serh-subscription-enable-toggle').forEach(toggle => {
+        toggle.onchange = () => {
+          const row = toggle.closest('.serh-subscription-row'); const url = (row.querySelector('.serh-subscription-url').value || '').trim();
+          if (!/^https?:\/\//i.test(url)) return;
+          const subs = getEngineSubscriptions(); const at = subs.findIndex(s => s && s.url === url); if (at < 0) return;
+          if ((subs[at].enabled !== false) === toggle.checked) return;
+          subs[at].enabled = toggle.checked; saveEngineSubscriptions(subs); subscriptions = getEngineSubscriptions();
+          row.dataset.originalEnabled = String(toggle.checked);
+          refreshEngineSite(); forceReprocessAll();
+        };
+      });
+    }
+
+    function bindDeleteEvents() {
+      container.querySelectorAll('.serh-subscription-delete-btn').forEach(btn => {
+        btn.onclick = (e) => {
+          if (btn.disabled) return; e.stopPropagation(); const row = btn.closest('.serh-subscription-row');
+          const origUrl = (row.dataset.originalUrl || '').trim(); if (origUrl) deletedUrls.add(origUrl);
+          row.remove(); reindexRows();
+        };
+      });
+    }
+
+    document.getElementById('serh-engine-sub-add').onclick = () => {
+      container.appendChild(createRow()); reindexRows(); bindDeleteEvents(); bindToggleEvents(); container.scrollTop = container.scrollHeight;
+    };
+
+    reindexRows(); bindDeleteEvents(); bindToggleEvents();
+    const engineAutoUpdateSwitch = document.getElementById('serh-engine-sub-auto-update');
+    if (engineAutoUpdateSwitch) {
+      engineAutoUpdateSwitch.addEventListener('change', function() {
+        adoptStoredConfigBeforeWrite(); currentConfig.engineSubAutoUpdate = this.checked; persistConfig(true);
+      });
+    }
+    document.getElementById('serh-engine-sub-import').onclick = async () => {
+      const rows = Array.from(container.querySelectorAll('.serh-subscription-row')); persistCurrent(); showToast(t('importing'), 'info');
+      let totalEngines = 0, failed = false;
+      for (const row of rows) {
+        const input = row.querySelector('.serh-subscription-url'); const url = input.value.trim(); const msgDiv = row.querySelector('.serh-subscription-status-message');
+        if (!url) {
+          row.classList.remove('serh-subscription-row-invalid'); msgDiv.textContent = t('subLinkEmpty'); msgDiv.className = 'serh-subscription-status-message error'; failed = true; continue;
+        }
+        if (!/^https?:\/\//i.test(url)) {
+          row.classList.add('serh-subscription-row-invalid'); msgDiv.textContent = t('subLinkInvalid'); msgDiv.className = 'serh-subscription-status-message error'; failed = true; continue;
+        }
+        try {
+          const result = await performEngineSubscriptionForUrl(url, false); if (!result.success) { failed = true; continue; }
+          totalEngines += result.count; row.classList.remove('serh-subscription-row-invalid'); row.dataset.originalUrl = url;
+          msgDiv.textContent = t('subImportSuccess'); msgDiv.className = 'serh-subscription-status-message success';
+          const sub = getEngineSubscriptions().find(s => s && s.url === url); row.querySelector('.serh-subscription-info').textContent = formatSubInfo(sub);
+        } catch (err) {
+          failed = true; console.error(`[引擎订阅] 导入失败 [${url}]:`, err);
+          msgDiv.textContent = t('subImportFailed'); msgDiv.className = 'serh-subscription-status-message error';
+        }
+      }
+      subscriptions = getEngineSubscriptions(); reindexRows(); forceReprocessAll();
+      if (totalEngines > 0) showToast(t('subscriptionSuccess', { count: totalEngines }), 'success');
+      else if (!failed) showToast(t('saved'), 'success');
+    };
+
+    document.getElementById('serh-engine-sub-cancel').onclick = (e) => {
+      e.stopPropagation(); cancelDiscardsEdits = true; closePanel();
+    };
   }
 
   function hasMatchingWebDAVCredentials(saved, url, username) {
@@ -6835,8 +7116,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           const trustedNow = netOffset !== null ? Date.now() + netOffset : (serverTime > 0 ? serverTime : Date.now()); const validRemoteTimes = extractValidCloudTimes(remoteConfig, trustedNow);
           const remoteSyncedAt = validRemoteTimes.length > 0 ? Math.max(...validRemoteTimes) : 0; const uploadedTime = Math.max(remoteSyncedAt + 1000, trustedNow);
           const remoteRaw = String(resp.responseText || '');
-          if (content.trim() === '' && resp.status !== 404 && remoteRaw.trim() !== '') await putWebDAVBackup(fullUrl, headers, remoteRaw);
-          await putWebDAVRules({ fullUrl, folderUrl, headers, rules: content.split('\n'), settingsModifiedAt: uploadedTime }, content, uploadedTime, remotePreserved, buildDavPutHeaders(headers, uploadedTime));
+          if (content.trim() === '' && resp.status !== 404 && remoteRaw.trim() !== '') { try { await putWebDAVBackup(fullUrl, headers, remoteRaw); } catch (bakErr) { console.warn('[WebDAV] 备份失败(不阻断上传):', bakErr && bakErr.message); } }
+          await putWebDAVRules({ fullUrl, folderUrl, headers, rules: content.split('\n'), settingsModifiedAt: uploadedTime, config }, content, uploadedTime, remotePreserved, buildDavPutHeaders(headers, uploadedTime));
           GM_setValue(WEBDAV_LAST_SYNC_KEY, uploadedTime);
         });
         loadingToast.dismiss();
@@ -6868,6 +7149,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       const loadingToast = showToast(t('webdavDownloading'), 'info', 10000);
       try {
         const syncResult = await runWithSyncLock('webdav', async () => performWebDAVDownload(config)); loadingToast.dismiss();
+        if (_pendingSubRefresh) { _pendingSubRefresh = false; if (syncResult !== false) checkAutoSubscription(true); }
         if (syncResult === false) {
           showToast(t('webdavSyncLocked'), 'error', 4000);
         } else if (syncResult !== 'cancelled') {
@@ -6919,10 +7201,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
               addedAt: (existing && existing.addedAt) || s.addedAt || 0
             };
           }));
-          setSubscriptionSyncSnapshot(subscriptions); setTimeout(() => { checkAutoSubscription(true); }, 1000);
+          setSubscriptionSyncSnapshot(subscriptions); _pendingSubRefresh = true;
         }
       }
-      if (selectors && typeof selectors === 'object' && !Array.isArray(selectors) && GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false)) {
+      if (selectors && typeof selectors === 'object' && !Array.isArray(selectors) && GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
         GM_setValue(SELECTORS_KEY, selectors); setSelectorSyncSnapshot(selectors); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite();
       }
     }
@@ -6940,7 +7222,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       }
     }
 
-    currentConfig.rules = newRules; persistConfig(false); GM_setValue(LOCAL_LAST_MODIFIED_KEY, cloudTime > 0 ? cloudTime : trustedNow); setRuleSyncSnapshot(newRules);
+    currentConfig.rules = newRules; persistConfig(false); GM_setValue(LOCAL_LAST_MODIFIED_KEY, cloudTime > 0 ? cloudTime : trustedNow); setRuleSyncSnapshot(newRules, config);
     const mainPanel = document.getElementById('serh-panel');
     if (mainPanel && Array.isArray(currentConfig.rules)) {
       mainPanel._initialRules = [...currentConfig.rules];
@@ -6989,7 +7271,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       if (localRules.length > 0) {
         console.log('[WebDAV] 云端文件为空，上传本地规则...'); const uploadedTime = Math.max(cloudTime + 1000, localTime + 1, trustedNow);
         try {
-          await putWebDAVRules({ fullUrl, folderUrl, headers, rules: localRules }, localRules.join('\n'), uploadedTime, {
+          await putWebDAVRules({ fullUrl, folderUrl, headers, rules: localRules, config }, localRules.join('\n'), uploadedTime, {
             rawScriptConfig: parsedHeader ? parsedHeader.rawScriptConfig : null,
             rawSelectors: parsedHeader ? parsedHeader.rawSelectors : null
           }, buildDavPutHeaders(headers, uploadedTime, { etag: cloudETag, lastMod: cloudLastMod }));
@@ -7012,7 +7294,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     if (resp.status === 404) {
       console.log('[WebDAV] 云端文件不存在，初始上传中...'); await ensureWebDAVFolder(folderUrl, headers);
       try {
-        await putWebDAVRules({ fullUrl, folderUrl, headers, rules: localRules }, localRules.join('\n'), trustedNow, null, buildDavPutHeaders(headers, trustedNow, { ifNoneMatch: true }));
+        await putWebDAVRules({ fullUrl, folderUrl, headers, rules: localRules, config }, localRules.join('\n'), trustedNow, null, buildDavPutHeaders(headers, trustedNow, { ifNoneMatch: true }));
       } catch (err) {
         if (err && err.message && err.message.includes('412') && depth < WEBDAV_SYNC_MAX_RETRIES) {
           console.warn(`[WebDAV] 云端文件被并发创建 (412)，重新同步 (${depth + 1}/${WEBDAV_SYNC_MAX_RETRIES})`);
@@ -7032,7 +7314,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         };
         localRules.forEach(addRule); cloudRules.forEach(addRule); mergedRules = union;
       } else {
-        mergedRules = mergeRules3Way(baseRules, localRules, cloudRules);
+        mergedRules = mergeRules3Way(baseRules, localRules, cloudRules, localTime >= cloudTime);
       }
 
       const mergedContent = mergedRules.join('\n');
@@ -7048,7 +7330,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       }
 
       currentConfig.rules = mergedRules; persistConfig(false);
-      const syncConfig = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false); const syncSelectors = GM_getValue(WEBDAV_SYNC_SELECTORS_KEY, false);
+      const syncConfig = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false); const syncSelectors = syncConfig;
       const cloudSelectors = (cloudConfig && Object.prototype.hasOwnProperty.call(cloudConfig, 'selectors') && cloudConfig.selectors && typeof cloudConfig.selectors === 'object' && !Array.isArray(cloudConfig.selectors)) ? cloudConfig.selectors : null;
       let mergedSelectors = null;
       if (syncSelectors && cloudSelectors) {
@@ -7067,11 +7349,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
       if (shouldUpload) {
         console.log('[WebDAV] 规则合并或配置更新完成，上传至云端...'); const uploadedTime = Math.max(cloudTime + 1000, localTime + 1, trustedNow);
-        if (mergedRules.length === 0 && cloudRules.length > 0) {
-          try { await putWebDAVBackup(fullUrl, headers, String(resp.responseText || '')); } catch (err) { console.warn('[WebDAV] 备份失败:', err && err.message); return; }
-        }
+        if (mergedRules.length === 0 && cloudRules.length > 0) { try { await putWebDAVBackup(fullUrl, headers, String(resp.responseText || '')); } catch (err) { console.warn('[WebDAV] 备份失败:', err && err.message); } }
         try {
-          await putWebDAVRules({ fullUrl, folderUrl, headers, rules: mergedRules, subs: mergedSubs, selectors: mergedSelectors, rulesModifiedAt: (contentChanged || selectorsChanged) ? uploadedTime : (cloudTime || uploadedTime), settingsModifiedAt: subscriptionsChanged ? Math.max(uploadedTime, localSettingsTime) : localSettingsTime }, mergedContent, uploadedTime, {
+          await putWebDAVRules({ fullUrl, folderUrl, headers, rules: mergedRules, subs: mergedSubs, selectors: mergedSelectors, config, rulesModifiedAt: (contentChanged || selectorsChanged) ? uploadedTime : (cloudTime || uploadedTime), settingsModifiedAt: subscriptionsChanged ? Math.max(uploadedTime, localSettingsTime) : localSettingsTime }, mergedContent, uploadedTime, {
             rawScriptConfig: parsedHeader ? parsedHeader.rawScriptConfig : null,
             rawSelectors: parsedHeader ? parsedHeader.rawSelectors : null
           }, buildDavPutHeaders(headers, uploadedTime, { etag: cloudETag, lastMod: cloudLastMod }));
@@ -7098,7 +7378,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   }
 
   function isSerhPanelOpen() {
-    return ['serh-panel', 'serh-subscription-panel', 'serh-webdav-panel', 'serh-selector-panel', 'serh-settings-panel', 'serh-hlcolor-panel'].some(id => document.getElementById(id));
+    return ['serh-panel', 'serh-subscription-panel', 'serh-engine-sub-panel', 'serh-webdav-panel', 'serh-selector-panel', 'serh-settings-panel', 'serh-hlcolor-panel'].some(id => document.getElementById(id));
   }
 
   let _webdavSyncDelayedTimer = null; let _webdavSyncPendingWhenPanelOpen = false;
@@ -7112,7 +7392,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       if (!GM_getValue(WEBDAV_AUTO_SYNC_KEY, false)) return;
       const config = loadWebDAVConfig(); if (!config || !config.url || !isHttpsUrl(config.url)) return;
       if (isSerhPanelOpen()) { _webdavSyncPendingWhenPanelOpen = true; return; }
-      runWithSyncLock('webdav', async () => {
+      runBackgroundSync('webdav', async () => {
+        if (isSerhPanelOpen()) { _webdavSyncPendingWhenPanelOpen = true; return; }
         await performAutoWebDAVSync(config);
       }).catch(err => console.error('[WebDAV] 同步失败:', err.message));
     }, delayMs);
@@ -7124,9 +7405,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     if (lastSync > 0 && Date.now() - lastSync < WEBDAV_AUTO_SYNC_INTERVAL) return; if (isSerhPanelOpen()) return;
     const now = await getTrustedNow(); if (lastSync > now + WEBDAV_TIME_TOLERANCE) lastSync = 0;
     if (lastSync > 0 && now - lastSync < WEBDAV_AUTO_SYNC_INTERVAL) return;
-    runWithSyncLock('webdav', async () => {
+    runBackgroundSync('webdav', async () => {
       const trustedNow = await getTrustedNow(); let currentLastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0); if (currentLastSync > trustedNow + WEBDAV_TIME_TOLERANCE) currentLastSync = 0;
-      if (currentLastSync > 0 && trustedNow - currentLastSync < WEBDAV_AUTO_SYNC_INTERVAL) return; await performAutoWebDAVSync(config);
+      if (currentLastSync > 0 && trustedNow - currentLastSync < WEBDAV_AUTO_SYNC_INTERVAL) return; if (isSerhPanelOpen()) return; await performAutoWebDAVSync(config);
     }).catch(err => console.error('[WebDAV] 同步失败:', err.message));
   }
 
@@ -7202,7 +7483,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   function registerMenu() {
     _menuCommandIds.forEach(id => { try { GM_unregisterMenuCommand(id); } catch (e) {} }); _menuCommandIds = [];
     _menuCommandIds.push(GM_registerMenuCommand(t('menuOpenPanel'), () => showConfigPanel()));
-    _menuCommandIds.push(GM_registerMenuCommand(t('menuCustomSelectors'), showSelectorPanel));
+    _menuCommandIds.push(GM_registerMenuCommand('🖋️ ' + t('menuCustomSelectors'), showSelectorPanel));
     _menuCommandIds.push(GM_registerMenuCommand(t('menuHighlightColor'), () => showHighlightColorPanel()));
   }
 
@@ -7239,6 +7520,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     const held = readSyncLock(task); if (held && held.owner === SYNC_TAB_ID) GM_setValue(SYNC_LOCK_KEY_PREFIX + task, null);
   }
 
+  const _syncLocalChains = new Map();
   async function runWithSyncLock(task, fn) {
     if (!(await acquireSyncLock(task))) return false; const renewTimer = setInterval(() => renewSyncLock(task), Math.max(5000, Math.floor(SYNC_LOCK_TTL / 3)));
     try {
@@ -7248,10 +7530,17 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
   }
 
+  function runBackgroundSync(task, fn) {
+    const prev = _syncLocalChains.get(task) || Promise.resolve();
+    const run = prev.then(() => runWithSyncLock(task, fn), () => runWithSyncLock(task, fn));
+    _syncLocalChains.set(task, run.then(() => {}, () => {}));
+    return run;
+  }
+
   function checkAutoSubscription(force = false) {
     if (!force && !currentConfig.subscriptionAutoUpdate) return; if (!force && isSerhPanelOpen()) return; const subs = getSubscriptions(); if (!subs || subs.length === 0) return;
     const now = Date.now(); const isDue = (s) => s.enabled && now - (s.lastAttempt || 0) >= AUTO_UPDATE_INTERVAL && (!s.rules || s.rules.length === 0 || now - s.lastUpdate >= AUTO_UPDATE_INTERVAL); if (!subs.some(isDue)) return;
-    runWithSyncLock('webdav', async () => {
+    runBackgroundSync('webdav', async () => {
       const pending = getSubscriptions().filter(isDue); if (!pending.length) return;
       for (const sub of pending) {
         console.log(`[订阅] 开始更新: ${sub.url}`);
@@ -7267,14 +7556,38 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }).catch(err => console.error('[订阅] 更新失败:', err.message));
   }
 
+  function checkAutoEngineSubscription(force = false) {
+    if (!force && !currentConfig.engineSubAutoUpdate) return;
+    if (!force && isSerhPanelOpen()) return;
+    const subs = getEngineSubscriptions(); const now = Date.now();
+    const isDue = (s) => s.enabled !== false && now - (s.lastAttempt || 0) >= AUTO_UPDATE_INTERVAL && (!s.selectors || now - (s.lastUpdate || 0) >= AUTO_UPDATE_INTERVAL);
+    if (!subs.some(isDue)) return;
+    runBackgroundSync('webdav', async () => {
+      const pending = getEngineSubscriptions().filter(isDue); if (!pending.length) return;
+      let updated = false;
+      for (const sub of pending) {
+        console.log(`[引擎订阅] 开始更新: ${sub.url}`);
+        try {
+          const res = await performEngineSubscriptionForUrl(sub.url, false); if (res.success) updated = true;
+        } catch (err) {
+          console.error(`[引擎订阅] 更新失败: ${sub.url}`, err.message);
+          const latest = getEngineSubscriptions(); const at = latest.findIndex(s => s && s.url === sub.url);
+          if (at >= 0) { latest[at].lastAttempt = Date.now(); saveEngineSubscriptions(latest); }
+        }
+      }
+      if (updated) forceReprocessAll();
+    }).catch(err => console.error('[引擎订阅] 更新失败:', err.message));
+  }
+
   function startBackgroundSync() {
     if (_syncIntervalIds.length) return;
     _syncIntervalIds = [
       setInterval(() => checkAutoSubscription(), 60 * 60 * 1000),
+      setInterval(() => checkAutoEngineSubscription(), 60 * 60 * 1000),
       setInterval(checkAutoWebDAV, 60 * 60 * 1000)
     ];
     setTimeout(() => {
-      checkAutoSubscription(); checkAutoWebDAV();
+      checkAutoSubscription(); checkAutoEngineSubscription(); checkAutoWebDAV();
     }, 5000 + Math.floor(Math.random() * 5000));
   }
 
@@ -7303,7 +7616,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           if (!container) continue;
           if (m.type === 'attributes') {
             _hrefChangedContainers.add(container);
-          } else if (container.hasAttribute('data-blocker-processed')) {
+          } else if (container.hasAttribute('data-blocker-processed') || container.hasAttribute('data-retry-exhausted')) {
             _contentChangedContainers.add(container);
           }
         }
@@ -7319,7 +7632,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         }
         if (_contentChangedContainers.size) {
           for (const container of _contentChangedContainers) {
-            if (!container.isConnected) continue; if (!container.hasAttribute('data-blocker-processed')) continue; const cachedSig = _resultContentCache.get(container);
+            if (!container.isConnected) continue; if (!container.hasAttribute('data-blocker-processed') && !container.hasAttribute('data-retry-exhausted')) continue; const cachedSig = _resultContentCache.get(container);
             const currentSig = getResultContentSignature(container); if (currentSig === null || cachedSig === currentSig) continue;
             reprocessContainer(container); statusDirty = true;
           }

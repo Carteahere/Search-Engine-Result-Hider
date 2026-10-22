@@ -7,7 +7,7 @@
 
 ### 3.2 运行测试
 
-将`test`文件夹和脚本放至同一目录运行，测试会自动读取上一级目录 `.js` 脚本，按功能域分为：条件表达式解析、规则订阅与WebDAV同步、规则逻辑、选择器与引擎
+将`test`文件夹和脚本放至同一目录运行，测试会自动读取上一级目录 `.js` 脚本，按功能域分为：条件表达式解析、WebDAV同步与订阅、规则逻辑、选择器与引擎
 
 ```bash
 # 运行所有测试
@@ -27,7 +27,10 @@ node test/test-conditions.cjs 2>&1 | Select-String "failed"
 开启脚本调试模式，使用[网页调试](https://greasyfork.org/zh-CN/scripts/475228)脚本或浏览器F12开发者工具 → Console标签查看输出
 
 ```javascript
+// 正式版
 const d = window.__SERH_DEBUG__;
+// Lite版
+const d = window.__SERHL_DEBUG__;
 
 // 查看当前配置
 console.log('当前配置:', d.config);
@@ -65,7 +68,7 @@ d.checkRuleMatchOptimized(
 ```
 ### 3.4 Debug API示例
 
-开启调试模式后 `window.__SERH_DEBUG__` 才会被挂载，关闭调试模式自动删除
+开启调试模式后 `window.__SERH_DEBUG__`（Lite：`window.__SERHL_DEBUG__`）才会被挂载，关闭调试模式自动清除
 
 | API | 签名 | 返回/说明 |
 | --- | --- | --- |

@@ -12,7 +12,7 @@ Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、S
 **安装：**  
 使用支持 Tampermonkey / Greasemonkey 脚本的浏览器打开安装  
 正式版 [Github自动更新](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [GreasyFork](https://greasyfork.org/zh-CN/scripts/552394) | [脚本猫](https://scriptcat.org/zh-CN/script-show-page/8237)  
-精简版（移除规则订阅/webdav）[Lite](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite.user.js)
+精简版 [Lite](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite.user.js)（移除WebDAV同步/规则订阅/引擎订阅等，无联网功能）
 
 ### 1.2 当前功能：
 
@@ -32,11 +32,11 @@ Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、S
 1. 来源显示：默认开启，关闭后不在被屏蔽结果上显示命中规则
 2. 折叠模式：默认关闭，开启后被屏蔽结果只显示标题
 3. 导出配置：默认关闭，开启后导出TXT附带脚本配置
-4. 悬浮球功能切换：默认点击打开面板；切换为显隐结果时点击显示/隐藏被屏蔽结果、长按打开面板，被屏蔽结果的屏蔽按钮再次点击则取消屏蔽
+4. 功能切换：悬浮球默认点击打开面板；切换为`显隐结果`时点击显示/隐藏被屏蔽结果、长按打开面板，被屏蔽结果的屏蔽按钮再次点击则取消屏蔽
 
-### 1.3 关于Webdav：
+### 1.3 关于WebDAV：
 
-1. 自动同步后台运行，每1h三方快照合并同步一次，手动上传/下载为强制覆盖，脚本配置/自定义引擎同步开关独立
+1. 自动同步后台运行，每1h三方快照合并同步一次，手动上传/下载为强制覆盖，云端文件在首次上传后每次上传都会生成`rules.txt.bak`备份文件
 2. 地址只支持**https**和完整路径，如坚果云`https://dav.jianguoyun.com/dav/your_folder/`，路径文件夹不存在时会自动创建，文件名如`rules.txt`修改后需手动上传覆盖一次
 3. 油猴无安全存储API，密码只能本地混淆处理，安全起见必须使用单独应用密码
 4. 同步时为确保时间戳准确，会自动访问一次timeapi/akamai/cloudflare授时点，访问失败默认使用webdav的date时间戳
@@ -44,13 +44,13 @@ Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、S
 ### 1.4 关于订阅：
 
 1. 规则订阅更新同样后台运行，每12h拉取一次，支持`UTF-8`编码的纯文本远程链接如 [rules.txt](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt) ，订阅规则在本地规则后追加应用
-2. 兼容`.yaml`uBlacklist列表格式（`name`/`rules`/`blacklist`/`whitelist`/`matches`项）
-3. 脚本扩展有限不支持`##`/`#@#`等DOM/uBO规则，通过订阅导入会自动过滤
-4. 订阅链接非github源时需要跨域请求权限，若有权限申请弹窗选`总是允许全部`
+2. 兼容`.yaml`uBlacklist列表格式（`name`/`rules`/`blacklist`/`whitelist`/`matches`项），不支持`##`/`#@#`等DOM/uBO规则，通过订阅导入会自动过滤
+3. 搜索引擎订阅支持`.js`/`.json`，默认内置 [Selectors.js](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js) 并自动更新引擎列表
+4. 订阅/同步需要跨域请求权限，若有权限申请弹窗选`总是允许全部`
 
 ### 1.5 其他：
 
-1. 对部分引擎自动去除重定向，可在设置内开关
+1. 对部分搜索引擎自动去除重定向，可在设置内开关
 2. 规则优先级：本地白名单 > 本地黑名单 > 订阅白名单 > 订阅黑名单
 3. 注释行格式`#+空格+内容`，不可重复否则同步时会合并同注释行下内容；⬆️/⬇️功能为移动到上一个/下一个注释行，在第一行或第一个注释行时⬆️会跳到最后一行
 4. 为避免跨页数据冲突，请勿在多个标签页同时打开面板编辑规则，打开面板时暂停同步

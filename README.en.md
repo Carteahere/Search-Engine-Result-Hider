@@ -12,7 +12,7 @@ Bing, Google, Google Scholar, DuckDuckGo(&lite), Yandex, Brave, Ecosia, Startpag
 **Install:**  
 Open and install using a browser that supports Tampermonkey / Greasemonkey scripts.  
 Release Version [Github-AutoUpdate](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [GreasyFork](https://greasyfork.org/en/scripts/552394) | [ScriptCat](https://scriptcat.org/zh-CN/script-show-page/8237)  
-Lite Version (Remove Subscription / WebDAV) [Lite](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite.user.js)
+Lite Version [Lite](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite.user.js) (Remove WebDAV Sync / Rule Subscription / Engine Subscription, no networking function) 
 
 ### 1.2 Features:
 
@@ -36,7 +36,7 @@ Partial setting instructions:
 
 ### 1.3 About WebDAV:
 
-1. Auto-sync runs in the background, 3-Way Merge Sync once every 1h, manual upload/download is mandatory overwrite, script config/custom engine synchronization switch independent.
+1. Auto-sync runs in the background, 3-Way Merge Sync once every 1h, manual upload/download is mandatory overwrite. After the initial upload, a backup file named `rules.txt.bak` is generated for each subsequent upload of the cloud file.
 2. Address only supports **https** and full paths, e.g., Nutstore `https://dav.jianguoyun.com/dav/your_folder/`; the folder is created automatically if it does not exist, after changing the file name such as `rules.txt` need to manually upload and overwrite it once.
 3. Tampermonkey lacks a secure storage API, so passwords can only be saved using local obfuscation; for security reasons, you must use a dedicated application password.
 4. To ensure the accuracy of the timestamp during synchronization, the timeapi/akamai/cloudflare timing point will be automatically accessed once. If the access fails, the webdav date timestamp will be used by default.
@@ -44,13 +44,13 @@ Partial setting instructions:
 ### 1.4 About Subscriptions:
 
 1. Rule subscription updates also run in the background, fetching once every 12h. It supports plain text remote links encoded in `UTF-8` such as [rules.txt](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt) , subscription rules are appended after local rules. 
-2. Compatible with `.yaml` uBlacklist list format (`name`/`rules`/`blacklist`/`whitelist`/`matches` fields).
-3. Script extensions are limited and do not support `##`/`#@#` DOM/uBO rules, they are filtered out automatically on subscription import.
-4. If the subscription link is not a GitHub source, cross-origin request permission is required; if a permission prompt appears, select `Always allow all`.
+2. Compatible with `.yaml` uBlacklist list format (`name`/`rules`/`blacklist`/`whitelist`/`matches` fields), do not support `##`/`#@#` DOM/uBO rules, they are filtered out automatically on subscription import.
+3. The search engine subscription supports `.js`/`.json`, with [Selectors.js](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js) being built-in by default and the engines list being automatically updated.
+4. Subscription/synchronization requires cross-domain request permissions, if a permission prompt appears, select `Always allow all`.
 
 ### 1.5 Other:
 
-1. Redirections will be automatically removed for some engines, and can be toggled on or off in the settings.
+1. Redirections will be automatically removed for some search engines, and can be toggled on or off in the settings.
 2. Rule priority: Local whitelist > Local blacklist > Subscription whitelist > Subscription blacklist
 3. Comment line format: `#+[space]+text` and cannot be repeated, otherwise the content under the same comment line will be merged during synchronization; ⬆️/⬇️ jump to the previous/next comment line; when on the first line or first comment line, ⬆️ jumps to the last line.
 4. To avoid cross-page data conflicts, do not open panel editing rules on multiple tabs at the same time, and pause synchronization when opening the panel.

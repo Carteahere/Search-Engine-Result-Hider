@@ -72,7 +72,7 @@ Regex uses browser-supported JavaScript `RegExp` flags: `i`, `m`, `s`, `u` (`s` 
 | `@Ntitle/.*example.*/` | Adds a colored border to results whose title contains `example` |
 | `@1path $= ".pdf"` | Add a colored border to the results of links ending with `.pdf` |
 
-Notes:
+**Notes:**
 1. `@N` must be separated by a [space] from naked domain name rules, while other rules can ignore [space]. For example, `@1 example.com` is recognized normally, while `@1example.com` is recognized as a whitelist rule.
 2. Only 5 colors are supported, `@N` = `@1`–`@5`; open the custom color panel from the script menu.
 3. Supports conditional expressions, such as `@N+host/path/url/scheme`.
@@ -132,7 +132,7 @@ Notes:
 
 ### 2.9 Custom Engine:
 
-Open the edit panel via script manager menu `🖋️ Custom Engine` (JS format, same structure as built-in [SELECTORS](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js)).  
+Open the edit panel via script manager menu `🖋️ Custom Engine` (JS format, same structure as built-in [Selectors.js](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js)).  
 Not limited to search engines, theoretically any web sites containing a container can be added.
 
 | Field | Type | Description |
@@ -163,12 +163,12 @@ bing: {disabled: true},
 **Built-in engine IDs:**  
 `google`, `google_scholar`, `bing`, `duckduckgo_lite`, `duckduckgo`, `yandex`, `brave`, `ecosia`, `startpage`, `yahoo`, `so360`, `sogou`, `toutiao`, `quark`, `github`, `greasyfork` (in `@if($site=)`, `ddg` is an alias for `duckduckgo`, `yahoo-japan` is an alias for `yahoo`).
 
-**Description:**
+**Notes:**
 
 1. Custom engines support the `$site = "Engine ID"` condition as well as block/highlight/whitelist rules; `titles`/`snippets` can be omitted, all selector fields are unsupported pseudo-elements like `::after`.
-2. Engine IDs allow only letters/digits/`_`/`-`; `other` is a reserved key and cannot be used. The same ID as a built-in engine, or an overlapping site, overrides the built-in selectors, e.g. matching `cn.bing.com` takes priority over built-in `bing`. Priority: Custom selectors > Built-in selectors.
+2. Engine IDs allow only letters/digits/`_`/`-`; `other` is a reserved key and cannot be used. The same ID as a built-in engine, or an overlapping site, overrides the built-in engines. Priority: Custom engines > subscription engines > Built-in engines.
 3. On save, only keys that differ from the built-ins are stored; unmodified built-ins are not written to storage. Changing an override back to the built-in value or using Reset restores following script updates. When no selector matches, it falls back to `other` (empty) by default.
-4. When adding a non-engine site with search functionality (in-site search), it is recommended to write the rule to be used only on that site. For example, on `m.example.com`, the rule could be written as `*://*.example.com/* @if(title *= "keyword")` or `title/.*keyword.*/i @if($site = "example")`, indicating that the target site is the current non-engine site, thereby avoiding blocking results containing the same keyword on external sites.
+4. When adding a non-engine site with search functionality (in-site search), it is recommended to write the rule to be used only on that site. For example, on `m.example.com`, the rule could be written as `title/.*keyword.*/i @if($site = "example")`, indicating that the target site is the current non-engine site, thereby avoiding blocking results containing the same keyword on external sites.
 
 **Auto-analysis:**
 
