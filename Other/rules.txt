@@ -1,6 +1,7 @@
-# 26-10 可能含有大量误杀 仅供参考
+# 26-10 可能误杀 仅供参考
 # ==== 文件 ====
-/^https?:\/\/[^\s"'<>]+\.(?:pdf|xlsx?)(?:[?#].*)?$/i
+/^https?:\/\/[^\s"<>]+\.pdf(?:[?#].*)?$/i
+/^https?:\/\/[^\s"<>]+\.xlsx?(?:[?#].*)?$/i
 # ==== 标题-摘要 ====
 title/.*(威|葳|㣲|幑|薇|嶶|溦|徽)信.*/
 title/.*(威|葳|㣲|幑|薇|嶶|溦|徽|微)芯.*/
@@ -8,9 +9,11 @@ title/.*[+加]\s*q{1,2}\s*\d{5,}.*/i
 title/.*吧友互助吧.*/
 title/.*笔趣阁.*/
 title/.*来到了没有知识存在的荒原.*/
+title/.*知乎 - 有问题,就会有答案.*/
+title/.*知乎 - 有问题，就会有答案.*/
 title/.*最新章节在线阅读.*/
 title/.*pikpak.*优惠码.*/i
-title/^(?=.*app)(?=.*(?:体育|娱乐)).*/i
+title/^(?=.*app)(?=.*(?:体育|娱乐|彩票)).*/i
 title/^(?=.*clash)(?=.*(?:官|中文|教程)).*/i
 title/^(?=.*github)(?=.*(?:教程网|中文站|中文网)).*/i
 title/^(?=.*telegram)(?=.*(?:86|短信)).*/i
@@ -47,6 +50,7 @@ text/.*暂无购买权限.*/
 *://*.support.huaweicloud.com/*
 *://community.oneplus.com/*
 # ==== 搜索引流 ====
+/^https://pcedu\.pconline\.com\.cn/\d{1,5}/\d{1,15}\.html$/
 *://*.3g.ali213.net/down/*
 *://*.acfun.cn/error/*
 *://*.agents.baidu.com/*
@@ -81,6 +85,7 @@ text/.*暂无购买权限.*/
 *://*.fetcherx.com/*
 *://*.form.baidu.com/*
 *://*.gamersky.com/handbook/*
+*://*.gamersky.com/news/*
 *://*.goodreads.com/quotes/tag/*
 *://*.google.com/maps/d/viewer*
 *://*.haokan.baidu.com/*
@@ -108,6 +113,7 @@ text/.*暂无购买权限.*/
 *://*.set.baidu.com/view/*
 *://*.shanxijianzhuzizhi.com/*
 *://*.sites.google.com/*
+*://*.so.com/?src=*
 *://*.so.com/index.php?q=*
 *://*.so.douyin.com/*
 *://*.so.youku.com/search/*
@@ -148,10 +154,14 @@ text/.*暂无购买权限.*/
 *://*.zaixianjisuan.com/*
 *://*.zhihu.com/zvideo/*
 *://*.ziliao.baidu.com/*
-*://telemetr.io/*/channels/*
-*://zh-classical.wikipedia.org/*
 *://github.com/cirosantilli/*
 *://github.com/wumaoland/*
+*://mumu.163.com/games/*
+*://mumu.163.com/help/*
+*://telemetr.io/*/channels/*
+*://wuu.wikipedia.org/*
+*://zh-classical.wikipedia.org/*
+*://zh-yue.wikipedia.org/*
 # ==== 购物平台 ====
 *://*.1688.com/*
 *://*.aeoncity.com.hk/*
@@ -228,15 +238,15 @@ text/.*暂无购买权限.*/
 *://*.uniqlo.com/*
 *://*.zh.accio.com/*
 # ==== 域名 ====
-*://168.76.33.6
-*://64.110.91.194
 *://*.0769soft.com/*
 *://*.0s52.com/*
 *://*.0xo.net/*
 *://*.103102.com/*
 *://*.123cha.com/*
 *://*.160.com/*
+*://*.16pic.com/*
 *://*.18183.com/*
+*://*.18touch.com/*
 *://*.192-168-1-1.com.cn/*
 *://*.19yxw.com/*
 *://*.1lou.me/*
@@ -283,6 +293,7 @@ text/.*暂无购买权限.*/
 *://*.9dish.com/*
 *://*.9game.cn/*
 *://*.9k9k.com/*
+*://*.9ok.com/*
 *://*.a.4399.cn/*
 *://*.a8h.net/*
 *://*.abbreviationfinder.org/*
@@ -294,6 +305,7 @@ text/.*暂无购买权限.*/
 *://*.aishare.jizhiku.net/*
 *://*.aitaa.cn/*
 *://*.aitxn.com/*
+*://*.ala.baidu.com/*
 *://*.aldeek.stores.jp/*
 *://*.alibaba.com/*
 *://*.aliexpress.com/*
@@ -302,6 +314,7 @@ text/.*暂无购买权限.*/
 *://*.amazon.se/*
 *://*.androidblip.com/*
 *://*.anfensi.com/*
+*://*.animenow.net/*
 *://*.animetox.com/*
 *://*.antiquefarmhouse.com/*
 *://*.apkcombo.com/*
@@ -333,6 +346,7 @@ text/.*暂无购买权限.*/
 *://*.bjsn.org.cn/*
 *://*.blog.gitcode.com/*
 *://*.blog.mypikpak.com/*
+*://*.blog.ytso.com/*
 *://*.bohe.cn/*
 *://*.book.it-ie.com/*
 *://*.bosquejokids.com/*
@@ -416,6 +430,7 @@ text/.*暂无购买权限.*/
 *://*.doyo.cn/*
 *://*.dreamstime.com/*
 *://*.droidinformer.org/*
+*://*.ds.163.com/*
 *://*.dsxue.com/*
 *://*.duanwen.cc/*
 *://*.duote.com/*
@@ -473,6 +488,7 @@ text/.*暂无购买权限.*/
 *://*.gk100.com/*
 *://*.gl.ali213.net/*
 *://*.godshen.com/*
+*://*.golue.com/*
 *://*.grand-screen.com/*
 *://*.groupyun.com/*
 *://*.guanjia.qq.com/*
@@ -640,6 +656,7 @@ text/.*暂无购买权限.*/
 *://*.news.17173.com/*
 *://*.news.4399.com/*
 *://*.news.hctcasting.com/*
+*://*.nodebe4.github.io/*
 *://*.np.huya.com/*
 *://*.ntdfriends.com.tw/*
 *://*.ntdtv.com.tw/*
@@ -732,6 +749,7 @@ text/.*暂无购买权限.*/
 *://*.soundofhope.org/*
 *://*.sowerclub.com/*
 *://*.speedhome.com/*
+*://*.ste56.com/*
 *://*.steamzg.com/*
 *://*.stxj.net.cn/*
 *://*.sucai999.com/*
@@ -748,6 +766,7 @@ text/.*暂无购买权限.*/
 *://*.tatiao.com/*
 *://*.technical.city/*
 *://*.techpowerup.com/*
+*://*.tgbus.com/*
 *://*.thefutureperfect.com/*
 *://*.tianqiongfaniya.cc/*
 *://*.tips.pfrlju.com/*
@@ -764,6 +783,7 @@ text/.*暂无购买权限.*/
 *://*.tv.zuoain.wiki/*
 *://*.tw.bid.yahoo.com/*
 *://*.tweetmanager.app/*
+*://*.twstalker.com/*
 *://*.u5book.com/*
 *://*.uc129.com/*
 *://*.ufcn.cn/*
@@ -864,6 +884,7 @@ text/.*暂无购买权限.*/
 *://*.zhongce.sina.com.cn/*
 *://*.zhuoyueyingxiangli.com/*
 *://*.ziran.huayou.cn/*
+*://*.zixingxinwen.com/*
 *://*.zjgkw.org/*
 *://*.zn50.cc/*
 *://*.zsbaocheng.net/*

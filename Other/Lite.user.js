@@ -3,10 +3,10 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.7.4
-// @description        支持正则的搜索结果屏蔽工具。Lite版，移除了规则订阅/webdav同步相关内容。
-// @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版，移除了规则订阅/webdav同步相关内容。
-// @description:en     A search result blocking tool that supports regular expressions. The Lite version has removed all content related to Rule Subscriptions and WebDAV.
+// @version      8.7.5
+// @description        支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
+// @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
+// @description:en     A search result blocking tool that supports regular expressions. The Lite version removes networking features including WebDAV Sync / Rule Subscription / Engine Subscription.
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjQgNCAxNiAxNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMmM1MjgyIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIgc3R5bGU9Im92ZXJmbG93OnZpc2libGUhaW1wb3J0YW50OyI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iNyI+PC9jaXJjbGU+PGxpbmUgeDE9IjcuNDUiIHkxPSI3LjQ1IiB4Mj0iMTYuNTUiIHkyPSIxNi41NSI+PC9saW5lPjwvc3ZnPg==
 // @author       南雪莲
 // @homepageURL  https://greasyfork.org/zh-CN/scripts/552394
@@ -29,14 +29,13 @@
   'use strict';
 
   if (window.top !== window.self) return; let preventPanelClose = false, _engineSiteSetup = false, _domObserver = null, _observedSelector = '';
-  let _searchForm = null, _searchFormHandler = null, _urlChangeHandler = null;
+  let _searchForm = null, _searchFormHandler = null, _urlChangeHandler = null, _panelCloseHandler = null, _panelPressHandler = null, _panelCloseTimer = null;
   let _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap(), _peekUrlCache = new WeakMap(); const _hrefChangedContainers = new Set(), _contentChangedContainers = new Set();
 
   const CONFIG_KEY = 'searchfilter_blocker', SELECTORS_KEY = 'searchfilter_selectors';
   const HL_STATS_REGEX = /^@\d+/;
   const RESULT_RETRY_LIMIT = 3, RESULT_RETRY_DELAY = 200;
 
-  // 默认配置
   const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', uiScale: 'l', darkMode: 'system', exportConfig: false, collapseMode: false, removeRedirects: true, bracketHighlight: true, language: 'zh-CN' };
   const DEFAULT_HIGHLIGHT_COLORS = {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'};
   function getDefaultConfig() {
@@ -70,7 +69,6 @@
   }
   let showHiddenResults = false;
 
-  // 选择器
   const SELECTORS = {
     bing: {
       match: /^(?:(?:www[2-4]?|cn|global|m)\.)?bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
@@ -365,6 +363,7 @@
       menuBubbleActionOpen: '打开面板', menuBubbleActionStats: '打开统计', menuBubbleActionToggle: '显隐结果',
       bubbleStatsHint: '点击打开统计，长按打开面板',
       bubbleToggleHint: '点击显示/隐藏屏蔽结果，长按打开面板',
+      bubbleSelectorsHint: '点击打开自定义引擎，长按打开面板',
       fileImportFailed: '导入失败，文件内容不是有效规则', importClearConfirm: '导入的文件不含任何规则，是否清空本地全部规则？',
       whitelistResult: '该结果为白名单',
       highlightRules: '高亮规则', menuHighlightColor: '🎨 高亮颜色',
@@ -380,7 +379,7 @@
       emptyIfCondition: '@if() 条件不能为空', unknownIfCondition: '未知 @if 条件: {part}',
       condExprError: '@if 表达式语法错误: {part}',
       invalidUrlWildcard: 'URL 通配符格式无效: {rule}', elementRuleUnsupported: '不支持元素规则',
-      menuCustomSelectors: '🖋️ 自定义引擎', selectorPanelTitle: '引擎选择器',
+      menuCustomSelectors: '自定义引擎', selectorPanelTitle: '引擎选择器',
       selectorHint: '如果不知道有什么用，请勿修改。',
       selectorJsonError: '解析失败，请检查格式',
       selectorReservedKey: '保留键不可使用: {key}',
@@ -419,6 +418,7 @@
       menuBubbleActionOpen: 'Open Panel', menuBubbleActionStats: 'Open Stats', menuBubbleActionToggle: 'Show Results',
       bubbleStatsHint: 'Click to open stats, long-press to open panel',
       bubbleToggleHint: 'Click to show/hide blocked results, long-press to open panel',
+      bubbleSelectorsHint: 'Click to open custom engine, long-press to open panel',
       fileImportFailed: 'Import failed, file content is not valid rules', importClearConfirm: 'The imported file contains no rules. Clear all local rules?',
       whitelistResult: 'This result is whitelisted',
       highlightRules: 'Highlight Rules', menuHighlightColor: '🎨 Highlight Colors',
@@ -434,7 +434,7 @@
       emptyIfCondition: '@if() condition cannot be empty', unknownIfCondition: 'Unknown @if condition: {part}',
       condExprError: 'Syntax error in @if expression: {part}',
       invalidUrlWildcard: 'Invalid URL wildcard format: {rule}', elementRuleUnsupported: 'Element rules are not supported',
-      menuCustomSelectors: '🖋️ Custom Engine', selectorPanelTitle: 'Engine Selectors',
+      menuCustomSelectors: 'Custom Engine', selectorPanelTitle: 'Engine Selectors',
       selectorHint: 'If you don\'t know what it is for, do not modify it.',
       selectorJsonError: 'Failed to parse, check the format',
       selectorReservedKey: 'Reserved key not allowed: {key}',
@@ -446,7 +446,6 @@
     }
   };
 
-  // Map
   function newCompiledRules() {
     return {
       domains: new Map(), urls: [], titles: [], texts: [],
@@ -468,21 +467,20 @@
     return text;
   }
 
-  // 统一调用开始
   function escHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   function showToast(message, type = 'info', duration = 3000) {
-    let container = document.getElementById('serh-toast-container');
+    let container = document.getElementById('serhl-toast-container');
     if (!container) {
-      container = document.createElement('div'); container.id = 'serh-toast-container'; document.body.appendChild(container);
+      container = document.createElement('div'); container.id = 'serhl-toast-container'; document.body.appendChild(container);
     }
 
-    const panel = document.getElementById('serh-hlcolor-panel') ||
-      document.getElementById('serh-selector-panel') ||
-      document.getElementById('serh-settings-panel') ||
-      document.getElementById('serh-panel');
+    const panel = document.getElementById('serhl-hlcolor-panel') ||
+      document.getElementById('serhl-selector-panel') ||
+      document.getElementById('serhl-settings-panel') ||
+      document.getElementById('serhl-panel');
     if (panel) {
       if (container.parentElement !== panel) {
         panel.appendChild(container);
@@ -502,7 +500,7 @@
     }
 
     const toast = document.createElement('div');
-    toast.className = `serh-toast serh-toast-${type}`;
+    toast.className = `serhl-toast serhl-toast-${type}`;
     toast.textContent = message; container.appendChild(toast); requestAnimationFrame(() => toast.classList.add('show'));
 
     let timer = null;
@@ -662,8 +660,8 @@
 
   const LINE_NUM_CHUNK = 200;
   const lineNumTargets = {
-    rules: { textareaId: 'serh-rules', lineNumsId: 'serh-line-numbers', syntaxCheck: true, pending: false, dirty: false, token: 0, timer: null },
-    selectors: { textareaId: 'serh-sel-rules', lineNumsId: 'serh-sel-line-numbers', syntaxCheck: false, pending: false, dirty: false, token: 0, timer: null }
+    rules: { textareaId: 'serhl-rules', lineNumsId: 'serhl-line-numbers', syntaxCheck: true, pending: false, dirty: false, token: 0, timer: null },
+    selectors: { textareaId: 'serhl-sel-rules', lineNumsId: 'serhl-sel-line-numbers', syntaxCheck: false, pending: false, dirty: false, token: 0, timer: null }
   };
 
   function updateLineNumbersIncremental(key) {
@@ -696,7 +694,7 @@
         }
         const analysis = target.syntaxCheck && currentConfig.errorDetection !== false ? cachedAnalyzeRule(lines[i]) : { valid: true, errors: [] }; const valid = analysis.valid;
         const errMsg = valid ? '' : analysis.errors.join(' | ');
-        const html = `${i + 1}${valid ? '' : `<span class="serh-line-error" title="${escHtml(errMsg)}" data-error="${escHtml(errMsg)}" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 10px; background: #edf2f7; z-index: 1; cursor: pointer;">⚠️</span>`}`;
+        const html = `${i + 1}${valid ? '' : `<span class="serhl-line-error" title="${escHtml(errMsg)}" data-error="${escHtml(errMsg)}" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 10px; background: #edf2f7; z-index: 1; cursor: pointer;">⚠️</span>`}`;
         if (node.dataset.v !== html) {
           node.innerHTML = html; node.dataset.v = html;
         }
@@ -901,11 +899,11 @@
     const container = textarea ? textarea.parentElement : null;
     if (!container || container.dataset.bracketLayer) return;
     container.dataset.bracketLayer = '1';
-    const layer = document.createElement('div'); layer.className = 'serh-bracket-layer';
-    const mirror = document.createElement('div'); mirror.className = 'serh-bracket-mirror'; layer.appendChild(mirror);
+    const layer = document.createElement('div'); layer.className = 'serhl-bracket-layer';
+    const mirror = document.createElement('div'); mirror.className = 'serhl-bracket-mirror'; layer.appendChild(mirror);
     const markerPool = [], hits = [];
     for (let i = 0; i < 4; i++) { const m = document.createElement('span'); markerPool.push(m); mirror.appendChild(m); }
-    for (let i = 0; i < 4; i++) { const hit = document.createElement('i'); hit.className = `serh-bracket-hit ${i < 2 ? 'serh-bracket-pair' : 'serh-bracket-enclosing'}`; layer.appendChild(hit); hits.push(hit); }
+    for (let i = 0; i < 4; i++) { const hit = document.createElement('i'); hit.className = `serhl-bracket-hit ${i < 2 ? 'serhl-bracket-pair' : 'serhl-bracket-enclosing'}`; layer.appendChild(hit); hits.push(hit); }
     container.insertBefore(layer, container.firstChild);
 
     let cache = { text: null, map: null }, mkText = null, mkIdxs = '', styleKey = null;
@@ -970,7 +968,7 @@
   }
 
   function getPanelPositionStyles() {
-    const statusBtn = document.getElementById('serh-status');
+    const statusBtn = document.getElementById('serhl-status');
     if (currentConfig.panelCentered) {
       return `top: 60%; left: 50%; transform: translate(-50%, -50%);`;
     }
@@ -988,7 +986,7 @@
   }
 
   function createPanel(id, width = '320px', padding = '15px') {
-    const panel = document.createElement('div'); panel.id = id; panel.classList.add('serh-panel-fade', 'serh-window');
+    const panel = document.createElement('div'); panel.id = id; panel.classList.add('serhl-panel-fade', 'serhl-window');
     panel.style.cssText = `
         position: fixed;
         ${getPanelPositionStyles()}
@@ -1020,7 +1018,7 @@
       if (pressStartedInside) {
         pressStartedInside = false; return;
       }
-      if (currentConfig.bubbleAction !== 'toggleHidden' && e.target && e.target.closest && e.target.closest('#serh-status')) return;
+      if (currentConfig.bubbleAction !== 'toggleHidden' && e.target && e.target.closest && e.target.closest('#serhl-status')) return;
       if (!panel.contains(e.target)) closePanel();
     };
     const closePanel = () => {
@@ -1059,26 +1057,27 @@
     return { panel, closePanel: bindClose ? bindOutsideClickClose(panel, beforeClose) : null };
   }
 
-  function openSerhPanels() { return Array.from(document.querySelectorAll('.serh-window')).filter(p => !p._fading); }
+  function openSerhPanels() { return Array.from(document.querySelectorAll('.serhl-window')).filter(p => !p._fading); }
   function closeAllSerhPanels() {
-    if (window._panelCloseTimer) { clearTimeout(window._panelCloseTimer); window._panelCloseTimer = null; }
-    if (window._panelCloseHandler) { document.removeEventListener('click', window._panelCloseHandler); window._panelCloseHandler = null; }
-    if (window._panelPressHandler) { document.removeEventListener('pointerdown', window._panelPressHandler); document.removeEventListener('mousedown', window._panelPressHandler); window._panelPressHandler = null; }
+    if (_panelCloseTimer) { clearTimeout(_panelCloseTimer); _panelCloseTimer = null; }
+    if (_panelCloseHandler) { document.removeEventListener('click', _panelCloseHandler); _panelCloseHandler = null; }
+    if (_panelPressHandler) { document.removeEventListener('pointerdown', _panelPressHandler); document.removeEventListener('mousedown', _panelPressHandler); _panelPressHandler = null; }
     openSerhPanels().forEach(p => {
       if (typeof p._cleanupClick === 'function') p._cleanupClick();
       if (typeof p._beforeClose === 'function') { try { p._beforeClose(); } catch (err) { console.error('[面板] 关闭前回调失败:', err); } p._beforeClose = null; }
       fadeOutAndRemovePanel(p);
     });
-    const toastContainer = document.getElementById('serh-toast-container'); if (toastContainer) toastContainer.remove();
+    const toastContainer = document.getElementById('serhl-toast-container'); if (toastContainer) toastContainer.remove();
   }
   function resolveBubblePanelAction() {
     if (preventPanelClose) return 'none';
-    const mainPanel = document.getElementById('serh-panel');
-    const statsPanel = document.getElementById('serh-stats-panel');
+    const mainPanel = document.getElementById('serhl-panel');
+    const statsPanel = document.getElementById('serhl-stats-panel');
     const mainAlive = !!(mainPanel && !mainPanel._fading);
     if (statsPanel && mainAlive && statsPanel.style.display === 'flex') return 'closeAll';
     if (currentConfig.bubbleAction === 'openStats' && mainAlive) return 'stats';
     if (openSerhPanels().length) return 'closeAll';
+    if (currentConfig.bubbleAction === 'openSelectors') return 'selectors';
     return currentConfig.bubbleAction === 'openStats' ? 'stats' : 'panel';
   }
 
@@ -1269,7 +1268,6 @@
     flushLeaf(); if (inSQ || inDQ || inRE || leafParens !== 0) return { error: true, tokens }; return { error: false, tokens };
   }
 
-  // 递归下降解析
   function parseCondExprTokens(tokens, leafParser, errors) {
     let pos = 0; let depth = 0; const peek = () => tokens[pos]; const next = () => tokens[pos++];
     const syntaxError = () => {
@@ -1877,9 +1875,9 @@
           return escapeWildcardPart(part, false);
         })
         .join('\\/'); let bs = 0; for (let i = pattern.length - 2; i >= 0 && pattern[i] === '\\'; i--) bs++;
-        return pattern.endsWith('*') && bs % 2 === 0 ? regexStr : regexStr + '(?:[\\/?#:]|$)';
+        return pattern.endsWith('*') && bs % 2 === 0 ? regexStr : regexStr + '(?:[\\/?#:&]|$)';
     }
-    return prefix + (hostIsFirst ? escapeHostPart(pattern) : escapeWildcardPart(pattern, false)) + '(?:[\\/?#:]|$)';
+    return prefix + (hostIsFirst ? escapeHostPart(pattern) : escapeWildcardPart(pattern, false)) + '(?:[\\/?#:&]|$)';
   }
 
   function ruleToRegex(rule) {
@@ -1968,7 +1966,6 @@
       .join(''); const compiled = { type, regex: new RegExp(pattern, sanitizedFlags) }; memo.set(coreRule, compiled); return compiled;
   }
 
-  // 预编译
   function buildRuleIndex() {
     let pageContext = '';
     try {
@@ -2226,7 +2223,6 @@
     return /^https?:\/\//i.test(realUrl) ? realUrl : '';
   }
 
-  // 去除重定向
   function unwrapRedirectUrl(url) {
     const isRedirectHost = (host) => {
       host = String(host || '').replace(/\.$/, '');
@@ -2420,7 +2416,7 @@
 
   function restoreResultCollapse(result) {
     if (!result || typeof result.querySelectorAll !== 'function') return;
-    result.querySelectorAll('.serh-collapse-hide').forEach(el => el.classList.remove('serh-collapse-hide'));
+    result.querySelectorAll('.serhl-collapse-hide').forEach(el => el.classList.remove('serhl-collapse-hide'));
   }
 
   function applyResultCollapse(result, engine) {
@@ -2433,7 +2429,7 @@
     while (node && node !== result) {
       const parent = node.parentElement; if (!parent) break;
       for (const child of parent.children) {
-        if (child !== node && !child.contains(titleEl)) child.classList.add('serh-collapse-hide');
+        if (child !== node && !child.contains(titleEl)) child.classList.add('serhl-collapse-hide');
       }
       node = parent;
     }
@@ -2635,7 +2631,7 @@
     if (_blockConfirmOutsideHandler) {
       document.removeEventListener('click', _blockConfirmOutsideHandler, true); _blockConfirmOutsideHandler = null;
     }
-    const existing = document.getElementById('serh-block-confirm-dialog'); if (existing) existing.remove();
+    const existing = document.getElementById('serhl-block-confirm-dialog'); if (existing) existing.remove();
 
     const opts = buildBlockRuleOptions(domain);
     const options = customOptions || (opts.isIP
@@ -2656,7 +2652,7 @@
               ]);
     const firstEnabledIdx = options.findIndex(o => !o.disabled);
 
-    const panel = document.createElement('div'); panel.id = 'serh-block-confirm-dialog';
+    const panel = document.createElement('div'); panel.id = 'serhl-block-confirm-dialog';
     panel.innerHTML = `
       <div class="sfb-confirm-domain">${escHtml(domain)}</div>
       ${options.map((o, i) => `
@@ -2666,8 +2662,8 @@
           <input type="text" class="sfb-confirm-rule" data-idx="${i}" value="${escHtml(o.rule)}" spellcheck="false" ${o.disabled ? 'disabled' : ''}>
         </label>`).join('')}
       <div class="sfb-confirm-btns">
-        <button id="sfb-confirm-ok" class="serh-button serh-button-primary">${t('bcConfirm')}</button>
-        <button id="sfb-confirm-cancel" class="serh-button serh-button-secondary">${t('cancel')}</button>
+        <button id="sfb-confirm-ok" class="serhl-button serhl-button-primary">${t('bcConfirm')}</button>
+        <button id="sfb-confirm-cancel" class="serhl-button serhl-button-secondary">${t('cancel')}</button>
       </div>`;
     document.body.appendChild(panel);
 
@@ -2760,9 +2756,9 @@
     if (engine === 'yandex') {
       if (!result.closest('.main__content, .content, [class*="z6OLDwO9"]')) return;
     }
-    if (result.querySelector('.serh-quick-block')) return;
+    if (result.querySelector('.serhl-quick-block')) return;
 
-    const isBlocked = result.getAttribute('data-is-blocked') === 'true'; const btn = document.createElement('div'); btn.className = 'serh-quick-block';
+    const isBlocked = result.getAttribute('data-is-blocked') === 'true'; const btn = document.createElement('div'); btn.className = 'serhl-quick-block';
     const iconColor = isBlocked ? '#3182ce' : 'currentColor';
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="${iconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line></svg>`;
 
@@ -2839,7 +2835,7 @@
   }
 
   function removeMatchedRuleLabel(result) {
-    const label = result.querySelector('.serh-matched-rule'); if (label) label.remove();
+    const label = result.querySelector('.serhl-matched-rule'); if (label) label.remove();
   }
 
   function clearMatchedData(result) {
@@ -2848,11 +2844,11 @@
   }
 
   function saveOriginalDisplay(el) {
-    if (!el || el.hasAttribute('data-serh-orig-display')) return; el.setAttribute('data-serh-orig-display', el.style.display || '');
+    if (!el || el.hasAttribute('data-serhl-orig-display')) return; el.setAttribute('data-serhl-orig-display', el.style.display || '');
   }
 
   function restoreOriginalDisplay(el) {
-    if (!el) return; const orig = el.getAttribute('data-serh-orig-display'); el.style.display = orig !== null ? orig : '';
+    if (!el) return; const orig = el.getAttribute('data-serhl-orig-display'); el.style.display = orig !== null ? orig : '';
   }
 
   function googleResultBlocks(parent) {
@@ -2879,49 +2875,49 @@
     const hasVisible = Array.from(children).some(visibleUnblocked);
     if (hasVisible) return;
     const alreadyHidden = parent.getAttribute(attr) === 'true';
-    saveOriginalDisplay(parent); parent.style.display = blockedShown() ? (parent.getAttribute('data-serh-orig-display') || '') : 'none'; parent.setAttribute(attr, 'true');
+    saveOriginalDisplay(parent); parent.style.display = blockedShown() ? (parent.getAttribute('data-serhl-orig-display') || '') : 'none'; parent.setAttribute(attr, 'true');
     if (!alreadyHidden) _hiddenParentCount++;
   }
 
   function resetResultStyles(result) {
-    restoreResultExtraElements(result); restoreResultCollapse(result); _hrefUrlCache.delete(result); _resultContentCache.delete(result); _resultRetryCounts.delete(result); _peekUrlCache.delete(result); result.removeAttribute('data-blocker-processed');
+    restoreResultExtraElements(result); restoreResultCollapse(result); _hrefUrlCache.delete(result); _resultContentCache.delete(result); _resultRetryCounts.delete(result); _peekUrlCache.delete(result); result.removeAttribute('data-blocker-processed'); result.removeAttribute('data-retry-exhausted');
     result.removeAttribute('data-is-blocked'); result.removeAttribute('data-is-highlighted'); result.removeAttribute('data-highlight-n'); result.removeAttribute('data-highlight-rule'); result.removeAttribute('data-highlight-source'); result.removeAttribute('data-highlight-source-key'); clearMatchedData(result);
-    result.classList.remove('serh-blocked-visible'); result.classList.remove('serh-blocked-collapsed'); result.style.outline = ''; result.style.outlineOffset = ''; const origDisplay = result.getAttribute('data-serh-orig-display');
-    if (origDisplay !== null) { result.style.display = origDisplay; result.removeAttribute('data-serh-orig-display'); }
+    result.classList.remove('serhl-blocked-visible'); result.classList.remove('serhl-blocked-collapsed'); result.style.outline = ''; result.style.outlineOffset = ''; const origDisplay = result.getAttribute('data-serhl-orig-display');
+    if (origDisplay !== null) { result.style.display = origDisplay; result.removeAttribute('data-serhl-orig-display'); }
     if (result.parentElement && result.parentElement.dataset.blockerYandexParent) {
       const parent = result.parentElement;
       const stillHasBlockedHidden = Array.from(parent.children).some(el =>
         el !== result && el.getAttribute('data-is-blocked') === 'true' && el.style.display === 'none');
-      const parentOrig = parent.getAttribute('data-serh-orig-display');
+      const parentOrig = parent.getAttribute('data-serhl-orig-display');
       if (stillHasBlockedHidden) {
         parent.style.display = 'none';
       } else if (parent.getAttribute('data-is-blocked') !== 'true') {
-        parent.style.display = parentOrig !== null ? parentOrig : ''; parent.removeAttribute('data-blocker-yandex-parent'); parent.removeAttribute('data-serh-orig-display'); _hiddenParentCount--;
+        parent.style.display = parentOrig !== null ? parentOrig : ''; parent.removeAttribute('data-blocker-yandex-parent'); parent.removeAttribute('data-serhl-orig-display'); _hiddenParentCount--;
       }
     }
-    const gridItem = result.closest ? result.closest('[data-serh-grid-item-hidden]') : null;
-    if (gridItem) { gridItem.style.display = ''; gridItem.removeAttribute('data-serh-grid-item-hidden'); _hiddenParentCount--; }
+    const gridItem = result.closest ? result.closest('[data-serhl-grid-item-hidden]') : null;
+    if (gridItem) { gridItem.style.display = ''; gridItem.removeAttribute('data-serhl-grid-item-hidden'); _hiddenParentCount--; }
     const googleParent = result.closest ? result.closest('[data-blocker-google-parent]') : null;
     if (googleParent) {
       const stillHasBlockedHidden = googleResultBlocks(googleParent).some(el =>
         el !== result && el.getAttribute('data-is-blocked') === 'true' && el.style.display === 'none');
-      const parentOrig = googleParent.getAttribute('data-serh-orig-display');
+      const parentOrig = googleParent.getAttribute('data-serhl-orig-display');
       if (stillHasBlockedHidden) {
         googleParent.style.display = 'none';
       } else if (googleParent.getAttribute('data-is-blocked') !== 'true') {
-        googleParent.style.display = parentOrig !== null ? parentOrig : ''; googleParent.removeAttribute('data-blocker-google-parent'); googleParent.removeAttribute('data-serh-orig-display'); _hiddenParentCount--;
+        googleParent.style.display = parentOrig !== null ? parentOrig : ''; googleParent.removeAttribute('data-blocker-google-parent'); googleParent.removeAttribute('data-serhl-orig-display'); _hiddenParentCount--;
       }
     }
-    removeMatchedRuleLabel(result); if (!result.querySelector('.serh-quick-block')) result.style.position = '';
+    removeMatchedRuleLabel(result); if (!result.querySelector('.serhl-quick-block')) result.style.position = '';
   }
 
   function restoreParentDisplay(parent) {
-    const orig = parent.getAttribute('data-serh-orig-display'); parent.style.display = orig !== null ? orig : ''; parent.removeAttribute('data-blocker-yandex-parent');
-    parent.removeAttribute('data-blocker-google-parent'); parent.removeAttribute('data-serh-grid-item-hidden'); parent.removeAttribute('data-serh-orig-display'); _hiddenParentCount--;
+    const orig = parent.getAttribute('data-serhl-orig-display'); parent.style.display = orig !== null ? orig : ''; parent.removeAttribute('data-blocker-yandex-parent');
+    parent.removeAttribute('data-blocker-google-parent'); parent.removeAttribute('data-serhl-grid-item-hidden'); parent.removeAttribute('data-serhl-orig-display'); _hiddenParentCount--;
   }
 
   function restoreAllHiddenParents() {
-    document.querySelectorAll('[data-blocker-yandex-parent], [data-blocker-google-parent], [data-serh-grid-item-hidden]').forEach(restoreParentDisplay); _hiddenParentCount = 0;
+    document.querySelectorAll('[data-blocker-yandex-parent], [data-blocker-google-parent], [data-serhl-grid-item-hidden]').forEach(restoreParentDisplay); _hiddenParentCount = 0;
   }
 
   function reconcileHiddenParents() {
@@ -2939,7 +2935,7 @@
       const hasVisibleUnblocked = blocks.some(visibleUnblocked);
       if (parent.getAttribute('data-is-blocked') !== 'true' && (!stillHiddenBlocked || hasVisibleUnblocked)) restoreParentDisplay(parent);
     });
-    document.querySelectorAll('[data-serh-grid-item-hidden]').forEach(cell => {
+    document.querySelectorAll('[data-serhl-grid-item-hidden]').forEach(cell => {
       const stillBlocked = Array.from(cell.querySelectorAll('[data-is-blocked="true"]')).some(el => el.style.display === 'none');
       if (!stillBlocked && !blockedShown()) restoreParentDisplay(cell);
     });
@@ -2947,7 +2943,7 @@
 
   function reprocessContainer(container) {
     try {
-      if (!container || !container.isConnected) return; const staleBtn = container.querySelector('.serh-quick-block'); if (staleBtn) staleBtn.remove(); resetResultStyles(container);
+      if (!container || !container.isConnected) return; const staleBtn = container.querySelector('.serhl-quick-block'); if (staleBtn) staleBtn.remove(); resetResultStyles(container);
       container.removeAttribute('data-observed');
       try {
         processSingleResult(container);
@@ -2966,7 +2962,7 @@
   }
 
   function addMatchedRuleLabel(result) {
-    if (currentConfig.showMatchedSource === false || !result.dataset.matchedRule) return; removeMatchedRuleLabel(result); const label = document.createElement('div'); label.className = 'serh-matched-rule';
+    if (currentConfig.showMatchedSource === false || !result.dataset.matchedRule) return; removeMatchedRuleLabel(result); const label = document.createElement('div'); label.className = 'serhl-matched-rule';
     const sourceText = result.dataset.matchedSource || t('matchedRule'); const ruleText = result.dataset.matchedRule;
     label.textContent = `${sourceText}: ${ruleText}`;
     ensurePositioned(result); result.appendChild(label);
@@ -2976,13 +2972,15 @@
     if (engine === 'google') {
       let cell = result.parentElement;
       while (cell && cell.parentElement && cell.tagName !== 'BODY') { const d = getComputedStyle(cell.parentElement).display; if (d === 'grid' || d === 'inline-grid') break; cell = cell.parentElement; }
-      if (cell && cell.parentElement && cell.tagName !== 'BODY') { cell.style.display = 'none'; cell.setAttribute('data-serh-grid-item-hidden', 'true'); _hiddenParentCount++; }
+      if (cell && cell.parentElement && cell.tagName !== 'BODY') { cell.style.display = 'none'; cell.setAttribute('data-serhl-grid-item-hidden', 'true'); _hiddenParentCount++; }
     } else if (engine === 'bing') {
       const slot = result.closest ? result.closest('li') : null;
-      if (slot) {
-        const tops = Array.from(slot.children || []).filter(c => c.matches && c.matches('div.iuscp, div.imgpt'));
-        const targets = tops.length ? tops : (slot.querySelectorAll ? Array.from(slot.querySelectorAll('div.iuscp, div.imgpt')) : []);
-        if (targets.length && targets.every(el => el.style.display === 'none')) { slot.style.display = 'none'; slot.setAttribute('data-serh-grid-item-hidden', 'true'); _hiddenParentCount++; }
+      if (slot && slot !== result) {
+        const leafItems = slot.querySelectorAll ? Array.from(slot.querySelectorAll('div.iuscp, div.imgpt')).filter(el => el.querySelector('a.iusc') && !Array.from(el.querySelectorAll('div.iuscp, div.imgpt')).some(child => child.querySelector('a.iusc'))) : [];
+        const targets = leafItems.length ? leafItems : [result];
+        if (targets.every(el => el.style.display === 'none' || !!(el.closest && el.closest('[data-is-blocked="true"]')))) {
+          slot.style.display = 'none'; slot.setAttribute('data-serhl-grid-item-hidden', 'true'); _hiddenParentCount++;
+        }
       }
     }
   }
@@ -3007,7 +3005,7 @@
     const { url, domain } = resolveUrlDomain(link); _hrefUrlCache.set(result, { rawHref: link.href || '', url });
     const title = getResultTitle(result, engine); const snippet = getResultSnippet(result, engine); _resultContentCache.set(result, buildContentSignature(url, title, snippet));
     const subdomainLevels = getSubdomainLevels(domain);
-    const matchResult = checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels); _resultRetryCounts.delete(result);
+    const matchResult = checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels); _resultRetryCounts.delete(result); result.removeAttribute('data-retry-exhausted');
     const matchHL = matchResult && matchResult.highlight;
     if (matchHL) {
       const hlColor = currentConfig.highlightColors[matchHL]; const color = (typeof hlColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(hlColor)) ? hlColor : (DEFAULT_HIGHLIGHT_COLORS[matchHL] || '#CE2029');
@@ -3031,10 +3029,10 @@
       result.dataset.matchedRule = matchResult.rule || ''; result.dataset.matchedSource = matchResult.source || ''; result.dataset.matchedSourceKey = matchResult.sourceKey || '';
       if (blockedShown()) {
         if (showHiddenResults) {
-          result.classList.add('serh-blocked-visible');
+          result.classList.add('serhl-blocked-visible');
           if (currentConfig.showBlockBtn) injectBlockButton(result, engine, domain); addMatchedRuleLabel(result);
         } else {
-          result.classList.add('serh-blocked-collapsed');
+          result.classList.add('serhl-blocked-collapsed');
           applyResultCollapse(result, engine);
         }
       }
@@ -3043,7 +3041,7 @@
 
     if (matchHL) {
       _resultRetryCounts.delete(result); saveOriginalDisplay(result); restoreOriginalDisplay(result);
-      result.classList.remove('serh-blocked-visible'); result.classList.remove('serh-blocked-collapsed'); result.setAttribute('data-blocker-processed', 'true'); result.removeAttribute('data-is-blocked'); clearMatchedData(result);
+      result.classList.remove('serhl-blocked-visible'); result.classList.remove('serhl-blocked-collapsed'); result.setAttribute('data-blocker-processed', 'true'); result.removeAttribute('data-is-blocked'); clearMatchedData(result);
       if (matchResult && matchResult.whitelisted) { result.dataset.whitelistRule = matchResult.rule || ''; result.dataset.whitelistSource = matchResult.source || ''; result.dataset.whitelistSourceKey = matchResult.sourceKey || ''; }
       if (currentConfig.showBlockBtn) injectBlockButton(result, engine, domain);
       return false;
@@ -3085,11 +3083,10 @@
   });
 
   function scheduleResultRetry(result) {
-    // 重试期间保持 data-observed，避免耗尽后又被 scanNewResults 选中
-    result.setAttribute('data-observed', 'true');
+    result.setAttribute('data-observed', 'true'); result.removeAttribute('data-retry-exhausted');
     const attempt = (_resultRetryCounts.get(result) || 0) + 1;
     if (attempt > RESULT_RETRY_LIMIT) {
-      _resultRetryCounts.delete(result); resultObserver.unobserve(result); return;
+      _resultRetryCounts.delete(result); resultObserver.unobserve(result); result.setAttribute('data-retry-exhausted', 'true'); _resultContentCache.set(result, getResultContentSignature(result)); return;
     }
     _resultRetryCounts.set(result, attempt);
     setTimeout(() => {
@@ -3107,7 +3104,7 @@
     document.querySelectorAll('[data-observed]').forEach(result => {
       let stillMatches = false;
       try { stillMatches = result.matches(selector); } catch (e) { stillMatches = false; }
-      if (stillMatches) return; resultObserver.unobserve(result); const quickBtn = result.querySelector('.serh-quick-block'); if (quickBtn) quickBtn.remove(); resetResultStyles(result);
+      if (stillMatches) return; resultObserver.unobserve(result); const quickBtn = result.querySelector('.serhl-quick-block'); if (quickBtn) quickBtn.remove(); resetResultStyles(result);
       result.removeAttribute('data-observed');
     });
   }
@@ -3142,10 +3139,10 @@
     if (isBingImagesPage(getSearchEngine())) {
       const seen = new Set();
       return kept.filter(el => {
-        const link = getResultLink(el, 'bing'); const href = link && link.href;
-        if (!href) return true;
-        if (seen.has(href)) return false;
-        seen.add(href); return true;
+        const iusc = el.querySelector ? el.querySelector('a.iusc') : null;
+        if (!iusc) return true;
+        if (seen.has(iusc)) return false;
+        seen.add(iusc); return true;
       });
     }
     return kept;
@@ -3173,7 +3170,7 @@
       document.querySelectorAll('[data-blocker-processed], [data-observed]').forEach(result => {
         resultObserver.unobserve(result); resetResultStyles(result); result.removeAttribute('data-observed');
       });
-      document.querySelectorAll('.serh-quick-block').forEach(btn => btn.remove());
+      document.querySelectorAll('.serhl-quick-block').forEach(btn => btn.remove());
       showHiddenResults = false; _observedSelector = ''; return;
     }
 
@@ -3208,7 +3205,7 @@
   function exposeDebugApi() {
     try {
       if (currentConfig.debug) {
-        window.__SERH_DEBUG__ = {
+        window.__SERHL_DEBUG__ = {
           get config() { return currentConfig; },
           get compiledRules() { return compiledRules; },
           getSearchEngine,
@@ -3222,8 +3219,8 @@
           getResultLink,
           forceReprocessAll
         };
-      } else if (window.__SERH_DEBUG__) {
-        delete window.__SERH_DEBUG__;
+      } else if (window.__SERHL_DEBUG__) {
+        delete window.__SERHL_DEBUG__;
       }
     } catch (_) {}
   }
@@ -3237,7 +3234,7 @@
       console.log(`[屏蔽] 规则数量: domains=${compiledRules.domains.size}, urls=${compiledRules.urls.length}, titles=${compiledRules.titles.length}, texts=${compiledRules.texts.length}`);
     }
 
-    document.querySelectorAll('.serh-quick-block').forEach(btn => btn.remove()); restoreAllHiddenParents();
+    document.querySelectorAll('.serhl-quick-block').forEach(btn => btn.remove()); restoreAllHiddenParents();
     const newResults = queryUnobserved(selector); newResults.forEach(r => r.setAttribute('data-observed', 'true'));
     const batchId = ++forceReprocessBatchId; let totalBlocked = 0; const allResults = document.querySelectorAll('[data-observed]'); let processIdx = 0;
     function processBatch() {
@@ -3265,7 +3262,6 @@
     requestAnimationFrame(processBatch);
   }
 
-  // 预留翻页高度
   const LAYOUT_CSS = `
         body { min-height: 101vh !important; }
         #rcnt, #rso { min-height: 60vh; }
@@ -3275,34 +3271,34 @@
   function injectWidgetStyles() {
     if (widgetStylesInjected) return; widgetStylesInjected = true;
     GM_addStyle(`
-        [id^="serh-"]:not(button),
-        #serh-settings-panel * {
+        [id^="serhl-"]:not(button),
+        #serhl-settings-panel * {
             text-align: left !important; letter-spacing: normal !important; word-spacing: normal !important;
             text-transform: none !important; text-indent: 0 !important; text-shadow: none !important;
             text-decoration: none !important; direction: ltr !important;
             font-style: normal !important; font-variant: normal !important;
         }
 
-        .serh-window, .serh-window * {
+        .serhl-window, .serhl-window * {
             box-sizing: border-box !important;
         }
-        .serh-window {
+        .serhl-window {
             font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
             font-size: 13px !important; background: #ffffff !important; color: #2d3748 !important;
             border: 1px solid #e2e8f0 !important; border-radius: 8px !important;
             box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important; text-align: left !important; line-height: 1.5 !important;
-            transition: all 0.3s ease;
+            transition: all 0.15s ease;
         }
 
-        #serh-settings-panel * { line-height: 1.2 !important; }
-        #serh-settings-panel label,
-        #serh-settings-panel span,
-        #serh-settings-panel select { font-weight: 400 !important; }
-        #serh-settings-panel span { font-size: inherit !important; }
-        #serh-settings-panel #serh-settings-close { font-size: 12px !important; }
+        #serhl-settings-panel * { line-height: 1.2 !important; }
+        #serhl-settings-panel label,
+        #serhl-settings-panel span,
+        #serhl-settings-panel select { font-weight: 400 !important; }
+        #serhl-settings-panel span { font-size: inherit !important; }
+        #serhl-settings-panel #serhl-settings-close { font-size: 12px !important; }
 
-        [id^="serh-"] button,
-        .serh-button {
+        [id^="serhl-"] button,
+        .serhl-button {
             border: none !important; border-radius: 4px !important; cursor: pointer !important; box-sizing: border-box !important;
             line-height: normal !important; letter-spacing: normal !important; text-transform: none !important;
             white-space: nowrap !important; vertical-align: middle !important;
@@ -3312,51 +3308,51 @@
             transition: background-color 0.2s;
         }
 
-        [id^="serh-"] button:not(.serh-action-button),
-        .serh-button:not(.serh-action-button) {
+        [id^="serhl-"] button:not(.serhl-action-button),
+        .serhl-button:not(.serhl-action-button) {
             font-size: 11px !important; padding: 4px 8px !important; height: auto !important; min-height: 0 !important;
             width: auto !important; min-width: 0 !important; max-width: none !important;
         }
-        .serh-button-primary { background: #2c5282 !important; color: #ffffff !important; }
-        .serh-button-primary:hover { background: #1a365d !important; color: #ffffff !important; }
-        .serh-button-primary:active, .serh-button-primary:focus, .serh-button-primary:focus-visible { background: #1d375d !important; color: #ffffff !important; }
+        .serhl-button-primary { background: #2c5282 !important; color: #ffffff !important; }
+        .serhl-button-primary:hover { background: #1a365d !important; color: #ffffff !important; }
+        .serhl-button-primary:active, .serhl-button-primary:focus, .serhl-button-primary:focus-visible { background: #1d375d !important; color: #ffffff !important; }
 
-        .serh-button-secondary { background: #4a5568 !important; color: #ffffff !important; }
-        .serh-button-secondary:hover { background: #2d3748 !important; color: #ffffff !important; }
-        .serh-button-secondary:active, .serh-button-secondary:focus, .serh-button-secondary:focus-visible { background: #2a3240 !important; color: #ffffff !important; }
+        .serhl-button-secondary { background: #4a5568 !important; color: #ffffff !important; }
+        .serhl-button-secondary:hover { background: #2d3748 !important; color: #ffffff !important; }
+        .serhl-button-secondary:active, .serhl-button-secondary:focus, .serhl-button-secondary:focus-visible { background: #2a3240 !important; color: #ffffff !important; }
 
-        .serh-button-success { background: #276749 !important; color: #ffffff !important; }
-        .serh-button-success:hover { background: #22543d !important; color: #ffffff !important; }
-        .serh-button-success:active, .serh-button-success:focus, .serh-button-success:focus-visible { background: #20503a !important; color: #ffffff !important; }
+        .serhl-button-success { background: #276749 !important; color: #ffffff !important; }
+        .serhl-button-success:hover { background: #22543d !important; color: #ffffff !important; }
+        .serhl-button-success:active, .serhl-button-success:focus, .serhl-button-success:focus-visible { background: #20503a !important; color: #ffffff !important; }
 
-        .serh-button-danger { background: #c53030 !important; color: #ffffff !important; }
-        .serh-button-danger:hover { background: #9b2c2c !important; color: #ffffff !important; }
-        .serh-button-danger:active, .serh-button-danger:focus, .serh-button-danger:focus-visible { background: #8f2c2c !important; color: #ffffff !important; }
+        .serhl-button-danger { background: #c53030 !important; color: #ffffff !important; }
+        .serhl-button-danger:hover { background: #9b2c2c !important; color: #ffffff !important; }
+        .serhl-button-danger:active, .serhl-button-danger:focus, .serhl-button-danger:focus-visible { background: #8f2c2c !important; color: #ffffff !important; }
 
-        .serh-option-row {
+        .serhl-option-row {
             display: flex; align-items: center; justify-content: space-between;
             margin-bottom: 10px; flex-wrap: wrap;
         }
-        .serh-option-label {
+        .serhl-option-label {
             font-size: 12px; color: #4a5568; white-space: nowrap; margin-bottom: 4px;
         }
-        .serh-compact-row {
+        .serhl-compact-row {
             display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
         }
-        .serh-action-button {
+        .serhl-action-button {
             padding: 7px 12px !important; font-size: 12px !important; font-weight: 500 !important; box-sizing: border-box !important;
             height: 32px !important; min-height: 32px !important; line-height: 1 !important;
             display: inline-flex !important; align-items: center !important; justify-content: center !important;
             text-align: center !important;
         }
 
-        .serh-rules-container {
+        .serhl-rules-container {
             display: flex; border: 1px solid #e2e8f0; border-radius: 4px; background: #f8fafc;
             height: 190px; margin-bottom: 3px; position: relative; overflow: hidden;
         }
 
-        #serh-line-numbers,
-        #serh-sel-line-numbers {
+        #serhl-line-numbers,
+        #serhl-sel-line-numbers {
             min-width: 20px; padding: 8px 4px 8px 2px !important; background: #edf2f7;
             border-right: 1px solid #e2e8f0; text-align: right !important; color: #a0aec0;
             font-family: 'Consolas', 'Monaco', 'Courier New', monospace !important;
@@ -3364,8 +3360,8 @@
             overflow: hidden !important; user-select: none !important; flex-shrink: 0; box-sizing: border-box !important;
         }
 
-        #serh-rules,
-        #serh-sel-rules {
+        #serhl-rules,
+        #serhl-sel-rules {
             flex: 1; height: 100% !important; min-height: 0 !important; max-height: none !important;
             font-size: 11px !important; padding: 8px !important; margin: 0 !important; border: none !important;
             resize: none !important; background: transparent !important; box-sizing: border-box !important;
@@ -3375,40 +3371,43 @@
             overflow-x: auto !important; overflow-y: auto !important; outline: none !important; box-shadow: none !important;
         }
 
-        .serh-bracket-layer {
+        .serhl-bracket-layer {
             position: absolute; top: 0; right: 0; bottom: 0; left: 0;
             z-index: 0; overflow: hidden; pointer-events: none;
         }
-        .serh-bracket-mirror {
+        .serhl-bracket-mirror {
             position: absolute; top: 0; left: 0; visibility: hidden;
             white-space: pre; pointer-events: none;
             margin: 0 !important; padding: 0 !important; border: 0 !important;
             text-indent: 0 !important; text-align: left !important;
             -webkit-text-size-adjust: 100% !important; text-size-adjust: 100% !important;
         }
-        .serh-bracket-hit { position: absolute; display: none; border-radius: 2px; pointer-events: none; }
-        .serh-bracket-pair { background: rgba(49, 130, 206, 0.30); box-shadow: 0 0 0 1px rgba(49, 130, 206, 0.60); }
-        .serh-bracket-enclosing { background: rgba(100, 116, 139, 0.16); }
+        .serhl-bracket-hit { position: absolute; display: none; border-radius: 2px; pointer-events: none; }
+        .serhl-bracket-pair { background: rgba(49, 130, 206, 0.30); box-shadow: 0 0 0 1px rgba(49, 130, 206, 0.60); }
+        .serhl-bracket-enclosing { background: rgba(100, 116, 139, 0.16); }
 
-        :is(#serh-rules, #serh-sel-rules)::-webkit-scrollbar { width: 6px; height: 0px; }
-        :is(#serh-rules, #serh-sel-rules, #serh-stats-content)::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
-        :is(#serh-rules, #serh-sel-rules, #serh-stats-content)::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
-        :is(#serh-rules, #serh-sel-rules, #serh-stats-content)::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+        :is(#serhl-rules, #serhl-sel-rules)::-webkit-scrollbar { width: 6px; height: 0px; }
+        :is(#serhl-rules, #serhl-sel-rules, #serhl-stats-content)::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
+        :is(#serhl-rules, #serhl-sel-rules, #serhl-stats-content)::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
+        :is(#serhl-rules, #serhl-sel-rules, #serhl-stats-content)::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
 
-        #serh-stats-panel {
+        #serhl-stats-panel {
             position: absolute; top: 10px; left: 15px; right: 15px; bottom: 50px;
             background: white; border: 1px solid #e2e8f0; border-radius: 6px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.05); z-index: 10; display: none;
             flex-direction: column; overflow: hidden; box-sizing: border-box;
         }
 
-        #serh-stats-content {
+        #serhl-stats-content {
             padding: 12px; overflow-y: auto; flex: 1; scrollbar-width: thin;
         }
 
-        #serh-stats-content::-webkit-scrollbar { width: 6px; }
+        .serhl-stats-title { color: #2d3748; }
+        .serhl-stats-item { color: #4a5568; }
 
-        .serh-quick-block {
+        #serhl-stats-content::-webkit-scrollbar { width: 6px; }
+
+        .serhl-quick-block {
             position: absolute; cursor: pointer; z-index: 99; width: 24px; height: 24px;
             display: flex; align-items: center; justify-content: center;
             border-radius: 50%; background: transparent; user-select: none;
@@ -3416,15 +3415,15 @@
             transition: transform 0.2s;
         }
 
-        .serh-quick-block:hover {
+        .serhl-quick-block:hover {
             transform: scale(1.1);
         }
 
-    body.serh-dark-on .serh-quick-block {
+    body.serhl-dark-on .serhl-quick-block {
         color: #ffffff;
     }
 
-        #serh-block-confirm-dialog {
+        #serhl-block-confirm-dialog {
             position: fixed; z-index: 10002; display: flex; flex-direction: column; gap: 6px;
             width: 250px; max-width: calc(100vw - 16px); padding: 8px 10px;
             background: #ffffff; color: #2d3748; border: 1px solid #e2e8f0; border-radius: 8px;
@@ -3432,89 +3431,90 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             font-size: 12px; text-align: left; line-height: 1.4; box-sizing: border-box;
         }
-        #serh-block-confirm-dialog .sfb-confirm-domain { font-size: 11px; color: #718096; word-break: break-all; margin-bottom: 2px; }
-        #serh-block-confirm-dialog .sfb-confirm-option {
+        #serhl-block-confirm-dialog .sfb-confirm-domain { font-size: 11px; color: #718096; word-break: break-all; margin-bottom: 2px; }
+        #serhl-block-confirm-dialog .sfb-confirm-option {
             display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0; padding: 0;
             border: none; background: transparent; font-weight: normal; white-space: nowrap;
         }
-        #serh-block-confirm-dialog .sfb-confirm-option input[type="radio"] {
+        #serhl-block-confirm-dialog .sfb-confirm-option input[type="radio"] {
             margin: 0 !important; padding: 0 !important; flex-shrink: 0 !important; accent-color: #2c5282 !important;
             cursor: pointer !important; width: auto !important; height: auto !important; min-width: 0 !important;
             appearance: auto !important; -webkit-appearance: auto !important; display: inline-block !important;
         }
-        #serh-block-confirm-dialog .sfb-confirm-option-disabled { cursor: not-allowed; opacity: 0.6; }
-        #serh-block-confirm-dialog .sfb-confirm-option-disabled input[type="radio"] { cursor: not-allowed !important; }
-        #serh-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule { background: #edf2f7; color: #a0aec0; }
+        #serhl-block-confirm-dialog .sfb-confirm-option-disabled { cursor: not-allowed; opacity: 0.6; }
+        #serhl-block-confirm-dialog .sfb-confirm-option-disabled input[type="radio"] { cursor: not-allowed !important; }
+        #serhl-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule { background: #edf2f7; color: #a0aec0; }
 
-        .serh-switch input[type="checkbox"] {
+        .serhl-switch input[type="checkbox"] {
             opacity: 0 !important; width: 0 !important; height: 0 !important;
             min-width: 0 !important; max-width: 0 !important; margin: 0 !important; padding: 0 !important;
             position: absolute !important; pointer-events: none !important;
             appearance: none !important; -webkit-appearance: none !important; border: none !important;
         }
-        #serh-block-confirm-dialog .sfb-confirm-label { flex-shrink: 0; min-width: 36px; white-space: nowrap; font-size: 12px; }
-        #serh-block-confirm-dialog .sfb-confirm-rule {
+        #serhl-block-confirm-dialog .sfb-confirm-label { flex-shrink: 0; min-width: 36px; white-space: nowrap; font-size: 12px; }
+        #serhl-block-confirm-dialog .sfb-confirm-rule {
             flex: 1; min-width: 0; padding: 3px 6px; border: 1px solid #e2e8f0; border-radius: 4px;
             font-size: 11px; font-family: 'Consolas', 'Monaco', monospace; background: #f7fafc;
             color: #2d3748; outline: none; box-shadow: none; height: auto; box-sizing: border-box;
         }
-        #serh-block-confirm-dialog .sfb-confirm-rule:focus { border-color: #3182ce; background: #ffffff; }
-        #serh-block-confirm-dialog .sfb-confirm-btns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
-        #serh-block-confirm-dialog .sfb-confirm-btns .serh-button { height: 24px; padding: 0 10px; font-size: 11px; }
-    body.serh-dark-on #serh-block-confirm-dialog {
+        #serhl-block-confirm-dialog .sfb-confirm-rule:focus { border-color: #3182ce; background: #ffffff; }
+        #serhl-block-confirm-dialog .sfb-confirm-btns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+        #serhl-block-confirm-dialog .sfb-confirm-btns .serhl-button { height: 24px; padding: 0 10px; font-size: 11px; }
+    body.serhl-dark-on #serhl-block-confirm-dialog {
         background: #171717; color: #f3f4f6; border-color: #374151;
         box-shadow: 0 4px 12px rgba(0,0,0,0.5);
     }
-    body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-rule { background: #374151; border-color: #4b5563; color: #f3f4f6; }
-    body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-rule:focus { border-color: #60a5fa; background: #374151; }
-    body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule { background: #1f2937; color: #6b7280; }
+    body.serhl-dark-on #serhl-block-confirm-dialog .sfb-confirm-rule { background: #374151; border-color: #4b5563; color: #f3f4f6; }
+    body.serhl-dark-on #serhl-block-confirm-dialog .sfb-confirm-rule:focus { border-color: #60a5fa; background: #374151; }
+    body.serhl-dark-on #serhl-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule { background: #1f2937; color: #6b7280; }
 
-        .serh-scroll-btn {
+        .serhl-scroll-btn {
             position: absolute; right: 7px; cursor: pointer; opacity: 0.5; font-size: 18px !important;
             line-height: 1 !important; user-select: none !important; transition: opacity 0.2s, transform 0.2s;
             background: transparent !important; border: none !important; padding: 0 !important; margin: 0 !important;
             z-index: 10;
         }
 
-        .serh-scroll-btn:hover { opacity: 1; transform: scale(1.2); }
-        .serh-quick-block:hover { transform: scale(1.1); opacity: 1; }
+        .serhl-scroll-btn:hover { opacity: 1; transform: scale(1.2); }
+        .serhl-quick-block:hover { transform: scale(1.1); opacity: 1; }
 
-        :is(.isv-r, .image-section, g-img, .is-extra-container) .serh-quick-block,
-        :is(header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav, #extabar) .serh-quick-block { display: none !important; }
+        :is(.isv-r, .image-section, g-img, .is-extra-container) .serhl-quick-block,
+        :is(header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav, #extabar) .serhl-quick-block { display: none !important; }
 
 
-    body.serh-dark-on #serh-panel .serh-option-label,
-    body.serh-dark-on #serh-panel .serh-compact-row span { color: #f3f4f6 !important; }
-    body.serh-dark-on :is(#serh-panel, #serh-selector-panel) .serh-rules-container { border-color: #4b5563 !important; background: #1E1F21 !important; }
-    body.serh-dark-on :is(#serh-line-numbers, #serh-sel-line-numbers) { background: #222629 !important; border-right-color: #4b5563 !important; color: #9ca3af !important; }
-    body.serh-dark-on :is(#serh-rules, #serh-sel-rules) { background: transparent !important; color: #f3f4f6 !important; }
-    body.serh-dark-on #serh-rules::placeholder { color: #6b7280 !important; }
-    body.serh-dark-on .serh-bracket-pair { background: rgba(96, 165, 250, 0.38); box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.75); }
-    body.serh-dark-on .serh-bracket-enclosing { background: rgba(148, 163, 184, 0.22); }
-    body.serh-dark-on #serh-stats-panel { background: #171717 !important; border-color: #374151 !important; }
-    body.serh-dark-on #serh-stats-content { color: #f3f4f6 !important; }
-    body.serh-dark-on #serh-panel .serh-compact-row button.serh-button {
+    body.serhl-dark-on #serhl-panel .serhl-option-label,
+    body.serhl-dark-on #serhl-panel .serhl-compact-row span { color: #f3f4f6 !important; }
+    body.serhl-dark-on :is(#serhl-panel, #serhl-selector-panel) .serhl-rules-container { border-color: #4b5563 !important; background: #1E1F21 !important; }
+    body.serhl-dark-on :is(#serhl-line-numbers, #serhl-sel-line-numbers) { background: #222629 !important; border-right-color: #4b5563 !important; color: #9ca3af !important; }
+    body.serhl-dark-on :is(#serhl-rules, #serhl-sel-rules) { background: transparent !important; color: #f3f4f6 !important; }
+    body.serhl-dark-on #serhl-rules::placeholder { color: #6b7280 !important; }
+    body.serhl-dark-on .serhl-bracket-pair { background: rgba(96, 165, 250, 0.38); box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.75); }
+    body.serhl-dark-on .serhl-bracket-enclosing { background: rgba(148, 163, 184, 0.22); }
+    body.serhl-dark-on #serhl-stats-panel { background: #171717 !important; border-color: #374151 !important; }
+    body.serhl-dark-on #serhl-stats-content { color: #f3f4f6 !important; }
+    body.serhl-dark-on #serhl-stats-content :is(.serhl-stats-title, .serhl-stats-item) { color: #f3f4f6 !important; }
+    body.serhl-dark-on #serhl-panel .serhl-compact-row button.serhl-button {
         height: auto !important; min-height: 0 !important; width: auto !important; min-width: 0 !important;
         flex: 0 0 auto !important; line-height: normal !important; padding: 3px 8px !important;
         font-size: 11px !important; margin: 0 !important;
     }
 
-        #serh-hlcolor-panel h3, #serh-selector-panel h3 {
+        #serhl-hlcolor-panel h3, #serhl-selector-panel h3 {
             margin: 0 0 8px 0 !important; font-size: 14px !important; color: inherit !important;
             font-weight: 600 !important; padding: 0 !important; border: none !important;
             background: transparent !important; letter-spacing: normal !important;
         }
 
-        #serh-hlcolor-panel h3 {
+        #serhl-hlcolor-panel h3 {
             margin: 0 0 1px 0 !important; line-height: 1.2 !important;
         }
 
-        #serh-selector-panel h3 {
+        #serhl-selector-panel h3 {
             margin: 0 !important; line-height: 1.2 !important;
         }
 
-        :is(#serh-hlcolor-panel) .serh-button,
-        :is(#serh-panel, #serh-selector-panel) .serh-action-button {
+        :is(#serhl-hlcolor-panel) .serhl-button,
+        :is(#serhl-panel, #serhl-selector-panel) .serhl-action-button {
             height: 30px !important; min-height: 30px !important; max-height: 30px !important; padding: 0 12px !important;
             font-size: 13px !important; font-weight: 500 !important; box-sizing: border-box !important; margin: 0 !important;
             display: flex !important; align-items: center !important; justify-content: center !important;
@@ -3524,79 +3524,79 @@
         }
 
 
-    body.serh-dark-on .serh-window {
+    body.serhl-dark-on .serhl-window {
         background: #171717 !important; color: #f3f4f6 !important; border-color: #374151 !important;
         box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
     }
-    body.serh-dark-on #serh-settings-panel label,
-    body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row label {
+    body.serhl-dark-on #serhl-settings-panel label,
+    body.serhl-dark-on #serhl-hlcolor-panel .serhl-hlcolor-row label {
         color: #9ca3af !important;
     }
-    body.serh-dark-on #serh-settings-panel select,
-    body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row input {
+    body.serhl-dark-on #serhl-settings-panel select,
+    body.serhl-dark-on #serhl-hlcolor-panel .serhl-hlcolor-row input {
         background: #374151 !important; border-color: #4b5563 !important; color: #f3f4f6 !important;
     }
-    body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row input:focus {
+    body.serhl-dark-on #serhl-hlcolor-panel .serhl-hlcolor-row input:focus {
         border-color: #60a5fa !important;
     }
-    body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row .serh-hlcolor-preview,
-    body.serh-dark-on #serh-hlcolor-current-preview,
-    body.serh-dark-on #serh-hlcolor-sv-canvas,
-    body.serh-dark-on #serh-hlcolor-hue-canvas {
+    body.serhl-dark-on #serhl-hlcolor-panel .serhl-hlcolor-row .serhl-hlcolor-preview,
+    body.serhl-dark-on #serhl-hlcolor-current-preview,
+    body.serhl-dark-on #serhl-hlcolor-sv-canvas,
+    body.serhl-dark-on #serhl-hlcolor-hue-canvas {
         border-color: #4b5563 !important;
     }
 
         /* 渐变动画 */
-        .serh-panel-fade {
+        .serhl-panel-fade {
             opacity: 0;
             transform: translate(-50%, -48%);
-            transition: all 0.3s ease;
+            transition: all 0.15s ease;
             pointer-events: none;
         }
-        .serh-panel-fade.show {
+        .serhl-panel-fade.show {
             opacity: 1;
             transform: translate(-50%, -50%);
             pointer-events: auto;
         }
 
-        .serh-window:not(.serh-panel-fade) {
+        .serhl-window:not(.serhl-panel-fade) {
             transition: opacity 0.1s ease;
         }
 
         /* 屏蔽灰底 */
-        .serh-blocked-visible,
-        .g.serh-blocked-visible,
-        .MjjYud.serh-blocked-visible {
+        .serhl-blocked-visible,
+        .g.serhl-blocked-visible,
+        .MjjYud.serhl-blocked-visible {
             background-color: #d1d5db !important; border-radius: 8px !important; padding: 8px !important;
             transition: background 0.2s;
         }
 
-    body.serh-dark-on .serh-blocked-visible,
-    body.serh-dark-on .g.serh-blocked-visible,
-    body.serh-dark-on .MjjYud.serh-blocked-visible {
+    body.serhl-dark-on .serhl-blocked-visible,
+    body.serhl-dark-on .g.serhl-blocked-visible,
+    body.serhl-dark-on .MjjYud.serhl-blocked-visible {
         background-color: #374151 !important;
     }
 
-        .serh-blocked-visible div,
-        .serh-blocked-visible .yuRUbf,
-        .serh-blocked-visible div[data-sokoban-container],
-        .serh-blocked-visible div[data-snc] {
+        .serhl-blocked-visible div,
+        .serhl-blocked-visible .yuRUbf,
+        .serhl-blocked-visible div[data-sokoban-container],
+        .serhl-blocked-visible div[data-snc] {
             background-color: transparent !important; background: transparent !important; background-image: none !important;
         }
 
-        .serh-bubble-number {
+        .serhl-bubble-number {
             color: #000000 !important;
             line-height: 1 !important;
         }
 
-    body.serh-dark-on #serh-status {
+    body.serhl-dark-on #serhl-status {
         color: #a8c7fa !important;
     }
-    body.serh-dark-on .serh-bubble-number {
+    body.serhl-dark-on .serhl-bubble-number {
         color: #ffffff !important;
     }
 
-        .serh-matched-rule {
+        .serhl-matched-rule {
             position: absolute; top: 2px; left: 50%; transform: translateX(-50%);
             max-width: calc(100% - 70px); background: rgba(0, 0, 0, 0.2); color: #000000;
             font-size: 12px; padding: 2px 8px; border-radius: 4px; white-space: nowrap;
@@ -3604,31 +3604,31 @@
             font-family: monospace; backdrop-filter: blur(2px);
             box-shadow: 0 1px 3px rgba(0,0,0,0.2);
         }
-    body.serh-dark-on .serh-matched-rule {
+    body.serhl-dark-on .serhl-matched-rule {
         background: rgba(0, 160, 0, 0.9);
         color: #fff;
     }
 
         /* 高亮 */
-        #serh-hlcolor-panel .serh-hlcolor-row {
+        #serhl-hlcolor-panel .serhl-hlcolor-row {
             margin-bottom: 2px !important; padding: 0 !important; border: none !important;
             background: transparent !important; display: flex !important; align-items: center !important; gap: 4px !important;
             height: auto !important; min-height: 0 !important; max-height: none !important;
         }
-        #serh-hlcolor-panel .serh-hlcolor-row label {
+        #serhl-hlcolor-panel .serhl-hlcolor-row label {
             min-width: 20px !important; font-size: 12px !important; color: #4a5568 !important;
             font-weight: 600 !important; margin: 0 !important; line-height: 1.2 !important;
             padding: 0 !important; border: none !important; background: transparent !important;
             height: auto !important; min-height: 0 !important; max-height: none !important;
             display: block !important; box-sizing: border-box !important;
         }
-        #serh-hlcolor-panel .serh-hlcolor-row .serh-hlcolor-preview {
+        #serhl-hlcolor-panel .serhl-hlcolor-row .serhl-hlcolor-preview {
             width: 12px !important; height: 12px !important; border-radius: 2px !important;
             border: 1px solid #e2e8f0 !important; flex-shrink: 0 !important; cursor: pointer !important;
             margin: 0 !important; padding: 0 !important; box-sizing: border-box !important;
             min-height: 0 !important; max-height: none !important;
         }
-        #serh-hlcolor-panel .serh-hlcolor-row input {
+        #serhl-hlcolor-panel .serhl-hlcolor-row input {
             width: 70px !important; flex: none !important; padding: 2px 4px !important; margin: 0 !important;
             border: 1px solid #e2e8f0 !important; border-radius: 3px !important; font-size: 11px !important;
             font-family: 'Consolas', monospace !important; background: #ffffff !important; color: #2d3748 !important;
@@ -3637,27 +3637,27 @@
             min-width: 0 !important; max-width: none !important; min-height: 0 !important; max-height: none !important;
             transform: none !important; appearance: none !important; -webkit-appearance: none !important;
         }
-        #serh-hlcolor-panel .serh-hlcolor-row input:focus {
+        #serhl-hlcolor-panel .serhl-hlcolor-row input:focus {
             border-color: #3182ce !important;
         }
-        #serh-hlcolor-panel .serh-hlcolor-picker-wrapper {
+        #serhl-hlcolor-panel .serhl-hlcolor-picker-wrapper {
             display: flex !important; align-items: stretch !important; margin: 0 !important;
         }
-        #serh-hlcolor-sv-canvas, #serh-hlcolor-hue-canvas {
+        #serhl-hlcolor-sv-canvas, #serhl-hlcolor-hue-canvas {
             cursor: crosshair !important; border-radius: 3px !important; border: 1px solid #e2e8f0 !important;
         }
-        #serh-hlcolor-sv-dot, #serh-hlcolor-hue-dot {
+        #serhl-hlcolor-sv-dot, #serhl-hlcolor-hue-dot {
             position: absolute !important; pointer-events: none !important; transform: translate(-50%, -50%) !important;
             border: 2px solid #ffffff !important; box-shadow: 0 0 3px rgba(0,0,0,0.55) !important; box-sizing: border-box !important; z-index: 2 !important;
         }
-        #serh-hlcolor-sv-dot { width: 13px !important; height: 13px !important; border-radius: 50% !important; }
-        #serh-hlcolor-hue-dot { width: 30px !important; height: 6px !important; border-radius: 3px !important; }
-        #serh-hlcolor-current-preview {
+        #serhl-hlcolor-sv-dot { width: 13px !important; height: 13px !important; border-radius: 50% !important; }
+        #serhl-hlcolor-hue-dot { width: 30px !important; height: 6px !important; border-radius: 3px !important; }
+        #serhl-hlcolor-current-preview {
             flex-shrink: 0 !important;
             margin: 0 !important; padding: 0 !important; box-sizing: border-box !important;
             min-height: 0 !important; max-height: none !important;
         }
-        #serh-hlcolor-code-text {
+        #serhl-hlcolor-code-text {
             display: flex !important; align-items: center !important; justify-content: center !important;
             width: 70px !important; height: 20px !important; flex: none !important;
             margin: 0 !important; padding: 2px 4px !important; box-sizing: border-box !important;
@@ -3669,7 +3669,7 @@
         }
 
         /* 开关 */
-        .serh-switch {
+        .serhl-switch {
             position: relative !important; display: inline-block !important; width: 28px !important; height: 16px !important;
             margin: 0 6px 0 0 !important; padding: 0 !important; flex-shrink: 0 !important;
             border: none !important; box-shadow: none !important; background: transparent !important;
@@ -3677,14 +3677,14 @@
             box-sizing: border-box !important;
         }
 
-        .serh-switch input {
+        .serhl-switch input {
             opacity: 0;
             width: 0;
             height: 0;
             position: absolute;
         }
 
-        .serh-slider {
+        .serhl-slider {
             position: absolute !important; cursor: pointer !important;
             top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
             background-color: #cbd5e0 !important; transition: .2s !important; border-radius: 16px !important;
@@ -3692,7 +3692,7 @@
             box-sizing: border-box !important;
         }
 
-        .serh-slider:before {
+        .serhl-slider:before {
             position: absolute !important; content: "" !important; height: 12px !important; width: 12px !important;
             left: 2px !important; bottom: 2px !important; top: auto !important; right: auto !important;
             background-color: #ffffff !important; transition: .2s !important; border-radius: 50% !important;
@@ -3700,22 +3700,22 @@
             box-sizing: border-box !important; transform: none !important;
         }
 
-        .serh-switch input:checked + .serh-slider {
+        .serhl-switch input:checked + .serhl-slider {
             background-color: #2c5282 !important;
         }
 
-        .serh-switch input:checked + .serh-slider:before {
+        .serhl-switch input:checked + .serhl-slider:before {
             transform: translateX(12px) !important;
         }
 
-    body.serh-dark-on .serh-slider {
+    body.serhl-dark-on .serhl-slider {
         background-color: #4b5563 !important;
     }
-    body.serh-dark-on .serh-switch input:checked + .serh-slider {
+    body.serhl-dark-on .serhl-switch input:checked + .serhl-slider {
         background-color: #2c5282 !important;
     }
 
-        #serh-bubble-size-slider {
+        #serhl-bubble-size-slider {
             flex: 1 1 0% !important; margin: 0 0 0 5px !important;
             height: 4px !important; min-height: 0 !important; max-height: none !important;
             width: auto !important; min-width: 0 !important; max-width: none !important;
@@ -3724,22 +3724,22 @@
             appearance: none !important; -webkit-appearance: none !important; -moz-appearance: none !important;
             cursor: pointer !important; transform: none !important; vertical-align: middle !important;
         }
-        #serh-bubble-size-slider::-webkit-slider-thumb {
+        #serhl-bubble-size-slider::-webkit-slider-thumb {
             -webkit-appearance: none !important; width: 14px !important; height: 14px !important; border-radius: 50% !important;
             background: #2c5282 !important; cursor: pointer !important; border: none !important;
         }
-        #serh-bubble-size-slider::-moz-range-thumb {
+        #serhl-bubble-size-slider::-moz-range-thumb {
             width: 14px !important; height: 14px !important; border-radius: 50% !important; background: #2c5282 !important;
             cursor: pointer !important; border: none !important;
         }
 
-        #serh-toast-container {
+        #serhl-toast-container {
             position: fixed; top: 15px; right: 15px; z-index: 2147483647; display: flex;
             flex-direction: column; align-items: stretch; gap: 8px; pointer-events: none;
             max-width: min(320px, calc(100vw - 16px));
         }
 
-        .serh-toast {
+        .serhl-toast {
             pointer-events: auto; box-sizing: border-box; background: #ffffff;
             border: 1px solid #e2e8f0; border-left: 3px solid #2c5282; border-radius: 6px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.12); color: #2d3748; font-size: 12px;
@@ -3749,24 +3749,24 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
 
-        .serh-toast.show {
+        .serhl-toast.show {
             opacity: 1;
             transform: translateY(0);
         }
 
-    body.serh-dark-on .serh-toast {
+    body.serhl-dark-on .serhl-toast {
         background: #171717 !important; color: #f3f4f6 !important;
         border-top-color: #374151; border-right-color: #374151; border-bottom-color: #374151;
     }
 
-        .serh-toast-success { border-left-color: #276749; }
-        .serh-toast-error { border-left-color: #c53030; }
-        .serh-toast-info { border-left-color: #2c5282; }
+        .serhl-toast-success { border-left-color: #276749; }
+        .serhl-toast-error { border-left-color: #c53030; }
+        .serhl-toast-info { border-left-color: #2c5282; }
     `);
   }
 
   function injectGlobalStyles() {
-    const engine = getSearchEngine(); const applyLayout = engine !== 'other' && !!SELECTORS[engine];
+    const engine = getSearchEngine(); const applyLayout = engine !== 'other' && !!getSelectors()[engine];
     if (applyLayout) {
       if (!_globalStyleEl) {
         const el = GM_addStyle(LAYOUT_CSS); if (el && typeof el.remove === 'function') _globalStyleEl = el;
@@ -3805,17 +3805,18 @@
   }
 
   function updateBubbleContent(statusBtn, blocked) {
-    const isLeft = currentConfig.bubbleState ? currentConfig.bubbleState.isLeftHalf : true; const isToggleMode = currentConfig.bubbleAction === 'toggleHidden';
+    const isLeft = currentConfig.bubbleState ? currentConfig.bubbleState.isLeftHalf : true; const isToggleMode = currentConfig.bubbleAction === 'toggleHidden'; const isEngineMode = currentConfig.bubbleAction === 'openSelectors';
 
     const bubbleIcon = (inner) => `<span style="display: inline-block; width: 1em; height: 1em; vertical-align: -0.15em; flex-shrink: 0; line-height: 0;"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg></span>`;
     const slash = currentConfig.bubbleAction === 'openStats' ? '<line x1="19.07" y1="4.93" x2="4.93" y2="19.07"/>' : '<line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>';
     const icon = isToggleMode
       ? bubbleIcon('<circle cx="12" cy="12" r="10"/>')
+      : isEngineMode ? bubbleIcon('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>')
       : bubbleIcon(`<circle cx="12" cy="12" r="10"/>${slash}`);
 
     let newHtml;
     newHtml = currentConfig.showCount
-      ? (isLeft ? `${icon} <span class="serh-bubble-number">${blocked}</span>` : `<span class="serh-bubble-number">${blocked}</span> ${icon}`)
+      ? (isLeft ? `${icon} <span class="serhl-bubble-number">${blocked}</span>` : `<span class="serhl-bubble-number">${blocked}</span> ${icon}`)
       : icon;
     if (statusBtn._lastHtml !== newHtml) {
       statusBtn.innerHTML = newHtml; statusBtn._lastHtml = newHtml;
@@ -3832,12 +3833,12 @@
       el.style.top = top; el.style.left = currentConfig.bubbleState.left || 'auto'; el.style.right = currentConfig.bubbleState.right || 'auto'; el.style.bottom = 'auto'; el.style.transform = 'none';
     }
     if (!currentConfig.showBubble) {
-      const status = document.getElementById('serh-status'); if (status) status.remove(); return;
+      const status = document.getElementById('serhl-status'); if (status) status.remove(); return;
     }
 
-    let status = document.getElementById('serh-status');
+    let status = document.getElementById('serhl-status');
     if (!status) {
-      status = document.createElement('div'); status.id = 'serh-status'; applyBubbleStyle(status);
+      status = document.createElement('div'); status.id = 'serhl-status'; applyBubbleStyle(status);
 
       let isDragging = false; let startX, startY, initialLeft, initialTop;
       let longPressTimer = null; let hasLongPressed = false;
@@ -3863,7 +3864,7 @@
         });
         document.addEventListener('touchend', endDrag); document.addEventListener('touchcancel', endDrag);
 
-        if (currentConfig.bubbleAction === 'toggleHidden' || currentConfig.bubbleAction === 'openStats') {
+        if (['toggleHidden', 'openStats', 'openSelectors'].includes(currentConfig.bubbleAction)) {
           longPressTimer = setTimeout(() => {
             if (!isDragging) {
               hasLongPressed = true; status.style.transform = 'scale(1.15)';
@@ -3898,7 +3899,7 @@
 
         if (e.type === 'touchend') e.preventDefault(); document.removeEventListener('mousemove', onDrag); document.removeEventListener('mouseup', endDrag);
         document.removeEventListener('touchmove', onDrag); document.removeEventListener('touchend', endDrag); document.removeEventListener('touchcancel', endDrag); status.style.cursor = 'grab';
-        status.style.transition = 'opacity 0.2s, text-shadow 0.2s, transform 0.2s, left 0.3s ease, right 0.3s ease, top 0.3s ease, color 0.2s';
+        status.style.transition = 'opacity 0.2s, text-shadow 0.2s, transform 0.2s, left 0.15s ease, right 0.15s ease, top 0.15s ease, color 0.2s';
         if (e.type === 'touchcancel') {
           applyBubbleStatePosition(status); return;
         }
@@ -3930,6 +3931,7 @@
                 const action = resolveBubblePanelAction();
                 if (action === 'closeAll') closeAllSerhPanels();
                 else if (action === 'stats') showStatsPanel();
+                else if (action === 'selectors') showSelectorPanel();
                 else if (action === 'panel') showConfigPanel();
               }, 50);
             }
@@ -3953,25 +3955,25 @@
     document.querySelectorAll('[data-is-blocked="true"]').forEach(el => {
       saveOriginalDisplay(el); if (showHiddenResults) restoreOriginalDisplay(el); else el.style.display = blockedShown() ? '' : 'none'; setResultExtraElementsVisible(el, showHiddenResults);
       if (showHiddenResults) {
-        el.classList.remove('serh-blocked-collapsed'); el.classList.add('serh-blocked-visible'); restoreResultCollapse(el); const engine = getSearchEngine(); const link = getResultLink(el, engine);
+        el.classList.remove('serhl-blocked-collapsed'); el.classList.add('serhl-blocked-visible'); restoreResultCollapse(el); const engine = getSearchEngine(); const link = getResultLink(el, engine);
         if (link && link.href && currentConfig.showBlockBtn) {
           const { domain } = resolveUrlDomain(link);
-          if (!el.querySelector('.serh-quick-block')) {
+          if (!el.querySelector('.serhl-quick-block')) {
             injectBlockButton(el, engine, domain);
           }
         }
         addMatchedRuleLabel(el);
       } else if (currentConfig.collapseMode === true) {
-        el.classList.remove('serh-blocked-visible'); el.classList.add('serh-blocked-collapsed');
-        const btn = el.querySelector('.serh-quick-block'); if (btn) btn.remove();
+        el.classList.remove('serhl-blocked-visible'); el.classList.add('serhl-blocked-collapsed');
+        const btn = el.querySelector('.serhl-quick-block'); if (btn) btn.remove();
         removeMatchedRuleLabel(el);
         applyResultCollapse(el, getSearchEngine());
       } else {
-        el.classList.remove('serh-blocked-visible'); el.classList.remove('serh-blocked-collapsed'); restoreResultCollapse(el); removeMatchedRuleLabel(el);
+        el.classList.remove('serhl-blocked-visible'); el.classList.remove('serhl-blocked-collapsed'); restoreResultCollapse(el); removeMatchedRuleLabel(el);
       }
     });
     if (showHiddenResults) {
-      document.querySelectorAll('[data-blocker-google-parent], [data-blocker-yandex-parent], [data-serh-grid-item-hidden]').forEach(parent => {
+      document.querySelectorAll('[data-blocker-google-parent], [data-blocker-yandex-parent], [data-serhl-grid-item-hidden]').forEach(parent => {
         restoreOriginalDisplay(parent);
       });
     } else {
@@ -3982,12 +3984,12 @@
         hideParentIfNoVisibleSiblings(parent, googleResultBlocks(parent), 'data-blocker-google-parent');
       });
       if (!blockedShown()) {
-        document.querySelectorAll('[data-serh-grid-item-hidden]').forEach(cell => { cell.style.display = 'none'; });
+        document.querySelectorAll('[data-serhl-grid-item-hidden]').forEach(cell => { cell.style.display = 'none'; });
         const engine = getSearchEngine();
         if (getSearchCategory() === 'images') document.querySelectorAll('[data-is-blocked="true"]').forEach(el => markResultGridSlot(el, engine));
       }
     }
-    const status = document.getElementById('serh-status');
+    const status = document.getElementById('serhl-status');
     if (status) {
       updateBubbleContent(status, parseInt(status.dataset.blockedCount || 0));
     }
@@ -4002,37 +4004,37 @@
   }
 
   const SETTINGS_PANEL_CHECKBOXES = {
-    'serh-set-remove-redirects': 'removeRedirects',
-    'serh-set-show-block-btn': 'showBlockBtn',
-    'serh-set-block-domain': 'blockDomain', 'serh-set-block-confirm': 'blockConfirm',
-    'serh-set-show-source': 'showMatchedSource', 'serh-set-bracket-highlight': 'bracketHighlight',
-    'serh-set-show-bubble': 'showBubble', 'serh-set-show-count': 'showCount',
-    'serh-set-panel-centered': 'panelCentered',
-    'serh-set-disable-block': 'enabled', 'serh-set-debug': 'debug',
-    'serh-set-error-detection': 'errorDetection', 'serh-set-export-config': 'exportConfig', 'serh-set-collapse-mode': 'collapseMode'
+    'serhl-set-remove-redirects': 'removeRedirects',
+    'serhl-set-show-block-btn': 'showBlockBtn',
+    'serhl-set-block-domain': 'blockDomain', 'serhl-set-block-confirm': 'blockConfirm',
+    'serhl-set-show-source': 'showMatchedSource', 'serhl-set-bracket-highlight': 'bracketHighlight',
+    'serhl-set-show-bubble': 'showBubble', 'serhl-set-show-count': 'showCount',
+    'serhl-set-panel-centered': 'panelCentered',
+    'serhl-set-disable-block': 'enabled', 'serhl-set-debug': 'debug',
+    'serhl-set-error-detection': 'errorDetection', 'serhl-set-export-config': 'exportConfig', 'serhl-set-collapse-mode': 'collapseMode'
   };
-  const INVERTED_SETTINGS_CHECKBOXES = new Set(['serh-set-disable-block']);
+  const INVERTED_SETTINGS_CHECKBOXES = new Set(['serhl-set-disable-block']);
 
   function applyDarkModeClass() {
     const mode = currentConfig.darkMode === 'light' || currentConfig.darkMode === 'dark' ? currentConfig.darkMode : 'system';
     const dark = mode === 'dark' || (mode === 'system' && !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches));
-    if (document.body) document.body.classList.toggle('serh-dark-on', dark);
+    if (document.body) document.body.classList.toggle('serhl-dark-on', dark);
   }
   const UI_SCALE_VALUE = { s: 0.75, l: 1, xl: 1.25, xxl: 1.5 };
   function applyUiScale() {
     const scale = UI_SCALE_VALUE[currentConfig.uiScale === 's' ? 's' : currentConfig.uiScale === 'xl' ? 'xl' : currentConfig.uiScale === 'xxl' ? 'xxl' : 'l'] || 1;
-    document.querySelectorAll('.serh-window').forEach(el => { el.style.zoom = scale === 1 ? '' : String(scale); });
+    document.querySelectorAll('.serhl-window').forEach(el => { el.style.zoom = scale === 1 ? '' : String(scale); });
   }
 
   let _collapseStyleEl = null;
 
   function buildCollapseCss() {
     const seen = new Set(); const rules = [];
-    rules.push('body.serh-collapse-on .serh-blocked-collapsed .serh-collapse-hide { display: none !important; }');
+    rules.push('body.serhl-collapse-on .serhl-blocked-collapsed .serhl-collapse-hide { display: none !important; }');
     for (const def of Object.values(getSelectors())) {
       for (const sel of [...(def.snippets || []), ...(def.extraElements || [])]) {
         if (typeof sel !== 'string' || !sel.trim() || sel.includes(',') || seen.has(sel)) continue; seen.add(sel);
-        rules.push(`body.serh-collapse-on .serh-blocked-collapsed ${sel} { display: none !important; }`);
+        rules.push(`body.serhl-collapse-on .serhl-blocked-collapsed ${sel} { display: none !important; }`);
       }
     }
     return rules.join('\n');
@@ -4041,23 +4043,23 @@
   function ensureCollapseStyle() {
     const css = buildCollapseCss();
     if (_collapseStyleEl && _collapseStyleEl.isConnected) { _collapseStyleEl.textContent = css; return; }
-    _collapseStyleEl = document.createElement('style'); _collapseStyleEl.setAttribute('data-serh', 'collapse');
+    _collapseStyleEl = document.createElement('style'); _collapseStyleEl.setAttribute('data-serhl', 'collapse');
     _collapseStyleEl.textContent = css; (document.head || document.documentElement).appendChild(_collapseStyleEl);
   }
 
   function applyCollapseMode() {
     const on = currentConfig.collapseMode === true;
-    if (document.body) document.body.classList.toggle('serh-collapse-on', on);
+    if (document.body) document.body.classList.toggle('serhl-collapse-on', on);
     if (on) ensureCollapseStyle(); else if (_collapseStyleEl) { _collapseStyleEl.remove(); _collapseStyleEl = null; }
   }
 
   function applyGlobalConfigUi() { applyDarkModeClass(); applyUiScale(); applyCollapseMode(); }
 
   function applyConfigToMainPanel() {
-    applyGlobalConfigUi(); if (!document.getElementById('serh-panel')) return;
+    applyGlobalConfigUi(); if (!document.getElementById('serhl-panel')) return;
     Object.keys(SETTINGS_PANEL_CHECKBOXES).forEach(id => {
       const el = document.getElementById(id); if (!el) return; const key = SETTINGS_PANEL_CHECKBOXES[id];
-      if (id === 'serh-set-error-detection' || id === 'serh-set-bracket-highlight') {
+      if (id === 'serhl-set-error-detection' || id === 'serhl-set-bracket-highlight') {
         el.checked = currentConfig[key] !== false;
       } else if (INVERTED_SETTINGS_CHECKBOXES.has(id)) {
         el.checked = currentConfig[key] === false;
@@ -4065,26 +4067,26 @@
         el.checked = currentConfig[key] === true;
       }
     });
-    const bubbleActionSelect = document.getElementById('serh-set-bubble-action');
-    if (bubbleActionSelect) bubbleActionSelect.value = (currentConfig.bubbleAction === 'toggleHidden' || currentConfig.bubbleAction === 'openStats') ? currentConfig.bubbleAction : 'openPanel';
-    const uiScaleSync = document.getElementById('serh-set-ui-scale'); if (uiScaleSync) uiScaleSync.value = ['s', 'xl', 'xxl'].includes(currentConfig.uiScale) ? currentConfig.uiScale : 'l';
-    const darkModeSync = document.getElementById('serh-set-dark-mode'); if (darkModeSync) darkModeSync.value = ['light', 'dark'].includes(currentConfig.darkMode) ? currentConfig.darkMode : 'system';
-    const langSync = document.getElementById('serh-set-language'); if (langSync) langSync.value = currentConfig.language === 'en' ? 'en' : 'zh-CN';
-    const textarea = document.getElementById('serh-rules');
+    const bubbleActionSelect = document.getElementById('serhl-set-bubble-action');
+    if (bubbleActionSelect) bubbleActionSelect.value = ['toggleHidden', 'openStats', 'openSelectors'].includes(currentConfig.bubbleAction) ? currentConfig.bubbleAction : 'openPanel';
+    const uiScaleSync = document.getElementById('serhl-set-ui-scale'); if (uiScaleSync) uiScaleSync.value = ['s', 'xl', 'xxl'].includes(currentConfig.uiScale) ? currentConfig.uiScale : 'l';
+    const darkModeSync = document.getElementById('serhl-set-dark-mode'); if (darkModeSync) darkModeSync.value = ['light', 'dark'].includes(currentConfig.darkMode) ? currentConfig.darkMode : 'system';
+    const langSync = document.getElementById('serhl-set-language'); if (langSync) langSync.value = currentConfig.language === 'en' ? 'en' : 'zh-CN';
+    const textarea = document.getElementById('serhl-rules');
     if (textarea && Array.isArray(currentConfig.rules)) {
       textarea.value = currentConfig.rules.join('\n'); updateLineNumbers();
     }
   }
 
   function syncRulesTextarea() {
-    const textarea = document.getElementById('serh-rules');
+    const textarea = document.getElementById('serhl-rules');
     if (textarea) {
       textarea.value = currentConfig.rules.join('\n'); updateLineNumbers();
     }
   }
 
   function appendRuleToTextarea(rule) {
-    const textarea = document.getElementById('serh-rules'); if (!textarea) return; const clean = stripRuleComment(String(rule).trim()); const panel = document.getElementById('serh-panel');
+    const textarea = document.getElementById('serhl-rules'); if (!textarea) return; const clean = stripRuleComment(String(rule).trim()); const panel = document.getElementById('serhl-panel');
     if (panel && Array.isArray(panel._initialRules) &&
         !panel._initialRules.some(r => getRuleKey(r) === getRuleKey(rule))) {
       panel._initialRules.push(rule);
@@ -4094,8 +4096,8 @@
   }
 
   function removeRulesFromTextarea(rulesToRemove) {
-    const textarea = document.getElementById('serh-rules'); if (!textarea || !rulesToRemove || !rulesToRemove.length) return;
-    const cleanSet = new Set(rulesToRemove.map(r => stripRuleComment(String(r).trim()))); const panel = document.getElementById('serh-panel');
+    const textarea = document.getElementById('serhl-rules'); if (!textarea || !rulesToRemove || !rulesToRemove.length) return;
+    const cleanSet = new Set(rulesToRemove.map(r => stripRuleComment(String(r).trim()))); const panel = document.getElementById('serhl-panel');
     if (panel && Array.isArray(panel._initialRules)) {
       panel._initialRules = panel._initialRules.filter(r => !cleanSet.has(stripRuleComment(String(r).trim())));
     }
@@ -4109,9 +4111,9 @@
   }
 
   function showStatsPanel() {
-    const panel = document.getElementById('serh-panel');
+    const panel = document.getElementById('serhl-panel');
     if (!panel || panel._fading) showConfigPanel();
-    const statsPanel = document.getElementById('serh-stats-panel');
+    const statsPanel = document.getElementById('serhl-stats-panel');
     if (statsPanel && statsPanel.style.display !== 'flex') {
       updateStatsContent();
       statsPanel.style.display = 'flex';
@@ -4119,12 +4121,12 @@
   }
 
   function hideStatsPanel() {
-    const statsPanel = document.getElementById('serh-stats-panel'); if (statsPanel) statsPanel.style.display = 'none';
-    const statsBtn = document.getElementById('serh-test'); if (statsBtn) statsBtn.blur();
+    const statsPanel = document.getElementById('serhl-stats-panel'); if (statsPanel) statsPanel.style.display = 'none';
+    const statsBtn = document.getElementById('serhl-test'); if (statsBtn) statsBtn.blur();
   }
 
   function toggleStatsPanel() {
-    const statsPanel = document.getElementById('serh-stats-panel'); if (!statsPanel) return;
+    const statsPanel = document.getElementById('serhl-stats-panel'); if (!statsPanel) return;
 
     if (statsPanel.style.display === 'flex') {
       hideStatsPanel(); return;
@@ -4134,9 +4136,9 @@
   }
 
   function updateStatsContent() {
-    const statsContent = document.getElementById('serh-stats-content'); if (!statsContent) return;
+    const statsContent = document.getElementById('serhl-stats-content'); if (!statsContent) return;
 
-    const textarea = document.getElementById('serh-rules'); const rulesText = textarea ? textarea.value : currentConfig.rules.join('\n'); const rawLines = rulesText.split('\n');
+    const textarea = document.getElementById('serhl-rules'); const rulesText = textarea ? textarea.value : currentConfig.rules.join('\n'); const rawLines = rulesText.split('\n');
     const localRules = filterValidRuleLines(rawLines);
     const activeRules = localRules
       .filter(rule => !rule.startsWith('#'))
@@ -4191,13 +4193,13 @@
     }
 
     function statsSectionStartHtml(title, badge) {
-      return `<div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #e2e8f0;"><div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #cbd5e0;"><span style="font-weight: bold; color: #2d3748; font-size: 14px;">${title}</span><span style="background: #2c5282; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px;">${badge}</span></div>`;
+      return `<div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #e2e8f0;"><div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #cbd5e0;"><span class="serhl-stats-title" style="font-weight: bold; font-size: 14px;">${title}</span><span style="background: #2c5282; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px;">${badge}</span></div>`;
     }
 
     const rulesSectionHtml = (title, badge, items) => {
       if (!items.length) return ''; let html = statsSectionStartHtml(title, badge);
       for (const item of items) {
-        html += `<div style="font-size: 11px; color: #4a5568; word-break: break-all; font-family: 'Consolas', monospace;">${item}</div>`;
+        html += `<div class="serhl-stats-item" style="font-size: 11px; word-break: break-all; font-family: 'Consolas', monospace;">${item}</div>`;
       }
       return html + '</div>';
     };
@@ -4214,7 +4216,7 @@
 
       resultHTML += `<div style="margin-bottom: 16px;">`;
       resultHTML += `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #cbd5e0;">`;
-      resultHTML += `<span style="font-weight: bold; color: #2d3748; font-size: 14px;">${sourceLabel}</span>`;
+      resultHTML += `<span class="serhl-stats-title" style="font-weight: bold; font-size: 14px;">${sourceLabel}</span>`;
       resultHTML += `<span style="background: #2c5282; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px;">${t('matchedCountLabel')} ${sourceStats.total} ${t('matchedCountUnit')}</span>`;
       resultHTML += `</div>`;
 
@@ -4260,80 +4262,80 @@
 
   function showConfigPanel() {
     const clearPanelCloseTimers = () => {
-      if (window._panelCloseTimer) {
-        clearTimeout(window._panelCloseTimer); window._panelCloseTimer = null;
+      if (_panelCloseTimer) {
+        clearTimeout(_panelCloseTimer); _panelCloseTimer = null;
       }
-      if (window._panelCloseHandler) {
-        document.removeEventListener('click', window._panelCloseHandler); window._panelCloseHandler = null;
+      if (_panelCloseHandler) {
+        document.removeEventListener('click', _panelCloseHandler); _panelCloseHandler = null;
       }
-      if (window._panelPressHandler) {
-        document.removeEventListener('pointerdown', window._panelPressHandler); document.removeEventListener('mousedown', window._panelPressHandler); window._panelPressHandler = null;
+      if (_panelPressHandler) {
+        document.removeEventListener('pointerdown', _panelPressHandler); document.removeEventListener('mousedown', _panelPressHandler); _panelPressHandler = null;
       }
     };
     clearPanelCloseTimers();
 
-    const opened = openPanel('serh-panel', { bindClose: false, onExisting: () => clearPanelCloseTimers() });
+    const opened = openPanel('serhl-panel', { bindClose: false, onExisting: () => clearPanelCloseTimers() });
     if (!opened) return;
     const { panel } = opened; panel._initialRules = Array.isArray(currentConfig.rules) ? [...currentConfig.rules] : [];
     const initialSize = getBubbleSize();
     panel.innerHTML = `
-            <div class="serh-option-row" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px;">
-                <span class="serh-option-label" style="margin-bottom: 0;">${t('bubbleSize')} <span id="serh-bubble-size-val">${initialSize}px</span></span>
-                <input type="range" id="serh-bubble-size-slider" min="20" max="60" value="${initialSize}" style="flex: 1; margin-left: 5px; height: 4px; background: #cbd5e0; border-radius: 2px; outline: none; -webkit-appearance: none; cursor: pointer;">
+            <div class="serhl-option-row" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px;">
+                <span class="serhl-option-label" style="margin-bottom: 0;">${t('bubbleSize')} <span id="serhl-bubble-size-val">${initialSize}px</span></span>
+                <input type="range" id="serhl-bubble-size-slider" min="20" max="60" value="${initialSize}" style="flex: 1; margin-left: 5px; height: 4px; background: #cbd5e0; border-radius: 2px; outline: none; -webkit-appearance: none; cursor: pointer;">
             </div>
             
             <div style="margin-bottom: 0px;">
-                <div class="serh-compact-row">
+                <div class="serhl-compact-row">
                     <span style="font-size: 12px; color: #4a5568;">${t('blockRules')}</span>
                     <div style="display: flex; gap: 4px; flex: 0 0 auto;">
-                        <button id="serh-import-file" class="serh-button serh-button-secondary" style="padding: 3px 8px; border: 1px solid transparent; min-width: 0 !important; width: auto !important; flex: 0 0 auto !important;">${t('import')}</button>
-                        <button id="serh-export-file" class="serh-button serh-button-success" style="padding: 3px 8px; border: 1px solid transparent; min-width: 0 !important; width: auto !important; flex: 0 0 auto !important;">${t('export')}</button>
-                        <button id="serh-open-settings" class="serh-button serh-button-secondary" style="padding: 3px 8px; border: 1px solid transparent; min-width: 0 !important; width: auto !important; flex: 0 0 auto !important;">${t('settingsBtn')}</button>
+                        <button id="serhl-import-file" class="serhl-button serhl-button-secondary" style="padding: 3px 8px; border: 1px solid transparent; min-width: 0 !important; width: auto !important; flex: 0 0 auto !important;">${t('import')}</button>
+                        <button id="serhl-export-file" class="serhl-button serhl-button-success" style="padding: 3px 8px; border: 1px solid transparent; min-width: 0 !important; width: auto !important; flex: 0 0 auto !important;">${t('export')}</button>
+                        <button id="serhl-open-settings" class="serhl-button serhl-button-secondary" style="padding: 3px 8px; border: 1px solid transparent; min-width: 0 !important; width: auto !important; flex: 0 0 auto !important;">${t('settingsBtn')}</button>
                     </div>
                 </div>
-                <div class="serh-rules-container" style="height: 205px;">
-                    <div id="serh-line-numbers"></div>
-                    <textarea id="serh-rules" placeholder="${t('placeholder')}" wrap="off">${escHtml(currentConfig.rules.join('\n'))}</textarea>
-                    <div id="serh-scroll-top" class="serh-scroll-btn" style="top: 2px;">⬆️</div>
-                    <div id="serh-scroll-bottom" class="serh-scroll-btn" style="bottom: 1px;">⬇️</div>
+                <div class="serhl-rules-container" style="height: 205px;">
+                    <div id="serhl-line-numbers"></div>
+                    <textarea id="serhl-rules" placeholder="${t('placeholder')}" wrap="off">${escHtml(currentConfig.rules.join('\n'))}</textarea>
+                    <div id="serhl-scroll-top" class="serhl-scroll-btn" style="top: 2px;">⬆️</div>
+                    <div id="serhl-scroll-bottom" class="serhl-scroll-btn" style="bottom: 1px;">⬇️</div>
                 </div>
             </div>
             
-            <div style="display: flex; gap: 6px; margin-top: 8px;" id="serh-panel-footer">
-                <button id="serh-save" class="serh-button serh-button-primary serh-action-button" style="flex: 2;">${t('save')}</button>
-                <button id="serh-test" class="serh-button serh-button-secondary serh-action-button" style="flex: 1;">${t('stats')}</button>
-                <button id="serh-close" class="serh-button serh-button-danger serh-action-button" style="flex: 1;">${t('close')}</button>
+            <div style="display: flex; gap: 6px; margin-top: 8px;" id="serhl-panel-footer">
+                <button id="serhl-save" class="serhl-button serhl-button-primary serhl-action-button" style="flex: 2;">${t('save')}</button>
+                <button id="serhl-test" class="serhl-button serhl-button-secondary serhl-action-button" style="flex: 1;">${t('stats')}</button>
+                <button id="serhl-close" class="serhl-button serhl-button-danger serhl-action-button" style="flex: 1;">${t('close')}</button>
             </div>
             
-            <div id="serh-stats-panel">
-                <div id="serh-stats-content"></div>
+            <div id="serhl-stats-panel">
+                <div id="serhl-stats-content"></div>
             </div>
         `;
 
     updateLineNumbers();
-    const textarea = document.getElementById('serh-rules'); const lineNums = document.getElementById('serh-line-numbers');
+    const textarea = document.getElementById('serhl-rules'); const lineNums = document.getElementById('serhl-line-numbers');
     textarea.addEventListener('input', () => scheduleLineNumbersUpdate());
     textarea.addEventListener('scroll', () => {
       lineNums.scrollTop = textarea.scrollTop;
     });
     lineNums.addEventListener('click', (e) => {
-      const errorEl = e.target.closest('.serh-line-error'); if (errorEl) showToast(errorEl.getAttribute('data-error') || t('invalidRule'), 'error');
+      const errorEl = e.target.closest('.serhl-line-error'); if (errorEl) showToast(errorEl.getAttribute('data-error') || t('invalidRule'), 'error');
     });
     setupBracketHighlight(textarea, 'rules');
 
     const closePanel = () => {
-      clearPanelCloseTimers(); fadeOutAndRemovePanel(panel); const toastContainer = document.getElementById('serh-toast-container'); if (toastContainer) toastContainer.remove();
+      clearPanelCloseTimers(); fadeOutAndRemovePanel(panel); const toastContainer = document.getElementById('serhl-toast-container'); if (toastContainer) toastContainer.remove();
     };
 
-    document.getElementById('serh-save').onclick = () => {
+    document.getElementById('serhl-save').onclick = () => {
       hideStatsPanel(); saveConfig(); showToast(t('saved'), 'success');
     };
-    document.getElementById('serh-test').onclick = toggleStatsPanel;
-    document.getElementById('serh-close').onclick = (e) => {
+    document.getElementById('serhl-test').onclick = toggleStatsPanel;
+    document.getElementById('serhl-close').onclick = (e) => {
       e.stopPropagation(); closePanel();
     };
-    document.getElementById('serh-import-file').onclick = importRulesFromFile; document.getElementById('serh-export-file').onclick = exportRulesToFile;
-    document.getElementById('serh-open-settings').onclick = (e) => {
+    document.getElementById('serhl-import-file').onclick = importRulesFromFile; document.getElementById('serhl-export-file').onclick = exportRulesToFile;
+    document.getElementById('serhl-open-settings').onclick = (e) => {
       e.stopPropagation(); showSettingsPanel();
     };
 
@@ -4410,23 +4412,23 @@
         if (Date.now() - lastTouchTime < 400) return; handleJump(e);
       };
     };
-    bindScrollBtn('serh-scroll-top', 'prev'); bindScrollBtn('serh-scroll-bottom', 'next');
+    bindScrollBtn('serhl-scroll-top', 'prev'); bindScrollBtn('serhl-scroll-bottom', 'next');
 
-    const sizeSlider = panel.querySelector('#serh-bubble-size-slider'); const sizeValueDisplay = panel.querySelector('#serh-bubble-size-val');
+    const sizeSlider = panel.querySelector('#serhl-bubble-size-slider'); const sizeValueDisplay = panel.querySelector('#serhl-bubble-size-val');
     if (sizeSlider) {
       sizeSlider.addEventListener('input', function() {
         const value = parseInt(this.value); currentConfig.bubbleSize = value;
         if (sizeValueDisplay) {
           sizeValueDisplay.textContent = `${value}px`;
         }
-        const statusBtn = document.getElementById('serh-status'); if (statusBtn) applyBubbleSize(statusBtn);
+        const statusBtn = document.getElementById('serhl-status'); if (statusBtn) applyBubbleSize(statusBtn);
       });
       sizeSlider.addEventListener('change', function() {
         const value = parseInt(this.value); adoptStoredConfigBeforeWrite(); currentConfig.bubbleSize = value; persistConfig(true);
       });
     }
 
-    const closeZoneSelector = '#serh-status, #serh-hlcolor-panel, #serh-selector-panel, #serh-block-confirm-dialog, #serh-settings-panel, .serh-quick-block';
+    const closeZoneSelector = '#serhl-status, #serhl-hlcolor-panel, #serhl-selector-panel, #serhl-block-confirm-dialog, #serhl-settings-panel, .serhl-quick-block';
     const isPanelZone = (target) => panel.contains(target) || !!(target.closest && target.closest(closeZoneSelector)); let pressStartedInside = false;
     const pressHandler = (e) => {
       if (e.isTrusted === false) return; pressStartedInside = isPanelZone(e.target);
@@ -4438,20 +4440,20 @@
       }
       if (!isPanelZone(e.target)) closePanel();
     };
-    window._panelCloseHandler = closeHandler; window._panelPressHandler = pressHandler; if (window._panelCloseTimer) clearTimeout(window._panelCloseTimer);
-    window._panelCloseTimer = setTimeout(() => {
-      window._panelCloseTimer = null;
-      if (panel.isConnected && window._panelCloseHandler === closeHandler) {
+    _panelCloseHandler = closeHandler; _panelPressHandler = pressHandler; if (_panelCloseTimer) clearTimeout(_panelCloseTimer);
+    _panelCloseTimer = setTimeout(() => {
+      _panelCloseTimer = null;
+      if (panel.isConnected && _panelCloseHandler === closeHandler) {
         document.addEventListener('pointerdown', pressHandler); document.addEventListener('mousedown', pressHandler); document.addEventListener('click', closeHandler);
       }
     }, 200);
   }
 
   function saveConfig() {
-    const rulesText = document.getElementById('serh-rules').value;
+    const rulesText = document.getElementById('serhl-rules').value;
 
     const rawLines = rulesText.split('\n'); const userRules = filterValidRuleLines(rawLines);
-    const panel = document.getElementById('serh-panel');
+    const panel = document.getElementById('serhl-panel');
     const baseRules = (panel && Array.isArray(panel._initialRules)) ? panel._initialRules : (Array.isArray(currentConfig.rules) ? currentConfig.rules : []);
     const rulesChanged = JSON.stringify(baseRules) !== JSON.stringify(userRules);
     adoptStoredConfigBeforeWrite();
@@ -4468,7 +4470,7 @@
       showHiddenResults = false;
       if (currentConfig.collapseMode !== true) {
         document.querySelectorAll('[data-is-blocked="true"]').forEach(el => {
-          el.style.display = 'none'; el.classList.remove('serh-blocked-visible'); el.classList.remove('serh-blocked-collapsed'); setResultExtraElementsVisible(el, false); removeMatchedRuleLabel(el); restoreResultCollapse(el);
+          el.style.display = 'none'; el.classList.remove('serhl-blocked-visible'); el.classList.remove('serhl-blocked-collapsed'); setResultExtraElementsVisible(el, false); removeMatchedRuleLabel(el); restoreResultCollapse(el);
         });
         document.querySelectorAll('[data-blocker-google-parent], [data-blocker-yandex-parent]').forEach(parent => { parent.style.display = 'none'; });
       }
@@ -4477,7 +4479,7 @@
   }
 
   function showSettingsPanel() {
-    const opened = openPanel('serh-settings-panel', { width: 'max-content' });
+    const opened = openPanel('serhl-settings-panel', { width: 'max-content' });
     if (!opened) return;
     const { panel, closePanel } = opened;
     panel.style.minWidth = '240px';
@@ -4485,9 +4487,9 @@
     const settingsSwitch = (id, label, checked) => `
                 <label style="display: flex; align-items: center; flex: 1; justify-content: space-between; white-space: nowrap; cursor: pointer; font-size: 12px; color: #4a5568; margin: 0; padding: 0;">
                     <span style="display: flex; align-items: center; margin: 0; padding: 0;">
-                        <span class="serh-switch">
+                        <span class="serhl-switch">
                             <input type="checkbox" id="${id}" ${checked ? 'checked' : ''}>
-                            <span class="serh-slider"></span>
+                            <span class="serhl-slider"></span>
                         </span>
                         <span style="margin: 0; padding: 0;">${label}</span>
                     </span>
@@ -4509,55 +4511,56 @@
     panel.innerHTML = `
             <div style="display: flex; align-items: center; justify-content: space-between; margin: 0 0 4px; padding: 0;">
                 <h3 style="margin: 0; padding: 0; font-size: 13px; font-weight: 600;">${escHtml(t('settingsPanelTitle'))}</h3>
-                <span id="serh-settings-close" style="cursor: pointer; font-size: 12px; line-height: 1; margin: 0; padding: 0;">❌</span>
+                <span id="serhl-settings-close" style="cursor: pointer; font-size: 12px; line-height: 1; margin: 0; padding: 0;">❌</span>
             </div>
             ${settingsHeader('settingsSecBlock')}
             ${settingsRow([
-              { id: 'serh-set-show-block-btn', labelKey: 'enableFeature', checked: currentConfig.showBlockBtn === true },
-              { id: 'serh-set-block-domain', labelKey: 'blockDomain', checked: currentConfig.blockDomain === true }
+              { id: 'serhl-set-show-block-btn', labelKey: 'enableFeature', checked: currentConfig.showBlockBtn === true },
+              { id: 'serhl-set-block-domain', labelKey: 'blockDomain', checked: currentConfig.blockDomain === true }
             ])}
             ${settingsRow([
-              { id: 'serh-set-block-confirm', labelKey: 'doubleConfirm', checked: currentConfig.blockConfirm === true },
-              { id: 'serh-set-show-source', labelKey: 'showMatchedSource', checked: currentConfig.showMatchedSource !== false }
+              { id: 'serhl-set-block-confirm', labelKey: 'doubleConfirm', checked: currentConfig.blockConfirm === true },
+              { id: 'serhl-set-show-source', labelKey: 'showMatchedSource', checked: currentConfig.showMatchedSource !== false }
             ])}
             ${settingsHeader('settingsSecUI')}
             ${settingsRow([
-              { id: 'serh-set-show-bubble', labelKey: 'menuBubble', checked: currentConfig.showBubble === true },
-              { id: 'serh-set-show-count', labelKey: 'showCount', checked: currentConfig.showCount === true }
+              { id: 'serhl-set-show-bubble', labelKey: 'menuBubble', checked: currentConfig.showBubble === true },
+              { id: 'serhl-set-show-count', labelKey: 'showCount', checked: currentConfig.showCount === true }
             ])}
             ${settingsRow([
-              { id: 'serh-set-panel-centered', labelKey: 'menuCenter', checked: currentConfig.panelCentered === true },
-              { id: 'serh-set-bracket-highlight', labelKey: 'bracketHighlight', checked: currentConfig.bracketHighlight !== false }
+              { id: 'serhl-set-panel-centered', labelKey: 'menuCenter', checked: currentConfig.panelCentered === true },
+              { id: 'serhl-set-bracket-highlight', labelKey: 'bracketHighlight', checked: currentConfig.bracketHighlight !== false }
             ])}
             ${settingsHeader('settingsSecOther')}
             ${settingsRow([
-              { id: 'serh-set-remove-redirects', labelKey: 'removeRedirects', checked: currentConfig.removeRedirects !== false },
-              { id: 'serh-set-error-detection', labelKey: 'menuErrorDetection', checked: currentConfig.errorDetection !== false }
+              { id: 'serhl-set-remove-redirects', labelKey: 'removeRedirects', checked: currentConfig.removeRedirects !== false },
+              { id: 'serhl-set-error-detection', labelKey: 'menuErrorDetection', checked: currentConfig.errorDetection !== false }
             ])}
             ${settingsRow([
-              { id: 'serh-set-disable-block', labelKey: 'disableBlock', checked: currentConfig.enabled === false },
-              { id: 'serh-set-debug', labelKey: 'debugMode', checked: currentConfig.debug === true }
+              { id: 'serhl-set-disable-block', labelKey: 'disableBlock', checked: currentConfig.enabled === false },
+              { id: 'serhl-set-debug', labelKey: 'debugMode', checked: currentConfig.debug === true }
             ])}
             ${settingsRow([
-              { id: 'serh-set-export-config', labelKey: 'exportConfig', checked: currentConfig.exportConfig === true },
-              { id: 'serh-set-collapse-mode', labelKey: 'collapseMode', checked: currentConfig.collapseMode === true }
+              { id: 'serhl-set-export-config', labelKey: 'exportConfig', checked: currentConfig.exportConfig === true },
+              { id: 'serhl-set-collapse-mode', labelKey: 'collapseMode', checked: currentConfig.collapseMode === true }
             ])}
             <div style="display: flex; gap: 8px; margin: 0; padding: 0;">
-                ${settingsSelect('serh-set-ui-scale', 'uiScale', [['s', t('scaleM')], ['l', t('scaleL')], ['xl', t('scaleXL')], ['xxl', t('scaleXXL')]], ['s', 'xl', 'xxl'].includes(currentConfig.uiScale) ? currentConfig.uiScale : 'l')}
-                ${settingsSelect('serh-set-dark-mode', 'darkMode', [['system', t('darkSystem')], ['light', t('darkLight')], ['dark', t('darkDark')]], ['light', 'dark'].includes(currentConfig.darkMode) ? currentConfig.darkMode : 'system')}
+                ${settingsSelect('serhl-set-ui-scale', 'uiScale', [['s', t('scaleM')], ['l', t('scaleL')], ['xl', t('scaleXL')], ['xxl', t('scaleXXL')]], ['s', 'xl', 'xxl'].includes(currentConfig.uiScale) ? currentConfig.uiScale : 'l')}
+                ${settingsSelect('serhl-set-dark-mode', 'darkMode', [['system', t('darkSystem')], ['light', t('darkLight')], ['dark', t('darkDark')]], ['light', 'dark'].includes(currentConfig.darkMode) ? currentConfig.darkMode : 'system')}
             </div>
             <div style="display: flex; gap: 8px; margin: 5px 0 0; padding: 0;">
                 <div style="flex: 1; min-width: 0; margin: 0; padding: 0;">
-                    <label for="serh-set-bubble-action" style="display: block; margin: 0 0 4px; padding: 0; cursor: pointer; font-size: 12px; color: #4a5568;">${t('menuBubbleAction')}</label>
-                    <select id="serh-set-bubble-action" style="width: 100%; min-width: 0; margin: 0; font-size: 12px; padding: 3px 4px; border: 1px solid #cbd5e0; border-radius: 4px; background: #fff; color: #2d3748; cursor: pointer; outline: none; font-family: inherit;">
-                        <option value="openPanel" ${(currentConfig.bubbleAction !== 'openStats' && currentConfig.bubbleAction !== 'toggleHidden') ? 'selected' : ''}>${t('menuBubbleActionOpen')}</option>
+                    <label for="serhl-set-bubble-action" style="display: block; margin: 0 0 4px; padding: 0; cursor: pointer; font-size: 12px; color: #4a5568;">${t('menuBubbleAction')}</label>
+                    <select id="serhl-set-bubble-action" style="width: 100%; min-width: 0; margin: 0; font-size: 12px; padding: 3px 4px; border: 1px solid #cbd5e0; border-radius: 4px; background: #fff; color: #2d3748; cursor: pointer; outline: none; font-family: inherit;">
+                        <option value="openPanel" ${!['openStats', 'toggleHidden', 'openSelectors'].includes(currentConfig.bubbleAction) ? 'selected' : ''}>${t('menuBubbleActionOpen')}</option>
                         <option value="openStats" ${currentConfig.bubbleAction === 'openStats' ? 'selected' : ''}>${t('menuBubbleActionStats')}</option>
                         <option value="toggleHidden" ${currentConfig.bubbleAction === 'toggleHidden' ? 'selected' : ''}>${t('menuBubbleActionToggle')}</option>
+                        <option value="openSelectors" ${currentConfig.bubbleAction === 'openSelectors' ? 'selected' : ''}>${t('menuCustomSelectors')}</option>
                     </select>
                 </div>
                 <div style="flex: 1; min-width: 0; margin: 0; padding: 0;">
-                    <label for="serh-set-language" style="display: block; margin: 0 0 4px; padding: 0; cursor: pointer; font-size: 12px; color: #4a5568;">${t('menuLanguage')}</label>
-                    <select id="serh-set-language" style="width: 100%; min-width: 0; margin: 0; font-size: 12px; padding: 3px 4px; border: 1px solid #cbd5e0; border-radius: 4px; background: #fff; color: #2d3748; cursor: pointer; outline: none; font-family: inherit;">
+                    <label for="serhl-set-language" style="display: block; margin: 0 0 4px; padding: 0; cursor: pointer; font-size: 12px; color: #4a5568;">${t('menuLanguage')}</label>
+                    <select id="serhl-set-language" style="width: 100%; min-width: 0; margin: 0; font-size: 12px; padding: 3px 4px; border: 1px solid #cbd5e0; border-radius: 4px; background: #fff; color: #2d3748; cursor: pointer; outline: none; font-family: inherit;">
                         <option value="zh-CN" ${currentConfig.language !== 'en' ? 'selected' : ''}>中文</option>
                         <option value="en" ${currentConfig.language === 'en' ? 'selected' : ''}>English</option>
                     </select>
@@ -4573,31 +4576,31 @@
     };
 
     const settingsDefs = [
-      { id: 'serh-set-remove-redirects', key: 'removeRedirects', apply: () => { forceReprocessAll(); } },
-      { id: 'serh-set-show-block-btn', key: 'showBlockBtn', apply: () => { forceReprocessAll(); } },
-      { id: 'serh-set-block-domain', key: 'blockDomain', apply: null },
-      { id: 'serh-set-block-confirm', key: 'blockConfirm', apply: null },
-      { id: 'serh-set-show-source', key: 'showMatchedSource', apply: () => {
+      { id: 'serhl-set-remove-redirects', key: 'removeRedirects', apply: () => { forceReprocessAll(); } },
+      { id: 'serhl-set-show-block-btn', key: 'showBlockBtn', apply: () => { forceReprocessAll(); } },
+      { id: 'serhl-set-block-domain', key: 'blockDomain', apply: null },
+      { id: 'serhl-set-block-confirm', key: 'blockConfirm', apply: null },
+      { id: 'serhl-set-show-source', key: 'showMatchedSource', apply: () => {
         document.querySelectorAll('[data-is-blocked="true"]').forEach(el => {
           if (currentConfig.showMatchedSource === false) removeMatchedRuleLabel(el); else if (showHiddenResults) addMatchedRuleLabel(el);
         });
       } },
-      { id: 'serh-set-show-bubble', key: 'showBubble', apply: () => { updateStatus(document.querySelectorAll('[data-is-blocked="true"]').length); } },
-      { id: 'serh-set-show-count', key: 'showCount', apply: () => { const s = document.getElementById('serh-status'); if (s) updateBubbleContent(s, parseInt(s.dataset.blockedCount || 0)); } },
-      { id: 'serh-set-panel-centered', key: 'panelCentered', apply: () => {
-        applyPanelPosition(document.getElementById('serh-panel')); applyPanelPosition(document.getElementById('serh-settings-panel'));
+      { id: 'serhl-set-show-bubble', key: 'showBubble', apply: () => { updateStatus(document.querySelectorAll('[data-is-blocked="true"]').length); } },
+      { id: 'serhl-set-show-count', key: 'showCount', apply: () => { const s = document.getElementById('serhl-status'); if (s) updateBubbleContent(s, parseInt(s.dataset.blockedCount || 0)); } },
+      { id: 'serhl-set-panel-centered', key: 'panelCentered', apply: () => {
+        applyPanelPosition(document.getElementById('serhl-panel')); applyPanelPosition(document.getElementById('serhl-settings-panel'));
       } },
-      { id: 'serh-set-bracket-highlight', key: 'bracketHighlight', apply: () => { document.querySelectorAll('.serh-bracket-hit').forEach(h => { h.style.display = 'none'; }); } },
-      { id: 'serh-set-disable-block', key: 'enabled', invert: true, apply: () => { forceReprocessAll(); } },
-      { id: 'serh-set-debug', key: 'debug', apply: () => { exposeDebugApi(); } },
-      { id: 'serh-set-error-detection', key: 'errorDetection', apply: () => {
-        updateLineNumbers(); const statsPanel = document.getElementById('serh-stats-panel'); if (statsPanel && statsPanel.style.display === 'flex') updateStatsContent();
+      { id: 'serhl-set-bracket-highlight', key: 'bracketHighlight', apply: () => { document.querySelectorAll('.serhl-bracket-hit').forEach(h => { h.style.display = 'none'; }); } },
+      { id: 'serhl-set-disable-block', key: 'enabled', invert: true, apply: () => { forceReprocessAll(); } },
+      { id: 'serhl-set-debug', key: 'debug', apply: () => { exposeDebugApi(); } },
+      { id: 'serhl-set-error-detection', key: 'errorDetection', apply: () => {
+        updateLineNumbers(); const statsPanel = document.getElementById('serhl-stats-panel'); if (statsPanel && statsPanel.style.display === 'flex') updateStatsContent();
       } },
-      { id: 'serh-set-collapse-mode', key: 'collapseMode', apply: () => {
+      { id: 'serhl-set-collapse-mode', key: 'collapseMode', apply: () => {
         applyCollapseMode(); forceReprocessAll();
         if (currentConfig.collapseMode === true) showToast(t('collapseModeHint'), 'info');
       } },
-      { id: 'serh-set-export-config', key: 'exportConfig', apply: null }
+      { id: 'serhl-set-export-config', key: 'exportConfig', apply: null }
     ];
     settingsDefs.forEach(sw => {
       const el = document.getElementById(sw.id);
@@ -4608,33 +4611,34 @@
       }
     });
 
-    const uiScaleSelect = document.getElementById('serh-set-ui-scale');
+    const uiScaleSelect = document.getElementById('serhl-set-ui-scale');
     if (uiScaleSelect) {
       uiScaleSelect.addEventListener('change', function() {
         adoptStoredConfigBeforeWrite(); currentConfig.uiScale = this.value; persistConfig(true); applyUiScale();
       });
     }
 
-    const darkModeSelect = document.getElementById('serh-set-dark-mode');
+    const darkModeSelect = document.getElementById('serhl-set-dark-mode');
     if (darkModeSelect) {
       darkModeSelect.addEventListener('change', function() {
         adoptStoredConfigBeforeWrite(); currentConfig.darkMode = this.value; persistConfig(true); applyDarkModeClass();
       });
     }
 
-    const bubbleActionSelect = document.getElementById('serh-set-bubble-action');
+    const bubbleActionSelect = document.getElementById('serhl-set-bubble-action');
     if (bubbleActionSelect) {
       bubbleActionSelect.addEventListener('change', function() {
         const wasToggleMode = currentConfig.bubbleAction === 'toggleHidden';
         adoptStoredConfigBeforeWrite(); currentConfig.bubbleAction = this.value; persistConfig(true);
         if (wasToggleMode && this.value !== 'toggleHidden' && showHiddenResults) toggleHiddenResults();
-        const statusBtn = document.getElementById('serh-status'); if (statusBtn) updateBubbleContent(statusBtn, parseInt(statusBtn.dataset.blockedCount || 0));
+        const statusBtn = document.getElementById('serhl-status'); if (statusBtn) updateBubbleContent(statusBtn, parseInt(statusBtn.dataset.blockedCount || 0));
         if (this.value === 'toggleHidden') showToast(t('bubbleToggleHint'), 'info');
         else if (this.value === 'openStats') showToast(t('bubbleStatsHint'), 'info');
+        else if (this.value === 'openSelectors') showToast(t('bubbleSelectorsHint'), 'info');
       });
     }
 
-    const languageSelect = document.getElementById('serh-set-language');
+    const languageSelect = document.getElementById('serhl-set-language');
     if (languageSelect) {
       languageSelect.addEventListener('change', function() {
         adoptStoredConfigBeforeWrite(); currentConfig.language = this.value; persistConfig(true); registerMenu();
@@ -4643,13 +4647,13 @@
       });
     }
 
-    document.getElementById('serh-settings-close').onclick = (e) => {
+    document.getElementById('serhl-settings-close').onclick = (e) => {
       e.stopPropagation(); closePanel();
     };
   }
 
   function showHighlightColorPanel() {
-    const opened = openPanel('serh-hlcolor-panel', { width: 'auto; max-width: 350px' });
+    const opened = openPanel('serhl-hlcolor-panel', { width: 'auto; max-width: 350px' });
     if (!opened) return;
     const { panel, closePanel } = opened;
 
@@ -4675,10 +4679,10 @@
     const colors = currentConfig.highlightColors || {}; const sanitizeHex = (val, fallback) => (/^#[0-9A-Fa-f]{6}$/.test(String(val || '')) ? String(val).toUpperCase() : fallback); let rowsHtml = '';
     for (let i = 1; i <= 5; i++) {
       const hex = sanitizeHex(colors[i], DEFAULT_HIGHLIGHT_COLORS[i]);
-      rowsHtml += `<div class="serh-hlcolor-row">
+      rowsHtml += `<div class="serhl-hlcolor-row">
         <label>@${i}</label>
-        <span class="serh-hlcolor-preview" id="serh-hlcolor-preview-${i}" style="background:${escHtml(hex)}"></span>
-        <input type="text" id="serh-hlcolor-input-${i}" value="${escHtml(hex)}" placeholder="#RRGGBB" maxlength="7">
+        <span class="serhl-hlcolor-preview" id="serhl-hlcolor-preview-${i}" style="background:${escHtml(hex)}"></span>
+        <input type="text" id="serhl-hlcolor-input-${i}" value="${escHtml(hex)}" placeholder="#RRGGBB" maxlength="7">
       </div>`;
     }
 
@@ -4687,31 +4691,31 @@
       <h3 style="margin:0 0 1px;font-size:13px;line-height:1.2;color:#2d3748;font-weight:600;">${escHtml(t('hlColorTitle'))}</h3>
       <div style="font-size:11px;color:#718096;margin:0 0 3px;">${t('hlColorHint')}</div>
       <div style="display:flex;gap:2px;align-items:stretch;">
-        <div id="serh-hlcolor-left" style="flex:0 0 auto;display:flex;flex-direction:column;height:132px;">
+        <div id="serhl-hlcolor-left" style="flex:0 0 auto;display:flex;flex-direction:column;height:132px;">
           ${rowsHtml}
           <div style="display:flex;align-items:center;gap:4px;margin-top:1px;">
             <span style="min-width:20px;font-size:12px;color:#4a5568;font-weight:600;">🎨</span>
-            <span id="serh-hlcolor-current-preview" style="width:12px;height:12px;border-radius:2px;border:1px solid #e2e8f0;background:${escHtml(defaultHex)};flex-shrink:0;"></span>
-            <span id="serh-hlcolor-code-text" style="font-size:11px;font-family:'Consolas',monospace;padding:2px 4px;background:#f7fafc;border-radius:3px;border:1px solid #e2e8f0;width:70px;flex:none;text-align:center;">${escHtml(defaultHex)}</span>
+            <span id="serhl-hlcolor-current-preview" style="width:12px;height:12px;border-radius:2px;border:1px solid #e2e8f0;background:${escHtml(defaultHex)};flex-shrink:0;"></span>
+            <span id="serhl-hlcolor-code-text" style="font-size:11px;font-family:'Consolas',monospace;padding:2px 4px;background:#f7fafc;border-radius:3px;border:1px solid #e2e8f0;width:70px;flex:none;text-align:center;">${escHtml(defaultHex)}</span>
           </div>
         </div>
-        <div class="serh-hlcolor-picker-wrapper" style="display:flex;gap:2px;align-items:stretch;flex-shrink:0;position:relative;">
-          <canvas id="serh-hlcolor-sv-canvas"></canvas>
-          <canvas id="serh-hlcolor-hue-canvas" width="22"></canvas>
-          <span id="serh-hlcolor-sv-dot"></span>
-          <span id="serh-hlcolor-hue-dot"></span>
+        <div class="serhl-hlcolor-picker-wrapper" style="display:flex;gap:2px;align-items:stretch;flex-shrink:0;position:relative;">
+          <canvas id="serhl-hlcolor-sv-canvas"></canvas>
+          <canvas id="serhl-hlcolor-hue-canvas" width="22"></canvas>
+          <span id="serhl-hlcolor-sv-dot"></span>
+          <span id="serhl-hlcolor-hue-dot"></span>
         </div>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:5px;">
-        <button id="serh-hlcolor-save" class="serh-button serh-button-primary" style="flex:1;">${escHtml(t('save'))}</button>
-        <button id="serh-hlcolor-reset" class="serh-button serh-button-secondary" style="flex:1;">${escHtml(t('hlColorReset'))}</button>
-        <button id="serh-hlcolor-cancel" class="serh-button serh-button-secondary" style="flex:1;">${escHtml(t('cancel'))}</button>
+        <button id="serhl-hlcolor-save" class="serhl-button serhl-button-primary" style="flex:1;">${escHtml(t('save'))}</button>
+        <button id="serhl-hlcolor-reset" class="serhl-button serhl-button-secondary" style="flex:1;">${escHtml(t('hlColorReset'))}</button>
+        <button id="serhl-hlcolor-cancel" class="serhl-button serhl-button-secondary" style="flex:1;">${escHtml(t('cancel'))}</button>
       </div>
     `;
 
     function resizeCanvasToMatch() {
-      const left = document.getElementById('serh-hlcolor-left'); const svCanvas = document.getElementById('serh-hlcolor-sv-canvas');
-      const hueCanvas = document.getElementById('serh-hlcolor-hue-canvas'); if (!left || !svCanvas || !hueCanvas) return; svCanvas.width = svCanvas.height = left.clientHeight;
+      const left = document.getElementById('serhl-hlcolor-left'); const svCanvas = document.getElementById('serhl-hlcolor-sv-canvas');
+      const hueCanvas = document.getElementById('serhl-hlcolor-hue-canvas'); if (!left || !svCanvas || !hueCanvas) return; svCanvas.width = svCanvas.height = left.clientHeight;
       hueCanvas.height = left.clientHeight; drawSVCanvas(currentHue); drawHueCanvas(); updateIndicators();
     }
     requestAnimationFrame(() => {
@@ -4719,7 +4723,7 @@
     });
 
     function drawSVCanvas(hue) {
-      const canvas = document.getElementById('serh-hlcolor-sv-canvas'); if (!canvas) return; const ctx = canvas.getContext('2d'); const w = canvas.width, h = canvas.height;
+      const canvas = document.getElementById('serhl-hlcolor-sv-canvas'); if (!canvas) return; const ctx = canvas.getContext('2d'); const w = canvas.width, h = canvas.height;
       const imageData = ctx.createImageData(w, h);
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
@@ -4731,7 +4735,7 @@
     }
 
     function drawHueCanvas() {
-      const canvas = document.getElementById('serh-hlcolor-hue-canvas'); if (!canvas) return; const ctx = canvas.getContext('2d'); const w = canvas.width, h = canvas.height;
+      const canvas = document.getElementById('serhl-hlcolor-hue-canvas'); if (!canvas) return; const ctx = canvas.getContext('2d'); const w = canvas.width, h = canvas.height;
       for (let y = 0; y < h; y++) {
         const [r, g, b] = hsvToRgb((y / h) * 360, 1, 1);
         ctx.fillStyle = `rgb(${r},${g},${b})`;
@@ -4740,18 +4744,18 @@
     }
 
     function updatePickedColor() {
-      const [r, g, b] = hsvToRgb(currentHue, currentSat, currentVal); const hex = rgbToHex(r, g, b); const el = document.getElementById('serh-hlcolor-code-text'); if (el) el.textContent = hex;
-      const preview = document.getElementById('serh-hlcolor-current-preview'); if (preview) preview.style.background = hex;
+      const [r, g, b] = hsvToRgb(currentHue, currentSat, currentVal); const hex = rgbToHex(r, g, b); const el = document.getElementById('serhl-hlcolor-code-text'); if (el) el.textContent = hex;
+      const preview = document.getElementById('serhl-hlcolor-current-preview'); if (preview) preview.style.background = hex;
     }
 
-    const svCanvas = document.getElementById('serh-hlcolor-sv-canvas');
+    const svCanvas = document.getElementById('serhl-hlcolor-sv-canvas');
     function onSVMove(clientX, clientY) {
       const rect = svCanvas.getBoundingClientRect(); const x = Math.max(0, Math.min(rect.width, clientX - rect.left)); const y = Math.max(0, Math.min(rect.height, clientY - rect.top));
       currentSat = x / rect.width; currentVal = 1 - y / rect.height; updatePickedColor(); updateIndicators();
     }
 
-    const hueCanvas = document.getElementById('serh-hlcolor-hue-canvas');
-    const svDot = document.getElementById('serh-hlcolor-sv-dot'); const hueDot = document.getElementById('serh-hlcolor-hue-dot');
+    const hueCanvas = document.getElementById('serhl-hlcolor-hue-canvas');
+    const svDot = document.getElementById('serhl-hlcolor-sv-dot'); const hueDot = document.getElementById('serhl-hlcolor-hue-dot');
     function updateIndicators() {
       if (!svDot || !hueDot || !svCanvas.width) return;
       svDot.style.left = (svCanvas.offsetLeft + currentSat * svCanvas.offsetWidth) + 'px'; svDot.style.top = (svCanvas.offsetTop + (1 - currentVal) * svCanvas.offsetHeight) + 'px';
@@ -4784,28 +4788,28 @@
     bindCanvasDrag(svCanvas, onSVMove); bindCanvasDrag(hueCanvas, (_x, y) => onHueMove(y));
 
     function updatePreview(i) {
-      const input = document.getElementById(`serh-hlcolor-input-${i}`);
-      const preview = document.getElementById(`serh-hlcolor-preview-${i}`);
+      const input = document.getElementById(`serhl-hlcolor-input-${i}`);
+      const preview = document.getElementById(`serhl-hlcolor-preview-${i}`);
       if (input && preview && /^#[0-9a-fA-F]{6}$/.test(input.value)) {
         preview.style.background = input.value;
       }
     }
 
     for (let i = 1; i <= 5; i++) {
-      document.getElementById(`serh-hlcolor-input-${i}`).addEventListener('input', () => updatePreview(i));
-      document.getElementById(`serh-hlcolor-preview-${i}`).addEventListener('click', () => {
-        const hexEl = document.getElementById('serh-hlcolor-code-text'); const hex = hexEl && hexEl.textContent; const input = document.getElementById(`serh-hlcolor-input-${i}`);
+      document.getElementById(`serhl-hlcolor-input-${i}`).addEventListener('input', () => updatePreview(i));
+      document.getElementById(`serhl-hlcolor-preview-${i}`).addEventListener('click', () => {
+        const hexEl = document.getElementById('serhl-hlcolor-code-text'); const hex = hexEl && hexEl.textContent; const input = document.getElementById(`serhl-hlcolor-input-${i}`);
         if (hex && input && /^#[0-9a-fA-F]{6}$/.test(hex)) { input.value = hex; updatePreview(i); }
       });
     }
 
-    document.getElementById('serh-hlcolor-save').onclick = () => {
+    document.getElementById('serhl-hlcolor-save').onclick = () => {
       const newColors = {...currentConfig.highlightColors}; let hasError = false;
       for (let i = 1; i <= 5; i++) {
-        const input = document.getElementById(`serh-hlcolor-input-${i}`);
+        const input = document.getElementById(`serhl-hlcolor-input-${i}`);
         const val = input.value.trim(); if (val === '') continue;
         if (!/^#[0-9a-fA-F]{6}$/.test(val)) {
-          const saveBtn = document.getElementById('serh-hlcolor-save'); if (!saveBtn._errTimer) saveBtn._errText = saveBtn.textContent; saveBtn.textContent = t('errorWord'); saveBtn.style.backgroundColor = '#c53030';
+          const saveBtn = document.getElementById('serhl-hlcolor-save'); if (!saveBtn._errTimer) saveBtn._errText = saveBtn.textContent; saveBtn.textContent = t('errorWord'); saveBtn.style.backgroundColor = '#c53030';
           clearTimeout(saveBtn._errTimer); saveBtn._errTimer = setTimeout(() => {
             saveBtn.textContent = saveBtn._errText; saveBtn.style.backgroundColor = ''; saveBtn._errTimer = null;
           }, 1500);
@@ -4816,17 +4820,17 @@
       if (hasError) return; adoptStoredConfigBeforeWrite(); currentConfig.highlightColors = newColors; persistConfig(true); forceReprocessAll(); showToast(t('saved'), 'success');
     };
 
-    document.getElementById('serh-hlcolor-reset').onclick = () => {
+    document.getElementById('serhl-hlcolor-reset').onclick = () => {
       const defaults = DEFAULT_HIGHLIGHT_COLORS;
       for (let i = 1; i <= 5; i++) {
-        document.getElementById(`serh-hlcolor-input-${i}`).value = defaults[i];
-        document.getElementById(`serh-hlcolor-preview-${i}`).style.background = defaults[i];
+        document.getElementById(`serhl-hlcolor-input-${i}`).value = defaults[i];
+        document.getElementById(`serhl-hlcolor-preview-${i}`).style.background = defaults[i];
       }
       const [r, g, b] = hexToRgb('#66CCFF');
       [currentHue, currentSat, currentVal] = rgbToHsv(r, g, b); drawSVCanvas(currentHue); updatePickedColor(); updateIndicators(); showToast(t('resetPending'), 'success');
     };
 
-    document.getElementById('serh-hlcolor-cancel').onclick = (e) => {
+    document.getElementById('serhl-hlcolor-cancel').onclick = (e) => {
       e.stopPropagation(); closePanel();
     };
   }
@@ -4861,7 +4865,7 @@
         `  snippets: [${(def.snippets || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
         `  links: ${links},\n` +
         `  extraElements: [${(def.extraElements || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
-        (def.button === false ? `  button: false,\n` : '') +
+        (def.button !== undefined ? `  button: ${def.button !== false},\n` : '') +
         (disabled ? `  disabled: true,\n` : '') +
         `}`;
     };
@@ -5202,30 +5206,30 @@
 
   function showSelectorPanel() {
     hideStatsPanel();
-    const opened = openPanel('serh-selector-panel');
+    const opened = openPanel('serhl-selector-panel');
     if (!opened) return;
     const { panel, closePanel } = opened;
     panel.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                 <h3 style="margin:0;font-size:14px;line-height:1.2;">${t('selectorPanelTitle')}</h3>
                 <div style="display:flex;align-items:center;gap:6px;">
-                    <button id="serh-selector-import" class="serh-button serh-button-secondary" style="padding: 3px 8px; border: 1px solid transparent;">${t('import')}</button>
-                    <button id="serh-selector-export" class="serh-button serh-button-success" style="padding: 3px 8px; border: 1px solid transparent;">${t('export')}</button>
+                    <button id="serhl-selector-import" class="serhl-button serhl-button-secondary" style="padding: 3px 8px; border: 1px solid transparent;">${t('import')}</button>
+                    <button id="serhl-selector-export" class="serhl-button serhl-button-success" style="padding: 3px 8px; border: 1px solid transparent;">${t('export')}</button>
                 </div>
             </div>
             <div style="font-size:11px;color:#718096;margin-bottom:6px;">${t('selectorHint')}</div>
-            <div class="serh-rules-container" style="height:255px;">
-                <div id="serh-sel-line-numbers"></div>
-                <textarea id="serh-sel-rules" spellcheck="false" wrap="off">${escHtml(serializeSelectors())}</textarea>
+            <div class="serhl-rules-container" style="height:255px;">
+                <div id="serhl-sel-line-numbers"></div>
+                <textarea id="serhl-sel-rules" spellcheck="false" wrap="off">${escHtml(serializeSelectors())}</textarea>
             </div>
             <div style="display:flex;gap:6px;margin-top:8px;">
-                <button id="serh-selector-save" class="serh-button serh-button-primary serh-action-button" style="flex:2;">${t('save')}</button>
-                <button id="serh-selector-reset" class="serh-button serh-button-danger serh-action-button" style="flex:1;">${t('hlColorReset')}</button>
-                <button id="serh-selector-cancel" class="serh-button serh-button-secondary serh-action-button" style="flex:1;">${t('cancel')}</button>
+                <button id="serhl-selector-save" class="serhl-button serhl-button-primary serhl-action-button" style="flex:2;">${t('save')}</button>
+                <button id="serhl-selector-reset" class="serhl-button serhl-button-danger serhl-action-button" style="flex:1;">${t('hlColorReset')}</button>
+                <button id="serhl-selector-cancel" class="serhl-button serhl-button-secondary serhl-action-button" style="flex:1;">${t('cancel')}</button>
             </div>
         `;
 
-    const textarea = document.getElementById('serh-sel-rules'); const lineNums = document.getElementById('serh-sel-line-numbers');
+    const textarea = document.getElementById('serhl-sel-rules'); const lineNums = document.getElementById('serhl-sel-line-numbers');
     updateLineNumbers('selectors');
 
     textarea.addEventListener('input', () => scheduleLineNumbersUpdate('selectors'));
@@ -5242,13 +5246,13 @@
       if (!messages || !messages.length) return; showToast(messages.join('\n'), 'error', 5000);
     };
 
-    document.getElementById('serh-selector-import').onclick = () => {
+    document.getElementById('serhl-selector-import').onclick = () => {
       importSelectorsFromFile(textarea, () => {
         showError([]); updateLineNumbers('selectors');
       });
     };
 
-    document.getElementById('serh-selector-export').onclick = () => {
+    document.getElementById('serhl-selector-export').onclick = () => {
       preventPanelClose = true; const content = textarea.value;
       if (!content.trim()) {
         preventPanelClose = false; showToast(t('noRulesExport'), 'error'); return;
@@ -5256,7 +5260,7 @@
       downloadTextFile(timestampFilename('selectors', 'js'), content, 'application/json;charset=utf-8'); preventPanelClose = false;
     };
 
-    document.getElementById('serh-selector-save').onclick = () => {
+    document.getElementById('serhl-selector-save').onclick = () => {
       const parsed = parseSelectorText(textarea.value);
       if (!parsed.config || parsed.errors.length) {
         showError(parsed.errors.length ? parsed.errors : [t('selectorJsonError')]); return;
@@ -5268,11 +5272,11 @@
       applyUserSelectors(parsed.config); showToast(t('saved'), 'success');
     };
 
-    document.getElementById('serh-selector-reset').onclick = () => {
+    document.getElementById('serhl-selector-reset').onclick = () => {
       textarea.value = serializeSelectors(SELECTORS); showError([]); updateLineNumbers('selectors'); showToast(t('resetPending'), 'success');
     };
 
-    document.getElementById('serh-selector-cancel').onclick = (e) => {
+    document.getElementById('serhl-selector-cancel').onclick = (e) => {
       e.stopPropagation(); closePanel();
     };
   }
@@ -5330,18 +5334,18 @@
       const newRules = filterValidRuleLines(parsedHeader.rest);
       if (!hasEffectiveRules(newRules) && hasEffectiveRules(currentConfig.rules) && !confirm(t('importClearConfirm'))) return;
       if (parsedHeader.settings) applyImportedSettings(parsedHeader.settings);
-      const textarea = document.getElementById('serh-rules');
+      const textarea = document.getElementById('serhl-rules');
       if (textarea) {
         textarea.value = parsedHeader.rest.join('\n'); updateLineNumbers();
       }
       currentConfig.rules = newRules;
-      const panel = document.getElementById('serh-panel'); if (panel) panel._initialRules = [...currentConfig.rules];
+      const panel = document.getElementById('serhl-panel'); if (panel) panel._initialRules = [...currentConfig.rules];
       persistConfig(true); applyConfigToMainPanel(); forceReprocessAll();
     });
   }
 
   function exportRulesToFile() {
-    preventPanelClose = true; const textarea = document.getElementById('serh-rules'); let content = textarea.value;
+    preventPanelClose = true; const textarea = document.getElementById('serhl-rules'); let content = textarea.value;
     if (!content.trim()) {
       showToast(t('noRulesExport'), 'error'); preventPanelClose = false; return;
     }
@@ -5353,7 +5357,7 @@
   function registerMenu() {
     _menuCommandIds.forEach(id => { try { GM_unregisterMenuCommand(id); } catch (e) {} }); _menuCommandIds = [];
     _menuCommandIds.push(GM_registerMenuCommand(t('menuOpenPanel'), () => showConfigPanel()));
-    _menuCommandIds.push(GM_registerMenuCommand(t('menuCustomSelectors'), showSelectorPanel));
+    _menuCommandIds.push(GM_registerMenuCommand('🖋️ ' + t('menuCustomSelectors'), showSelectorPanel));
     _menuCommandIds.push(GM_registerMenuCommand(t('menuHighlightColor'), () => showHighlightColorPanel()));
   }
 
@@ -5382,7 +5386,7 @@
           if (!container) continue;
           if (m.type === 'attributes') {
             _hrefChangedContainers.add(container);
-          } else if (container.hasAttribute('data-blocker-processed')) {
+          } else if (container.hasAttribute('data-blocker-processed') || container.hasAttribute('data-retry-exhausted')) {
             _contentChangedContainers.add(container);
           }
         }
@@ -5398,7 +5402,7 @@
         }
         if (_contentChangedContainers.size) {
           for (const container of _contentChangedContainers) {
-            if (!container.isConnected) continue; if (!container.hasAttribute('data-blocker-processed')) continue; const cachedSig = _resultContentCache.get(container);
+            if (!container.isConnected) continue; if (!container.hasAttribute('data-blocker-processed') && !container.hasAttribute('data-retry-exhausted')) continue; const cachedSig = _resultContentCache.get(container);
             const currentSig = getResultContentSignature(container); if (currentSig === null || cachedSig === currentSig) continue;
             reprocessContainer(container); statusDirty = true;
           }
@@ -5462,14 +5466,14 @@
       const wrapped = function(...args) {
         const ret = orig.apply(this, args);
         try {
-          window.dispatchEvent(new Event('serh:locationchange'));
+          window.dispatchEvent(new Event('serhl:locationchange'));
         } catch (e) {}
         return ret;
       };
       wrapped._serhWrapped = true;
       history[method] = wrapped;
     };
-    wrapHistoryMethod('pushState'); wrapHistoryMethod('replaceState'); window.addEventListener('serh:locationchange', _urlChangeHandler);
+    wrapHistoryMethod('pushState'); wrapHistoryMethod('replaceState'); window.addEventListener('serhl:locationchange', _urlChangeHandler);
   }
 
   function teardownEngineSite() {
@@ -5481,12 +5485,12 @@
     if (_searchForm && _searchFormHandler) {
       _searchForm.removeEventListener('submit', _searchFormHandler);
     }
-    _searchForm = null; _searchFormHandler = null; document.querySelectorAll('.serh-quick-block').forEach(btn => btn.remove());
-    const confirmPanel = document.getElementById('serh-block-confirm-dialog'); if (confirmPanel) confirmPanel.remove(); if (_blockConfirmOutsideHandler) { document.removeEventListener('click', _blockConfirmOutsideHandler, true); _blockConfirmOutsideHandler = null; } restoreAllHiddenParents();
+    _searchForm = null; _searchFormHandler = null; document.querySelectorAll('.serhl-quick-block').forEach(btn => btn.remove());
+    const confirmPanel = document.getElementById('serhl-block-confirm-dialog'); if (confirmPanel) confirmPanel.remove(); if (_blockConfirmOutsideHandler) { document.removeEventListener('click', _blockConfirmOutsideHandler, true); _blockConfirmOutsideHandler = null; } restoreAllHiddenParents();
     document.querySelectorAll('[data-observed]').forEach(el => {
       resultObserver.unobserve(el); el.removeAttribute('data-observed'); resetResultStyles(el);
     });
-    showHiddenResults = false; _observedSelector = ''; const status = document.getElementById('serh-status'); if (status) status.remove(); removeGlobalStyles();
+    showHiddenResults = false; _observedSelector = ''; const status = document.getElementById('serhl-status'); if (status) status.remove(); removeGlobalStyles();
   }
 
   function refreshEngineSite() {
@@ -5527,7 +5531,7 @@
   }
 
   function checkExternalConfigChange() {
-    if (document.getElementById('serh-panel')) return false;
+    if (document.getElementById('serhl-panel')) return false;
     const storeSignature = getConfigStoreSignature();
     if (_configStoreSignature !== null && storeSignature === _configStoreSignature) return false;
     if (!adoptStoredConfigIfNewer()) return false; _configStoreSignature = storeSignature; applyGlobalConfigUi(); forceReprocessAll(); return true;
