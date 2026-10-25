@@ -14,7 +14,7 @@
       links: ['h3.gs_rt a[href]', 'a[href]'],
     },
     google: {
-      match: /^(?:(?:www|images|video|videos|search|encrypted|m)\.)?google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/,
+      match: /^https?:\/\/(?:(?:www|images|video|videos|search|encrypted|m)\.)?google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})(?::\d+)?\/(?:(?:search|webhp|imghp|videohp)(?:[/?#]|$)|[?#]|$)/i,
       containers: 'div.g, div.MjjYud',
       titles: ['h3', 'div[role="heading"]', '.LC20lb', '.DKV0Md', '.sXLaOe', '.c9DxTc', 'a h3'],
       snippets: ['.st', '.VwiC3b', '.s3v9rd', '.IsZvec', '.lyLwlc', '.yXK7lf'],
@@ -107,7 +107,7 @@
       button: false,
     },
     greasyfork: {
-      match: /^https?:\/\/(?:www\.)?greasyfork\.org\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?scripts\/?(?:[?#]|$)/i,
+      match: /^https?:\/\/(?:www\.)?greasyfork\.org\/(?:[a-z]{2}(?:-[a-z0-9]{2,4})?\/)?scripts(?:\/(?:by-site\/[^\/?#]*|language\/[a-z0-9+-]+)\/?)?(?:[?#]|$)/i,
       containers: '#browse-script-list li[data-script-id]',
       titles: ['a.script-link', 'article h2 a'],
       snippets: ['.script-description', 'article .description'],

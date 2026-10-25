@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.7.5
+// @version      8.7.6
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version removes networking features including WebDAV Sync / Rule Subscription / Engine Subscription.
@@ -28,7 +28,7 @@
 (function() {
   'use strict';
 
-  if (window.top !== window.self) return; let preventPanelClose = false, _engineSiteSetup = false, _domObserver = null, _observedSelector = '';
+  if (window.top !== window.self) return; let preventPanelClose = false, _engineSiteSetup = false, _domObserver = null, _observedBody = null, _observedSelector = '';
   let _searchForm = null, _searchFormHandler = null, _urlChangeHandler = null, _panelCloseHandler = null, _panelPressHandler = null, _panelCloseTimer = null;
   let _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap(), _peekUrlCache = new WeakMap(); const _hrefChangedContainers = new Set(), _contentChangedContainers = new Set();
 
@@ -61,7 +61,7 @@
     return cfg;
   }
   let currentConfig = normalizeConfig(GM_getValue(CONFIG_KEY, getDefaultConfig()));
-  ['searchfilter_rule_tombstones', 'searchfilter_subscription_tombstones', 'searchfilter_rule_added_times', 'searchfilter_local_last_modified', 'searchfilter_settings_last_modified', 'searchfilter_selectors_last_modified', 'searchfilter_settings_time_migrated', 'searchfilter_webdav', 'searchfilter_subscription_url', 'searchfilter_subscription_last_update', 'searchfilter_subscription_rules', 'searchfilter_subscriptions', 'searchfilter_webdav_last_sync', 'searchfilter_webdav_auto_sync', 'searchfilter_webdav_sync_config', 'searchfilter_webdav_sync_selectors', 'searchfilter_webdav_sync_snapshot', 'searchfilter_subscription_sync_snapshot', 'searchfilter_webdav_last_sync_selectors'].forEach(k => {
+  ['searchfilter_rule_tombstones', 'searchfilter_subscription_tombstones', 'searchfilter_rule_added_times', 'searchfilter_local_last_modified', 'searchfilter_settings_last_modified', 'searchfilter_selectors_last_modified', 'searchfilter_settings_time_migrated', 'searchfilter_webdav', 'searchfilter_subscription_url', 'searchfilter_subscription_last_update', 'searchfilter_subscription_rules', 'searchfilter_subscriptions', 'searchfilter_webdav_last_sync', 'searchfilter_webdav_auto_sync', 'searchfilter_webdav_sync_config', 'searchfilter_webdav_sync_selectors', 'searchfilter_webdav_sync_snapshot', 'searchfilter_subscription_sync_snapshot', 'searchfilter_webdav_last_sync_selectors', 'searchfilter_engine_subscriptions'].forEach(k => {
     if (typeof GM_deleteValue === 'function') GM_deleteValue(k);
   });
   if (currentConfig && typeof currentConfig === 'object') {
@@ -85,7 +85,7 @@
       links: ['h3.gs_rt a[href]', 'a[href]'],
     },
     google: {
-      match: /^(?:(?:www|images|video|videos|search|encrypted|m)\.)?google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/,
+      match: /^https?:\/\/(?:(?:www|images|video|videos|search|encrypted|m)\.)?google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})(?::\d+)?\/(?:(?:search|webhp|imghp|videohp)(?:[/?#]|$)|[?#]|$)/i,
       containers: 'div.g, div.MjjYud',
       titles: ['h3', 'div[role="heading"]', '.LC20lb', '.DKV0Md', '.sXLaOe', '.c9DxTc', 'a h3'],
       snippets: ['.st', '.VwiC3b', '.s3v9rd', '.IsZvec', '.lyLwlc', '.yXK7lf'],
@@ -135,7 +135,7 @@
       links: ['a.result-link[href]', 'a.wgl-site-title[href]', 'a.wgl-display-url[href]', 'a.display-url[href]', '.w-gl__result-title[href]', 'a[href]'],
     },
     yahoo: {
-      match: /^(?:[a-z]{2,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
+      match: /^(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
       containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo',
       titles: ['h3', '.s-title', 'h2 a', 'a h2', '.b_title', '.title'],
       snippets: ['.sw-Card__description', '.sw-Card__snippet', '.sw-Text__body', 'p', '.b_caption p', '.b_snippet', '.b_paractl p'],
@@ -167,7 +167,7 @@
       containers: 'div.qk-card',
       titles: ['.qk-title-text', '.qk-title', 'a.qk-link-wrapper'],
       snippets: ['.qk-paragraph-text', '.qk-paragraph'],
-      links: ['a.qk-title a[href]', '.qk-title a[href]', 'a.qk-link-wrapper[href]', 'a[href]'],
+      links: ['.qk-title a[href]', 'a.qk-link-wrapper[href]', 'a[href]'],
     },
     github: {
       match: /^https?:\/\/(?:www\.)?github\.com\/search\/?(?:[?#]|$)/i,
@@ -178,7 +178,7 @@
       button: false,
     },
     greasyfork: {
-      match: /^https?:\/\/(?:www\.)?greasyfork\.org\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?scripts\/?(?:[?#]|$)/i,
+      match: /^https?:\/\/(?:www\.)?greasyfork\.org\/(?:[a-z]{2}(?:-[a-z0-9]{2,4})?\/)?scripts(?:\/(?:by-site\/[^\/?#]*|language\/[a-z0-9+-]+)\/?)?(?:[?#]|$)/i,
       containers: '#browse-script-list li[data-script-id]',
       titles: ['a.script-link', 'article h2 a'],
       snippets: ['.script-description', 'article .description'],
@@ -197,6 +197,18 @@
 
   function normalizeSelectorList(value) {
     if (Array.isArray(value)) return value.filter(s => typeof s === 'string' && s); if (typeof value === 'string' && value) return [value]; return [];
+  }
+  function hasTopLevelComma(selector) {
+    let quote = ''; let depth = 0;
+    for (let i = 0; i < selector.length; i++) {
+      const c = selector[i];
+      if (quote) { if (c === '\\') i++; else if (c === quote) quote = ''; continue; }
+      if (c === '"' || c === "'") { quote = c; continue; }
+      if (c === '[' || c === '(') depth++;
+      else if ((c === ']' || c === ')') && depth) depth--;
+      else if (c === ',' && !depth) return true;
+    }
+    return false;
   }
 
   const builtinSelectorOf = (key) => (SELECTORS[key] && typeof SELECTORS[key] === 'object') ? SELECTORS[key] : {};
@@ -235,7 +247,7 @@
         } else if (def.match && typeof def.match === 'object' && typeof def.match.source === 'string' && def.match.source) {
           match = new RegExp(def.match.source, String(def.match.flags || '').toLowerCase().replace(/[^imsu]/g, ''));
         }
-      } catch (e) { match = null; }
+      } catch (e) { match = (base && base.match) || null; }
       merged[key] = { ...mergeSelectorDef(def, base), match };
     }
     for (const key of Object.keys(SELECTORS)) {
@@ -1034,7 +1046,7 @@
       document.removeEventListener('click', closeHandler); document.removeEventListener('pointerdown', pressHandler); document.removeEventListener('mousedown', pressHandler);
     };
     setTimeout(() => {
-      if (panel.isConnected) {
+      if (panel.isConnected && !panel._fading) {
         document.addEventListener('pointerdown', pressHandler); document.addEventListener('mousedown', pressHandler); document.addEventListener('click', closeHandler);
       }
     }, 200);
@@ -1359,8 +1371,8 @@
         const abs = /:\/\//.test(raw) || raw.startsWith('//'); let out = raw;
         if (abs) out = toASCIIUrl(raw) || raw;
         else if (/[^\x00-\x7F]/.test(raw) && /^[^/?#\s]+\.[^/?#\s]+/.test(raw)) {
-          const host = raw.split(/[/?#]/)[0]; const ascii = toASCIIHostname(host.replace(/:\d+$/, ''));
-          if (ascii && ascii !== host) out = ascii + raw.slice(host.length);
+          const host = raw.split(/[/?#]/)[0]; const port = /:\d+$/.exec(host); const ascii = toASCIIHostname(host.replace(/:\d+$/, ''));
+          if (ascii && ascii !== host) out = ascii + (port ? port[0] : '') + raw.slice(host.length);
         }
         out = encodeNonAscii(out); return out.toLowerCase();
       };
@@ -2386,7 +2398,7 @@
     const selectors = (getSelectors()[engine] || SELECTORS.other).extraElements; const parent = result.parentElement; if (!parent || !Array.isArray(selectors) || !selectors.length) return [];
     const index = Array.prototype.indexOf.call(parent.children, result) + 1; const elements = new Set();
     for (const selector of selectors) {
-      if (typeof selector !== 'string' || !selector.trim() || selector.includes(',')) continue;
+      if (typeof selector !== 'string' || !selector.trim() || hasTopLevelComma(selector)) continue;
       try {
         for (const element of parent.querySelectorAll(':scope > :nth-child(' + index + ') ' + selector)) {
           if (element !== result && !element.contains(result)) elements.add(element);
@@ -2420,6 +2432,7 @@
   }
 
   function applyResultCollapse(result, engine) {
+    if (result && result.dataset) result.dataset.serhlEngine = engine;
     restoreResultCollapse(result);
     const titleEl = getResultTitleElement(result, engine);
     if (!titleEl || (result.contains && !result.contains(titleEl))) {
@@ -2733,8 +2746,7 @@
       else if (typeof m === 'string' && m) { try { engineMatch = new RegExp(m); } catch (_) {} }
     } catch (_) {}
     if (engineMatch && engineMatch.test(target)) return true;
-    if (!currentHost.endsWith('.' + target)) return false;
-    return !engineMatch;
+    return currentHost.endsWith('.' + target);
   }
 
   function isBlockButtonEnabledForEngine(engine) {
@@ -2746,7 +2758,9 @@
 
   function injectBlockButton(result, engine, domain) {
     if (!isBlockButtonEnabledForEngine(engine)) return;
-    if (!domain || getSearchCategory() === 'images') return; if (result.closest('header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav')) return;
+    if (getSearchCategory() === 'images') return;
+    const isBlocked = result.getAttribute('data-is-blocked') === 'true';
+    if (!domain && !isBlocked) return; if (result.closest('header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav')) return;
     if (engine === 'google') {
       if (result.classList.contains('isv-r') || result.querySelector('g-img')) {
         if (!result.querySelector('h3')) return;
@@ -2758,7 +2772,7 @@
     }
     if (result.querySelector('.serhl-quick-block')) return;
 
-    const isBlocked = result.getAttribute('data-is-blocked') === 'true'; const btn = document.createElement('div'); btn.className = 'serhl-quick-block';
+    const btn = document.createElement('div'); btn.className = 'serhl-quick-block';
     const iconColor = isBlocked ? '#3182ce' : 'currentColor';
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="${iconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line></svg>`;
 
@@ -2788,8 +2802,8 @@
       }
 
       if (isBlocked) {
-        const opts = buildBlockRuleOptions(domain); const whitelistRule = '@' + (currentConfig.blockDomain ? opts.domainRule : opts.exactRule);
         const matchedRule = (result.dataset.matchedRule || '').trim(); const matchedSourceKey = (result.dataset.matchedSourceKey || '').trim(); const isSubRule = false;
+        const opts = domain ? buildBlockRuleOptions(domain) : null; const whitelistRule = opts ? '@' + (currentConfig.blockDomain ? opts.domainRule : opts.exactRule) : (matchedRule ? '@' + stripRuleComment(matchedRule) : '');
         const deleteLocalRule = (rule) => {
           adoptStoredConfigBeforeWrite(); const cleanTarget = stripRuleComment(rule.trim()); currentConfig.rules = currentConfig.rules.filter(r => stripRuleComment(r.trim()) !== cleanTarget);
           persistConfig(true); removeRulesFromTextarea([rule]); forceReprocessAll();
@@ -2800,7 +2814,8 @@
           if (matchedRule) {
             unblockOptions.push({ label: t('bcDelete'), rule: matchedRule, action: 'delete', disabled: false });
           }
-          unblockOptions.push({ label: t('bcWhitelist'), rule: whitelistRule, action: 'whitelist' });
+          if (whitelistRule) unblockOptions.push({ label: t('bcWhitelist'), rule: whitelistRule, action: 'whitelist' });
+          if (!unblockOptions.length) return;
 
           showBlockConfirmPanel(btn, domain, (chosenRule, selectedOption) => {
             const action = (selectedOption && selectedOption.action) || 'whitelist';
@@ -2926,14 +2941,14 @@
       const stillHiddenBlocked = Array.from(parent.children).some(el =>
         el.style.display === 'none' && el.getAttribute('data-is-blocked') === 'true');
       const hasVisibleUnblocked = Array.from(parent.children).some(visibleUnblocked);
-      if (parent.getAttribute('data-is-blocked') !== 'true' && (!stillHiddenBlocked || hasVisibleUnblocked)) restoreParentDisplay(parent);
+      if (parent.getAttribute('data-is-blocked') !== 'true' && !blockedShown() && (!stillHiddenBlocked || hasVisibleUnblocked)) restoreParentDisplay(parent);
     });
     document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
       const blocks = googleResultBlocks(parent);
       const stillHiddenBlocked = blocks.some(el =>
         el.style.display === 'none' && el.getAttribute('data-is-blocked') === 'true');
       const hasVisibleUnblocked = blocks.some(visibleUnblocked);
-      if (parent.getAttribute('data-is-blocked') !== 'true' && (!stillHiddenBlocked || hasVisibleUnblocked)) restoreParentDisplay(parent);
+      if (parent.getAttribute('data-is-blocked') !== 'true' && !blockedShown() && (!stillHiddenBlocked || hasVisibleUnblocked)) restoreParentDisplay(parent);
     });
     document.querySelectorAll('[data-serhl-grid-item-hidden]').forEach(cell => {
       const stillBlocked = Array.from(cell.querySelectorAll('[data-is-blocked="true"]')).some(el => el.style.display === 'none');
@@ -2963,16 +2978,19 @@
 
   function addMatchedRuleLabel(result) {
     if (currentConfig.showMatchedSource === false || !result.dataset.matchedRule) return; removeMatchedRuleLabel(result); const label = document.createElement('div'); label.className = 'serhl-matched-rule';
-    const sourceText = result.dataset.matchedSource || t('matchedRule'); const ruleText = result.dataset.matchedRule;
+    const sourceText = (result.dataset.matchedSourceKey === 'local' ? t('localRule') : '') || result.dataset.matchedSource || t('matchedRule'); const ruleText = result.dataset.matchedRule;
     label.textContent = `${sourceText}: ${ruleText}`;
     ensurePositioned(result); result.appendChild(label);
   }
 
   function markResultGridSlot(result, engine) {
     if (engine === 'google') {
-      let cell = result.parentElement;
+      let cell = result;
       while (cell && cell.parentElement && cell.tagName !== 'BODY') { const d = getComputedStyle(cell.parentElement).display; if (d === 'grid' || d === 'inline-grid') break; cell = cell.parentElement; }
-      if (cell && cell.parentElement && cell.tagName !== 'BODY') { cell.style.display = 'none'; cell.setAttribute('data-serhl-grid-item-hidden', 'true'); _hiddenParentCount++; }
+      if (!cell || cell === result || !cell.parentElement || cell.tagName === 'BODY') return;
+      const leaves = Array.from(cell.querySelectorAll('div.isv-r')); if (!leaves.length) leaves.push(...Array.from(cell.querySelectorAll('div[data-attrid="images universal"]')));
+      if (leaves.length && !leaves.every(el => el.style.display === 'none' || el.getAttribute('data-is-blocked') === 'true')) return;
+      cell.style.display = 'none'; cell.setAttribute('data-serhl-grid-item-hidden', 'true'); _hiddenParentCount++;
     } else if (engine === 'bing') {
       const slot = result.closest ? result.closest('li') : null;
       if (slot && slot !== result) {
@@ -3091,7 +3109,7 @@
     _resultRetryCounts.set(result, attempt);
     setTimeout(() => {
       if (!result.isConnected || !_engineSiteSetup) {
-        _resultRetryCounts.delete(result); return;
+        _resultRetryCounts.delete(result); result.removeAttribute('data-observed'); return;
       }
       if (result.hasAttribute('data-blocker-processed')) {
         _resultRetryCounts.delete(result); return;
@@ -4031,10 +4049,12 @@
   function buildCollapseCss() {
     const seen = new Set(); const rules = [];
     rules.push('body.serhl-collapse-on .serhl-blocked-collapsed .serhl-collapse-hide { display: none !important; }');
-    for (const def of Object.values(getSelectors())) {
+    for (const [key, def] of Object.entries(getSelectors())) {
       for (const sel of [...(def.snippets || []), ...(def.extraElements || [])]) {
-        if (typeof sel !== 'string' || !sel.trim() || sel.includes(',') || seen.has(sel)) continue; seen.add(sel);
-        rules.push(`body.serhl-collapse-on .serhl-blocked-collapsed ${sel} { display: none !important; }`);
+        if (typeof sel !== 'string' || !sel.trim() || hasTopLevelComma(sel)) continue;
+        const scoped = `body.serhl-collapse-on .serhl-blocked-collapsed[data-serhl-engine="${key}"] ${sel}`;
+        if (seen.has(scoped)) continue; seen.add(scoped);
+        rules.push(`${scoped} { display: none !important; }`);
       }
     }
     return rules.join('\n');
@@ -4903,7 +4923,7 @@
   }
 
   function validateUserSelectors(config) {
-    if (!config || typeof config !== 'object' || Array.isArray(config)) return [t('selectorJsonError')]; const errors = []; const hasUnquotedComma = (v) => typeof v === 'string' && /,/.test(v.replace(/(["'])(?:\\.|(?!\1).)*\1/g, ''));
+    if (!config || typeof config !== 'object' || Array.isArray(config)) return [t('selectorJsonError')]; const errors = [];
     for (const key of Object.keys(config)) {
       const def = config[key];
       if (key === 'other') { errors.push(t('selectorReservedKey', { key })); continue; }
@@ -4914,7 +4934,7 @@
           errors.push(t('selectorFieldRequired', { key, field: 'extraElements' }));
         } else {
           for (const s of def.extraElements) {
-            if (typeof s !== 'string' || !s.trim() || hasUnquotedComma(s) || hasPseudoElement(s) || !isValidCssSelector(':scope > :nth-child(1) ' + s)) {
+            if (typeof s !== 'string' || !s.trim() || hasTopLevelComma(s) || hasPseudoElement(s) || !isValidCssSelector(':scope > :nth-child(1) ' + s)) {
               errors.push(t('selectorInvalidCss', { key, field: 'extraElements', value: s }));
             }
           }
@@ -5248,7 +5268,8 @@
 
     document.getElementById('serhl-selector-import').onclick = () => {
       importSelectorsFromFile(textarea, () => {
-        showError([]); updateLineNumbers('selectors');
+        const parsed = parseSelectorText(textarea.value); const errors = parsed.errors && parsed.errors.length ? parsed.errors : (parsed.config ? validateUserSelectors(parsed.config) : [t('selectorJsonError')]);
+        showError(errors); updateLineNumbers('selectors');
       });
     };
 
@@ -5318,7 +5339,7 @@
     const next = { ...currentConfig }, allowed = new Set([...Object.keys(CFG_DEFAULTS), 'showCount', 'debug', 'errorDetection', 'highlightColors']);
     for (const key of Object.keys(settings)) if (allowed.has(key)) next[key] = settings[key];
     if (settings.highlightColors && typeof settings.highlightColors === 'object' && !Array.isArray(settings.highlightColors)) next.highlightColors = { ...currentConfig.highlightColors, ...settings.highlightColors };
-    currentConfig = normalizeConfig(next);
+    currentConfig = normalizeConfig(next); if (settings.language !== undefined) registerMenu();
   }
 
   function getExportSettings(config) {
@@ -5361,13 +5382,26 @@
     _menuCommandIds.push(GM_registerMenuCommand(t('menuHighlightColor'), () => showHighlightColorPanel()));
   }
 
+  function bindSearchForm() {
+    if (_searchForm && _searchFormHandler) _searchForm.removeEventListener('submit', _searchFormHandler);
+    _searchForm = null; _searchFormHandler = null;
+    const searchForm = document.querySelector('form[role="search"], form[name="search"], form[action*="search"]');
+    if (searchForm) { _searchForm = searchForm; _searchFormHandler = () => setTimeout(forceReprocessAll, 800); searchForm.addEventListener('submit', _searchFormHandler); }
+  }
+
+  function syncBodyBindings() {
+    if (!_engineSiteSetup || !document.body || _observedBody === document.body) return;
+    _observedBody = document.body; _hiddenParentCount = 0;
+    applyDarkModeClass(); applyCollapseMode(); bindSearchForm(); updateStatus(document.querySelectorAll('[data-is-blocked="true"]').length);
+  }
+
   function ensureEngineSiteSetup() {
-    if (_engineSiteSetup || !isEngineSite()) return; _engineSiteSetup = true; injectGlobalStyles(); buildRuleIndex(); exposeDebugApi(); updateStatus(0); scanNewResults();
+    if (_engineSiteSetup || !isEngineSite()) return; _engineSiteSetup = true; _observedBody = document.body; injectGlobalStyles(); buildRuleIndex(); exposeDebugApi(); updateStatus(0); scanNewResults();
 
     let _pendingRecords = []; let _mutationRafPending = false;
     const flushMutations = () => {
       _mutationRafPending = false; const records = _pendingRecords; _pendingRecords = []; if (!records.length || !_engineSiteSetup) return;
-      if (!currentConfig.enabled) { _hrefChangedContainers.clear(); _contentChangedContainers.clear(); return; } if (_domObserver) _domObserver.disconnect();
+      syncBodyBindings(); if (!currentConfig.enabled) { _hrefChangedContainers.clear(); _contentChangedContainers.clear(); return; } if (_domObserver) _domObserver.disconnect();
       try {
         const selector = getContainerSelector(getSearchEngine());
         for (const m of records) {
@@ -5414,7 +5448,7 @@
         const hasAddedNodes = records.some(m => m.type === 'childList' && m.addedNodes.length > 0); if (hasAddedNodes) scanNewResults(); else if (statusDirty) reconcileHiddenParents();
       } finally {
         if (_engineSiteSetup && _domObserver) {
-          _domObserver.observe(document.body, {
+          _domObserver.observe(document.documentElement, {
             childList: true,
             attributes: true,
             attributeFilter: ['href'],
@@ -5432,7 +5466,7 @@
       _pendingRecords = _pendingRecords.concat(records);
       if (_pendingRecords.length > 2000) _pendingRecords = [{ type: 'childList', target: document.body, addedNodes: [1] }];
     });
-    _domObserver.observe(document.body, {
+    _domObserver.observe(document.documentElement, {
       childList: true,
       attributes: true,
       attributeFilter: ['href'],
@@ -5440,10 +5474,7 @@
       subtree: true
     });
 
-    const searchForm = document.querySelector('form[role="search"], form[name="search"], form[action*="search"]');
-    if (searchForm) {
-      _searchForm = searchForm; _searchFormHandler = () => setTimeout(forceReprocessAll, 800); searchForm.addEventListener('submit', _searchFormHandler);
-    }
+    bindSearchForm();
   }
 
   function ensureUrlWatcher() {
@@ -5490,13 +5521,13 @@
     document.querySelectorAll('[data-observed]').forEach(el => {
       resultObserver.unobserve(el); el.removeAttribute('data-observed'); resetResultStyles(el);
     });
-    showHiddenResults = false; _observedSelector = ''; const status = document.getElementById('serhl-status'); if (status) status.remove(); removeGlobalStyles();
+    showHiddenResults = false; _observedSelector = ''; _observedBody = null; const status = document.getElementById('serhl-status'); if (status) status.remove(); removeGlobalStyles();
   }
 
   function refreshEngineSite() {
     const wasEngine = _engineSiteSetup;
     if (isEngineSite()) {
-      ensureEngineSiteSetup(); if (wasEngine) injectGlobalStyles(); forceReprocessAll();
+      ensureEngineSiteSetup(); if (wasEngine) { syncBodyBindings(); injectGlobalStyles(); } forceReprocessAll();
     } else if (wasEngine) {
       teardownEngineSite();
     }
@@ -5534,7 +5565,9 @@
     if (document.getElementById('serhl-panel')) return false;
     const storeSignature = getConfigStoreSignature();
     if (_configStoreSignature !== null && storeSignature === _configStoreSignature) return false;
-    if (!adoptStoredConfigIfNewer()) return false; _configStoreSignature = storeSignature; applyGlobalConfigUi(); forceReprocessAll(); return true;
+    const prevLanguage = currentConfig.language;
+    if (!adoptStoredConfigIfNewer()) return false; _configStoreSignature = storeSignature; applyGlobalConfigUi(); forceReprocessAll();
+    if (currentConfig.language !== prevLanguage) registerMenu(); return true;
   }
 
   function init() {
