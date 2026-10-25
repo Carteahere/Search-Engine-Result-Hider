@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.7.5
+// @version      8.7.6
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -30,7 +30,7 @@
 (function() {
   'use strict';
 
-  if (window.top !== window.self) return; let preventPanelClose = false, _engineSiteSetup = false, _domObserver = null, _observedSelector = '';
+  if (window.top !== window.self) return; let preventPanelClose = false, _engineSiteSetup = false, _domObserver = null, _observedBody = null, _observedSelector = '';
   let _searchForm = null, _searchFormHandler = null, _urlChangeHandler = null, _panelCloseHandler = null, _panelPressHandler = null, _panelCloseTimer = null; let _syncIntervalIds = [];
   let _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap(), _peekUrlCache = new WeakMap(); const _hrefChangedContainers = new Set(), _contentChangedContainers = new Set(); let _pendingSubRefresh = false;
 
@@ -49,7 +49,7 @@
   const RESULT_RETRY_LIMIT = 3, RESULT_RETRY_DELAY = 200;
 
   // 默认配置
-  const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', uiScale: 'l', darkMode: 'system', exportConfig: false, collapseMode: false, removeRedirects: true, showSubBtn: true, showSyncBtn: true, bracketHighlight: true, language: 'zh-CN' };
+  const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', uiScale: 'l', darkMode: 'system', exportConfig: false, collapseMode: false, removeRedirects: true, showSubBtn: true, showSyncBtn: true, bracketHighlight: true, language: 'zh-CN', subscriptionAutoUpdate: true, engineSubAutoUpdate: true };
   const DEFAULT_HIGHLIGHT_COLORS = {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'};
   function getDefaultConfig() {
     return {
@@ -58,7 +58,6 @@
       bubbleSize: 30,
       debug: false,
       bubbleState: null,
-      subscriptionAutoUpdate: true, engineSubAutoUpdate: true,
       errorDetection: true,
       ...CFG_DEFAULTS,
       highlightColors: { ...DEFAULT_HIGHLIGHT_COLORS }
@@ -105,7 +104,7 @@
       links: ['h3.gs_rt a[href]', 'a[href]'],
     },
     google: {
-      match: /^(?:(?:www|images|video|videos|search|encrypted|m)\.)?google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/,
+      match: /^https?:\/\/(?:(?:www|images|video|videos|search|encrypted|m)\.)?google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})(?::\d+)?\/(?:(?:search|webhp|imghp|videohp)(?:[/?#]|$)|[?#]|$)/i,
       containers: 'div.g, div.MjjYud',
       titles: ['h3', 'div[role="heading"]', '.LC20lb', '.DKV0Md', '.sXLaOe', '.c9DxTc', 'a h3'],
       snippets: ['.st', '.VwiC3b', '.s3v9rd', '.IsZvec', '.lyLwlc', '.yXK7lf'],
@@ -155,7 +154,7 @@
       links: ['a.result-link[href]', 'a.wgl-site-title[href]', 'a.wgl-display-url[href]', 'a.display-url[href]', '.w-gl__result-title[href]', 'a[href]'],
     },
     yahoo: {
-      match: /^(?:[a-z]{2,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
+      match: /^(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
       containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo',
       titles: ['h3', '.s-title', 'h2 a', 'a h2', '.b_title', '.title'],
       snippets: ['.sw-Card__description', '.sw-Card__snippet', '.sw-Text__body', 'p', '.b_caption p', '.b_snippet', '.b_paractl p'],
@@ -187,7 +186,7 @@
       containers: 'div.qk-card',
       titles: ['.qk-title-text', '.qk-title', 'a.qk-link-wrapper'],
       snippets: ['.qk-paragraph-text', '.qk-paragraph'],
-      links: ['a.qk-title a[href]', '.qk-title a[href]', 'a.qk-link-wrapper[href]', 'a[href]'],
+      links: ['.qk-title a[href]', 'a.qk-link-wrapper[href]', 'a[href]'],
     },
     github: {
       match: /^https?:\/\/(?:www\.)?github\.com\/search\/?(?:[?#]|$)/i,
@@ -198,7 +197,7 @@
       button: false,
     },
     greasyfork: {
-      match: /^https?:\/\/(?:www\.)?greasyfork\.org\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?scripts\/?(?:[?#]|$)/i,
+      match: /^https?:\/\/(?:www\.)?greasyfork\.org\/(?:[a-z]{2}(?:-[a-z0-9]{2,4})?\/)?scripts(?:\/(?:by-site\/[^\/?#]*|language\/[a-z0-9+-]+)\/?)?(?:[?#]|$)/i,
       containers: '#browse-script-list li[data-script-id]',
       titles: ['a.script-link', 'article h2 a'],
       snippets: ['.script-description', 'article .description'],
@@ -217,6 +216,18 @@
 
   function normalizeSelectorList(value) {
     if (Array.isArray(value)) return value.filter(s => typeof s === 'string' && s); if (typeof value === 'string' && value) return [value]; return [];
+  }
+  function hasTopLevelComma(selector) {
+    let quote = ''; let depth = 0;
+    for (let i = 0; i < selector.length; i++) {
+      const c = selector[i];
+      if (quote) { if (c === '\\') i++; else if (c === quote) quote = ''; continue; }
+      if (c === '"' || c === "'") { quote = c; continue; }
+      if (c === '[' || c === '(') depth++;
+      else if ((c === ']' || c === ')') && depth) depth--;
+      else if (c === ',' && !depth) return true;
+    }
+    return false;
   }
 
   const builtinSelectorOf = (key) => (SELECTORS[key] && typeof SELECTORS[key] === 'object') ? SELECTORS[key] : {};
@@ -261,7 +272,7 @@
       } else if (def.match && typeof def.match === 'object' && typeof def.match.source === 'string' && def.match.source) {
         match = new RegExp(def.match.source, String(def.match.flags || '').toLowerCase().replace(/[^imsu]/g, ''));
       }
-    } catch (e) { match = null; }
+    } catch (e) { match = (base && base.match) || null; }
     return match;
   }
 
@@ -1142,7 +1153,7 @@
       document.removeEventListener('click', closeHandler); document.removeEventListener('pointerdown', pressHandler); document.removeEventListener('mousedown', pressHandler);
     };
     setTimeout(() => {
-      if (panel.isConnected) {
+      if (panel.isConnected && !panel._fading) {
         document.addEventListener('pointerdown', pressHandler); document.addEventListener('mousedown', pressHandler); document.addEventListener('click', closeHandler);
       }
     }, 200);
@@ -1215,15 +1226,15 @@
     if (modifiedTime !== null) GM_setValue(LOCAL_LAST_MODIFIED_KEY, modifiedTime);
     setRuleSyncSnapshot(rules, config);
     if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) setSubscriptionSyncSnapshot(subs || getSubscriptions());
-    if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) && selectors !== null) setSelectorSyncSnapshot(selectors);
+    if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) && selectors !== null) setSelectorSyncSnapshot(selectors, config);
   }
 
   async function putWebDAVRules(ctx, content, uploadedTime, remotePreserved, putHeaders) {
     const settingsModifiedAt = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) ? (ctx.settingsModifiedAt ?? getSettingsModifiedTime()) : null;
     const rulesModifiedAt = ctx.rulesModifiedAt ?? uploadedTime; const selectors = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) ? getUserSelectors() : null;
-    const uploadData = buildUploadContent(content, rulesModifiedAt, { ...remotePreserved, settingsModifiedAt });
+    const rulesSnapshot = Array.isArray(ctx.rules) ? ctx.rules.slice() : ctx.rules; const uploadData = buildUploadContent(content, rulesModifiedAt, { ...remotePreserved, settingsModifiedAt });
     await gmPutWebDAV(ctx.fullUrl, { headers: putHeaders, data: uploadData }, ctx.folderUrl, ctx.headers);
-    persistSyncSnapshots(ctx.rules, { modifiedTime: rulesModifiedAt, settingsModifiedAt, subs: ctx.subs, selectors, config: ctx.config || null });
+    persistSyncSnapshots(rulesSnapshot, { modifiedTime: rulesModifiedAt, settingsModifiedAt, subs: ctx.subs, selectors, config: ctx.config || null });
   }
   // 统一调用结束
 
@@ -1497,8 +1508,8 @@
         const abs = /:\/\//.test(raw) || raw.startsWith('//'); let out = raw;
         if (abs) out = toASCIIUrl(raw) || raw;
         else if (/[^\x00-\x7F]/.test(raw) && /^[^/?#\s]+\.[^/?#\s]+/.test(raw)) {
-          const host = raw.split(/[/?#]/)[0]; const ascii = toASCIIHostname(host.replace(/:\d+$/, ''));
-          if (ascii && ascii !== host) out = ascii + raw.slice(host.length);
+          const host = raw.split(/[/?#]/)[0]; const port = /:\d+$/.exec(host); const ascii = toASCIIHostname(host.replace(/:\d+$/, ''));
+          if (ascii && ascii !== host) out = ascii + (port ? port[0] : '') + raw.slice(host.length);
         }
         out = encodeNonAscii(out); return out.toLowerCase();
       };
@@ -2546,7 +2557,7 @@
     const selectors = (getSelectors()[engine] || SELECTORS.other).extraElements; const parent = result.parentElement; if (!parent || !Array.isArray(selectors) || !selectors.length) return [];
     const index = Array.prototype.indexOf.call(parent.children, result) + 1; const elements = new Set();
     for (const selector of selectors) {
-      if (typeof selector !== 'string' || !selector.trim() || selector.includes(',')) continue;
+      if (typeof selector !== 'string' || !selector.trim() || hasTopLevelComma(selector)) continue;
       try {
         for (const element of parent.querySelectorAll(':scope > :nth-child(' + index + ') ' + selector)) {
           if (element !== result && !element.contains(result)) elements.add(element);
@@ -2580,6 +2591,7 @@
   }
 
   function applyResultCollapse(result, engine) {
+    if (result && result.dataset) result.dataset.serhEngine = engine;
     restoreResultCollapse(result);
     const titleEl = getResultTitleElement(result, engine);
     if (!titleEl || (result.contains && !result.contains(titleEl))) {
@@ -2893,8 +2905,7 @@
       else if (typeof m === 'string' && m) { try { engineMatch = new RegExp(m); } catch (_) {} }
     } catch (_) {}
     if (engineMatch && engineMatch.test(target)) return true;
-    if (!currentHost.endsWith('.' + target)) return false;
-    return !engineMatch;
+    return currentHost.endsWith('.' + target);
   }
 
   function isBlockButtonEnabledForEngine(engine) {
@@ -2906,7 +2917,9 @@
 
   function injectBlockButton(result, engine, domain) {
     if (!isBlockButtonEnabledForEngine(engine)) return;
-    if (!domain || getSearchCategory() === 'images') return; if (result.closest('header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav')) return;
+    if (getSearchCategory() === 'images') return;
+    const isBlocked = result.getAttribute('data-is-blocked') === 'true';
+    if (!domain && !isBlocked) return; if (result.closest('header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav')) return;
     if (engine === 'google') {
       if (result.classList.contains('isv-r') || result.querySelector('g-img')) {
         if (!result.querySelector('h3')) return;
@@ -2918,7 +2931,7 @@
     }
     if (result.querySelector('.serh-quick-block')) return;
 
-    const isBlocked = result.getAttribute('data-is-blocked') === 'true'; const btn = document.createElement('div'); btn.className = 'serh-quick-block';
+    const btn = document.createElement('div'); btn.className = 'serh-quick-block';
     const iconColor = isBlocked ? '#3182ce' : 'currentColor';
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="${iconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line></svg>`;
 
@@ -2948,8 +2961,8 @@
       }
 
       if (isBlocked) {
-        const opts = buildBlockRuleOptions(domain); const whitelistRule = '@' + (currentConfig.blockDomain ? opts.domainRule : opts.exactRule);
         const matchedRule = (result.dataset.matchedRule || '').trim(); const matchedSource = (result.dataset.matchedSource || '').trim(); const matchedSourceKey = (result.dataset.matchedSourceKey || '').trim(); const isSubRule = matchedSourceKey ? matchedSourceKey.startsWith('sub:') : !isLocalEntry({ source: matchedSource });
+        const opts = domain ? buildBlockRuleOptions(domain) : null; const whitelistRule = opts ? '@' + (currentConfig.blockDomain ? opts.domainRule : opts.exactRule) : (matchedRule ? '@' + stripRuleComment(matchedRule) : '');
         const deleteLocalRule = (rule) => {
           adoptStoredConfigBeforeWrite(); const cleanTarget = stripRuleComment(rule.trim()); currentConfig.rules = currentConfig.rules.filter(r => stripRuleComment(r.trim()) !== cleanTarget);
           persistConfig(true); removeRulesFromTextarea([rule]); forceReprocessAll();
@@ -2960,7 +2973,8 @@
           if (matchedRule) {
             unblockOptions.push({ label: isSubRule ? t('bcDeleteSub') : t('bcDelete'), rule: matchedRule, action: 'delete', disabled: isSubRule });
           }
-          unblockOptions.push({ label: t('bcWhitelist'), rule: whitelistRule, action: 'whitelist' });
+          if (whitelistRule) unblockOptions.push({ label: t('bcWhitelist'), rule: whitelistRule, action: 'whitelist' });
+          if (!unblockOptions.length) return;
 
           showBlockConfirmPanel(btn, domain, (chosenRule, selectedOption) => {
             const action = (selectedOption && selectedOption.action) || 'whitelist';
@@ -3086,14 +3100,14 @@
       const stillHiddenBlocked = Array.from(parent.children).some(el =>
         el.style.display === 'none' && el.getAttribute('data-is-blocked') === 'true');
       const hasVisibleUnblocked = Array.from(parent.children).some(visibleUnblocked);
-      if (parent.getAttribute('data-is-blocked') !== 'true' && (!stillHiddenBlocked || hasVisibleUnblocked)) restoreParentDisplay(parent);
+      if (parent.getAttribute('data-is-blocked') !== 'true' && !blockedShown() && (!stillHiddenBlocked || hasVisibleUnblocked)) restoreParentDisplay(parent);
     });
     document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
       const blocks = googleResultBlocks(parent);
       const stillHiddenBlocked = blocks.some(el =>
         el.style.display === 'none' && el.getAttribute('data-is-blocked') === 'true');
       const hasVisibleUnblocked = blocks.some(visibleUnblocked);
-      if (parent.getAttribute('data-is-blocked') !== 'true' && (!stillHiddenBlocked || hasVisibleUnblocked)) restoreParentDisplay(parent);
+      if (parent.getAttribute('data-is-blocked') !== 'true' && !blockedShown() && (!stillHiddenBlocked || hasVisibleUnblocked)) restoreParentDisplay(parent);
     });
     document.querySelectorAll('[data-serh-grid-item-hidden]').forEach(cell => {
       const stillBlocked = Array.from(cell.querySelectorAll('[data-is-blocked="true"]')).some(el => el.style.display === 'none');
@@ -3134,9 +3148,12 @@
 
   function markResultGridSlot(result, engine) {
     if (engine === 'google') {
-      let cell = result.parentElement;
+      let cell = result;
       while (cell && cell.parentElement && cell.tagName !== 'BODY') { const d = getComputedStyle(cell.parentElement).display; if (d === 'grid' || d === 'inline-grid') break; cell = cell.parentElement; }
-      if (cell && cell.parentElement && cell.tagName !== 'BODY') { cell.style.display = 'none'; cell.setAttribute('data-serh-grid-item-hidden', 'true'); _hiddenParentCount++; }
+      if (!cell || cell === result || !cell.parentElement || cell.tagName === 'BODY') return;
+      const leaves = Array.from(cell.querySelectorAll('div.isv-r')); if (!leaves.length) leaves.push(...Array.from(cell.querySelectorAll('div[data-attrid="images universal"]')));
+      if (leaves.length && !leaves.every(el => el.style.display === 'none' || el.getAttribute('data-is-blocked') === 'true')) return;
+      cell.style.display = 'none'; cell.setAttribute('data-serh-grid-item-hidden', 'true'); _hiddenParentCount++;
     } else if (engine === 'bing') {
       const slot = result.closest ? result.closest('li') : null;
       if (slot && slot !== result) {
@@ -3255,7 +3272,7 @@
     _resultRetryCounts.set(result, attempt);
     setTimeout(() => {
       if (!result.isConnected || !_engineSiteSetup) {
-        _resultRetryCounts.delete(result); return;
+        _resultRetryCounts.delete(result); result.removeAttribute('data-observed'); return;
       }
       if (result.hasAttribute('data-blocker-processed')) {
         _resultRetryCounts.delete(result); return;
@@ -4353,10 +4370,12 @@
   function buildCollapseCss() {
     const seen = new Set(); const rules = [];
     rules.push('body.serh-collapse-on .serh-blocked-collapsed .serh-collapse-hide { display: none !important; }');
-    for (const def of Object.values(getSelectors())) {
+    for (const [key, def] of Object.entries(getSelectors())) {
       for (const sel of [...(def.snippets || []), ...(def.extraElements || [])]) {
-        if (typeof sel !== 'string' || !sel.trim() || sel.includes(',') || seen.has(sel)) continue; seen.add(sel);
-        rules.push(`body.serh-collapse-on .serh-blocked-collapsed ${sel} { display: none !important; }`);
+        if (typeof sel !== 'string' || !sel.trim() || hasTopLevelComma(sel)) continue;
+        const scoped = `body.serh-collapse-on .serh-blocked-collapsed[data-serh-engine="${key}"] ${sel}`;
+        if (seen.has(scoped)) continue; seen.add(scoped);
+        rules.push(`${scoped} { display: none !important; }`);
       }
     }
     return rules.join('\n');
@@ -5257,7 +5276,7 @@
   }
 
   function validateUserSelectors(config) {
-    if (!config || typeof config !== 'object' || Array.isArray(config)) return [t('selectorJsonError')]; const errors = []; const hasUnquotedComma = (v) => typeof v === 'string' && /,/.test(v.replace(/(["'])(?:\\.|(?!\1).)*\1/g, ''));
+    if (!config || typeof config !== 'object' || Array.isArray(config)) return [t('selectorJsonError')]; const errors = [];
     for (const key of Object.keys(config)) {
       const def = config[key];
       if (key === 'other') { errors.push(t('selectorReservedKey', { key })); continue; }
@@ -5268,7 +5287,7 @@
           errors.push(t('selectorFieldRequired', { key, field: 'extraElements' }));
         } else {
           for (const s of def.extraElements) {
-            if (typeof s !== 'string' || !s.trim() || hasUnquotedComma(s) || hasPseudoElement(s) || !isValidCssSelector(':scope > :nth-child(1) ' + s)) {
+            if (typeof s !== 'string' || !s.trim() || hasTopLevelComma(s) || hasPseudoElement(s) || !isValidCssSelector(':scope > :nth-child(1) ' + s)) {
               errors.push(t('selectorInvalidCss', { key, field: 'extraElements', value: s }));
             }
           }
@@ -5609,7 +5628,8 @@
 
     document.getElementById('serh-selector-import').onclick = () => {
       importSelectorsFromFile(textarea, () => {
-        showError([]); updateLineNumbers('selectors');
+        const parsed = parseSelectorText(textarea.value); const errors = parsed.errors && parsed.errors.length ? parsed.errors : (parsed.config ? validateUserSelectors(parsed.config) : [t('selectorJsonError')]);
+        showError(errors); updateLineNumbers('selectors');
       });
     };
 
@@ -5879,11 +5899,12 @@
   }
 
   function getSelectorSyncSnapshot() {
-    const raw = GM_getValue(WEBDAV_LAST_SYNC_SELECTORS_KEY, null); return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : null;
+    const raw = GM_getValue(WEBDAV_LAST_SYNC_SELECTORS_KEY, null);
+    return (raw && typeof raw === 'object' && !Array.isArray(raw) && raw.target === webdavTargetId(loadWebDAVConfig()) && raw.selectors && typeof raw.selectors === 'object' && !Array.isArray(raw.selectors)) ? raw.selectors : null;
   }
 
-  function setSelectorSyncSnapshot(selectors) {
-    if (!selectors || typeof selectors !== 'object' || Array.isArray(selectors)) return; GM_setValue(WEBDAV_LAST_SYNC_SELECTORS_KEY, selectors);
+  function setSelectorSyncSnapshot(selectors, config = null) {
+    if (!selectors || typeof selectors !== 'object' || Array.isArray(selectors)) return; GM_setValue(WEBDAV_LAST_SYNC_SELECTORS_KEY, { target: webdavTargetId(config || loadWebDAVConfig()), selectors });
   }
 
   function selectorsEqual(a, b) {
@@ -6024,7 +6045,10 @@
     const pickedByBase = new Map();
     const pickGroup = (bk) => {
       const localKeys = localGroups.get(bk) || []; const cloudKeys = cloudGroups.get(bk) || [];
-      if (!cloudKeys.length) return localKeys; if (!localKeys.length) return cloudKeys; return preferLocal ? localKeys : cloudKeys;
+      if (!cloudKeys.length) return localKeys; if (!localKeys.length) return cloudKeys;
+      const first = preferLocal ? localKeys : cloudKeys; const second = preferLocal ? cloudKeys : localKeys;
+      if (!first.some(k => second.indexOf(k) !== -1)) return first;
+      return first.concat(second.filter(k => first.indexOf(k) === -1));
     };
     new Set([...localGroups.keys(), ...cloudGroups.keys()]).forEach(bk => pickedByBase.set(bk, pickGroup(bk)));
     const orderedRows = orderSide === cloudMeta ? cloudRows : localRows; const otherRows = orderSide === cloudMeta ? localRows : cloudRows;
@@ -6102,13 +6126,12 @@
         if (val && typeof val === 'object' && typeof val.source === 'string' && flagsOk(val.flags)) { try { new RegExp(val.source, String(val.flags || '').toLowerCase()); return true; } catch (e) { return false; } }
         return false;
       };
-      const hasUnquotedComma = (v) => typeof v === 'string' && /,/.test(v.replace(/(["'])(?:\\.|(?!\1).)*\1/g, ''));
       for (const key of Object.keys(v)) {
         const def = v[key];
         if (key === 'other' || !/^[A-Za-z0-9_-]+$/.test(key)) return false;
         if (!def || typeof def !== 'object' || Array.isArray(def)) return false;
         if ((def.disabled !== undefined && def.disabled !== null && typeof def.disabled !== 'boolean') || (def.disable !== undefined && def.disable !== null && typeof def.disable !== 'boolean')) return false;
-        if (def.extraElements !== undefined && def.extraElements !== null && (!Array.isArray(def.extraElements) || !def.extraElements.every((s) => typeof s === 'string' && !!s.trim() && !hasUnquotedComma(s) && probe(':scope > :nth-child(1) ' + s)))) return false;
+        if (def.extraElements !== undefined && def.extraElements !== null && (!Array.isArray(def.extraElements) || !def.extraElements.every((s) => typeof s === 'string' && !!s.trim() && !hasTopLevelComma(s) && probe(':scope > :nth-child(1) ' + s)))) return false;
         if (def.match !== undefined && def.match !== null && !reOk(def.match)) return false;
         for (const f of ['containers', 'titles', 'snippets', 'links']) if (def[f] !== undefined && def[f] !== null && !cssOk(def[f])) return false;
       }
@@ -7116,7 +7139,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           const trustedNow = netOffset !== null ? Date.now() + netOffset : (serverTime > 0 ? serverTime : Date.now()); const validRemoteTimes = extractValidCloudTimes(remoteConfig, trustedNow);
           const remoteSyncedAt = validRemoteTimes.length > 0 ? Math.max(...validRemoteTimes) : 0; const uploadedTime = Math.max(remoteSyncedAt + 1000, trustedNow);
           const remoteRaw = String(resp.responseText || '');
-          if (content.trim() === '' && resp.status !== 404 && remoteRaw.trim() !== '') { try { await putWebDAVBackup(fullUrl, headers, remoteRaw); } catch (bakErr) { console.warn('[WebDAV] 备份失败(不阻断上传):', bakErr && bakErr.message); } }
+          if (resp.status !== 404 && remoteRaw.trim() !== '' && !isInvalidSyncResponse(resp.responseText, resp.responseHeaders)) { try { await putWebDAVBackup(fullUrl, headers, remoteRaw); } catch (bakErr) { console.warn('[WebDAV] 备份失败:', bakErr && bakErr.message); } }
           await putWebDAVRules({ fullUrl, folderUrl, headers, rules: content.split('\n'), settingsModifiedAt: uploadedTime, config }, content, uploadedTime, remotePreserved, buildDavPutHeaders(headers, uploadedTime));
           GM_setValue(WEBDAV_LAST_SYNC_KEY, uploadedTime);
         });
@@ -7186,6 +7209,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
             bubbleSize: currentConfig.bubbleSize
           }));
           GM_setValue(CONFIG_KEY, currentConfig);
+          if (settings.language !== undefined) registerMenu();
         }
         if (Array.isArray(subscriptions)) {
           const existingMap = new Map(getSubscriptions().map(s => [s.url, s]));
@@ -7205,7 +7229,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         }
       }
       if (selectors && typeof selectors === 'object' && !Array.isArray(selectors) && GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
-        GM_setValue(SELECTORS_KEY, selectors); setSelectorSyncSnapshot(selectors); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite();
+        GM_setValue(SELECTORS_KEY, selectors); setSelectorSyncSnapshot(selectors, config); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite();
       }
     }
     const trustedNow = await getTrustedNow(parseHttpDateHeader(resp.responseHeaders)); let cloudTime = 0; const validCloudTimes = [getCloudModifiedTime(parsedHeader.config, 'rulesSyncedAt', trustedNow)].filter(v => v > 0);
@@ -7326,7 +7350,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) && cloudSettingsTime > localSettingsTime && cloudConfig) {
         const cloudSettings = getSyncSettings(cloudConfig); const colors = cloudSettings.highlightColors;
         if (colors && typeof colors === 'object' && !Array.isArray(colors)) cloudSettings.highlightColors = Object.assign({}, currentConfig.highlightColors, colors);
-        Object.assign(currentConfig, cloudSettings); localSettingsTime = cloudSettingsTime; GM_setValue(SETTINGS_LAST_MODIFIED_KEY, localSettingsTime);
+        Object.assign(currentConfig, cloudSettings); localSettingsTime = cloudSettingsTime; GM_setValue(SETTINGS_LAST_MODIFIED_KEY, localSettingsTime); if (cloudSettings.language !== undefined) registerMenu();
       }
 
       currentConfig.rules = mergedRules; persistConfig(false);
@@ -7349,7 +7373,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
       if (shouldUpload) {
         console.log('[WebDAV] 规则合并或配置更新完成，上传至云端...'); const uploadedTime = Math.max(cloudTime + 1000, localTime + 1, trustedNow);
-        if (mergedRules.length === 0 && cloudRules.length > 0) { try { await putWebDAVBackup(fullUrl, headers, String(resp.responseText || '')); } catch (err) { console.warn('[WebDAV] 备份失败:', err && err.message); } }
+        if (cloudRules.length > 0 && resp.status !== 404 && String(resp.responseText || '').trim() !== '') { try { await putWebDAVBackup(fullUrl, headers, String(resp.responseText || '')); } catch (err) { console.warn('[WebDAV] 备份失败:', err && err.message); } }
         try {
           await putWebDAVRules({ fullUrl, folderUrl, headers, rules: mergedRules, subs: mergedSubs, selectors: mergedSelectors, config, rulesModifiedAt: (contentChanged || selectorsChanged) ? uploadedTime : (cloudTime || uploadedTime), settingsModifiedAt: subscriptionsChanged ? Math.max(uploadedTime, localSettingsTime) : localSettingsTime }, mergedContent, uploadedTime, {
             rawScriptConfig: parsedHeader ? parsedHeader.rawScriptConfig : null,
@@ -7367,7 +7391,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           console.warn('[WebDAV] 上传失败:', err.message); return;
         }
       } else {
-        persistSyncSnapshots(mergedRules, { subs: mergedSubs, selectors: mergedSelectors });
+        persistSyncSnapshots(mergedRules, { subs: mergedSubs, selectors: mergedSelectors, config });
         if (cloudTime > 0) {
           GM_setValue(LOCAL_LAST_MODIFIED_KEY, cloudTime);
         }
@@ -7454,7 +7478,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           const next = Object.assign({}, currentConfig); const colors = settings.highlightColors;
           if (colors && typeof colors === 'object' && !Array.isArray(colors)) settings.highlightColors = Object.assign({}, currentConfig.highlightColors, colors);
           Object.assign(next, settings); next.rules = currentConfig.rules || []; next.bubbleState = currentConfig.bubbleState; next.bubbleSize = currentConfig.bubbleSize;
-          currentConfig = normalizeConfig(next);
+          currentConfig = normalizeConfig(next); if (settings.language !== undefined) registerMenu();
         }
       }
       if (headerConfig) { const importedSubs = Array.isArray(headerConfig.subscriptions) ? headerConfig.subscriptions : null; if (importedSubs && applyImportedSubscriptions(importedSubs) > 0) setTimeout(() => checkAutoSubscription(true), 1000); }
@@ -7591,13 +7615,26 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }, 5000 + Math.floor(Math.random() * 5000));
   }
 
+  function bindSearchForm() {
+    if (_searchForm && _searchFormHandler) _searchForm.removeEventListener('submit', _searchFormHandler);
+    _searchForm = null; _searchFormHandler = null;
+    const searchForm = document.querySelector('form[role="search"], form[name="search"], form[action*="search"]');
+    if (searchForm) { _searchForm = searchForm; _searchFormHandler = () => setTimeout(forceReprocessAll, 800); searchForm.addEventListener('submit', _searchFormHandler); }
+  }
+
+  function syncBodyBindings() {
+    if (!_engineSiteSetup || !document.body || _observedBody === document.body) return;
+    _observedBody = document.body; _hiddenParentCount = 0;
+    applyDarkModeClass(); applyCollapseMode(); bindSearchForm(); updateStatus(document.querySelectorAll('[data-is-blocked="true"]').length);
+  }
+
   function ensureEngineSiteSetup() {
-    if (_engineSiteSetup || !isEngineSite()) return; _engineSiteSetup = true; injectGlobalStyles(); buildRuleIndex(); exposeDebugApi(); updateStatus(0); scanNewResults();
+    if (_engineSiteSetup || !isEngineSite()) return; _engineSiteSetup = true; _observedBody = document.body; injectGlobalStyles(); buildRuleIndex(); exposeDebugApi(); updateStatus(0); scanNewResults();
 
     let _pendingRecords = []; let _mutationRafPending = false;
     const flushMutations = () => {
       _mutationRafPending = false; const records = _pendingRecords; _pendingRecords = []; if (!records.length || !_engineSiteSetup) return;
-      if (!currentConfig.enabled) { _hrefChangedContainers.clear(); _contentChangedContainers.clear(); return; } if (_domObserver) _domObserver.disconnect();
+      syncBodyBindings(); if (!currentConfig.enabled) { _hrefChangedContainers.clear(); _contentChangedContainers.clear(); return; } if (_domObserver) _domObserver.disconnect();
       try {
         const selector = getContainerSelector(getSearchEngine());
         for (const m of records) {
@@ -7644,7 +7681,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         const hasAddedNodes = records.some(m => m.type === 'childList' && m.addedNodes.length > 0); if (hasAddedNodes) scanNewResults(); else if (statusDirty) reconcileHiddenParents();
       } finally {
         if (_engineSiteSetup && _domObserver) {
-          _domObserver.observe(document.body, {
+          _domObserver.observe(document.documentElement, {
             childList: true,
             attributes: true,
             attributeFilter: ['href'],
@@ -7662,7 +7699,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       _pendingRecords = _pendingRecords.concat(records);
       if (_pendingRecords.length > 2000) _pendingRecords = [{ type: 'childList', target: document.body, addedNodes: [1] }];
     });
-    _domObserver.observe(document.body, {
+    _domObserver.observe(document.documentElement, {
       childList: true,
       attributes: true,
       attributeFilter: ['href'],
@@ -7670,10 +7707,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       subtree: true
     });
 
-    const searchForm = document.querySelector('form[role="search"], form[name="search"], form[action*="search"]');
-    if (searchForm) {
-      _searchForm = searchForm; _searchFormHandler = () => setTimeout(forceReprocessAll, 800); searchForm.addEventListener('submit', _searchFormHandler);
-    }
+    bindSearchForm();
   }
 
   function ensureUrlWatcher() {
@@ -7720,13 +7754,13 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     document.querySelectorAll('[data-observed]').forEach(el => {
       resultObserver.unobserve(el); el.removeAttribute('data-observed'); resetResultStyles(el);
     });
-    showHiddenResults = false; _observedSelector = ''; const status = document.getElementById('serh-status'); if (status) status.remove(); removeGlobalStyles();
+    showHiddenResults = false; _observedSelector = ''; _observedBody = null; const status = document.getElementById('serh-status'); if (status) status.remove(); removeGlobalStyles();
   }
 
   function refreshEngineSite() {
     const wasEngine = _engineSiteSetup;
     if (isEngineSite()) {
-      ensureEngineSiteSetup(); if (wasEngine) injectGlobalStyles(); forceReprocessAll();
+      ensureEngineSiteSetup(); if (wasEngine) { syncBodyBindings(); injectGlobalStyles(); } forceReprocessAll();
     } else if (wasEngine) {
       teardownEngineSite();
     }
@@ -7764,7 +7798,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     if (document.getElementById('serh-panel')) return false;
     const storeSignature = getConfigStoreSignature();
     if (_configStoreSignature !== null && storeSignature === _configStoreSignature) return false;
-    if (!adoptStoredConfigIfNewer()) return false; _configStoreSignature = storeSignature; applyGlobalConfigUi(); forceReprocessAll(); return true;
+    const prevLanguage = currentConfig.language;
+    if (!adoptStoredConfigIfNewer()) return false; _configStoreSignature = storeSignature; applyGlobalConfigUi(); forceReprocessAll();
+    if (currentConfig.language !== prevLanguage) registerMenu(); return true;
   }
 
   function init() {
