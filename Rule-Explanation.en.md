@@ -161,7 +161,7 @@ bing: {disabled: true},
 ```
 
 **Built-in engine IDs:**  
-`google`, `google_scholar`, `bing`, `duckduckgo_lite`, `duckduckgo`, `yandex`, `brave`, `ecosia`, `startpage`, `yahoo`, `so360`, `sogou`, `toutiao`, `quark`, `github`, `greasyfork` (in `@if($site=)`, `ddg` is an alias for `duckduckgo`, `yahoo-japan` is an alias for `yahoo`).
+`google`, `google_scholar`, `bing`, `duckduckgo`, `duckduckgo_lite`, `yandex`, `brave`, `ecosia`, `startpage`, `yahoo`, `yahoo_japan`, `so360`, `sogou`, `toutiao`, `quark`, `github`, `greasyfork` (in `@if($site=)`, `ddg` is an alias for `duckduckgo`).
 
 **Notes:**
 

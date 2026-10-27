@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.7.6
+// @version      8.7.7
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -44,7 +44,7 @@
   const WEBDAV_SYNC_SNAPSHOT_KEY = 'searchfilter_webdav_sync_snapshot', ENGINE_SUBSCRIPTIONS_KEY = 'searchfilter_engine_subscriptions';
   const BUILTIN_ENGINE_SUB_URL = 'https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js';
   const SUBSCRIPTION_SYNC_SNAPSHOT_KEY = 'searchfilter_subscription_sync_snapshot'; const WEBDAV_LAST_SYNC_SELECTORS_KEY = 'searchfilter_webdav_last_sync_selectors'; const HL_STATS_REGEX = /^@\d+/;
-  const AUTO_UPDATE_INTERVAL = 12 * 60 * 60 * 1000, WEBDAV_AUTO_SYNC_INTERVAL = 1 * 60 * 60 * 1000;
+  const AUTO_UPDATE_INTERVAL = 12 * 60 * 60 * 1000, WEBDAV_AUTO_SYNC_INTERVAL = 1 * 60 * 60 * 1000, AUTO_SYNC_TOLERANCE = 60 * 1000;
   const WEBDAV_SYNC_MAX_RETRIES = 3, WEBDAV_SYNC_RETRY_DELAY = 2000, WEBDAV_TIME_TOLERANCE = 5 * 60 * 1000; const NET_TIME_CACHE_TTL = 30 * 60 * 1000, NET_TIME_FAIL_TTL = 10 * 60 * 1000;
   const RESULT_RETRY_LIMIT = 3, RESULT_RETRY_DELAY = 200;
 
@@ -152,6 +152,13 @@
       titles: ['a.result-link', 'h2.wgl-title', 'a.wgl-site-title', '.w-gl__result-title'],
       snippets: ['p.description', '.result__main > p', '.w-gl__description'],
       links: ['a.result-link[href]', 'a.wgl-site-title[href]', 'a.wgl-display-url[href]', 'a.display-url[href]', '.w-gl__result-title[href]', 'a[href]'],
+    },
+    yahoo_japan: {
+      match: /^(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.co\.jp$/,
+      containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo',
+      titles: ['h3', '.s-title', 'h2 a', 'a h2', '.b_title', '.title'],
+      snippets: ['.sw-Card__description', '.sw-Card__snippet', '.sw-Text__body', 'p', '.b_caption p', '.b_snippet', '.b_paractl p'],
+      links: ['h3 a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
     },
     yahoo: {
       match: /^(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
@@ -309,24 +316,36 @@
         merged[key] = { ...coerceSelectorDef(def, base), disabled: true }; continue;
       }
       const defContentKeys = Object.keys(def).filter(k => k !== 'disabled' && k !== 'disable' && def[k] !== undefined && def[k] !== null && def[k] !== '');
-      if (!defContentKeys.length) { if (subscribed[key] || builtin[key]) merged[key] = subscribed[key] || builtin[key]; continue; }
+      if (!defContentKeys.length) { const baseDef = subscribed[key] || builtin[key]; if (baseDef) merged[key] = (def.disabled === false || def.disable === false) ? { ...baseDef, disabled: false } : baseDef; continue; }
       merged[key] = coerceSelectorDef(def, base);
     }
     for (const key of Object.keys(subscribed)) if (!(key in merged)) merged[key] = subscribed[key];
     for (const key of Object.keys(builtin)) if (!(key in merged)) merged[key] = builtin[key];
     const keys = Object.keys(merged); const gIdx = keys.indexOf('google'); const gsIdx = keys.indexOf('google_scholar');
+    let ordered = merged;
     if (gIdx !== -1 && gsIdx !== -1 && gIdx < gsIdx) {
-      const fixed = {};
+      ordered = {};
       for (const k of keys) {
         if (k === 'google') {
-          fixed['google_scholar'] = merged['google_scholar']; fixed['google'] = merged['google'];
+          ordered['google_scholar'] = merged['google_scholar']; ordered['google'] = merged['google'];
         } else if (k !== 'google_scholar') {
-          fixed[k] = merged[k];
+          ordered[k] = merged[k];
         }
       }
-      activeSelectors = fixed; return fixed;
     }
-    activeSelectors = merged; return merged;
+    const yKeys = Object.keys(ordered); const yIdx = yKeys.indexOf('yahoo'); const yjIdx = yKeys.indexOf('yahoo_japan');
+    if (yIdx !== -1 && yjIdx !== -1 && yIdx < yjIdx) {
+      const fixed = {};
+      for (const k of yKeys) {
+        if (k === 'yahoo') {
+          fixed['yahoo_japan'] = ordered['yahoo_japan']; fixed['yahoo'] = ordered['yahoo'];
+        } else if (k !== 'yahoo_japan') {
+          fixed[k] = ordered[k];
+        }
+      }
+      ordered = fixed;
+    }
+    activeSelectors = ordered; return ordered;
   }
 
   function resetSelectorCache() {
@@ -382,8 +401,8 @@
     google: /(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i,
     google_scholar: /(?:^|\.)scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i,
     duckduckgo: /(?:^|\.)(?:duckduckgo\.com|ddg\.gg)$/i,
-    yahoo: /(?:^|\.)(?:[a-z]{2,6}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i,
-    yahoo_jp: /(?:^|\.)(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i,
+    yahoo: /(?:^|\.)(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i,
+    yahoo_japan: /(?:^|\.)(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i,
     so360: /(?:^|\.)so\.com$/i,
     sogou: /(?:^|\.)sogou\.com$/i,
     toutiao: /(?:^|\.)toutiao\.com$/i
@@ -1160,16 +1179,10 @@
     return closePanel;
   }
 
-  function openPanel(id, { width = '320px', padding = '15px', beforeClose = null, onExisting = null, bindClose = true } = {}) {
+  function openPanel(id, { width = '320px', padding = '15px', beforeClose = null, bindClose = true } = {}) {
     injectWidgetStyles();
     const existing = document.getElementById(id);
-    if (existing && !existing._fading) {
-      if (typeof existing._cleanupClick === 'function') existing._cleanupClick();
-      if (typeof existing._beforeClose === 'function') { try { existing._beforeClose(); } catch (err) { console.error('[面板] 关闭前回调失败:', err); } existing._beforeClose = null; }
-      if (onExisting) onExisting(existing);
-      existing.remove();
-      return null;
-    }
+    if (existing && !existing._fading) return null;
     if (existing) existing.remove();
     const panel = createPanel(id, width, padding);
     panel._beforeClose = typeof beforeClose === 'function' ? beforeClose : null;
@@ -1225,7 +1238,7 @@
     if (settingsModifiedAt !== null && GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) GM_setValue(SETTINGS_LAST_MODIFIED_KEY, settingsModifiedAt);
     if (modifiedTime !== null) GM_setValue(LOCAL_LAST_MODIFIED_KEY, modifiedTime);
     setRuleSyncSnapshot(rules, config);
-    if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) setSubscriptionSyncSnapshot(subs || getSubscriptions());
+    if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) setSubscriptionSyncSnapshot(subs || getSubscriptions(), config);
     if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) && selectors !== null) setSelectorSyncSnapshot(selectors, config);
   }
 
@@ -1305,6 +1318,18 @@
 
   function safeDecodeURIComponent(str) {
     try { return decodeURIComponent(String(str ?? '')); } catch (e) { return String(str ?? ''); }
+  }
+
+  function decodeUrlForMatch(url) {
+    const raw = String(url ?? ''); if (!raw) return '';
+    try {
+      const abs = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) || raw.startsWith('//');
+      if (!abs) return safeDecodeURIComponent(raw);
+      const u = new URL(raw.startsWith('//') ? 'http:' + raw : raw); const host = toUnicodeHostname(u.hostname);
+      const auth = u.username ? u.username + (u.password ? ':' + u.password : '') + '@' : ''; const port = u.port ? ':' + u.port : '';
+      const tail = safeDecodeURIComponent(u.pathname + u.search) + safeDecodeURIComponent(u.hash);
+      return (raw.startsWith('//') ? '//' : u.protocol + '//') + auth + host + port + tail;
+    } catch (_) { return safeDecodeURIComponent(raw); }
   }
 
   function encodeNonAscii(str) {
@@ -1518,19 +1543,7 @@
       if (cond.op === '$=') return urlHit(v => v.endsWith(cmpUrl)); if (cond.op === '*=') return urlHit(v => v.includes(cmpUrl));
       if (cond.op === '=~') {
         if (safeRegexTest(cond.regex, url)) return true;
-        let folded = '';
-        try {
-          const abs = /^[a-z][a-z0-9+.-]*:\/\//i.test(url) || url.startsWith('//');
-          if (!abs) folded = safeDecodeURIComponent(url);
-          else {
-            const u = new URL(url.startsWith('//') ? 'http:' + url : url);
-            const host = toUnicodeHostname(u.hostname);
-            const auth = u.username ? u.username + (u.password ? ':' + u.password : '') + '@' : '';
-            const port = u.port ? ':' + u.port : '';
-            const tail = safeDecodeURIComponent(u.pathname + u.search) + safeDecodeURIComponent(u.hash);
-            folded = (url.startsWith('//') ? '//' : u.protocol + '//') + auth + host + port + tail;
-          }
-        } catch (_) { folded = safeDecodeURIComponent(url); }
+        const folded = decodeUrlForMatch(url);
         return folded !== url && safeRegexTest(cond.regex, folded);
       }
       return false;
@@ -1602,7 +1615,7 @@
     const enginePropMatch = trimmed.match(/^(?:\$site|engine)\s*[=:]\s*(?:['"](.*?)['"]|([^\s\)]+))\s*i?\s*$/i);
     if (enginePropMatch) {
       const raw = (enginePropMatch[1] !== undefined ? enginePropMatch[1] : enginePropMatch[2]).trim().toLowerCase();
-      const target = raw.replace(/^ddg$/, 'duckduckgo').replace(/^yahoo-japan$/, 'yahoo'); const engine = String(currentEngine || '').toLowerCase();
+      const target = raw.replace(/^ddg$/, 'duckduckgo'); const engine = String(currentEngine || '').toLowerCase();
       return { matched: true, static: engine === target || engine === raw };
     }
 
@@ -1636,7 +1649,8 @@
     const strMatch = eqReOk ? null : trimmed.match(/^(title|url|host|path|scheme)\s*(\^=|\$=|\*=|=|:)\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s"']+))\s*i?\s*$/i);
     if (strMatch) {
       if (strMatch[5] !== undefined && strMatch[5].startsWith('~')) return { matched: false };
-      if (strMatch[2] === '=' && strMatch[5] !== undefined && /^\/((?:[^/\\\[\]]|\\.|\[(?:[^\]\\]|\\.)*\])+)\/([a-z]*)$/i.test(strMatch[5]) && (!RegExp.$2 || isUniqueFlagsStr(RegExp.$2) || isFlagsCandidateError(RegExp.$2))) return { matched: false };
+      const bareEq = (strMatch[2] === '=' && strMatch[5] !== undefined) ? strMatch[5].match(/^\/((?:[^/\\\[\]]|\\.|\[(?:[^\]\\]|\\.)*\])+)\/([a-z]*)$/i) : null;
+      if (bareEq && (!bareEq[2] || isUniqueFlagsStr(bareEq[2]) || isFlagsCandidateError(bareEq[2]))) return { matched: false };
       const op = strMatch[2] === ':' ? '=' : strMatch[2];
       const rawVal = (strMatch[3] !== undefined ? strMatch[3] : (strMatch[4] !== undefined ? strMatch[4] : strMatch[5])); let val = rawVal.replace(/\\(["'])/g, '$1').toLowerCase();
       const condType = strMatch[1].toLowerCase(); if (condType === 'host') val = val.startsWith('/') ? val : toASCIIHostname(val); return { matched: true, dynamic: { type: condType, op, val } };
@@ -1665,9 +1679,20 @@
   }
   function isUniqueFlagsStr(seg) { const s = String(seg || '').toLowerCase(); return /^[imsu]+$/.test(s) && new Set(s).size === s.length; }
   function isFlagsCandidateError(seg) { seg = String(seg || ''); return /^[imsugy]+$/i.test(seg) && !!getInvalidRegexFlags(seg); }
+  function hasBareRegexSlash(pattern) {
+    let inClass = false;
+    for (let i = 0; i < pattern.length; i++) {
+      const ch = pattern[i];
+      if (ch === '\\') { i++; continue; }
+      if (inClass) { if (ch === ']') inClass = false; continue; }
+      if (ch === '[') { inClass = true; continue; }
+      if (ch === '/') return true;
+    }
+    return false;
+  }
 
   function validateUrlWildcard(rule) {
-    if (!rule || /[<>"']/.test(rule) || /\s/.test(rule)) return false; if (rule.startsWith('|') || rule.startsWith('@@')) return false; if (rule.includes('^')) return false;
+    if (!rule || /[<>"]/.test(rule) || /\s/.test(rule)) return false; if (rule.startsWith('|') || rule.startsWith('@@')) return false; if (rule.includes('^')) return false;
     if (rule.includes('://')) {
       const scheme = rule.split('://')[0]; if (scheme !== '*' && !/^[a-z][a-z0-9+.-]*$/.test(scheme.toLowerCase())) return false;
     }
@@ -1844,7 +1869,7 @@
     try {
       if (ruleToCheck.startsWith('/') && ruleToCheck.lastIndexOf('/') > 0) {
         const { pattern, flags } = ruleToRegex(ruleToCheck);
-        if (!pattern.trim()) {
+        if (!pattern.trim() || hasBareRegexSlash(pattern)) {
           errors.push(t('regexError')); return { valid: false, errors };
         }
         const invalidFlags = getInvalidRegexFlags(flags);
@@ -2273,10 +2298,12 @@
       }
       return subHit;
     };
-    const scanPatterns = (patterns, value, filter) => {
+    const scanPatterns = (patterns, value, filter, foldUrl) => {
       if (!value) return null;
+      const alt = foldUrl ? decodeUrlForMatch(value) : '';
       for (const item of patterns) {
-        if (filter && !filter(item)) continue; if (safeRegexTest(item.regex, value)) return item;
+        if (filter && !filter(item)) continue;
+        if (safeRegexTest(item.regex, value) || (alt && alt !== value && safeRegexTest(item.regex, alt))) return item;
       }
       return null;
     };
@@ -2297,15 +2324,16 @@
       for (const item of rules) {
         if (filter && !filter(item)) continue; if (!checkDynamicConditions(item.conditions, title, url)) continue; if (item.type === 'expr') return item;
         const value = item.type === 'title' ? title : item.type === 'text' ? snippet : url;
+        const alt = (item.type === 'url' || item.type === 'regex') && value ? decodeUrlForMatch(value) : '';
         if ((item.type === 'url' || item.type === 'regex' || item.type === 'title' || item.type === 'text') &&
-            value && safeRegexTest(item.regex, value)) return item;
+            value && (safeRegexTest(item.regex, value) || (alt && alt !== value && safeRegexTest(item.regex, alt)))) return item;
       }
       return null;
     };
 
     const hlEntry =
       scanDomainMap(compiledRules.highlightDomains, (en, lv) => matchDomainEntryType(en.type, lv, lowerDomain)) ||
-      scanPatterns(compiledRules.highlightUrls, url) ||
+      scanPatterns(compiledRules.highlightUrls, url, null, true) ||
       scanPatterns(compiledRules.highlightTitles, title) ||
       scanPatterns(compiledRules.highlightTexts, snippet) ||
       scanConditionalDomains(compiledRules.highlightConditionalDomains, (it, lv) => matchDomainEntryType(it.domainType, lv, lowerDomain)) ||
@@ -2323,7 +2351,7 @@
     };
     const findWhitelistPair = () => findPair([
       () => scanDomainMap(compiledRules.whitelistDomains, (en, lv) => matchDomainEntryType(en.type, lv, lowerDomain), true),
-      () => scanPatterns(compiledRules.whitelistUrlPatterns, url),
+      () => scanPatterns(compiledRules.whitelistUrlPatterns, url, null, true),
       () => scanPatterns(compiledRules.whitelistTitlePatterns, title),
       () => scanPatterns(compiledRules.whitelistTextPatterns, snippet),
       () => scanConditionalDomains(compiledRules.whitelistConditionalDomains, (it, lv) => matchDomainEntryType(it.domainType, lv, lowerDomain), true),
@@ -2331,7 +2359,7 @@
     ]);
     const findBlockedPair = () => findPair([
       () => scanDomainMap(compiledRules.domains, (en, lv) => matchDomainEntryType(en.type, lv, lowerDomain), true),
-      () => scanPatterns(compiledRules.urls, url),
+      () => scanPatterns(compiledRules.urls, url, null, true),
       () => scanPatterns(compiledRules.titles, title),
       () => scanPatterns(compiledRules.texts, snippet),
       () => scanConditionalDomains(compiledRules.conditionalDomains, (it, lv) => matchDomainEntryType(it.domainType, lv, lowerDomain), true),
@@ -2397,7 +2425,7 @@
   function unwrapRedirectUrl(url) {
     const isRedirectHost = (host) => {
       host = String(host || '').replace(/\.$/, '');
-      return ['bing', 'google_scholar', 'google', 'duckduckgo', 'yahoo', 'yahoo_jp'].some(e => isEngineHost(e, host)) ||
+      return ['bing', 'google_scholar', 'google', 'duckduckgo', 'yahoo', 'yahoo_japan'].some(e => isEngineHost(e, host)) ||
         isEngineHost('so360', host) || isEngineHost('sogou', host) || isEngineHost('toutiao', host);
     };
     const seen = new Set();
@@ -2416,7 +2444,7 @@
           for (const p of ['adurl', 'imgurl', 'url', 'u', 'dest']) { if (tryGoogleParam(p)) break; }
         } else if (isEngineHost('duckduckgo', host) && /^\/l\/?$/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('uddg'));
-        } else if (isEngineHost('yahoo', host) || isEngineHost('yahoo_jp', host)) {
+        } else if (isEngineHost('yahoo', host) || isEngineHost('yahoo_japan', host)) {
           if (/ru=/i.test(path)) {
             const ruMatch = path.match(/(?:^|\/)RU=([\s\S]*?)(?=(?:\/(?:rk|rs|rv|ro|re|rh|rt|_ylt|_ylu)=|\/$|$))/i); if (ruMatch && ruMatch[1]) next = decodeRedirectTarget(ruMatch[1]);
           }
@@ -2437,8 +2465,10 @@
             } catch (_) {}
           }
         } else if (isEngineHost('so360', host) && /^\/jump\/?$/i.test(path)) {
-          next = decodeRedirectTarget(urlObj.searchParams.get('u'));
-        } else if ((isEngineHost('so360', host) || isEngineHost('sogou', host)) && /(?:\/tc\b|\/jump\b|\/link\b)/i.test(path)) {
+          next = decodeRedirectTarget(urlObj.searchParams.get('u') || urlObj.searchParams.get('url'));
+        } else if (isEngineHost('sogou', host) && /(?:\/tc\b|\/jump\b|\/link\b)/i.test(path)) {
+          next = decodeRedirectTarget(urlObj.searchParams.get('url'));
+        } else if (isEngineHost('so360', host) && /(?:\/tc\b|\/link\b)/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('url'));
         }
       } catch (_) {}
@@ -2936,7 +2966,7 @@
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="${iconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line></svg>`;
 
     ensurePositioned(result);
-    if (engine === 'bing' || engine === 'yandex' || engine === 'brave' || engine === 'yahoo') {
+    if (engine === 'bing' || engine === 'yandex' || engine === 'brave' || engine === 'yahoo' || engine === 'yahoo_japan') {
       btn.style.right = '5px'; btn.style.top = '10px';
     } else {
       btn.style.right = '35px'; btn.style.top = '10px';
@@ -3110,8 +3140,19 @@
       if (parent.getAttribute('data-is-blocked') !== 'true' && !blockedShown() && (!stillHiddenBlocked || hasVisibleUnblocked)) restoreParentDisplay(parent);
     });
     document.querySelectorAll('[data-serh-grid-item-hidden]').forEach(cell => {
-      const stillBlocked = Array.from(cell.querySelectorAll('[data-is-blocked="true"]')).some(el => el.style.display === 'none');
-      if (!stillBlocked && !blockedShown()) restoreParentDisplay(cell);
+      const leaves = getGridLeaves(cell);
+      const stillBlocked = leaves.length ? leaves.some(gridLeafBlocked) : Array.from(cell.querySelectorAll('[data-is-blocked="true"]')).some(el => el.style.display === 'none');
+      const leafShown = (el) => {
+        let cur = el;
+        while (cur && cur !== cell) {
+          if (cur.style && cur.style.display === 'none') return false;
+          if (cur.getAttribute && cur.getAttribute('data-is-blocked') === 'true') return false;
+          cur = cur.parentElement;
+        }
+        return cur === cell;
+      };
+      const hasVisibleUnblocked = leaves.some(leafShown);
+      if (!blockedShown() && (!stillBlocked || hasVisibleUnblocked)) restoreParentDisplay(cell);
     });
   }
 
@@ -3146,22 +3187,34 @@
     ensurePositioned(result); result.appendChild(label);
   }
 
+  function getGridLeaves(cell) {
+    if (!cell || typeof cell.querySelectorAll !== 'function') return [];
+    try {
+      const isv = Array.from(cell.querySelectorAll('div.isv-r')); if (isv.length) return isv;
+      const cards = Array.from(cell.querySelectorAll('div[data-attrid="images universal"]')); if (cards.length) return cards;
+      return Array.from(cell.querySelectorAll('div.iuscp, div.imgpt')).filter(el => el.querySelector && el.querySelector('a.iusc') && !Array.from(el.querySelectorAll('div.iuscp, div.imgpt')).some(child => child.querySelector && child.querySelector('a.iusc')));
+    } catch (e) { return []; }
+  }
+  function gridLeafBlocked(el) {
+    return !!el && (el.style.display === 'none' || el.getAttribute('data-is-blocked') === 'true' || !!(el.closest && el.closest('[data-is-blocked="true"]')));
+  }
+  function hideGridCell(cell, attr) {
+    if (!cell) return; const alreadyHidden = cell.getAttribute(attr) === 'true';
+    cell.style.display = 'none'; cell.setAttribute(attr, 'true'); if (!alreadyHidden) _hiddenParentCount++;
+  }
   function markResultGridSlot(result, engine) {
     if (engine === 'google') {
       let cell = result;
       while (cell && cell.parentElement && cell.tagName !== 'BODY') { const d = getComputedStyle(cell.parentElement).display; if (d === 'grid' || d === 'inline-grid') break; cell = cell.parentElement; }
       if (!cell || cell === result || !cell.parentElement || cell.tagName === 'BODY') return;
-      const leaves = Array.from(cell.querySelectorAll('div.isv-r')); if (!leaves.length) leaves.push(...Array.from(cell.querySelectorAll('div[data-attrid="images universal"]')));
-      if (leaves.length && !leaves.every(el => el.style.display === 'none' || el.getAttribute('data-is-blocked') === 'true')) return;
-      cell.style.display = 'none'; cell.setAttribute('data-serh-grid-item-hidden', 'true'); _hiddenParentCount++;
+      const leaves = getGridLeaves(cell); const targets = leaves.length ? leaves : [result];
+      if (!targets.every(gridLeafBlocked)) return;
+      hideGridCell(cell, 'data-serh-grid-item-hidden');
     } else if (engine === 'bing') {
       const slot = result.closest ? result.closest('li') : null;
       if (slot && slot !== result) {
-        const leafItems = slot.querySelectorAll ? Array.from(slot.querySelectorAll('div.iuscp, div.imgpt')).filter(el => el.querySelector('a.iusc') && !Array.from(el.querySelectorAll('div.iuscp, div.imgpt')).some(child => child.querySelector('a.iusc'))) : [];
-        const targets = leafItems.length ? leafItems : [result];
-        if (targets.every(el => el.style.display === 'none' || !!(el.closest && el.closest('[data-is-blocked="true"]')))) {
-          slot.style.display = 'none'; slot.setAttribute('data-serh-grid-item-hidden', 'true'); _hiddenParentCount++;
-        }
+        const leaves = getGridLeaves(slot); const targets = leaves.length ? leaves : [result];
+        if (targets.every(gridLeafBlocked)) hideGridCell(slot, 'data-serh-grid-item-hidden');
       }
     }
   }
@@ -3348,10 +3401,10 @@
 
   function scanNewResults() {
     if (!currentConfig.enabled) {
+      document.querySelectorAll('.serh-quick-block').forEach(btn => btn.remove());
       document.querySelectorAll('[data-blocker-processed], [data-observed]').forEach(result => {
         resultObserver.unobserve(result); resetResultStyles(result); result.removeAttribute('data-observed');
       });
-      document.querySelectorAll('.serh-quick-block').forEach(btn => btn.remove());
       showHiddenResults = false; _observedSelector = ''; return;
     }
 
@@ -3453,612 +3506,170 @@
   function injectWidgetStyles() {
     if (widgetStylesInjected) return; widgetStylesInjected = true;
     GM_addStyle(`
-        [id^="serh-"]:not(button),
-        #serh-settings-panel * {
-            text-align: left !important; letter-spacing: normal !important; word-spacing: normal !important;
-            text-transform: none !important; text-indent: 0 !important; text-shadow: none !important;
-            text-decoration: none !important; direction: ltr !important;
-            font-style: normal !important; font-variant: normal !important;
+        /* 主题变量 */
+        body {
+            --serh-bg: #ffffff; --serh-fg: #2d3748; --serh-label: #4a5568; --serh-label-strong: #4a5568;
+            --serh-faint: #718096; --serh-dim: #a0aec0; --serh-border: #e2e8f0; --serh-input-border: #e2e8f0;
+            --serh-editor-border: #e2e8f0; --serh-editor-fg: #000000; --serh-editor-bg: #f8fafc; --serh-gutter-bg: #edf2f7; --serh-code-bg: #f7fafc;
+            --serh-readonly-bg: #f7fafc; --serh-input-bg: #ffffff; --serh-switch-off: #cbd5e0; --serh-focus: #3182ce;
+            --serh-accent: #2c5282; --serh-success: #276749; --serh-danger: #c53030; --serh-blocked-bg: #d1d5db;
+            --serh-bubble: #2c5282; --serh-bubble-number: #000000; --serh-quick-block: #2c5282;
+            --serh-bracket-bg: rgba(49, 130, 206, 0.30); --serh-bracket-ring: rgba(49, 130, 206, 0.60); --serh-bracket-enclosing: rgba(100, 116, 139, 0.16);
+            --serh-matched-bg: rgba(0, 0, 0, 0.2); --serh-matched-fg: #000000;
+            --serh-window-shadow: 0 4px 12px rgba(0,0,0,0.08); --serh-dialog-shadow: 0 4px 12px rgba(0,0,0,0.15); --serh-toast-shadow: 0 4px 12px rgba(0,0,0,0.12);
+            --serh-stats-bg: #ffffff; --serh-toast-bg: #ffffff; --serh-dialog-bg: #ffffff;
+            --serh-disabled-bg: #edf2f7; --serh-disabled-fg: #a0aec0;
+            --serh-scroll-track: #f1f1f1; --serh-scroll-thumb: #c1c1c1; --serh-scroll-thumb-hover: #a8a8a8;
+        }
+        body.serh-dark-on {
+            --serh-bg: #171717; --serh-fg: #f3f4f6; --serh-label: #9ca3af; --serh-label-strong: #f3f4f6;
+            --serh-faint: #9ca3af; --serh-dim: #9ca3af; --serh-border: #374151; --serh-input-border: #4b5563;
+            --serh-editor-border: #4b5563; --serh-editor-fg: #f3f4f6; --serh-editor-bg: #1E1F21; --serh-gutter-bg: #222629; --serh-code-bg: #374151;
+            --serh-readonly-bg: #2d3748; --serh-input-bg: #374151; --serh-switch-off: #4b5563; --serh-focus: #60a5fa;
+            --serh-blocked-bg: #374151; --serh-bubble: #a8c7fa; --serh-bubble-number: #ffffff; --serh-quick-block: #ffffff;
+            --serh-bracket-bg: rgba(96, 165, 250, 0.38); --serh-bracket-ring: rgba(96, 165, 250, 0.75); --serh-bracket-enclosing: rgba(148, 163, 184, 0.22);
+            --serh-matched-bg: rgba(0, 160, 0, 0.9); --serh-matched-fg: #ffffff;
+            --serh-window-shadow: 0 4px 12px rgba(0,0,0,0.5); --serh-dialog-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            --serh-stats-bg: #171717; --serh-toast-bg: #171717; --serh-dialog-bg: #171717;
+            --serh-disabled-bg: #1f2937; --serh-disabled-fg: #6b7280;
         }
 
-        .serh-window, .serh-window * {
-            box-sizing: border-box !important;
-        }
-        .serh-window {
-            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-            font-size: 13px !important; background: #ffffff !important; color: #2d3748 !important;
-            border: 1px solid #e2e8f0 !important; border-radius: 8px !important;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important; text-align: left !important; line-height: 1.5 !important;
-            transition: all 0.15s ease;
-        }
-
+        [id^="serh-"]:not(button), #serh-settings-panel * { text-align: left !important; letter-spacing: normal !important; word-spacing: normal !important; text-transform: none !important; text-indent: 0 !important; text-shadow: none !important; text-decoration: none !important; direction: ltr !important; font-style: normal !important; font-variant: normal !important; }
+        .serh-window, .serh-window * { box-sizing: border-box !important; }
+        .serh-window { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 13px !important; background: var(--serh-bg) !important; color: var(--serh-fg) !important; border: 1px solid var(--serh-border) !important; border-radius: 8px !important; box-shadow: var(--serh-window-shadow) !important; text-align: left !important; line-height: 1.5 !important; transition: all 0.15s ease; }
         #serh-settings-panel * { line-height: 1.2 !important; }
-        #serh-settings-panel label,
-        #serh-settings-panel span,
-        #serh-settings-panel select { font-weight: 400 !important; }
+        #serh-settings-panel label, #serh-settings-panel span, #serh-settings-panel select { font-weight: 400 !important; }
         #serh-settings-panel span { font-size: inherit !important; }
         #serh-settings-panel #serh-settings-close { font-size: 12px !important; }
-
-        [id^="serh-"] button,
-        .serh-button {
-            border: none !important; border-radius: 4px !important; cursor: pointer !important; box-sizing: border-box !important;
-            line-height: normal !important; letter-spacing: normal !important; text-transform: none !important;
-            white-space: nowrap !important; vertical-align: middle !important;
-            appearance: none !important; -webkit-appearance: none !important; background-image: none !important;
-            box-shadow: none !important; margin: 0 !important; outline: none !important; text-shadow: none !important;
-            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-            transition: background-color 0.2s;
-        }
-
-        [id^="serh-"] button:not(.serh-action-button),
-        .serh-button:not(.serh-action-button) {
-            font-size: 11px !important; padding: 4px 8px !important; height: auto !important; min-height: 0 !important;
-            width: auto !important; min-width: 0 !important; max-width: none !important;
-        }
+        [id^="serh-"] button, .serh-button { border: none !important; border-radius: 4px !important; cursor: pointer !important; box-sizing: border-box !important; line-height: normal !important; letter-spacing: normal !important; text-transform: none !important; white-space: nowrap !important; vertical-align: middle !important; appearance: none !important; -webkit-appearance: none !important; background-image: none !important; box-shadow: none !important; margin: 0 !important; outline: none !important; text-shadow: none !important; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; transition: background-color 0.2s; }
+        [id^="serh-"] button:not(.serh-action-button), .serh-button:not(.serh-action-button) { font-size: 11px !important; padding: 4px 8px !important; height: auto !important; min-height: 0 !important; width: auto !important; min-width: 0 !important; max-width: none !important; }
         .serh-button-primary { background: #2c5282 !important; color: #ffffff !important; }
         .serh-button-primary:hover { background: #1a365d !important; color: #ffffff !important; }
         .serh-button-primary:active, .serh-button-primary:focus, .serh-button-primary:focus-visible { background: #1d375d !important; color: #ffffff !important; }
-
         .serh-button-secondary { background: #4a5568 !important; color: #ffffff !important; }
         .serh-button-secondary:hover { background: #2d3748 !important; color: #ffffff !important; }
         .serh-button-secondary:active, .serh-button-secondary:focus, .serh-button-secondary:focus-visible { background: #2a3240 !important; color: #ffffff !important; }
-
         .serh-button-success { background: #276749 !important; color: #ffffff !important; }
         .serh-button-success:hover { background: #22543d !important; color: #ffffff !important; }
         .serh-button-success:active, .serh-button-success:focus, .serh-button-success:focus-visible { background: #20503a !important; color: #ffffff !important; }
-
         .serh-button-danger { background: #c53030 !important; color: #ffffff !important; }
         .serh-button-danger:hover { background: #9b2c2c !important; color: #ffffff !important; }
         .serh-button-danger:active, .serh-button-danger:focus, .serh-button-danger:focus-visible { background: #8f2c2c !important; color: #ffffff !important; }
-
-        .serh-option-row {
-            display: flex; align-items: center; justify-content: space-between;
-            margin-bottom: 10px; flex-wrap: wrap;
-        }
-        .serh-option-label {
-            font-size: 12px; color: #4a5568; white-space: nowrap; margin-bottom: 4px;
-        }
-        .serh-compact-row {
-            display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
-        }
-        .serh-action-button {
-            padding: 7px 12px !important; font-size: 12px !important; font-weight: 500 !important; box-sizing: border-box !important;
-            height: 32px !important; min-height: 32px !important; line-height: 1 !important;
-            display: inline-flex !important; align-items: center !important; justify-content: center !important;
-            text-align: center !important;
-        }
-
-        .serh-rules-container {
-            display: flex; border: 1px solid #e2e8f0; border-radius: 4px; background: #f8fafc;
-            height: 190px; margin-bottom: 3px; position: relative; overflow: hidden;
-        }
-
-        #serh-line-numbers,
-        #serh-sel-line-numbers {
-            min-width: 20px; padding: 8px 4px 8px 2px !important; background: #edf2f7;
-            border-right: 1px solid #e2e8f0; text-align: right !important; color: #a0aec0;
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace !important;
-            font-size: 11px !important; line-height: 15.4px !important; white-space: nowrap !important;
-            overflow: hidden !important; user-select: none !important; flex-shrink: 0; box-sizing: border-box !important;
-        }
-
-        #serh-rules,
-        #serh-sel-rules {
-            flex: 1; height: 100% !important; min-height: 0 !important; max-height: none !important;
-            font-size: 11px !important; padding: 8px !important; margin: 0 !important; border: none !important;
-            resize: none !important; background: transparent !important; box-sizing: border-box !important;
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace !important;
-            line-height: 15.4px !important; white-space: pre !important;
-            position: relative; z-index: 1;
-            overflow-x: auto !important; overflow-y: auto !important; outline: none !important; box-shadow: none !important;
-        }
-
-        .serh-bracket-layer {
-            position: absolute; top: 0; right: 0; bottom: 0; left: 0;
-            z-index: 0; overflow: hidden; pointer-events: none;
-        }
-        .serh-bracket-mirror {
-            position: absolute; top: 0; left: 0; visibility: hidden;
-            white-space: pre; pointer-events: none;
-            margin: 0 !important; padding: 0 !important; border: 0 !important;
-            text-indent: 0 !important; text-align: left !important;
-            -webkit-text-size-adjust: 100% !important; text-size-adjust: 100% !important;
-        }
+        .serh-option-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; }
+        .serh-option-label { font-size: 12px; color: var(--serh-label-strong); white-space: nowrap; margin-bottom: 4px; }
+        .serh-compact-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .serh-action-button { padding: 7px 12px !important; font-size: 12px !important; font-weight: 500 !important; box-sizing: border-box !important; height: 32px !important; min-height: 32px !important; line-height: 1 !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; text-align: center !important; }
+        .serh-rules-container { display: flex; border: 1px solid var(--serh-editor-border); border-radius: 4px; background: var(--serh-editor-bg); height: 190px; margin-bottom: 3px; position: relative; overflow: hidden; }
+        #serh-line-numbers, #serh-sel-line-numbers { min-width: 20px; padding: 8px 4px 8px 2px !important; background: var(--serh-gutter-bg); border-right: 1px solid var(--serh-editor-border); text-align: right !important; color: var(--serh-dim); font-family: 'Consolas', 'Monaco', 'Courier New', monospace !important; font-size: 11px !important; line-height: 15.4px !important; white-space: nowrap !important; overflow: hidden !important; user-select: none !important; flex-shrink: 0; box-sizing: border-box !important; }
+        #serh-rules, #serh-sel-rules { flex: 1; height: 100% !important; min-height: 0 !important; max-height: none !important; font-size: 11px !important; padding: 8px !important; margin: 0 !important; border: none !important; resize: none !important; background: transparent !important; box-sizing: border-box !important; font-family: 'Consolas', 'Monaco', 'Courier New', monospace !important; line-height: 15.4px !important; white-space: pre !important; position: relative; z-index: 1; overflow-x: auto !important; overflow-y: auto !important; outline: none !important; box-shadow: none !important; color: var(--serh-editor-fg) !important; }
+        .serh-bracket-layer { position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+        .serh-bracket-mirror { position: absolute; top: 0; left: 0; visibility: hidden; white-space: pre; pointer-events: none; margin: 0 !important; padding: 0 !important; border: 0 !important; text-indent: 0 !important; text-align: left !important; -webkit-text-size-adjust: 100% !important; text-size-adjust: 100% !important; }
         .serh-bracket-hit { position: absolute; display: none; border-radius: 2px; pointer-events: none; }
-        .serh-bracket-pair { background: rgba(49, 130, 206, 0.30); box-shadow: 0 0 0 1px rgba(49, 130, 206, 0.60); }
-        .serh-bracket-enclosing { background: rgba(100, 116, 139, 0.16); }
-
+        .serh-bracket-pair { background: var(--serh-bracket-bg); box-shadow: 0 0 0 1px var(--serh-bracket-ring); }
+        .serh-bracket-enclosing { background: var(--serh-bracket-enclosing); }
         :is(#serh-rules, #serh-sel-rules)::-webkit-scrollbar { width: 6px; height: 0px; }
-        :is(#serh-rules, #serh-sel-rules, #serh-stats-content, #serh-subscription-rows-container, #serh-engine-sub-rows)::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
-        :is(#serh-rules, #serh-sel-rules, #serh-stats-content, #serh-subscription-rows-container, #serh-engine-sub-rows)::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
-        :is(#serh-rules, #serh-sel-rules, #serh-stats-content, #serh-subscription-rows-container, #serh-engine-sub-rows)::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
-
-        #serh-stats-panel {
-            position: absolute; top: 10px; left: 15px; right: 15px; bottom: 50px;
-            background: white; border: 1px solid #e2e8f0; border-radius: 6px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05); z-index: 10; display: none;
-            flex-direction: column; overflow: hidden; box-sizing: border-box;
-        }
-
-        #serh-stats-content {
-            padding: 12px; overflow-y: auto; flex: 1; scrollbar-width: thin;
-        }
-
-        .serh-stats-title { color: #2d3748; }
-        .serh-stats-item { color: #4a5568; }
-
+        :is(#serh-rules, #serh-sel-rules, #serh-stats-content, #serh-subscription-rows-container, #serh-engine-sub-rows)::-webkit-scrollbar-track { background: var(--serh-scroll-track); border-radius: 3px; }
+        :is(#serh-rules, #serh-sel-rules, #serh-stats-content, #serh-subscription-rows-container, #serh-engine-sub-rows)::-webkit-scrollbar-thumb { background: var(--serh-scroll-thumb); border-radius: 3px; }
+        :is(#serh-rules, #serh-sel-rules, #serh-stats-content, #serh-subscription-rows-container, #serh-engine-sub-rows)::-webkit-scrollbar-thumb:hover { background: var(--serh-scroll-thumb-hover); }
+        #serh-stats-panel { position: absolute; top: 10px; left: 15px; right: 15px; bottom: 50px; background: var(--serh-stats-bg); border: 1px solid var(--serh-border); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); z-index: 10; display: none; flex-direction: column; overflow: hidden; box-sizing: border-box; }
+        #serh-stats-content { padding: 12px; overflow-y: auto; flex: 1; scrollbar-width: thin; }
+        .serh-stats-title { color: var(--serh-fg); }
+        .serh-stats-item { color: var(--serh-label-strong); }
         #serh-stats-content::-webkit-scrollbar { width: 6px; }
-
-        .serh-quick-block {
-            position: absolute; cursor: pointer; z-index: 99; width: 24px; height: 24px;
-            display: flex; align-items: center; justify-content: center;
-            border-radius: 50%; background: transparent; user-select: none;
-            color: #2c5282;
-            transition: transform 0.2s;
-        }
-
-        .serh-quick-block:hover {
-            transform: scale(1.1);
-        }
-
-    body.serh-dark-on .serh-quick-block {
-        color: #ffffff;
-    }
-
-        #serh-block-confirm-dialog {
-            position: fixed; z-index: 10002; display: flex; flex-direction: column; gap: 6px;
-            width: 250px; max-width: calc(100vw - 16px); padding: 8px 10px;
-            background: #ffffff; color: #2d3748; border: 1px solid #e2e8f0; border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            font-size: 12px; text-align: left; line-height: 1.4; box-sizing: border-box;
-        }
+        .serh-quick-block { position: absolute; cursor: pointer; z-index: 99; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: transparent; user-select: none; color: var(--serh-quick-block); transition: transform 0.2s; }
+        #serh-block-confirm-dialog { position: fixed; z-index: 10002; display: flex; flex-direction: column; gap: 6px; width: 250px; max-width: calc(100vw - 16px); padding: 8px 10px; background: var(--serh-dialog-bg); color: var(--serh-fg); border: 1px solid var(--serh-border); border-radius: 8px; box-shadow: var(--serh-dialog-shadow); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; text-align: left; line-height: 1.4; box-sizing: border-box; }
         #serh-block-confirm-dialog .sfb-confirm-domain { font-size: 11px; color: #718096; word-break: break-all; margin-bottom: 2px; }
-        #serh-block-confirm-dialog .sfb-confirm-option {
-            display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0; padding: 0;
-            border: none; background: transparent; font-weight: normal; white-space: nowrap;
-        }
-        #serh-block-confirm-dialog .sfb-confirm-option input[type="radio"] {
-            margin: 0 !important; padding: 0 !important; flex-shrink: 0 !important; accent-color: #2c5282 !important;
-            cursor: pointer !important; width: auto !important; height: auto !important; min-width: 0 !important;
-            appearance: auto !important; -webkit-appearance: auto !important; display: inline-block !important;
-        }
+        #serh-block-confirm-dialog .sfb-confirm-option { display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0; padding: 0; border: none; background: transparent; font-weight: normal; white-space: nowrap; }
+        #serh-block-confirm-dialog .sfb-confirm-option input[type="radio"] { margin: 0 !important; padding: 0 !important; flex-shrink: 0 !important; accent-color: #2c5282 !important; cursor: pointer !important; width: auto !important; height: auto !important; min-width: 0 !important; appearance: auto !important; -webkit-appearance: auto !important; display: inline-block !important; }
         #serh-block-confirm-dialog .sfb-confirm-option-disabled { cursor: not-allowed; opacity: 0.6; }
         #serh-block-confirm-dialog .sfb-confirm-option-disabled input[type="radio"] { cursor: not-allowed !important; }
-        #serh-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule { background: #edf2f7; color: #a0aec0; }
-
-        .serh-switch input[type="checkbox"] {
-            opacity: 0 !important; width: 0 !important; height: 0 !important;
-            min-width: 0 !important; max-width: 0 !important; margin: 0 !important; padding: 0 !important;
-            position: absolute !important; pointer-events: none !important;
-            appearance: none !important; -webkit-appearance: none !important; border: none !important;
-        }
+        #serh-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule { background: var(--serh-disabled-bg); color: var(--serh-disabled-fg); }
+        .serh-switch input[type="checkbox"] { opacity: 0 !important; width: 0 !important; height: 0 !important; min-width: 0 !important; max-width: 0 !important; margin: 0 !important; padding: 0 !important; position: absolute !important; pointer-events: none !important; appearance: none !important; -webkit-appearance: none !important; border: none !important; }
         #serh-block-confirm-dialog .sfb-confirm-label { flex-shrink: 0; min-width: 36px; white-space: nowrap; font-size: 12px; }
-        #serh-block-confirm-dialog .sfb-confirm-rule {
-            flex: 1; min-width: 0; padding: 3px 6px; border: 1px solid #e2e8f0; border-radius: 4px;
-            font-size: 11px; font-family: 'Consolas', 'Monaco', monospace; background: #f7fafc;
-            color: #2d3748; outline: none; box-shadow: none; height: auto; box-sizing: border-box;
-        }
-        #serh-block-confirm-dialog .sfb-confirm-rule:focus { border-color: #3182ce; background: #ffffff; }
+        #serh-block-confirm-dialog .sfb-confirm-rule { flex: 1; min-width: 0; padding: 3px 6px; border: 1px solid var(--serh-input-border); border-radius: 4px; font-size: 11px; font-family: 'Consolas', 'Monaco', monospace; background: var(--serh-code-bg); color: var(--serh-fg); outline: none; box-shadow: none; height: auto; box-sizing: border-box; }
+        #serh-block-confirm-dialog .sfb-confirm-rule:focus { border-color: var(--serh-focus); background: var(--serh-input-bg); }
         #serh-block-confirm-dialog .sfb-confirm-btns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
         #serh-block-confirm-dialog .sfb-confirm-btns .serh-button { height: 24px; padding: 0 10px; font-size: 11px; }
-    body.serh-dark-on #serh-block-confirm-dialog {
-        background: #171717; color: #f3f4f6; border-color: #374151;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-    }
-    body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-rule { background: #374151; border-color: #4b5563; color: #f3f4f6; }
-    body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-rule:focus { border-color: #60a5fa; background: #374151; }
-    body.serh-dark-on #serh-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule { background: #1f2937; color: #6b7280; }
-
-        .serh-scroll-btn {
-            position: absolute; right: 7px; cursor: pointer; opacity: 0.5; font-size: 18px !important;
-            line-height: 1 !important; user-select: none !important; transition: opacity 0.2s, transform 0.2s;
-            background: transparent !important; border: none !important; padding: 0 !important; margin: 0 !important;
-            z-index: 10;
-        }
-
+        .serh-scroll-btn { position: absolute; right: 7px; cursor: pointer; opacity: 0.5; font-size: 18px !important; line-height: 1 !important; user-select: none !important; transition: opacity 0.2s, transform 0.2s; background: transparent !important; border: none !important; padding: 0 !important; margin: 0 !important; z-index: 10; }
         .serh-scroll-btn:hover { opacity: 1; transform: scale(1.2); }
         .serh-quick-block:hover { transform: scale(1.1); opacity: 1; }
-
-        :is(.isv-r, .image-section, g-img, .is-extra-container) .serh-quick-block,
-        :is(header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav, #extabar) .serh-quick-block { display: none !important; }
-
+        :is(.isv-r, .image-section, g-img, .is-extra-container) .serh-quick-block, :is(header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav, #extabar) .serh-quick-block { display: none !important; }
         :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel) { height: 332px; overflow: visible; }
         :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel, #serh-selector-panel) #serh-toast-container { max-width: none; width: auto; left: 0; right: 0; }
-
-    body.serh-dark-on #serh-panel .serh-option-label,
-    body.serh-dark-on #serh-panel .serh-compact-row span { color: #f3f4f6 !important; }
-    body.serh-dark-on :is(#serh-panel, #serh-selector-panel) .serh-rules-container { border-color: #4b5563 !important; background: #1E1F21 !important; }
-    body.serh-dark-on :is(#serh-line-numbers, #serh-sel-line-numbers) { background: #222629 !important; border-right-color: #4b5563 !important; color: #9ca3af !important; }
-    body.serh-dark-on :is(#serh-rules, #serh-sel-rules) { background: transparent !important; color: #f3f4f6 !important; }
-    body.serh-dark-on #serh-rules::placeholder { color: #6b7280 !important; }
-    body.serh-dark-on .serh-bracket-pair { background: rgba(96, 165, 250, 0.38); box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.75); }
-    body.serh-dark-on .serh-bracket-enclosing { background: rgba(148, 163, 184, 0.22); }
-    body.serh-dark-on #serh-stats-panel { background: #171717 !important; border-color: #374151 !important; }
-    body.serh-dark-on #serh-stats-content { color: #f3f4f6 !important; }
-    body.serh-dark-on #serh-stats-content :is(.serh-stats-title, .serh-stats-item) { color: #f3f4f6 !important; }
-    body.serh-dark-on #serh-panel .serh-compact-row button.serh-button {
-        height: auto !important; min-height: 0 !important; width: auto !important; min-width: 0 !important;
-        flex: 0 0 auto !important; line-height: normal !important; padding: 3px 8px !important;
-        font-size: 11px !important; margin: 0 !important;
-    }
-
-        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel, #serh-hlcolor-panel) h3 {
-            margin: 0 0 8px 0 !important; font-size: 14px !important; color: inherit !important;
-            font-weight: 600 !important; padding: 0 !important; border: none !important;
-            background: transparent !important; letter-spacing: normal !important;
-        }
-
-        #serh-hlcolor-panel h3 {
-            margin: 0 0 1px 0 !important; line-height: 1.2 !important;
-        }
-
-        #serh-selector-panel h3 {
-            margin: 0 !important; line-height: 1.2 !important;
-        }
-
-        #serh-webdav-panel .serh-webdav-row {
-            margin-bottom: 8px !important; padding: 0 !important;
-            border: none !important; background: transparent !important; display: block !important;
-        }
-
-        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel) label {
-            display: block !important; margin: 0 0 4px 0 !important; color: #4a5568 !important;
-            font-size: 12px !important; font-weight: normal !important; line-height: 1.2 !important;
-        }
-
-        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel) input[type="text"],
-        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel) input[type="password"] {
-            width: 100% !important; padding: 6px 8px !important; margin: 0 !important;
-            border: 1px solid #e2e8f0 !important; border-radius: 4px !important;
-            font-size: 13px !important; background: #ffffff !important; color: #2d3748 !important;
-            height: 30px !important; line-height: normal !important; box-shadow: none !important;
-            outline: none !important; display: block !important;
-        }
-
-        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel) input:focus {
-            border-color: #3182ce !important;
-        }
-
-        #serh-webdav-panel .serh-webdav-btn-group {
-            display: flex !important; gap: 8px !important; justify-content: flex-end !important; margin-top: 12px !important;
-        }
-
-        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel, #serh-hlcolor-panel) .serh-button,
-        :is(#serh-panel, #serh-selector-panel) .serh-action-button {
-            height: 30px !important; min-height: 30px !important; max-height: 30px !important; padding: 0 12px !important;
-            font-size: 13px !important; font-weight: 500 !important; box-sizing: border-box !important; margin: 0 !important;
-            display: flex !important; align-items: center !important; justify-content: center !important;
-            text-align: center !important; line-height: 1 !important; border: none !important; border-radius: 4px !important;
-            appearance: none !important; -webkit-appearance: none !important; box-shadow: none !important;
-            background-image: none !important;
-        }
-
-        #serh-webdav-panel .serh-button {
-            flex: 1 !important;
-        }
-
-    body.serh-dark-on .serh-window {
-        background: #171717 !important; color: #f3f4f6 !important; border-color: #374151 !important;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
-    }
-    body.serh-dark-on #serh-webdav-panel label,
-    body.serh-dark-on #serh-subscription-panel label,
-    body.serh-dark-on #serh-engine-sub-panel label,
-    body.serh-dark-on #serh-settings-panel label,
-    body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row label {
-        color: #9ca3af !important;
-    }
-    body.serh-dark-on #serh-webdav-panel input[type="text"],
-    body.serh-dark-on #serh-webdav-panel input[type="password"],
-    body.serh-dark-on #serh-subscription-panel input[type="text"],
-    body.serh-dark-on #serh-engine-sub-panel input[type="text"],
-    body.serh-dark-on #serh-settings-panel select,
-    body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row input {
-        background: #374151 !important; border-color: #4b5563 !important; color: #f3f4f6 !important;
-    }
-    body.serh-dark-on #serh-webdav-panel input:focus,
-    body.serh-dark-on #serh-subscription-panel input:focus,
-    body.serh-dark-on #serh-engine-sub-panel input:focus,
-    body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row input:focus {
-        border-color: #60a5fa !important;
-    }
-    body.serh-dark-on #serh-hlcolor-panel .serh-hlcolor-row .serh-hlcolor-preview,
-    body.serh-dark-on #serh-hlcolor-current-preview,
-    body.serh-dark-on #serh-hlcolor-sv-canvas,
-    body.serh-dark-on #serh-hlcolor-hue-canvas {
-        border-color: #4b5563 !important;
-    }
-
+        body.serh-dark-on #serh-panel .serh-compact-row span { color: #f3f4f6 !important; }
+        body.serh-dark-on #serh-rules::placeholder { color: #6b7280 !important; }
+        body.serh-dark-on #serh-stats-content { color: #f3f4f6 !important; }
+        body.serh-dark-on #serh-panel .serh-compact-row button.serh-button { height: auto !important; min-height: 0 !important; width: auto !important; min-width: 0 !important; flex: 0 0 auto !important; line-height: normal !important; padding: 3px 8px !important; font-size: 11px !important; margin: 0 !important; }
+        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel, #serh-hlcolor-panel) h3 { margin: 0 0 8px 0 !important; font-size: 14px !important; color: inherit !important; font-weight: 600 !important; padding: 0 !important; border: none !important; background: transparent !important; letter-spacing: normal !important; }
+        #serh-hlcolor-panel h3 { margin: 0 0 1px 0 !important; line-height: 1.2 !important; }
+        #serh-selector-panel h3 { margin: 0 !important; line-height: 1.2 !important; }
+        #serh-webdav-panel .serh-webdav-row { margin-bottom: 8px !important; padding: 0 !important; border: none !important; background: transparent !important; display: block !important; }
+        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel) label { display: block !important; margin: 0 0 4px 0 !important; color: var(--serh-label) !important; font-size: 12px !important; font-weight: normal !important; line-height: 1.2 !important; }
+        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel) input[type="text"], :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel) input[type="password"] { width: 100% !important; padding: 6px 8px !important; margin: 0 !important; border: 1px solid var(--serh-input-border) !important; border-radius: 4px !important; font-size: 13px !important; background: var(--serh-input-bg) !important; color: var(--serh-fg) !important; height: 30px !important; line-height: normal !important; box-shadow: none !important; outline: none !important; display: block !important; }
+        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel) input:focus { border-color: var(--serh-focus) !important; }
+        #serh-webdav-panel .serh-webdav-btn-group { display: flex !important; gap: 8px !important; justify-content: flex-end !important; margin-top: 12px !important; }
+        :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel, #serh-hlcolor-panel) .serh-button, :is(#serh-panel, #serh-selector-panel) .serh-action-button { height: 30px !important; min-height: 30px !important; max-height: 30px !important; padding: 0 12px !important; font-size: 13px !important; font-weight: 500 !important; box-sizing: border-box !important; margin: 0 !important; display: flex !important; align-items: center !important; justify-content: center !important; text-align: center !important; line-height: 1 !important; border: none !important; border-radius: 4px !important; appearance: none !important; -webkit-appearance: none !important; box-shadow: none !important; background-image: none !important; }
+        #serh-webdav-panel .serh-button { flex: 1 !important; }
+        body.serh-dark-on #serh-settings-panel label { color: #9ca3af !important; }
+        body.serh-dark-on #serh-settings-panel select { background: #374151 !important; border-color: #4b5563 !important; color: #f3f4f6 !important; }
         /* 渐变动画 */
-        .serh-panel-fade {
-            opacity: 0;
-            transform: translate(-50%, -48%);
-            transition: all 0.15s ease;
-            pointer-events: none;
-        }
-        .serh-panel-fade.show {
-            opacity: 1;
-            transform: translate(-50%, -50%);
-            pointer-events: auto;
-        }
-
-        .serh-window:not(.serh-panel-fade) {
-            transition: opacity 0.1s ease;
-        }
-
-        .serh-subscription-panel-header {
-            flex-shrink: 0;
-        }
-        .serh-subscription-panel-header h3 {
-            margin: 0 !important;
-        }
-        :is(#serh-subscription-rows-container, #serh-engine-sub-rows) {
-            flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
-            scrollbar-width: thin; padding-right: 2px;
-        }
+        .serh-panel-fade { opacity: 0; transform: translate(-50%, -48%); transition: all 0.15s ease; pointer-events: none; }
+        .serh-panel-fade.show { opacity: 1; transform: translate(-50%, -50%); pointer-events: auto; }
+        .serh-window:not(.serh-panel-fade) { transition: opacity 0.1s ease; }
+        .serh-subscription-panel-header { flex-shrink: 0; }
+        .serh-subscription-panel-header h3 { margin: 0 !important; }
+        :is(#serh-subscription-rows-container, #serh-engine-sub-rows) { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; padding-right: 2px; }
         :is(#serh-subscription-rows-container, #serh-engine-sub-rows)::-webkit-scrollbar { width: 6px; }
-        .serh-subscription-row {
-            display: flex;
-            flex-direction: column;
-            margin-bottom: 0;
-        }
-        .serh-subscription-meta-row {
-            display: flex; align-items: center; margin: 2px 0 2px 0; min-height: 14px;
-        }
-        .serh-subscription-index {
-            font-size: 12px; color: #4a5568; flex-shrink: 0; line-height: 1.2;
-        }
-        .serh-subscription-info {
-            font-size: 11px; color: #718096; white-space: nowrap; line-height: 1.2;
-            margin-left: auto; margin-right: 24px;
-        }
-        .serh-subscription-input-row {
-            display: flex; align-items: center; gap: 6px;
-        }
-        .serh-subscription-input-row .serh-subscription-toggle-switch {
-            width: 28px !important; height: 16px !important; margin: 0 !important; flex-shrink: 0 !important;
-        }
-        .serh-subscription-input-row input.serh-subscription-url {
-            flex: 1;
-            margin: 0;
-        }
-        .serh-subscription-row.serh-subscription-row-invalid input.serh-subscription-url {
-            border-color: #e53935 !important;
-            box-shadow: 0 0 0 1px rgba(229, 57, 53, 0.25) !important;
-        }
-        .serh-subscription-delete-btn {
-            background: none; border: none; font-size: 16px; cursor: pointer; color: #c53030;
-            padding: 0; width: 18px; line-height: 1; text-align: center; flex-shrink: 0; opacity: 0.7; transition: opacity 0.2s;
-        }
-        .serh-subscription-delete-btn:hover {
-            opacity: 1;
-        }
-        .serh-subscription-delete-btn:disabled {
-            color: #a0aec0; cursor: not-allowed; opacity: 0.5;
-        }
-        .serh-subscription-input-row input.serh-subscription-url[readonly] {
-            color: #718096 !important; background: #f7fafc !important;
-        }
-        .serh-subscription-status-message {
-            font-size: 11px; color: #4a5568; margin-left: 8px; line-height: 1.2; white-space: nowrap;
-            overflow: hidden; text-overflow: ellipsis;
-        }
-        .serh-subscription-status-message.success {
-            color: #276749;
-        }
-        .serh-subscription-status-message.error {
-            color: #c53030;
-        }
-        .serh-subscription-btn-group {
-            display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; flex-shrink: 0;
-        }
-        .serh-subscription-btn-group .serh-button {
-            flex: 1 !important;
-        }
-    body.serh-dark-on :is(.serh-subscription-index, .serh-subscription-info) { color: #9ca3af; }
-    body.serh-dark-on .serh-subscription-input-row input.serh-subscription-url[readonly] { color: #9ca3af !important; background: #2d3748 !important; }
-
+        .serh-subscription-row { display: flex; flex-direction: column; margin-bottom: 0; }
+        .serh-subscription-meta-row { display: flex; align-items: center; margin: 2px 0 2px 0; min-height: 14px; }
+        .serh-subscription-index { font-size: 12px; color: var(--serh-label); flex-shrink: 0; line-height: 1.2; }
+        .serh-subscription-info { font-size: 11px; color: var(--serh-faint); white-space: nowrap; line-height: 1.2; margin-left: auto; margin-right: 24px; }
+        .serh-subscription-input-row { display: flex; align-items: center; gap: 6px; }
+        .serh-subscription-input-row .serh-subscription-toggle-switch { width: 28px !important; height: 16px !important; margin: 0 !important; flex-shrink: 0 !important; }
+        .serh-subscription-input-row input.serh-subscription-url { flex: 1; margin: 0; }
+        .serh-subscription-row.serh-subscription-row-invalid input.serh-subscription-url { border-color: #e53935 !important; box-shadow: 0 0 0 1px rgba(229, 57, 53, 0.25) !important; }
+        .serh-subscription-delete-btn { background: none; border: none; font-size: 16px; cursor: pointer; color: #c53030; padding: 0; width: 18px; line-height: 1; text-align: center; flex-shrink: 0; opacity: 0.7; transition: opacity 0.2s; }
+        .serh-subscription-delete-btn:hover { opacity: 1; }
+        .serh-subscription-delete-btn:disabled { color: #a0aec0; cursor: not-allowed; opacity: 0.5; }
+        .serh-subscription-input-row input.serh-subscription-url[readonly] { color: var(--serh-faint) !important; background: var(--serh-readonly-bg) !important; }
+        .serh-subscription-status-message { font-size: 11px; color: #4a5568; margin-left: 8px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .serh-subscription-status-message.success { color: #276749; }
+        .serh-subscription-status-message.error { color: #c53030; }
+        .serh-subscription-btn-group { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; flex-shrink: 0; }
+        .serh-subscription-btn-group .serh-button { flex: 1 !important; }
         /* 屏蔽灰底 */
-        .serh-blocked-visible,
-        .g.serh-blocked-visible,
-        .MjjYud.serh-blocked-visible {
-            background-color: #d1d5db !important; border-radius: 8px !important; padding: 8px !important;
-            transition: background 0.2s;
-        }
-
-    body.serh-dark-on .serh-blocked-visible,
-    body.serh-dark-on .g.serh-blocked-visible,
-    body.serh-dark-on .MjjYud.serh-blocked-visible {
-        background-color: #374151 !important;
-    }
-
-        .serh-blocked-visible div,
-        .serh-blocked-visible .yuRUbf,
-        .serh-blocked-visible div[data-sokoban-container],
-        .serh-blocked-visible div[data-snc] {
-            background-color: transparent !important; background: transparent !important; background-image: none !important;
-        }
-
-        .serh-bubble-number {
-            color: #000000 !important;
-            line-height: 1 !important;
-        }
-
-    body.serh-dark-on #serh-status {
-        color: #a8c7fa !important;
-    }
-    body.serh-dark-on .serh-bubble-number {
-        color: #ffffff !important;
-    }
-
-        .serh-matched-rule {
-            position: absolute; top: 2px; left: 50%; transform: translateX(-50%);
-            max-width: calc(100% - 70px); background: rgba(0, 0, 0, 0.2); color: #000000;
-            font-size: 12px; padding: 2px 8px; border-radius: 4px; white-space: nowrap;
-            overflow: hidden; text-overflow: ellipsis; z-index: 98; pointer-events: none;
-            font-family: monospace; backdrop-filter: blur(2px);
-            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-        }
-    body.serh-dark-on .serh-matched-rule {
-        background: rgba(0, 160, 0, 0.9);
-        color: #fff;
-    }
-
+        .serh-blocked-visible, .g.serh-blocked-visible, .MjjYud.serh-blocked-visible { background-color: var(--serh-blocked-bg) !important; border-radius: 8px !important; padding: 8px !important; transition: background 0.2s; }
+        .serh-blocked-visible div, .serh-blocked-visible .yuRUbf, .serh-blocked-visible div[data-sokoban-container], .serh-blocked-visible div[data-snc] { background-color: transparent !important; background: transparent !important; background-image: none !important; }
+        .serh-bubble-number { color: var(--serh-bubble-number) !important; line-height: 1 !important; }
+        .serh-matched-rule { position: absolute; top: 2px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 70px); background: var(--serh-matched-bg); color: var(--serh-matched-fg); font-size: 12px; padding: 2px 8px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; z-index: 98; pointer-events: none; font-family: monospace; backdrop-filter: blur(2px); box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
         /* 高亮 */
-        #serh-hlcolor-panel .serh-hlcolor-row {
-            margin-bottom: 2px !important; padding: 0 !important; border: none !important;
-            background: transparent !important; display: flex !important; align-items: center !important; gap: 4px !important;
-            height: auto !important; min-height: 0 !important; max-height: none !important;
-        }
-        #serh-hlcolor-panel .serh-hlcolor-row label {
-            min-width: 20px !important; font-size: 12px !important; color: #4a5568 !important;
-            font-weight: 600 !important; margin: 0 !important; line-height: 1.2 !important;
-            padding: 0 !important; border: none !important; background: transparent !important;
-            height: auto !important; min-height: 0 !important; max-height: none !important;
-            display: block !important; box-sizing: border-box !important;
-        }
-        #serh-hlcolor-panel .serh-hlcolor-row .serh-hlcolor-preview {
-            width: 12px !important; height: 12px !important; border-radius: 2px !important;
-            border: 1px solid #e2e8f0 !important; flex-shrink: 0 !important; cursor: pointer !important;
-            margin: 0 !important; padding: 0 !important; box-sizing: border-box !important;
-            min-height: 0 !important; max-height: none !important;
-        }
-        #serh-hlcolor-panel .serh-hlcolor-row input {
-            width: 70px !important; flex: none !important; padding: 2px 4px !important; margin: 0 !important;
-            border: 1px solid #e2e8f0 !important; border-radius: 3px !important; font-size: 11px !important;
-            font-family: 'Consolas', monospace !important; background: #ffffff !important; color: #2d3748 !important;
-            height: 20px !important; line-height: normal !important; box-shadow: none !important; outline: none !important;
-            display: block !important; font-weight: normal !important; box-sizing: border-box !important;
-            min-width: 0 !important; max-width: none !important; min-height: 0 !important; max-height: none !important;
-            transform: none !important; appearance: none !important; -webkit-appearance: none !important;
-        }
-        #serh-hlcolor-panel .serh-hlcolor-row input:focus {
-            border-color: #3182ce !important;
-        }
-        #serh-hlcolor-panel .serh-hlcolor-picker-wrapper {
-            display: flex !important; align-items: stretch !important; margin: 0 !important;
-        }
-        #serh-hlcolor-sv-canvas, #serh-hlcolor-hue-canvas {
-            cursor: crosshair !important; border-radius: 3px !important; border: 1px solid #e2e8f0 !important;
-        }
-        #serh-hlcolor-sv-dot, #serh-hlcolor-hue-dot {
-            position: absolute !important; pointer-events: none !important; transform: translate(-50%, -50%) !important;
-            border: 2px solid #ffffff !important; box-shadow: 0 0 3px rgba(0,0,0,0.55) !important; box-sizing: border-box !important; z-index: 2 !important;
-        }
+        #serh-hlcolor-panel .serh-hlcolor-row { margin-bottom: 2px !important; padding: 0 !important; border: none !important; background: transparent !important; display: flex !important; align-items: center !important; gap: 4px !important; height: auto !important; min-height: 0 !important; max-height: none !important; }
+        #serh-hlcolor-panel .serh-hlcolor-row label { min-width: 20px !important; font-size: 12px !important; color: var(--serh-label) !important; font-weight: 600 !important; margin: 0 !important; line-height: 1.2 !important; padding: 0 !important; border: none !important; background: transparent !important; height: auto !important; min-height: 0 !important; max-height: none !important; display: block !important; box-sizing: border-box !important; }
+        #serh-hlcolor-panel .serh-hlcolor-row .serh-hlcolor-preview { width: 12px !important; height: 12px !important; border-radius: 2px !important; border: 1px solid var(--serh-input-border) !important; flex-shrink: 0 !important; cursor: pointer !important; margin: 0 !important; padding: 0 !important; box-sizing: border-box !important; min-height: 0 !important; max-height: none !important; }
+        #serh-hlcolor-panel .serh-hlcolor-row input { width: 70px !important; flex: none !important; padding: 2px 4px !important; margin: 0 !important; border: 1px solid var(--serh-input-border) !important; border-radius: 3px !important; font-size: 11px !important; font-family: 'Consolas', monospace !important; background: var(--serh-input-bg) !important; color: var(--serh-fg) !important; height: 20px !important; line-height: normal !important; box-shadow: none !important; outline: none !important; display: block !important; font-weight: normal !important; box-sizing: border-box !important; min-width: 0 !important; max-width: none !important; min-height: 0 !important; max-height: none !important; transform: none !important; appearance: none !important; -webkit-appearance: none !important; }
+        #serh-hlcolor-panel .serh-hlcolor-row input:focus { border-color: var(--serh-focus) !important; }
+        #serh-hlcolor-panel .serh-hlcolor-picker-wrapper { display: flex !important; align-items: stretch !important; margin: 0 !important; }
+        #serh-hlcolor-sv-canvas, #serh-hlcolor-hue-canvas { cursor: crosshair !important; border-radius: 3px !important; border: 1px solid var(--serh-input-border) !important; }
+        #serh-hlcolor-sv-dot, #serh-hlcolor-hue-dot { position: absolute !important; pointer-events: none !important; transform: translate(-50%, -50%) !important; border: 2px solid #ffffff !important; box-shadow: 0 0 3px rgba(0,0,0,0.55) !important; box-sizing: border-box !important; z-index: 2 !important; }
         #serh-hlcolor-sv-dot { width: 13px !important; height: 13px !important; border-radius: 50% !important; }
         #serh-hlcolor-hue-dot { width: 30px !important; height: 6px !important; border-radius: 3px !important; }
-        #serh-hlcolor-current-preview {
-            flex-shrink: 0 !important;
-            margin: 0 !important; padding: 0 !important; box-sizing: border-box !important;
-            min-height: 0 !important; max-height: none !important;
-        }
-        #serh-hlcolor-code-text {
-            display: flex !important; align-items: center !important; justify-content: center !important;
-            width: 70px !important; height: 20px !important; flex: none !important;
-            margin: 0 !important; padding: 2px 4px !important; box-sizing: border-box !important;
-            border: 1px solid #e2e8f0 !important; border-radius: 3px !important;
-            background: #f7fafc !important; color: #2d3748 !important;
-            font-size: 11px !important; font-family: 'Consolas', monospace !important; font-weight: normal !important;
-            line-height: normal !important; min-height: 0 !important; max-height: none !important;
-            min-width: 0 !important; overflow: hidden !important; white-space: nowrap !important;
-        }
-
+        #serh-hlcolor-current-preview { flex-shrink: 0 !important; margin: 0 !important; padding: 0 !important; box-sizing: border-box !important; min-height: 0 !important; max-height: none !important; }
+        #serh-hlcolor-code-text { display: flex !important; align-items: center !important; justify-content: center !important; width: 70px !important; height: 20px !important; flex: none !important; margin: 0 !important; padding: 2px 4px !important; box-sizing: border-box !important; border: 1px solid var(--serh-input-border) !important; border-radius: 3px !important; background: var(--serh-code-bg) !important; color: var(--serh-fg) !important; font-size: 11px !important; font-family: 'Consolas', monospace !important; font-weight: normal !important; line-height: normal !important; min-height: 0 !important; max-height: none !important; min-width: 0 !important; overflow: hidden !important; white-space: nowrap !important; }
         /* 开关 */
-        .serh-switch {
-            position: relative !important; display: inline-block !important; width: 28px !important; height: 16px !important;
-            margin: 0 6px 0 0 !important; padding: 0 !important; flex-shrink: 0 !important;
-            border: none !important; box-shadow: none !important; background: transparent !important;
-            min-width: 0 !important; max-width: none !important; min-height: 0 !important; max-height: none !important;
-            box-sizing: border-box !important;
-        }
-
-        .serh-switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-            position: absolute;
-        }
-
-        .serh-slider {
-            position: absolute !important; cursor: pointer !important;
-            top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
-            background-color: #cbd5e0 !important; transition: .2s !important; border-radius: 16px !important;
-            border: none !important; box-shadow: none !important; margin: 0 !important; padding: 0 !important;
-            box-sizing: border-box !important;
-        }
-
-        .serh-slider:before {
-            position: absolute !important; content: "" !important; height: 12px !important; width: 12px !important;
-            left: 2px !important; bottom: 2px !important; top: auto !important; right: auto !important;
-            background-color: #ffffff !important; transition: .2s !important; border-radius: 50% !important;
-            border: none !important; box-shadow: none !important; margin: 0 !important; padding: 0 !important;
-            box-sizing: border-box !important; transform: none !important;
-        }
-
-        .serh-switch input:checked + .serh-slider {
-            background-color: #2c5282 !important;
-        }
-
-        .serh-switch input:checked + .serh-slider:before {
-            transform: translateX(12px) !important;
-        }
-
-    body.serh-dark-on .serh-slider {
-        background-color: #4b5563 !important;
-    }
-    body.serh-dark-on .serh-switch input:checked + .serh-slider {
-        background-color: #2c5282 !important;
-    }
-
-        #serh-bubble-size-slider {
-            flex: 1 1 0% !important; margin: 0 0 0 5px !important;
-            height: 4px !important; min-height: 0 !important; max-height: none !important;
-            width: auto !important; min-width: 0 !important; max-width: none !important;
-            padding: 0 !important; border: none !important; border-radius: 2px !important;
-            background: #cbd5e0 !important; outline: none !important; box-shadow: none !important;
-            appearance: none !important; -webkit-appearance: none !important; -moz-appearance: none !important;
-            cursor: pointer !important; transform: none !important; vertical-align: middle !important;
-        }
-        #serh-bubble-size-slider::-webkit-slider-thumb {
-            -webkit-appearance: none !important; width: 14px !important; height: 14px !important; border-radius: 50% !important;
-            background: #2c5282 !important; cursor: pointer !important; border: none !important;
-        }
-        #serh-bubble-size-slider::-moz-range-thumb {
-            width: 14px !important; height: 14px !important; border-radius: 50% !important; background: #2c5282 !important;
-            cursor: pointer !important; border: none !important;
-        }
-
-        #serh-toast-container {
-            position: fixed; top: 15px; right: 15px; z-index: 2147483647; display: flex;
-            flex-direction: column; align-items: stretch; gap: 8px; pointer-events: none;
-            max-width: min(320px, calc(100vw - 16px));
-        }
-
-        .serh-toast {
-            pointer-events: auto; box-sizing: border-box; background: #ffffff;
-            border: 1px solid #e2e8f0; border-left: 3px solid #2c5282; border-radius: 6px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.12); color: #2d3748; font-size: 12px;
-            line-height: 1.4; padding: 8px 12px; word-break: break-all; cursor: pointer;
-            opacity: 0; transform: translateY(8px);
-            transition: opacity 0.25s ease, transform 0.25s ease;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
-
-        .serh-toast.show {
-            opacity: 1;
-            transform: translateY(0);
-        }
-
-    body.serh-dark-on .serh-toast {
-        background: #171717 !important; color: #f3f4f6 !important;
-        border-top-color: #374151; border-right-color: #374151; border-bottom-color: #374151;
-    }
-
-        .serh-toast-success { border-left-color: #276749; }
-        .serh-toast-error { border-left-color: #c53030; }
-        .serh-toast-info { border-left-color: #2c5282; }
-    `);
+        .serh-switch { position: relative !important; display: inline-block !important; width: 28px !important; height: 16px !important; margin: 0 6px 0 0 !important; padding: 0 !important; flex-shrink: 0 !important; border: none !important; box-shadow: none !important; background: transparent !important; min-width: 0 !important; max-width: none !important; min-height: 0 !important; max-height: none !important; box-sizing: border-box !important; }
+        .serh-slider { position: absolute !important; cursor: pointer !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; background-color: var(--serh-switch-off) !important; transition: .2s !important; border-radius: 16px !important; border: none !important; box-shadow: none !important; margin: 0 !important; padding: 0 !important; box-sizing: border-box !important; }
+        .serh-slider:before { position: absolute !important; content: "" !important; height: 12px !important; width: 12px !important; left: 2px !important; bottom: 2px !important; top: auto !important; right: auto !important; background-color: #ffffff !important; transition: .2s !important; border-radius: 50% !important; border: none !important; box-shadow: none !important; margin: 0 !important; padding: 0 !important; box-sizing: border-box !important; transform: none !important; }
+        .serh-switch input:checked + .serh-slider { background-color: var(--serh-accent) !important; }
+        .serh-switch input:checked + .serh-slider:before { transform: translateX(12px) !important; }
+        #serh-bubble-size-slider { flex: 1 1 0% !important; margin: 0 0 0 5px !important; height: 4px !important; min-height: 0 !important; max-height: none !important; width: auto !important; min-width: 0 !important; max-width: none !important; padding: 0 !important; border: none !important; border-radius: 2px !important; background: #cbd5e0 !important; outline: none !important; box-shadow: none !important; appearance: none !important; -webkit-appearance: none !important; -moz-appearance: none !important; cursor: pointer !important; transform: none !important; vertical-align: middle !important; }
+        #serh-bubble-size-slider::-webkit-slider-thumb { -webkit-appearance: none !important; width: 14px !important; height: 14px !important; border-radius: 50% !important; background: var(--serh-accent) !important; cursor: pointer !important; border: none !important; }
+        #serh-bubble-size-slider::-moz-range-thumb { width: 14px !important; height: 14px !important; border-radius: 50% !important; background: var(--serh-accent) !important; cursor: pointer !important; border: none !important; }
+        #serh-toast-container { position: fixed; top: 15px; right: 15px; z-index: 2147483647; display: flex; flex-direction: column; align-items: stretch; gap: 8px; pointer-events: none; max-width: min(320px, calc(100vw - 16px)); }
+        .serh-toast { pointer-events: auto; box-sizing: border-box; background: var(--serh-toast-bg); border: 1px solid var(--serh-border); border-left: 3px solid var(--serh-accent); border-radius: 6px; box-shadow: var(--serh-toast-shadow); color: var(--serh-fg); font-size: 12px; line-height: 1.4; padding: 8px 12px; word-break: break-all; cursor: pointer; opacity: 0; transform: translateY(8px); transition: opacity 0.25s ease, transform 0.25s ease; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        .serh-toast.show { opacity: 1; transform: translateY(0); }
+        .serh-toast-success { border-left-color: var(--serh-success); }
+        .serh-toast-error { border-left-color: var(--serh-danger); }
+        .serh-toast-info { border-left-color: var(--serh-accent); }`);
   }
 
   function injectGlobalStyles() {
@@ -4081,7 +3692,7 @@
 
   function applyBubbleStyle(element) {
     element.style.cssText = `
-            position: fixed; background: transparent; color: #2c5282; border-radius: 4px;
+            position: fixed; background: transparent; color: var(--serh-bubble); border-radius: 4px;
             z-index: 10000; cursor: grab; font-weight: bold; user-select: none;
             transition: opacity 0.2s, text-shadow 0.2s, transform 0.2s; opacity: 0.8;
             font-family: Arial, sans-serif; text-align: center; box-sizing: border-box;
@@ -4322,8 +3933,8 @@
 
   function persistConfig(updateModifiedTime = false) {
     const previous = normalizeConfig(GM_getValue(CONFIG_KEY, getDefaultConfig()));
-    const rulesChanged = updateModifiedTime && JSON.stringify(previous.rules) !== JSON.stringify(currentConfig.rules);
-    const settingsChanged = updateModifiedTime && !selectorsEqual(getSyncSettings(previous), getSyncSettings(currentConfig));
+    const rulesChanged = JSON.stringify(previous.rules) !== JSON.stringify(currentConfig.rules);
+    const settingsChanged = !selectorsEqual(getSyncSettings(previous), getSyncSettings(currentConfig));
     GM_setValue(CONFIG_KEY, currentConfig);
     if (updateModifiedTime) {
       if (rulesChanged) markLocalModifiedTime(); if (settingsChanged) markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY);
@@ -4331,6 +3942,7 @@
         triggerWebDAVSyncDelayed(5000);
       }
     }
+    return { rulesChanged, settingsChanged };
   }
 
   function markLocalModifiedTime(key = LOCAL_LAST_MODIFIED_KEY) {
@@ -4635,10 +4247,9 @@
         document.removeEventListener('pointerdown', _panelPressHandler); document.removeEventListener('mousedown', _panelPressHandler); _panelPressHandler = null;
       }
     };
-    clearPanelCloseTimers();
-
-    const opened = openPanel('serh-panel', { bindClose: false, onExisting: () => clearPanelCloseTimers() });
+    const opened = openPanel('serh-panel', { bindClose: false });
     if (!opened) return;
+    clearPanelCloseTimers();
     const { panel } = opened; panel._initialRules = Array.isArray(currentConfig.rules) ? [...currentConfig.rules] : [];
     const initialSize = getBubbleSize();
     panel.innerHTML = `
@@ -4824,15 +4435,12 @@
     const baseRules = (panel && Array.isArray(panel._initialRules)) ? panel._initialRules : (Array.isArray(currentConfig.rules) ? currentConfig.rules : []);
     const rulesChanged = JSON.stringify(baseRules) !== JSON.stringify(userRules);
     adoptStoredConfigBeforeWrite();
-    const initialKeySet = new Set(baseRules.map(getRuleKey)); const userKeySet = new Set(userRules.map(getRuleKey));
-    const backgroundNewRules = (Array.isArray(currentConfig.rules) ? currentConfig.rules : []).filter(r => {
-      const k = getRuleKey(r); return k && !initialKeySet.has(k) && !userKeySet.has(k);
-    });
-    const finalRules = backgroundNewRules.length > 0 ? [...userRules, ...backgroundNewRules] : userRules;
+    const storedRules = Array.isArray(currentConfig.rules) ? currentConfig.rules : [];
+    const finalRules = JSON.stringify(baseRules) === JSON.stringify(storedRules) ? userRules : mergeRules3Way(baseRules, userRules, storedRules, true);
 
     currentConfig.rules = finalRules;
     persistConfig(rulesChanged);
-    if (panel) panel._initialRules = [...finalRules]; if (backgroundNewRules.length > 0) syncRulesTextarea();
+    if (panel) panel._initialRules = [...finalRules]; if (JSON.stringify(userRules) !== JSON.stringify(finalRules)) syncRulesTextarea();
     if (showHiddenResults) {
       showHiddenResults = false;
       if (currentConfig.collapseMode !== true) {
@@ -5209,10 +4817,12 @@
   }
 
   function regexSourceToLiteralText(source) {
-    let out = '';
+    let out = ''; let inClass = false;
     for (let i = 0; i < source.length; i++) {
       const ch = source[i];
       if (ch === '\\') { out += ch + (source[i + 1] || ''); i++; continue; }
+      if (inClass) { if (ch === ']') inClass = false; out += ch; continue; }
+      if (ch === '[') inClass = true;
       if (ch === '/') out += '\\/'; else out += ch;
     }
     return out;
@@ -5239,7 +4849,7 @@
         `  links: ${links},\n` +
         `  extraElements: [${(def.extraElements || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
         (def.button !== undefined ? `  button: ${def.button !== false},\n` : '') +
-        (disabled ? `  disabled: true,\n` : '') +
+        (disabled ? `  disabled: true,\n` : (def.disabled === false ? `  disabled: false,\n` : '')) +
         `}`;
     };
     for (const key of Object.keys(merged)) {
@@ -5370,12 +4980,11 @@
       if (rest.disable !== undefined) {
         if (rest.disabled === undefined) rest.disabled = rest.disable; delete rest.disable;
       }
-      if (rest.disabled === true) {
-        const diff = diffSelectorDefFields(rest, builtin); diff.disabled = true; out[key] = diff; continue;
-      }
-      if (rest.disabled === false && Object.keys(rest).every(k => k === 'disabled')) continue;
       if (!builtin) { out[key] = rest; continue; }
-      const diff = diffSelectorDefFields(rest, builtin); if (Object.keys(diff).length > 0) out[key] = diff;
+      const diff = diffSelectorDefFields(rest, builtin); const hasContent = Object.keys(rest).some(k => k !== 'disabled');
+      if (rest.disabled === true) { if (builtin.disabled !== true || Object.keys(diff).length) diff.disabled = true; }
+      else if (builtin.disabled === true && (rest.disabled === false || hasContent)) diff.disabled = false;
+      if (Object.keys(diff).length > 0) out[key] = diff;
     }
     return out;
   }
@@ -5698,12 +5307,13 @@
   }
 
   function getSubscriptionSyncSnapshot() {
-    const raw = GM_getValue(SUBSCRIPTION_SYNC_SNAPSHOT_KEY, null); return Array.isArray(raw) ? raw : null;
+    const raw = GM_getValue(SUBSCRIPTION_SYNC_SNAPSHOT_KEY, null);
+    return raw && !Array.isArray(raw) && raw.target === webdavTargetId(loadWebDAVConfig()) && Array.isArray(raw.subs) ? raw.subs : null;
   }
 
-  function setSubscriptionSyncSnapshot(subs) {
+  function setSubscriptionSyncSnapshot(subs, config = null) {
     if (!Array.isArray(subs)) return;
-    GM_setValue(SUBSCRIPTION_SYNC_SNAPSHOT_KEY, subs.map(s => ({ url: s.url, name: s.name, enabled: s.enabled !== false })));
+    GM_setValue(SUBSCRIPTION_SYNC_SNAPSHOT_KEY, { target: webdavTargetId(config || loadWebDAVConfig()), subs: subs.map(s => ({ url: s.url, name: s.name, enabled: s.enabled !== false })) });
   }
 
   function applyCloudSubscriptions(cloudSubs, preferLocal = false) {
@@ -5978,6 +5588,18 @@
       return { index, line };
     };
     const localMeta = sideMeta(localRows); const cloudMeta = sideMeta(cloudRows); const lineOf = (meta, key) => (meta.line.has(key) ? meta.line.get(key) : null);
+    const lineSim = (a, b) => {
+      a = String(a || '').toLowerCase(); b = String(b || '').toLowerCase(); if (!a || !b) return 0;
+      let p = 0; while (p < a.length && p < b.length && a[p] === b[p]) p++;
+      let s = 0; while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+      return (p * 2 + s) / (a.length + b.length);
+    };
+    const bestRow = (rows, slotKey) => {
+      const baseLine = baseIndex.has(slotKey) ? baseRows[baseIndex.get(slotKey)].line : '';
+      let best = rows[0]; let score = -1;
+      for (const row of rows) { const v = lineSim(row.line, baseLine); if (v > score) { score = v; best = row; } }
+      return best;
+    };
     const deleted = (key) => {
       if (!localDeleted.has(key) && !cloudDeleted.has(key)) return false;
       const baseLine = baseIndex.has(key) ? baseRows[baseIndex.get(key)].line : ''; const localLine = lineOf(localMeta, key); const cloudLine = lineOf(cloudMeta, key);
@@ -6023,12 +5645,17 @@
     const srcOf = (rows, gone) => {
       const map = new Map(); let run = []; let lo = -1;
       const flush = (hi) => {
+        if (!run.length) return;
         const cand = []; for (const [bk, bi] of baseIndex) if (bi > lo && bi < hi && gone.has(bk)) cand.push(bk);
         cand.sort((a, b) => baseIndex.get(a) - baseIndex.get(b));
         const both = cand.filter(bk => localDeleted.has(bk) && cloudDeleted.has(bk));
-        if (cand.length === 1) run.forEach(row => map.set(row.key, cand[0]));
-        else if (cand.length !== run.length && both.length === 1) run.forEach(row => map.set(row.key, both[0]));
-        else for (let i = 0; i < run.length && i < cand.length; i++) map.set(run[i].key, cand[i]);
+        if (cand.length === 1) {
+          const best = bestRow(run, cand[0]); map.set(best.key, cand[0]);
+          run.forEach(row => { if (row !== best) noteInsert(row.key, cand[0]); });
+        } else if (cand.length !== run.length && both.length === 1) {
+          const best = bestRow(run, both[0]); map.set(best.key, both[0]);
+          run.forEach(row => { if (row !== best) noteInsert(row.key, both[0]); });
+        } else for (let i = 0; i < run.length && i < cand.length; i++) map.set(run[i].key, cand[i]);
         run = [];
       };
       rows.forEach(row => {
@@ -6038,10 +5665,12 @@
       flush(baseRows.length); return map;
     };
     const localSrc = srcOf(localRows, localDeleted); const cloudSrc = srcOf(cloudRows, cloudDeleted);
-    const groupBySrc = (srcMap) => {
-      const groups = new Map(); srcMap.forEach((bk, key) => { if (!groups.has(bk)) groups.set(bk, []); groups.get(bk).push(key); }); return groups;
+    const sharedKeys = [...localKeys].filter(k => cloudKeys.has(k));
+    for (const k of sharedKeys) { const lb = localSrc.get(k); const cb = cloudSrc.get(k); if (lb !== undefined && cb === undefined) cloudSrc.set(k, lb); else if (cb !== undefined && lb === undefined) localSrc.set(k, cb); }
+    const groupBySrc = (srcMap, rows) => {
+      const groups = new Map(); rows.forEach(row => { const bk = srcMap.get(row.key); if (bk === undefined) return; if (!groups.has(bk)) groups.set(bk, []); const arr = groups.get(bk); if (arr.indexOf(row.key) === -1) arr.push(row.key); }); return groups;
     };
-    const localGroups = groupBySrc(localSrc); const cloudGroups = groupBySrc(cloudSrc); const mappedKeys = new Set([...localSrc.keys(), ...cloudSrc.keys()]);
+    const localGroups = groupBySrc(localSrc, localRows); const cloudGroups = groupBySrc(cloudSrc, cloudRows); const mappedKeys = new Set([...localSrc.keys(), ...cloudSrc.keys()]);
     const pickedByBase = new Map();
     const pickGroup = (bk) => {
       const localKeys = localGroups.get(bk) || []; const cloudKeys = cloudGroups.get(bk) || [];
@@ -6080,7 +5709,9 @@
       if (picked) { picked.forEach(emit); seen.add(key); } else emit(key);
       emitPending(key);
     });
-    emitPending(END); for (const key of place.keys()) emit(key); baseRows.forEach((row) => emit(row.key)); return result;
+    emitPending(END); for (const key of place.keys()) emit(key); baseRows.forEach((row) => emit(row.key)); for (const key of sharedKeys) emit(key);
+    for (const row of [...localRows, ...cloudRows]) if (!baseIndex.has(row.key) && !deleted(row.key) && !mappedKeys.has(row.key) && !seen.has(row.key)) emit(row.key);
+    return result;
   }
 
   function buildSyncPayload(settingsModifiedAt = getSettingsModifiedTime()) {
@@ -6171,10 +5802,12 @@
   function isNonRuleTextResponse(restLines, hasHeader = false, allowCommentOnly = false) {
     const lines = (Array.isArray(restLines) ? restLines : [])
       .map((l) => String(l || '').trim())
-      .filter((l) => l.length > 0); if (lines.length === 0) return false; if (lines.some((l) => /<\s*\/?\s*(?:!doctype|html|head|body)\b/i.test(l))) return true;
+      .filter((l) => l.length > 0); if (lines.length === 0) return false;
+    const ruleLines = lines.filter((l) => !l.startsWith('#')); const htmlLike = (l, headOnly) => (headOnly ? /<\s*\/?\s*(?:!doctype|html|head|body)\b/i : /<\s*\/?\s*[a-z!?][^>\n]*>/i).test(l) && !validateRule(l);
+    if (ruleLines.some((l) => htmlLike(l, true))) return true;
     const ruleLike = (l) => /^[\x21-\x7E]+$/.test(l) || /[:@|./]/.test(l) || looksLikeCondExpr(l);
-    const ruleLines = lines.filter((l) => !l.startsWith('#')); if (ruleLines.some((l) => ruleLike(l) && validateRule(l))) return false; if (lines.some((l) => /<\s*\/?\s*[a-z!?][^>\n]*>/i.test(l))) return true;
-    if (ruleLines.length === 0) return allowCommentOnly ? false : !hasHeader; return !hasHeader ? true : !ruleLines.some((l) => ruleLike(l) && validateRule(l.trim()));
+    if (ruleLines.some((l) => ruleLike(l) && validateRule(l))) return false; if (ruleLines.some((l) => htmlLike(l, false))) return true;
+    if (ruleLines.length === 0) return allowCommentOnly ? false : !hasHeader; return true;
   }
 
   function safeBase64Encode(str) {
@@ -6304,7 +5937,7 @@
 
   // yaml解析
   function extractYamlRuleItems(lines) {
-    let hasSection = false; let inSection = false; let sectionKind = ''; let sectionIndent = -1; let name; const items = [];
+    let hasSection = false; let inSection = false; let sectionKind = ''; let sectionIndent = -1; let name; const items = []; const sectionStack = [];
     const stripQ = (raw) => {
       const s = raw.trim();
       if (s.startsWith("'")) {
@@ -6338,7 +5971,8 @@
     };
     const flowCloseAt = (from) => {
       for (let j = from; j < lines.length; j++) {
-        const m = stripLineComment(lines[j]).match(/^(.*)\]\s*$/);
+        const stripped = stripLineComment(lines[j]); if (/^[a-zA-Z0-9_]+\s*:/.test(stripped)) continue;
+        const m = stripped.match(/^(.*)\]\s*$/);
         if (m) return { line: j, prefix: m[1].trim() };
       }
       return null;
@@ -6437,7 +6071,10 @@
       }
       const match = listKeyOf(line);
       if (match) {
-        hasSection = true; inSection = true; sectionKind = match.key; sectionIndent = match.indent;
+        hasSection = true;
+        while (sectionStack.length && sectionStack[sectionStack.length - 1].indent >= match.indent) sectionStack.pop();
+        sectionStack.push({ kind: match.key, indent: match.indent });
+        inSection = true; sectionKind = match.key; sectionIndent = match.indent;
         if (match.block) {
           let j = idx + 1; const blockLines = [];
           for (; j < lines.length; j++) {
@@ -6464,12 +6101,12 @@
         continue;
       }
       const s = line.trim(); if (!s || s.startsWith('#')) continue;
-      if (s.startsWith('[')) { const end = pushFlowSeq(stripLineComment(s), idx, sectionKind); if (end !== -1) { idx = end; continue; } }
 
       const currentIndent = line.search(/\S/); const isListItem = s.startsWith('-');
-      if (!isListItem && (currentIndent <= sectionIndent || (sectionIndent === 0 && currentIndent === 0))) {
-        inSection = false; sectionKind = ''; sectionIndent = -1; idx--; continue;
-      }
+      while (sectionStack.length && sectionStack[sectionStack.length - 1].indent >= currentIndent + (isListItem ? 1 : 0)) sectionStack.pop();
+      if (!sectionStack.length) { inSection = false; sectionKind = ''; sectionIndent = -1; idx--; continue; }
+      sectionKind = sectionStack[sectionStack.length - 1].kind; sectionIndent = sectionStack[sectionStack.length - 1].indent;
+      if (s.startsWith('[')) { const end = pushFlowSeq(stripLineComment(s), idx, sectionKind); if (end !== -1) { idx = end; continue; } }
 
       if (/^-\s+/.test(s)) {
         let rawItem = s.replace(/^-\s+/, '').trim();
@@ -6602,64 +6239,94 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     return { success: true, count };
   }
 
-  function showSubscriptionPanel() {
+  const SUBSCRIPTION_PANEL_SPECS = {
+    rules: {
+      panelId: 'serh-subscription-panel', rowsId: 'serh-subscription-rows-container',
+      titleKey: 'panelTitle', importKey: 'save', urlPlaceholder: 'https://example.com/rules.txt',
+      autoUpdateKey: 'subscriptionAutoUpdate',
+      get: getSubscriptions, save: saveSubscriptions, signature: subscriptionsSignature,
+      countOf: sub => (sub && Array.isArray(sub.rules) ? sub.rules.length : 0),
+      rowLabel: (sub, index) => `${t('subscription')}${index + 1}`,
+      importOne: performSubscriptionForUrl,
+      afterChange: () => { markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY); forceReprocessAll(); triggerWebDAVSyncDelayed(5000); }
+    },
+    engine: {
+      panelId: 'serh-engine-sub-panel', rowsId: 'serh-engine-sub-rows',
+      titleKey: 'engineSubTitle', importKey: 'import', urlPlaceholder: 'https://example.com/selectors.js',
+      autoUpdateKey: 'engineSubAutoUpdate',
+      get: getEngineSubscriptions, save: saveEngineSubscriptions,
+      signature: list => JSON.stringify(list.map(s => [s.url, s.enabled !== false, s.name || ''])),
+      countOf: sub => (sub && sub.selectors && typeof sub.selectors === 'object' ? Object.keys(sub.selectors).length : 0),
+      rowLabel: (sub, index) => (sub && sub.builtin ? t('builtinEngineSub') : ((sub && sub.name) || `${t('subscription')}${index + 1}`)),
+      importOne: performEngineSubscriptionForUrl,
+      afterChange: () => { refreshEngineSite(); forceReprocessAll(); }
+    }
+  };
+
+  function showSubscriptionPanel(kind = 'rules') {
+    const isEngine = kind === 'engine';
+    const spec = isEngine ? SUBSCRIPTION_PANEL_SPECS.engine : SUBSCRIPTION_PANEL_SPECS.rules;
+    const pid = isEngine ? 'serh-engine-sub' : 'serh-subscription';
     hideStatsPanel();
-    const opened = openPanel('serh-subscription-panel', { padding: '20px', beforeClose: () => { if (!cancelDiscardsEdits) persistCurrentSubscriptions(); } });
+    let cancelDiscardsEdits = false;
+    const opened = openPanel(spec.panelId, { padding: '20px', beforeClose: () => { if (!cancelDiscardsEdits) persistCurrent(); } });
     if (!opened) return;
     const { panel, closePanel } = opened;
-    let subscriptions = getSubscriptions(); const deletedUrls = new Set();
-    function createSubscriptionRow(sub = {}) {
-      const url = typeof sub === 'string' ? sub : (sub.url || ''); const enabled = typeof sub === 'object' && sub.enabled !== undefined ? sub.enabled : true; const row = document.createElement('div');
+    let subscriptions = spec.get(); const deletedUrls = new Set();
+
+    function createRow(sub = {}) {
+      const url = typeof sub === 'string' ? sub : (sub.url || ''); const enabled = typeof sub === 'object' && sub.enabled !== undefined ? sub.enabled : true;
+      const builtin = isEngine && sub.builtin === true; const row = document.createElement('div');
       row.className = 'serh-subscription-row';
-      row.innerHTML = `<div class="serh-subscription-meta-row"><span class="serh-subscription-index"></span><div class="serh-subscription-status-message"></div><span class="serh-subscription-info"></span></div><div class="serh-subscription-input-row"><label class="serh-switch serh-subscription-toggle-switch" style="margin:0 2px 0 0;"><input type="checkbox" class="serh-subscription-enable-toggle" ${enabled ? 'checked' : ''}><span class="serh-slider"></span></label><input type="text" class="serh-subscription-url" placeholder="https://example.com/rules.txt"><button class="serh-subscription-delete-btn">❌</button></div>`;
-      row.querySelector('.serh-subscription-url').value = url; row.dataset.originalUrl = url; row.dataset.originalEnabled = String(enabled !== false);
+      row.dataset.builtin = builtin ? '1' : ''; row.dataset.originalUrl = url; row.dataset.originalEnabled = String(enabled !== false);
+      row.innerHTML = `<div class="serh-subscription-meta-row"><span class="serh-subscription-index"></span><div class="serh-subscription-status-message"></div><span class="serh-subscription-info"></span></div><div class="serh-subscription-input-row"><label class="serh-switch serh-subscription-toggle-switch" style="margin:0 2px 0 0;"><input type="checkbox" class="serh-subscription-enable-toggle" ${enabled ? 'checked' : ''}><span class="serh-slider"></span></label><input type="text" class="serh-subscription-url" placeholder="${spec.urlPlaceholder}" ${builtin ? 'readonly' : ''}><button class="serh-subscription-delete-btn" ${builtin ? 'disabled' : ''}>❌</button></div>`;
+      row.querySelector('.serh-subscription-url').value = url;
       return row;
     }
 
     panel.innerHTML = `
             <div class="serh-subscription-panel-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0;">
-                <h3 style="margin:0;font-size:16px;color:#2d3748;line-height:1;">${t('panelTitle')}</h3>
+                <h3 style="margin:0;font-size:16px;color:#2d3748;line-height:1;">${t(spec.titleKey)}</h3>
                 <label style="display:flex !important;align-items:center;font-size:12px;color:#4a5568;cursor:pointer;margin:0;white-space:nowrap;line-height:1;">
                     <span class="serh-switch">
-                        <input type="checkbox" id="serh-subscription-auto-update" ${currentConfig.subscriptionAutoUpdate ? 'checked' : ''}>
+                        <input type="checkbox" id="${pid}-auto-update" ${currentConfig[spec.autoUpdateKey] ? 'checked' : ''}>
                         <span class="serh-slider"></span>
                     </span>
                     <span style="line-height:1;">${t('autoUpdate')}</span>
                 </label>
             </div>
-            <div id="serh-subscription-rows-container"></div>
+            <div id="${spec.rowsId}"></div>
             <div class="serh-subscription-btn-group">
-                <button id="serh-subscription-import" class="serh-button serh-button-primary">${t('save')}</button>
-                <button id="serh-subscription-add" class="serh-button serh-button-success">+</button>
-                <button id="serh-subscription-cancel" class="serh-button serh-button-secondary">${t('cancel')}</button>
+                <button id="${pid}-import" class="serh-button serh-button-primary">${t(spec.importKey)}</button>
+                <button id="${pid}-add" class="serh-button serh-button-success">+</button>
+                <button id="${pid}-cancel" class="serh-button serh-button-secondary">${t('cancel')}</button>
             </div>
         `;
 
-    const container = document.getElementById('serh-subscription-rows-container');
-    subscriptions.forEach(sub => {
-      container.appendChild(createSubscriptionRow(sub));
-    });
+    const container = document.getElementById(spec.rowsId);
+    subscriptions.forEach(sub => container.appendChild(createRow(sub)));
 
-    const addBtn = document.getElementById('serh-subscription-add'); const autoUpdateSwitch = document.getElementById('serh-subscription-auto-update');
+    const autoUpdateSwitch = document.getElementById(`${pid}-auto-update`);
     if (autoUpdateSwitch) {
       autoUpdateSwitch.addEventListener('change', function() {
-        adoptStoredConfigBeforeWrite(); currentConfig.subscriptionAutoUpdate = this.checked; persistConfig(true);
+        adoptStoredConfigBeforeWrite(); currentConfig[spec.autoUpdateKey] = this.checked; persistConfig(true);
       });
+    }
+
+    function formatSubInfo(sub) {
+      if (!sub || !sub.lastUpdate) return '';
+      const d = new Date(sub.lastUpdate);
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      return `${dateStr} - ${spec.countOf(sub)}`;
     }
 
     function reindexRows() {
-      const rows = container.querySelectorAll('.serh-subscription-row');
-      rows.forEach((row, index) => {
-        row.querySelector('.serh-subscription-index').textContent = `${t('subscription')}${index + 1}`;
-        const sub = subscriptions.find(s => s.url === row.dataset.originalUrl); row.querySelector('.serh-subscription-info').textContent = formatSubInfo(sub);
+      container.querySelectorAll('.serh-subscription-row').forEach((row, index) => {
+        const sub = subscriptions.find(s => s.url === row.dataset.originalUrl);
+        row.querySelector('.serh-subscription-index').textContent = spec.rowLabel(sub, index);
+        row.querySelector('.serh-subscription-info').textContent = formatSubInfo(sub);
       });
     }
-
-    const formatSubInfo = (sub) => {
-      if (!sub || !sub.lastUpdate) return ''; const d = new Date(sub.lastUpdate);
-      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      return `${dateStr} - ${Array.isArray(sub.rules) ? sub.rules.length : 0}`;
-    };
 
     function collectSubscriptionsFromRows(latestSubs = subscriptions, removedUrls = []) {
       const removed = new Set(removedUrls); const newSubs = latestSubs.filter(s => !removed.has(s.url)); let hasError = false; const seenUrls = new Set(); const producedUrls = new Set();
@@ -6698,137 +6365,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       return { newSubs, hasError };
     }
 
-    function persistCurrentSubscriptions() {
-      const latestSubs = getSubscriptions(); const { newSubs } = collectSubscriptionsFromRows(latestSubs, deletedUrls);
-      const savedSubs = newSubs.filter(s => s.url);
-      const subsChanged = subscriptionsSignature(savedSubs) !== subscriptionsSignature(latestSubs); saveSubscriptions(savedSubs); deletedUrls.clear(); subscriptions = getSubscriptions();
-      container.querySelectorAll('.serh-subscription-row').forEach(row => {
-        const input = row.querySelector('.serh-subscription-url'); const currentUrl = input ? input.value.trim() : '';
-        if (!input || !/^https?:\/\//i.test(currentUrl)) return;
-        row.dataset.originalUrl = currentUrl; const toggle = row.querySelector('.serh-subscription-enable-toggle');
-        if (toggle) row.dataset.originalEnabled = String(toggle.checked);
-      });
-      if (subsChanged) {
-        markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY); forceReprocessAll();
-        triggerWebDAVSyncDelayed(5000);
-      }
-      return true;
-    }
-
-    function bindToggleEvents() {
-      container.querySelectorAll('.serh-subscription-enable-toggle').forEach(toggle => {
-        toggle.onchange = () => {
-          const row = toggle.closest('.serh-subscription-row'); const url = (row.querySelector('.serh-subscription-url').value || '').trim();
-          if (!/^https?:\/\//i.test(url)) return;
-          const subs = getSubscriptions(); const at = subs.findIndex(s => s && s.url === url); if (at < 0) return;
-          if ((subs[at].enabled !== false) === toggle.checked) return;
-          subs[at].enabled = toggle.checked; saveSubscriptions(subs); subscriptions = getSubscriptions();
-          row.dataset.originalEnabled = String(toggle.checked);
-          markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY); forceReprocessAll(); triggerWebDAVSyncDelayed(5000);
-        };
-      });
-    }
-
-    function bindDeleteEvents() {
-      container.querySelectorAll('.serh-subscription-delete-btn').forEach(btn => {
-        btn.onclick = (e) => {
-          e.stopPropagation(); const row = btn.closest('.serh-subscription-row'); const origUrl = (row.dataset.originalUrl || '').trim();
-          if (origUrl) deletedUrls.add(origUrl);
-          row.remove(); reindexRows();
-        };
-      });
-    }
-
-    addBtn.onclick = () => {
-      container.appendChild(createSubscriptionRow()); reindexRows(); bindDeleteEvents(); bindToggleEvents(); container.scrollTop = container.scrollHeight;
-    };
-
-    reindexRows(); bindDeleteEvents(); bindToggleEvents();
-    let cancelDiscardsEdits = false;
-
-    document.getElementById('serh-subscription-import').onclick = async () => {
-      const rows = Array.from(container.querySelectorAll('.serh-subscription-row')); persistCurrentSubscriptions(); showToast(t('importing'), 'info');
-      for (const row of rows) {
-        const input = row.querySelector('.serh-subscription-url'); const url = input.value.trim(); const msgDiv = row.querySelector('.serh-subscription-status-message');
-        if (!url) {
-          row.classList.remove('serh-subscription-row-invalid'); msgDiv.textContent = t('subLinkEmpty'); msgDiv.className = 'serh-subscription-status-message error'; continue;
-        }
-        if (!/^https?:\/\//i.test(url)) {
-          row.classList.add('serh-subscription-row-invalid'); msgDiv.textContent = t('subLinkInvalid'); msgDiv.className = 'serh-subscription-status-message error'; continue;
-        }
-        try {
-          const result = await performSubscriptionForUrl(url, false); if (!result.success) continue; row.classList.remove('serh-subscription-row-invalid'); row.dataset.originalUrl = url; msgDiv.textContent = t('subImportSuccess');
-          msgDiv.className = 'serh-subscription-status-message success'; const sub = getSubscriptions().find(s => s && s.url === url);
-          row.querySelector('.serh-subscription-info').textContent = formatSubInfo(sub);
-        } catch (err) {
-          console.error(`导入失败 [${url}]:`, err);
-          msgDiv.textContent = t('subImportFailed'); msgDiv.className = 'serh-subscription-status-message error';
-        }
-      }
-      subscriptions = getSubscriptions(); forceReprocessAll();
-      if (!rows.some(r => r.querySelector('.serh-subscription-status-message.error'))) showToast(t('saved'), 'success');
-    };
-
-    document.getElementById('serh-subscription-cancel').onclick = (e) => {
-      e.stopPropagation(); cancelDiscardsEdits = true; closePanel();
-    };
-
-  }
-
-  function showEngineSubscriptionPanel() {
-    hideStatsPanel();
-    let cancelDiscardsEdits = false;
-    const opened = openPanel('serh-engine-sub-panel', { padding: '20px', beforeClose: () => { if (!cancelDiscardsEdits) persistCurrent(); } });
-    if (!opened) return;
-    const { panel, closePanel } = opened;
-    let subscriptions = getEngineSubscriptions(); const deletedUrls = new Set();
-
-    const createRow = (sub = {}) => {
-      const url = sub.url || ''; const enabled = sub.enabled !== false; const row = document.createElement('div');
-      row.className = 'serh-subscription-row'; row.dataset.builtin = sub.builtin ? '1' : '';
-      row.dataset.originalUrl = url; row.dataset.originalEnabled = String(enabled);
-      row.innerHTML = `<div class="serh-subscription-meta-row"><span class="serh-subscription-index"></span><div class="serh-subscription-status-message"></div><span class="serh-subscription-info"></span></div><div class="serh-subscription-input-row"><label class="serh-switch serh-subscription-toggle-switch" style="margin:0 2px 0 0;"><input type="checkbox" class="serh-subscription-enable-toggle" ${enabled ? 'checked' : ''}><span class="serh-slider"></span></label><input type="text" class="serh-subscription-url" placeholder="https://example.com/selectors.js" ${sub.builtin ? 'readonly' : ''}><button class="serh-subscription-delete-btn" ${sub.builtin ? 'disabled' : ''}>❌</button></div>`;
-      row.querySelector('.serh-subscription-url').value = url;
-      return row;
-    };
-
-    panel.innerHTML = `
-            <div class="serh-subscription-panel-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0;">
-                <h3 style="margin:0;font-size:16px;color:#2d3748;line-height:1;">${t('engineSubTitle')}</h3>
-                <label style="display:flex !important;align-items:center;font-size:12px;color:#4a5568;cursor:pointer;margin:0;white-space:nowrap;line-height:1;">
-                    <span class="serh-switch">
-                        <input type="checkbox" id="serh-engine-sub-auto-update" ${currentConfig.engineSubAutoUpdate ? 'checked' : ''}>
-                        <span class="serh-slider"></span>
-                    </span>
-                    <span style="line-height:1;">${t('autoUpdate')}</span>
-                </label>
-            </div>
-            <div id="serh-engine-sub-rows"></div>
-            <div class="serh-subscription-btn-group">
-                <button id="serh-engine-sub-import" class="serh-button serh-button-primary">${t('import')}</button>
-                <button id="serh-engine-sub-add" class="serh-button serh-button-success">+</button>
-                <button id="serh-engine-sub-cancel" class="serh-button serh-button-secondary">${t('cancel')}</button>
-            </div>
-        `;
-
-    const container = document.getElementById('serh-engine-sub-rows');
-    subscriptions.forEach(sub => container.appendChild(createRow(sub)));
-
-    const formatSubInfo = (sub) => {
-      if (!sub || !sub.lastUpdate) return ''; const d = new Date(sub.lastUpdate);
-      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      return `${dateStr} - ${sub.selectors && typeof sub.selectors === 'object' ? Object.keys(sub.selectors).length : 0}`;
-    };
-
-    function reindexRows() {
-      container.querySelectorAll('.serh-subscription-row').forEach((row, index) => {
-        const sub = subscriptions.find(s => s.url === row.dataset.originalUrl);
-        row.querySelector('.serh-subscription-index').textContent = sub && sub.builtin ? t('builtinEngineSub') : ((sub && sub.name) || `${t('subscription')}${index + 1}`);
-        row.querySelector('.serh-subscription-info').textContent = formatSubInfo(sub);
-      });
-    }
-
-    function collectFromRows(latestSubs, removedUrls) {
+    function collectEngineSubscriptionsFromRows(latestSubs, removedUrls) {
       const removed = new Set(removedUrls); const newSubs = latestSubs.filter(s => s.builtin || !removed.has(s.url));
       const seen = new Set(); let hasError = false;
       container.querySelectorAll('.serh-subscription-row').forEach(row => {
@@ -6857,19 +6394,20 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       return { newSubs: [...newSubs.filter(s => s.builtin), ...newSubs.filter(s => !s.builtin)], hasError };
     }
 
+    const collectRows = isEngine ? collectEngineSubscriptionsFromRows : collectSubscriptionsFromRows;
+
     function persistCurrent() {
-      const latest = getEngineSubscriptions(); const { newSubs } = collectFromRows(latest, deletedUrls);
-      const signature = (list) => JSON.stringify(list.map(s => [s.url, s.enabled !== false, s.name || '']));
-      const before = signature(latest); saveEngineSubscriptions(newSubs);
-      deletedUrls.clear(); subscriptions = getEngineSubscriptions();
+      const latestSubs = spec.get(); const { newSubs } = collectRows(latestSubs, deletedUrls);
+      const savedSubs = newSubs.filter(s => s.url); const changed = spec.signature(savedSubs) !== spec.signature(latestSubs);
+      spec.save(savedSubs); deletedUrls.clear(); subscriptions = spec.get();
       container.querySelectorAll('.serh-subscription-row').forEach(row => {
         const input = row.querySelector('.serh-subscription-url'); const currentUrl = input ? input.value.trim() : '';
         if (!input || !/^https?:\/\//i.test(currentUrl)) return;
         row.dataset.originalUrl = currentUrl; const toggle = row.querySelector('.serh-subscription-enable-toggle');
         if (toggle) row.dataset.originalEnabled = String(toggle.checked);
       });
-      reindexRows();
-      if (before !== signature(subscriptions)) { refreshEngineSite(); forceReprocessAll(); }
+      if (isEngine) reindexRows();
+      if (changed) spec.afterChange();
       return true;
     }
 
@@ -6878,11 +6416,11 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         toggle.onchange = () => {
           const row = toggle.closest('.serh-subscription-row'); const url = (row.querySelector('.serh-subscription-url').value || '').trim();
           if (!/^https?:\/\//i.test(url)) return;
-          const subs = getEngineSubscriptions(); const at = subs.findIndex(s => s && s.url === url); if (at < 0) return;
+          const subs = spec.get(); const at = subs.findIndex(s => s && s.url === url); if (at < 0) return;
           if ((subs[at].enabled !== false) === toggle.checked) return;
-          subs[at].enabled = toggle.checked; saveEngineSubscriptions(subs); subscriptions = getEngineSubscriptions();
+          subs[at].enabled = toggle.checked; spec.save(subs); subscriptions = spec.get();
           row.dataset.originalEnabled = String(toggle.checked);
-          refreshEngineSite(); forceReprocessAll();
+          spec.afterChange();
         };
       });
     }
@@ -6897,20 +6435,16 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       });
     }
 
-    document.getElementById('serh-engine-sub-add').onclick = () => {
-      container.appendChild(createRow()); reindexRows(); bindDeleteEvents(); bindToggleEvents(); container.scrollTop = container.scrollHeight;
+    document.getElementById(`${pid}-add`).onclick = () => {
+      container.appendChild(createRow()); reindexRows(); bindDeleteEvents(); bindToggleEvents();
+      container.scrollTop = container.scrollHeight;
     };
 
     reindexRows(); bindDeleteEvents(); bindToggleEvents();
-    const engineAutoUpdateSwitch = document.getElementById('serh-engine-sub-auto-update');
-    if (engineAutoUpdateSwitch) {
-      engineAutoUpdateSwitch.addEventListener('change', function() {
-        adoptStoredConfigBeforeWrite(); currentConfig.engineSubAutoUpdate = this.checked; persistConfig(true);
-      });
-    }
-    document.getElementById('serh-engine-sub-import').onclick = async () => {
+
+    document.getElementById(`${pid}-import`).onclick = async () => {
       const rows = Array.from(container.querySelectorAll('.serh-subscription-row')); persistCurrent(); showToast(t('importing'), 'info');
-      let totalEngines = 0, failed = false;
+      let total = 0; let failed = false;
       for (const row of rows) {
         const input = row.querySelector('.serh-subscription-url'); const url = input.value.trim(); const msgDiv = row.querySelector('.serh-subscription-status-message');
         if (!url) {
@@ -6920,23 +6454,32 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           row.classList.add('serh-subscription-row-invalid'); msgDiv.textContent = t('subLinkInvalid'); msgDiv.className = 'serh-subscription-status-message error'; failed = true; continue;
         }
         try {
-          const result = await performEngineSubscriptionForUrl(url, false); if (!result.success) { failed = true; continue; }
-          totalEngines += result.count; row.classList.remove('serh-subscription-row-invalid'); row.dataset.originalUrl = url;
+          const result = await spec.importOne(url, false); if (!result.success) { failed = true; continue; }
+          total += result.count || 0; row.classList.remove('serh-subscription-row-invalid'); row.dataset.originalUrl = url;
           msgDiv.textContent = t('subImportSuccess'); msgDiv.className = 'serh-subscription-status-message success';
-          const sub = getEngineSubscriptions().find(s => s && s.url === url); row.querySelector('.serh-subscription-info').textContent = formatSubInfo(sub);
+          const sub = spec.get().find(s => s && s.url === url);
+          row.querySelector('.serh-subscription-info').textContent = formatSubInfo(sub);
         } catch (err) {
-          failed = true; console.error(`[引擎订阅] 导入失败 [${url}]:`, err);
+          failed = true; console.error(isEngine ? `[引擎订阅] 导入失败 [${url}]:` : `导入失败 [${url}]:`, err);
           msgDiv.textContent = t('subImportFailed'); msgDiv.className = 'serh-subscription-status-message error';
         }
       }
-      subscriptions = getEngineSubscriptions(); reindexRows(); forceReprocessAll();
-      if (totalEngines > 0) showToast(t('subscriptionSuccess', { count: totalEngines }), 'success');
-      else if (!failed) showToast(t('saved'), 'success');
+      subscriptions = spec.get(); if (isEngine) reindexRows(); forceReprocessAll();
+      if (isEngine) {
+        if (total > 0) showToast(t('subscriptionSuccess', { count: total }), 'success');
+        else if (!failed) showToast(t('saved'), 'success');
+      } else if (!rows.some(r => r.querySelector('.serh-subscription-status-message.error'))) {
+        showToast(t('saved'), 'success');
+      }
     };
 
-    document.getElementById('serh-engine-sub-cancel').onclick = (e) => {
+    document.getElementById(`${pid}-cancel`).onclick = (e) => {
       e.stopPropagation(); cancelDiscardsEdits = true; closePanel();
     };
+  }
+
+  function showEngineSubscriptionPanel() {
+    showSubscriptionPanel('engine');
   }
 
   function hasMatchingWebDAVCredentials(saved, url, username) {
@@ -7002,9 +6545,6 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     hideStatsPanel();
     const opened = openPanel('serh-webdav-panel', {
       padding: '20px',
-      onExisting: (existing) => {
-        const password = existing.querySelector('#serh-webdav-password'); if (password) password.value = '';
-      },
       beforeClose: () => { passwordInput.value = ''; updateWebDAVPasswordState(); }
     });
     if (!opened) return;
@@ -7122,7 +6662,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       } else {
         adoptStoredConfigBeforeWrite();
       }
-      collectMainPanelConfigState(); persistConfig(false); let content = currentConfig.rules.join('\n'); const loadingToast = showToast(t('webdavUploading'), 'info', 10000);
+      collectMainPanelConfigState(); const changes = persistConfig(false); if (changes.rulesChanged) markLocalModifiedTime(); if (changes.settingsChanged) markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY); let content = currentConfig.rules.join('\n'); const loadingToast = showToast(t('webdavUploading'), 'info', 10000);
       try {
         const lockAcquired = await runWithSyncLock('webdav', async () => {
           const { folderUrl, fullUrl, headers } = getWebDAVRequest(config); await ensureWebDAVFolder(folderUrl, headers); let remotePreserved = {}; let remoteConfig = null;
@@ -7145,7 +6685,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         });
         loadingToast.dismiss();
         if (lockAcquired === false) {
-          showToast(t('webdavSyncLocked'), 'error', 4000);
+          showToast(t('webdavSyncLocked'), 'error', 4000); forceReprocessAll();
         } else {
           saveSuccessfulWebDAVConfig(config); showToast(t('uploadSuccess'), 'success'); const mainPanel = document.getElementById('serh-panel');
           if (mainPanel && Array.isArray(currentConfig.rules)) {
@@ -7154,7 +6694,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           forceReprocessAll();
         }
       } catch (err) {
-        loadingToast.dismiss(); showToast(t('webdavUploadFailed') + err.message, 'error', 5000);
+        loadingToast.dismiss(); showToast(t('webdavUploadFailed') + err.message, 'error', 5000); forceReprocessAll();
       } finally {
         setWebDAVBusy(false);
       }
@@ -7225,7 +6765,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
               addedAt: (existing && existing.addedAt) || s.addedAt || 0
             };
           }));
-          setSubscriptionSyncSnapshot(subscriptions); _pendingSubRefresh = true;
+          setSubscriptionSyncSnapshot(subscriptions, config); _pendingSubRefresh = true;
         }
       }
       if (selectors && typeof selectors === 'object' && !Array.isArray(selectors) && GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
@@ -7425,13 +6965,12 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   async function checkAutoWebDAV() {
     if (!GM_getValue(WEBDAV_AUTO_SYNC_KEY, false)) return; const config = loadWebDAVConfig(); if (!config || !config.url) return; if (!isHttpsUrl(config.url)) return;
-    let lastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0); if (lastSync > Date.now() + WEBDAV_TIME_TOLERANCE) lastSync = 0;
-    if (lastSync > 0 && Date.now() - lastSync < WEBDAV_AUTO_SYNC_INTERVAL) return; if (isSerhPanelOpen()) return;
-    const now = await getTrustedNow(); if (lastSync > now + WEBDAV_TIME_TOLERANCE) lastSync = 0;
-    if (lastSync > 0 && now - lastSync < WEBDAV_AUTO_SYNC_INTERVAL) return;
+    if (isSerhPanelOpen()) return;
+    const now = await getTrustedNow(); let lastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0); if (lastSync > now + WEBDAV_TIME_TOLERANCE) lastSync = 0;
+    if (lastSync > 0 && now - lastSync < WEBDAV_AUTO_SYNC_INTERVAL - AUTO_SYNC_TOLERANCE) return;
     runBackgroundSync('webdav', async () => {
       const trustedNow = await getTrustedNow(); let currentLastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0); if (currentLastSync > trustedNow + WEBDAV_TIME_TOLERANCE) currentLastSync = 0;
-      if (currentLastSync > 0 && trustedNow - currentLastSync < WEBDAV_AUTO_SYNC_INTERVAL) return; if (isSerhPanelOpen()) return; await performAutoWebDAVSync(config);
+      if (currentLastSync > 0 && trustedNow - currentLastSync < WEBDAV_AUTO_SYNC_INTERVAL - AUTO_SYNC_TOLERANCE) return; if (isSerhPanelOpen()) return; await performAutoWebDAVSync(config);
     }).catch(err => console.error('[WebDAV] 同步失败:', err.message));
   }
 
@@ -7554,17 +7093,22 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     }
   }
 
-  function runBackgroundSync(task, fn) {
+  function runBackgroundSync(task, fn, retries = 2) {
     const prev = _syncLocalChains.get(task) || Promise.resolve();
     const run = prev.then(() => runWithSyncLock(task, fn), () => runWithSyncLock(task, fn));
     _syncLocalChains.set(task, run.then(() => {}, () => {}));
+    run.then((res) => {
+      if (res !== false || retries <= 0) return; const held = readSyncLock(task); const wait = Math.max(250, (held && held.expires > Date.now() ? held.expires - Date.now() : 0) + 100 + Math.floor(Math.random() * 200));
+      setTimeout(() => runBackgroundSync(task, fn, retries - 1), wait);
+    }).catch(() => {});
     return run;
   }
 
   function checkAutoSubscription(force = false) {
     if (!force && !currentConfig.subscriptionAutoUpdate) return; if (!force && isSerhPanelOpen()) return; const subs = getSubscriptions(); if (!subs || subs.length === 0) return;
-    const now = Date.now(); const isDue = (s) => s.enabled && now - (s.lastAttempt || 0) >= AUTO_UPDATE_INTERVAL && (!s.rules || s.rules.length === 0 || now - s.lastUpdate >= AUTO_UPDATE_INTERVAL); if (!subs.some(isDue)) return;
+    const now = Date.now(); const isDue = (s) => s.enabled && now - (s.lastAttempt || 0) >= AUTO_UPDATE_INTERVAL - AUTO_SYNC_TOLERANCE && (!s.rules || s.rules.length === 0 || now - s.lastUpdate >= AUTO_UPDATE_INTERVAL - AUTO_SYNC_TOLERANCE); if (!subs.some(isDue)) return;
     runBackgroundSync('webdav', async () => {
+      if (!force && isSerhPanelOpen()) return;
       const pending = getSubscriptions().filter(isDue); if (!pending.length) return;
       for (const sub of pending) {
         console.log(`[订阅] 开始更新: ${sub.url}`);
@@ -7584,9 +7128,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     if (!force && !currentConfig.engineSubAutoUpdate) return;
     if (!force && isSerhPanelOpen()) return;
     const subs = getEngineSubscriptions(); const now = Date.now();
-    const isDue = (s) => s.enabled !== false && now - (s.lastAttempt || 0) >= AUTO_UPDATE_INTERVAL && (!s.selectors || now - (s.lastUpdate || 0) >= AUTO_UPDATE_INTERVAL);
+    const isDue = (s) => s.enabled !== false && now - (s.lastAttempt || 0) >= AUTO_UPDATE_INTERVAL - AUTO_SYNC_TOLERANCE && (!s.selectors || now - (s.lastUpdate || 0) >= AUTO_UPDATE_INTERVAL - AUTO_SYNC_TOLERANCE);
     if (!subs.some(isDue)) return;
     runBackgroundSync('webdav', async () => {
+      if (!force && isSerhPanelOpen()) return;
       const pending = getEngineSubscriptions().filter(isDue); if (!pending.length) return;
       let updated = false;
       for (const sub of pending) {
@@ -7629,7 +7174,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   }
 
   function ensureEngineSiteSetup() {
-    if (_engineSiteSetup || !isEngineSite()) return; _engineSiteSetup = true; _observedBody = document.body; injectGlobalStyles(); buildRuleIndex(); exposeDebugApi(); updateStatus(0); scanNewResults();
+    if (_engineSiteSetup || !isEngineSite()) return; _engineSiteSetup = true; _observedBody = document.body;
+    try { injectGlobalStyles(); buildRuleIndex(); exposeDebugApi(); updateStatus(0); scanNewResults(); } catch (e) { _engineSiteSetup = false; _observedBody = null; throw e; }
 
     let _pendingRecords = []; let _mutationRafPending = false;
     const flushMutations = () => {
@@ -7678,7 +7224,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         if (statusDirty) {
           updateStatus(document.querySelectorAll('[data-is-blocked="true"]').length);
         }
-        const hasAddedNodes = records.some(m => m.type === 'childList' && m.addedNodes.length > 0); if (hasAddedNodes) scanNewResults(); else if (statusDirty) reconcileHiddenParents();
+        const hasAddedNodes = records.some(m => m.type === 'childList' && m.addedNodes && m.addedNodes.length > 0);
+        const hasRemovedNodes = records.some(m => m.type === 'childList' && m.removedNodes && m.removedNodes.length > 0);
+        if (hasAddedNodes) scanNewResults(); else if (hasRemovedNodes || statusDirty) reconcileHiddenParents();
       } finally {
         if (_engineSiteSetup && _domObserver) {
           _domObserver.observe(document.documentElement, {
@@ -7813,6 +7361,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         checkExternalSelectorChange(); checkExternalConfigChange();
       }
     });
+    window.addEventListener('pagehide', (e) => { if (!e.persisted) releaseSyncLock('webdav'); });
 
     startBackgroundSync();
     registerMenu();
