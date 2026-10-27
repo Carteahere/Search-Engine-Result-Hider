@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.7.6
+// @version      8.7.7
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version removes networking features including WebDAV Sync / Rule Subscription / Engine Subscription.
@@ -134,6 +134,13 @@
       snippets: ['p.description', '.result__main > p', '.w-gl__description'],
       links: ['a.result-link[href]', 'a.wgl-site-title[href]', 'a.wgl-display-url[href]', 'a.display-url[href]', '.w-gl__result-title[href]', 'a[href]'],
     },
+    yahoo_japan: {
+      match: /^(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.co\.jp$/,
+      containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo',
+      titles: ['h3', '.s-title', 'h2 a', 'a h2', '.b_title', '.title'],
+      snippets: ['.sw-Card__description', '.sw-Card__snippet', '.sw-Text__body', 'p', '.b_caption p', '.b_snippet', '.b_paractl p'],
+      links: ['h3 a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
+    },
     yahoo: {
       match: /^(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
       containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo',
@@ -254,18 +261,30 @@
       if (!(key in merged)) merged[key] = SELECTORS[key];
     }
     const keys = Object.keys(merged); const gIdx = keys.indexOf('google'); const gsIdx = keys.indexOf('google_scholar');
+    let ordered = merged;
     if (gIdx !== -1 && gsIdx !== -1 && gIdx < gsIdx) {
-      const fixed = {};
+      ordered = {};
       for (const k of keys) {
         if (k === 'google') {
-          fixed['google_scholar'] = merged['google_scholar']; fixed['google'] = merged['google'];
+          ordered['google_scholar'] = merged['google_scholar']; ordered['google'] = merged['google'];
         } else if (k !== 'google_scholar') {
-          fixed[k] = merged[k];
+          ordered[k] = merged[k];
         }
       }
-      activeSelectors = fixed; return fixed;
     }
-    activeSelectors = merged; return merged;
+    const yKeys = Object.keys(ordered); const yIdx = yKeys.indexOf('yahoo'); const yjIdx = yKeys.indexOf('yahoo_japan');
+    if (yIdx !== -1 && yjIdx !== -1 && yIdx < yjIdx) {
+      const fixed = {};
+      for (const k of yKeys) {
+        if (k === 'yahoo') {
+          fixed['yahoo_japan'] = ordered['yahoo_japan']; fixed['yahoo'] = ordered['yahoo'];
+        } else if (k !== 'yahoo_japan') {
+          fixed[k] = ordered[k];
+        }
+      }
+      ordered = fixed;
+    }
+    activeSelectors = ordered; return ordered;
   }
 
   function resetSelectorCache() {
@@ -321,8 +340,8 @@
     google: /(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i,
     google_scholar: /(?:^|\.)scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i,
     duckduckgo: /(?:^|\.)(?:duckduckgo\.com|ddg\.gg)$/i,
-    yahoo: /(?:^|\.)(?:[a-z]{2,6}\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i,
-    yahoo_jp: /(?:^|\.)(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i,
+    yahoo: /(?:^|\.)(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i,
+    yahoo_japan: /(?:^|\.)(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i,
     so360: /(?:^|\.)so\.com$/i,
     sogou: /(?:^|\.)sogou\.com$/i,
     toutiao: /(?:^|\.)toutiao\.com$/i
@@ -470,7 +489,7 @@
   }
   let compiledRules = newCompiledRules();
 
-  const validationCache = new Map(); const subdomainCache = new Map(); let forceReprocessBatchId = 0; let _hiddenParentCount = 0; let _rulesRevision = 0;
+  const validationCache = new Map(); const subdomainCache = new Map(); let forceReprocessBatchId = 0; let _hiddenParentCount = 0; let _rulesRevision = 0; let _rulesFingerprint = JSON.stringify(currentConfig.rules || []);
   function t(key, params = {}) {
     const lang = currentConfig.language; const texts = LANG_TEXTS[lang] || LANG_TEXTS['zh-CN']; let text = texts[key] || key;
     for (const [k, v] of Object.entries(params)) {
@@ -1053,16 +1072,10 @@
     return closePanel;
   }
 
-  function openPanel(id, { width = '320px', padding = '15px', beforeClose = null, onExisting = null, bindClose = true } = {}) {
+  function openPanel(id, { width = '320px', padding = '15px', beforeClose = null, bindClose = true } = {}) {
     injectWidgetStyles();
     const existing = document.getElementById(id);
-    if (existing && !existing._fading) {
-      if (typeof existing._cleanupClick === 'function') existing._cleanupClick();
-      if (typeof existing._beforeClose === 'function') { try { existing._beforeClose(); } catch (err) { console.error('[面板] 关闭前回调失败:', err); } existing._beforeClose = null; }
-      if (onExisting) onExisting(existing);
-      existing.remove();
-      return null;
-    }
+    if (existing && !existing._fading) return null;
     if (existing) existing.remove();
     const panel = createPanel(id, width, padding);
     panel._beforeClose = typeof beforeClose === 'function' ? beforeClose : null;
@@ -1162,6 +1175,18 @@
     try { return decodeURIComponent(String(str ?? '')); } catch (e) { return String(str ?? ''); }
   }
 
+  function decodeUrlForMatch(url) {
+    const raw = String(url ?? ''); if (!raw) return '';
+    try {
+      const abs = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) || raw.startsWith('//');
+      if (!abs) return safeDecodeURIComponent(raw);
+      const u = new URL(raw.startsWith('//') ? 'http:' + raw : raw); const host = toUnicodeHostname(u.hostname);
+      const auth = u.username ? u.username + (u.password ? ':' + u.password : '') + '@' : ''; const port = u.port ? ':' + u.port : '';
+      const tail = safeDecodeURIComponent(u.pathname + u.search) + safeDecodeURIComponent(u.hash);
+      return (raw.startsWith('//') ? '//' : u.protocol + '//') + auth + host + port + tail;
+    } catch (_) { return safeDecodeURIComponent(raw); }
+  }
+
   function encodeNonAscii(str) {
     const s = String(str ?? ''); return /[^\x00-\x7F]/.test(s) ? s.replace(/[^\x00-\x7F]/gu, ch => encodeURIComponent(ch)) : s;
   }
@@ -1176,11 +1201,11 @@
 
   function isNonRuleTextResponse(restLines, hasHeader = false, allowCommentOnly = false) {
     const lines = (Array.isArray(restLines) ? restLines : []).map((l) => String(l || '').trim()).filter((l) => l.length > 0); if (lines.length === 0) return false;
-    if (lines.some((l) => /<\s*\/?\s*(?:!doctype|html|head|body)\b/i.test(l))) return true;
+    const ruleLines = lines.filter((l) => !l.startsWith('#')); const htmlLike = (l, headOnly) => (headOnly ? /<\s*\/?\s*(?:!doctype|html|head|body)\b/i : /<\s*\/?\s*[a-z!?][^>\n]*>/i).test(l) && !validateRule(l);
+    if (ruleLines.some((l) => htmlLike(l, true))) return true;
     const ruleLike = (l) => /^[\x21-\x7E]+$/.test(l) || /[:@|./]/.test(l) || looksLikeCondExpr(l);
-    const ruleLines = lines.filter((l) => !l.startsWith('#')); if (ruleLines.some((l) => ruleLike(l) && validateRule(l))) return false;
-    if (lines.some((l) => /<\s*\/?\s*[a-z!?][^>\n]*>/i.test(l))) return true;
-    if (ruleLines.length === 0) return allowCommentOnly ? false : !hasHeader; return !hasHeader ? true : !ruleLines.some((l) => ruleLike(l) && validateRule(l.trim()));
+    if (ruleLines.some((l) => ruleLike(l) && validateRule(l))) return false; if (ruleLines.some((l) => htmlLike(l, false))) return true;
+    if (ruleLines.length === 0) return allowCommentOnly ? false : !hasHeader; return true;
   }
 
   function getRuleKey(r) {
@@ -1381,19 +1406,7 @@
       if (cond.op === '$=') return urlHit(v => v.endsWith(cmpUrl)); if (cond.op === '*=') return urlHit(v => v.includes(cmpUrl));
       if (cond.op === '=~') {
         if (safeRegexTest(cond.regex, url)) return true;
-        let folded = '';
-        try {
-          const abs = /^[a-z][a-z0-9+.-]*:\/\//i.test(url) || url.startsWith('//');
-          if (!abs) folded = safeDecodeURIComponent(url);
-          else {
-            const u = new URL(url.startsWith('//') ? 'http:' + url : url);
-            const host = toUnicodeHostname(u.hostname);
-            const auth = u.username ? u.username + (u.password ? ':' + u.password : '') + '@' : '';
-            const port = u.port ? ':' + u.port : '';
-            const tail = safeDecodeURIComponent(u.pathname + u.search) + safeDecodeURIComponent(u.hash);
-            folded = (url.startsWith('//') ? '//' : u.protocol + '//') + auth + host + port + tail;
-          }
-        } catch (_) { folded = safeDecodeURIComponent(url); }
+        const folded = decodeUrlForMatch(url);
         return folded !== url && safeRegexTest(cond.regex, folded);
       }
       return false;
@@ -1465,7 +1478,7 @@
     const enginePropMatch = trimmed.match(/^(?:\$site|engine)\s*[=:]\s*(?:['"](.*?)['"]|([^\s\)]+))\s*i?\s*$/i);
     if (enginePropMatch) {
       const raw = (enginePropMatch[1] !== undefined ? enginePropMatch[1] : enginePropMatch[2]).trim().toLowerCase();
-      const target = raw.replace(/^ddg$/, 'duckduckgo').replace(/^yahoo-japan$/, 'yahoo'); const engine = String(currentEngine || '').toLowerCase();
+      const target = raw.replace(/^ddg$/, 'duckduckgo'); const engine = String(currentEngine || '').toLowerCase();
       return { matched: true, static: engine === target || engine === raw };
     }
 
@@ -1499,7 +1512,8 @@
     const strMatch = eqReOk ? null : trimmed.match(/^(title|url|host|path|scheme)\s*(\^=|\$=|\*=|=|:)\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s"']+))\s*i?\s*$/i);
     if (strMatch) {
       if (strMatch[5] !== undefined && strMatch[5].startsWith('~')) return { matched: false };
-      if (strMatch[2] === '=' && strMatch[5] !== undefined && /^\/((?:[^/\\\[\]]|\\.|\[(?:[^\]\\]|\\.)*\])+)\/([a-z]*)$/i.test(strMatch[5]) && (!RegExp.$2 || isUniqueFlagsStr(RegExp.$2) || isFlagsCandidateError(RegExp.$2))) return { matched: false };
+      const bareEq = (strMatch[2] === '=' && strMatch[5] !== undefined) ? strMatch[5].match(/^\/((?:[^/\\\[\]]|\\.|\[(?:[^\]\\]|\\.)*\])+)\/([a-z]*)$/i) : null;
+      if (bareEq && (!bareEq[2] || isUniqueFlagsStr(bareEq[2]) || isFlagsCandidateError(bareEq[2]))) return { matched: false };
       const op = strMatch[2] === ':' ? '=' : strMatch[2];
       const rawVal = (strMatch[3] !== undefined ? strMatch[3] : (strMatch[4] !== undefined ? strMatch[4] : strMatch[5])); let val = rawVal.replace(/\\(["'])/g, '$1').toLowerCase();
       const condType = strMatch[1].toLowerCase(); if (condType === 'host') val = val.startsWith('/') ? val : toASCIIHostname(val); return { matched: true, dynamic: { type: condType, op, val } };
@@ -1528,9 +1542,20 @@
   }
   function isUniqueFlagsStr(seg) { const s = String(seg || '').toLowerCase(); return /^[imsu]+$/.test(s) && new Set(s).size === s.length; }
   function isFlagsCandidateError(seg) { seg = String(seg || ''); return /^[imsugy]+$/i.test(seg) && !!getInvalidRegexFlags(seg); }
+  function hasBareRegexSlash(pattern) {
+    let inClass = false;
+    for (let i = 0; i < pattern.length; i++) {
+      const ch = pattern[i];
+      if (ch === '\\') { i++; continue; }
+      if (inClass) { if (ch === ']') inClass = false; continue; }
+      if (ch === '[') { inClass = true; continue; }
+      if (ch === '/') return true;
+    }
+    return false;
+  }
 
   function validateUrlWildcard(rule) {
-    if (!rule || /[<>"']/.test(rule) || /\s/.test(rule)) return false; if (rule.startsWith('|') || rule.startsWith('@@')) return false; if (rule.includes('^')) return false;
+    if (!rule || /[<>"]/.test(rule) || /\s/.test(rule)) return false; if (rule.startsWith('|') || rule.startsWith('@@')) return false; if (rule.includes('^')) return false;
     if (rule.includes('://')) {
       const scheme = rule.split('://')[0]; if (scheme !== '*' && !/^[a-z][a-z0-9+.-]*$/.test(scheme.toLowerCase())) return false;
     }
@@ -1707,7 +1732,7 @@
     try {
       if (ruleToCheck.startsWith('/') && ruleToCheck.lastIndexOf('/') > 0) {
         const { pattern, flags } = ruleToRegex(ruleToCheck);
-        if (!pattern.trim()) {
+        if (!pattern.trim() || hasBareRegexSlash(pattern)) {
           errors.push(t('regexError')); return { valid: false, errors };
         }
         const invalidFlags = getInvalidRegexFlags(flags);
@@ -2121,10 +2146,12 @@
       }
       return null;
     };
-    const scanPatterns = (patterns, value, filter) => {
+    const scanPatterns = (patterns, value, filter, foldUrl) => {
       if (!value) return null;
+      const alt = foldUrl ? decodeUrlForMatch(value) : '';
       for (const item of patterns) {
-        if (filter && !filter(item)) continue; if (safeRegexTest(item.regex, value)) return item;
+        if (filter && !filter(item)) continue;
+        if (safeRegexTest(item.regex, value) || (alt && alt !== value && safeRegexTest(item.regex, alt))) return item;
       }
       return null;
     };
@@ -2142,15 +2169,16 @@
       for (const item of rules) {
         if (filter && !filter(item)) continue; if (!checkDynamicConditions(item.conditions, title, url)) continue; if (item.type === 'expr') return item;
         const value = item.type === 'title' ? title : item.type === 'text' ? snippet : url;
+        const alt = (item.type === 'url' || item.type === 'regex') && value ? decodeUrlForMatch(value) : '';
         if ((item.type === 'url' || item.type === 'regex' || item.type === 'title' || item.type === 'text') &&
-            value && safeRegexTest(item.regex, value)) return item;
+            value && (safeRegexTest(item.regex, value) || (alt && alt !== value && safeRegexTest(item.regex, alt)))) return item;
       }
       return null;
     };
 
     const hlEntry =
       scanDomainMap(compiledRules.highlightDomains, (en, lv) => matchDomainEntryType(en.type, lv, lowerDomain)) ||
-      scanPatterns(compiledRules.highlightUrls, url) ||
+      scanPatterns(compiledRules.highlightUrls, url, null, true) ||
       scanPatterns(compiledRules.highlightTitles, title) ||
       scanPatterns(compiledRules.highlightTexts, snippet) ||
       scanConditionalDomains(compiledRules.highlightConditionalDomains, (it, lv) => matchDomainEntryType(it.domainType, lv, lowerDomain)) ||
@@ -2165,7 +2193,7 @@
     };
     const findWhitelistPair = () => findPair([
       () => scanDomainMap(compiledRules.whitelistDomains, (en, lv) => matchDomainEntryType(en.type, lv, lowerDomain)),
-      () => scanPatterns(compiledRules.whitelistUrlPatterns, url),
+      () => scanPatterns(compiledRules.whitelistUrlPatterns, url, null, true),
       () => scanPatterns(compiledRules.whitelistTitlePatterns, title),
       () => scanPatterns(compiledRules.whitelistTextPatterns, snippet),
       () => scanConditionalDomains(compiledRules.whitelistConditionalDomains, (it, lv) => matchDomainEntryType(it.domainType, lv, lowerDomain)),
@@ -2173,7 +2201,7 @@
     ]);
     const findBlockedPair = () => findPair([
       () => scanDomainMap(compiledRules.domains, (en, lv) => matchDomainEntryType(en.type, lv, lowerDomain)),
-      () => scanPatterns(compiledRules.urls, url),
+      () => scanPatterns(compiledRules.urls, url, null, true),
       () => scanPatterns(compiledRules.titles, title),
       () => scanPatterns(compiledRules.texts, snippet),
       () => scanConditionalDomains(compiledRules.conditionalDomains, (it, lv) => matchDomainEntryType(it.domainType, lv, lowerDomain)),
@@ -2238,7 +2266,7 @@
   function unwrapRedirectUrl(url) {
     const isRedirectHost = (host) => {
       host = String(host || '').replace(/\.$/, '');
-      return ['bing', 'google_scholar', 'google', 'duckduckgo', 'yahoo', 'yahoo_jp'].some(e => isEngineHost(e, host)) ||
+      return ['bing', 'google_scholar', 'google', 'duckduckgo', 'yahoo', 'yahoo_japan'].some(e => isEngineHost(e, host)) ||
         isEngineHost('so360', host) || isEngineHost('sogou', host) || isEngineHost('toutiao', host);
     };
     const seen = new Set();
@@ -2257,7 +2285,7 @@
           for (const p of ['adurl', 'imgurl', 'url', 'u', 'dest']) { if (tryGoogleParam(p)) break; }
         } else if (isEngineHost('duckduckgo', host) && /^\/l\/?$/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('uddg'));
-        } else if (isEngineHost('yahoo', host) || isEngineHost('yahoo_jp', host)) {
+        } else if (isEngineHost('yahoo', host) || isEngineHost('yahoo_japan', host)) {
           if (/ru=/i.test(path)) {
             const ruMatch = path.match(/(?:^|\/)RU=([\s\S]*?)(?=(?:\/(?:rk|rs|rv|ro|re|rh|rt|_ylt|_ylu)=|\/$|$))/i); if (ruMatch && ruMatch[1]) next = decodeRedirectTarget(ruMatch[1]);
           }
@@ -2278,8 +2306,10 @@
             } catch (_) {}
           }
         } else if (isEngineHost('so360', host) && /^\/jump\/?$/i.test(path)) {
-          next = decodeRedirectTarget(urlObj.searchParams.get('u'));
-        } else if ((isEngineHost('so360', host) || isEngineHost('sogou', host)) && /(?:\/tc\b|\/jump\b|\/link\b)/i.test(path)) {
+          next = decodeRedirectTarget(urlObj.searchParams.get('u') || urlObj.searchParams.get('url'));
+        } else if (isEngineHost('sogou', host) && /(?:\/tc\b|\/jump\b|\/link\b)/i.test(path)) {
+          next = decodeRedirectTarget(urlObj.searchParams.get('url'));
+        } else if (isEngineHost('so360', host) && /(?:\/tc\b|\/link\b)/i.test(path)) {
           next = decodeRedirectTarget(urlObj.searchParams.get('url'));
         }
       } catch (_) {}
@@ -2777,7 +2807,7 @@
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="${iconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line></svg>`;
 
     ensurePositioned(result);
-    if (engine === 'bing' || engine === 'yandex' || engine === 'brave' || engine === 'yahoo') {
+    if (engine === 'bing' || engine === 'yandex' || engine === 'brave' || engine === 'yahoo' || engine === 'yahoo_japan') {
       btn.style.right = '5px'; btn.style.top = '10px';
     } else {
       btn.style.right = '35px'; btn.style.top = '10px';
@@ -2951,8 +2981,19 @@
       if (parent.getAttribute('data-is-blocked') !== 'true' && !blockedShown() && (!stillHiddenBlocked || hasVisibleUnblocked)) restoreParentDisplay(parent);
     });
     document.querySelectorAll('[data-serhl-grid-item-hidden]').forEach(cell => {
-      const stillBlocked = Array.from(cell.querySelectorAll('[data-is-blocked="true"]')).some(el => el.style.display === 'none');
-      if (!stillBlocked && !blockedShown()) restoreParentDisplay(cell);
+      const leaves = getGridLeaves(cell);
+      const stillBlocked = leaves.length ? leaves.some(gridLeafBlocked) : Array.from(cell.querySelectorAll('[data-is-blocked="true"]')).some(el => el.style.display === 'none');
+      const leafShown = (el) => {
+        let cur = el;
+        while (cur && cur !== cell) {
+          if (cur.style && cur.style.display === 'none') return false;
+          if (cur.getAttribute && cur.getAttribute('data-is-blocked') === 'true') return false;
+          cur = cur.parentElement;
+        }
+        return cur === cell;
+      };
+      const hasVisibleUnblocked = leaves.some(leafShown);
+      if (!blockedShown() && (!stillBlocked || hasVisibleUnblocked)) restoreParentDisplay(cell);
     });
   }
 
@@ -2983,22 +3024,34 @@
     ensurePositioned(result); result.appendChild(label);
   }
 
+  function getGridLeaves(cell) {
+    if (!cell || typeof cell.querySelectorAll !== 'function') return [];
+    try {
+      const isv = Array.from(cell.querySelectorAll('div.isv-r')); if (isv.length) return isv;
+      const cards = Array.from(cell.querySelectorAll('div[data-attrid="images universal"]')); if (cards.length) return cards;
+      return Array.from(cell.querySelectorAll('div.iuscp, div.imgpt')).filter(el => el.querySelector && el.querySelector('a.iusc') && !Array.from(el.querySelectorAll('div.iuscp, div.imgpt')).some(child => child.querySelector && child.querySelector('a.iusc')));
+    } catch (e) { return []; }
+  }
+  function gridLeafBlocked(el) {
+    return !!el && (el.style.display === 'none' || el.getAttribute('data-is-blocked') === 'true' || !!(el.closest && el.closest('[data-is-blocked="true"]')));
+  }
+  function hideGridCell(cell, attr) {
+    if (!cell) return; const alreadyHidden = cell.getAttribute(attr) === 'true';
+    cell.style.display = 'none'; cell.setAttribute(attr, 'true'); if (!alreadyHidden) _hiddenParentCount++;
+  }
   function markResultGridSlot(result, engine) {
     if (engine === 'google') {
       let cell = result;
       while (cell && cell.parentElement && cell.tagName !== 'BODY') { const d = getComputedStyle(cell.parentElement).display; if (d === 'grid' || d === 'inline-grid') break; cell = cell.parentElement; }
       if (!cell || cell === result || !cell.parentElement || cell.tagName === 'BODY') return;
-      const leaves = Array.from(cell.querySelectorAll('div.isv-r')); if (!leaves.length) leaves.push(...Array.from(cell.querySelectorAll('div[data-attrid="images universal"]')));
-      if (leaves.length && !leaves.every(el => el.style.display === 'none' || el.getAttribute('data-is-blocked') === 'true')) return;
-      cell.style.display = 'none'; cell.setAttribute('data-serhl-grid-item-hidden', 'true'); _hiddenParentCount++;
+      const leaves = getGridLeaves(cell); const targets = leaves.length ? leaves : [result];
+      if (!targets.every(gridLeafBlocked)) return;
+      hideGridCell(cell, 'data-serhl-grid-item-hidden');
     } else if (engine === 'bing') {
       const slot = result.closest ? result.closest('li') : null;
       if (slot && slot !== result) {
-        const leafItems = slot.querySelectorAll ? Array.from(slot.querySelectorAll('div.iuscp, div.imgpt')).filter(el => el.querySelector('a.iusc') && !Array.from(el.querySelectorAll('div.iuscp, div.imgpt')).some(child => child.querySelector('a.iusc'))) : [];
-        const targets = leafItems.length ? leafItems : [result];
-        if (targets.every(el => el.style.display === 'none' || !!(el.closest && el.closest('[data-is-blocked="true"]')))) {
-          slot.style.display = 'none'; slot.setAttribute('data-serhl-grid-item-hidden', 'true'); _hiddenParentCount++;
-        }
+        const leaves = getGridLeaves(slot); const targets = leaves.length ? leaves : [result];
+        if (targets.every(gridLeafBlocked)) hideGridCell(slot, 'data-serhl-grid-item-hidden');
       }
     }
   }
@@ -3185,10 +3238,10 @@
 
   function scanNewResults() {
     if (!currentConfig.enabled) {
+      document.querySelectorAll('.serhl-quick-block').forEach(btn => btn.remove());
       document.querySelectorAll('[data-blocker-processed], [data-observed]').forEach(result => {
         resultObserver.unobserve(result); resetResultStyles(result); result.removeAttribute('data-observed');
       });
-      document.querySelectorAll('.serhl-quick-block').forEach(btn => btn.remove());
       showHiddenResults = false; _observedSelector = ''; return;
     }
 
@@ -3288,499 +3341,141 @@
   let widgetStylesInjected = false; let _globalStyleEl = null;
   function injectWidgetStyles() {
     if (widgetStylesInjected) return; widgetStylesInjected = true;
-    GM_addStyle(`
-        [id^="serhl-"]:not(button),
-        #serhl-settings-panel * {
-            text-align: left !important; letter-spacing: normal !important; word-spacing: normal !important;
-            text-transform: none !important; text-indent: 0 !important; text-shadow: none !important;
-            text-decoration: none !important; direction: ltr !important;
-            font-style: normal !important; font-variant: normal !important;
+    GM_addStyle(`        /* 主题变量 */
+        body {
+            --serhl-bg: #ffffff; --serhl-fg: #2d3748; --serhl-label: #4a5568; --serhl-label-strong: #4a5568;
+            --serhl-dim: #a0aec0; --serhl-border: #e2e8f0; --serhl-input-border: #e2e8f0;
+            --serhl-editor-border: #e2e8f0; --serhl-editor-fg: #000000; --serhl-editor-bg: #f8fafc; --serhl-gutter-bg: #edf2f7; --serhl-code-bg: #f7fafc;
+            --serhl-input-bg: #ffffff; --serhl-switch-off: #cbd5e0; --serhl-focus: #3182ce;
+            --serhl-accent: #2c5282; --serhl-success: #276749; --serhl-danger: #c53030; --serhl-blocked-bg: #d1d5db;
+            --serhl-bubble: #2c5282; --serhl-bubble-number: #000000; --serhl-quick-block: #2c5282;
+            --serhl-bracket-bg: rgba(49, 130, 206, 0.30); --serhl-bracket-ring: rgba(49, 130, 206, 0.60); --serhl-bracket-enclosing: rgba(100, 116, 139, 0.16);
+            --serhl-matched-bg: rgba(0, 0, 0, 0.2); --serhl-matched-fg: #000000;
+            --serhl-window-shadow: 0 4px 12px rgba(0,0,0,0.08); --serhl-dialog-shadow: 0 4px 12px rgba(0,0,0,0.15); --serhl-toast-shadow: 0 4px 12px rgba(0,0,0,0.12);
+            --serhl-stats-bg: #ffffff; --serhl-toast-bg: #ffffff; --serhl-dialog-bg: #ffffff;
+            --serhl-disabled-bg: #edf2f7; --serhl-disabled-fg: #a0aec0;
+            --serhl-scroll-track: #f1f1f1; --serhl-scroll-thumb: #c1c1c1; --serhl-scroll-thumb-hover: #a8a8a8;
+        }
+        body.serhl-dark-on {
+            --serhl-bg: #171717; --serhl-fg: #f3f4f6; --serhl-label: #9ca3af; --serhl-label-strong: #f3f4f6;
+            --serhl-dim: #9ca3af; --serhl-border: #374151; --serhl-input-border: #4b5563;
+            --serhl-editor-border: #4b5563; --serhl-editor-fg: #f3f4f6; --serhl-editor-bg: #1E1F21; --serhl-gutter-bg: #222629; --serhl-code-bg: #374151;
+            --serhl-input-bg: #374151; --serhl-switch-off: #4b5563; --serhl-focus: #60a5fa;
+            --serhl-blocked-bg: #374151; --serhl-bubble: #a8c7fa; --serhl-bubble-number: #ffffff; --serhl-quick-block: #ffffff;
+            --serhl-bracket-bg: rgba(96, 165, 250, 0.38); --serhl-bracket-ring: rgba(96, 165, 250, 0.75); --serhl-bracket-enclosing: rgba(148, 163, 184, 0.22);
+            --serhl-matched-bg: rgba(0, 160, 0, 0.9); --serhl-matched-fg: #ffffff;
+            --serhl-window-shadow: 0 4px 12px rgba(0,0,0,0.5); --serhl-dialog-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            --serhl-stats-bg: #171717; --serhl-toast-bg: #171717; --serhl-dialog-bg: #171717;
+            --serhl-disabled-bg: #1f2937; --serhl-disabled-fg: #6b7280;
         }
 
-        .serhl-window, .serhl-window * {
-            box-sizing: border-box !important;
-        }
-        .serhl-window {
-            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-            font-size: 13px !important; background: #ffffff !important; color: #2d3748 !important;
-            border: 1px solid #e2e8f0 !important; border-radius: 8px !important;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important; text-align: left !important; line-height: 1.5 !important;
-            transition: all 0.15s ease;
-        }
-
+        [id^="serhl-"]:not(button), #serhl-settings-panel * { text-align: left !important; letter-spacing: normal !important; word-spacing: normal !important; text-transform: none !important; text-indent: 0 !important; text-shadow: none !important; text-decoration: none !important; direction: ltr !important; font-style: normal !important; font-variant: normal !important; }
+        .serhl-window, .serhl-window * { box-sizing: border-box !important; }
+        .serhl-window { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 13px !important; background: var(--serhl-bg) !important; color: var(--serhl-fg) !important; border: 1px solid var(--serhl-border) !important; border-radius: 8px !important; box-shadow: var(--serhl-window-shadow) !important; text-align: left !important; line-height: 1.5 !important; transition: all 0.15s ease; }
         #serhl-settings-panel * { line-height: 1.2 !important; }
-        #serhl-settings-panel label,
-        #serhl-settings-panel span,
-        #serhl-settings-panel select { font-weight: 400 !important; }
+        #serhl-settings-panel label, #serhl-settings-panel span, #serhl-settings-panel select { font-weight: 400 !important; }
         #serhl-settings-panel span { font-size: inherit !important; }
         #serhl-settings-panel #serhl-settings-close { font-size: 12px !important; }
-
-        [id^="serhl-"] button,
-        .serhl-button {
-            border: none !important; border-radius: 4px !important; cursor: pointer !important; box-sizing: border-box !important;
-            line-height: normal !important; letter-spacing: normal !important; text-transform: none !important;
-            white-space: nowrap !important; vertical-align: middle !important;
-            appearance: none !important; -webkit-appearance: none !important; background-image: none !important;
-            box-shadow: none !important; margin: 0 !important; outline: none !important; text-shadow: none !important;
-            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-            transition: background-color 0.2s;
-        }
-
-        [id^="serhl-"] button:not(.serhl-action-button),
-        .serhl-button:not(.serhl-action-button) {
-            font-size: 11px !important; padding: 4px 8px !important; height: auto !important; min-height: 0 !important;
-            width: auto !important; min-width: 0 !important; max-width: none !important;
-        }
+        [id^="serhl-"] button, .serhl-button { border: none !important; border-radius: 4px !important; cursor: pointer !important; box-sizing: border-box !important; line-height: normal !important; letter-spacing: normal !important; text-transform: none !important; white-space: nowrap !important; vertical-align: middle !important; appearance: none !important; -webkit-appearance: none !important; background-image: none !important; box-shadow: none !important; margin: 0 !important; outline: none !important; text-shadow: none !important; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; transition: background-color 0.2s; }
+        [id^="serhl-"] button:not(.serhl-action-button), .serhl-button:not(.serhl-action-button) { font-size: 11px !important; padding: 4px 8px !important; height: auto !important; min-height: 0 !important; width: auto !important; min-width: 0 !important; max-width: none !important; }
         .serhl-button-primary { background: #2c5282 !important; color: #ffffff !important; }
         .serhl-button-primary:hover { background: #1a365d !important; color: #ffffff !important; }
         .serhl-button-primary:active, .serhl-button-primary:focus, .serhl-button-primary:focus-visible { background: #1d375d !important; color: #ffffff !important; }
-
         .serhl-button-secondary { background: #4a5568 !important; color: #ffffff !important; }
         .serhl-button-secondary:hover { background: #2d3748 !important; color: #ffffff !important; }
         .serhl-button-secondary:active, .serhl-button-secondary:focus, .serhl-button-secondary:focus-visible { background: #2a3240 !important; color: #ffffff !important; }
-
         .serhl-button-success { background: #276749 !important; color: #ffffff !important; }
         .serhl-button-success:hover { background: #22543d !important; color: #ffffff !important; }
         .serhl-button-success:active, .serhl-button-success:focus, .serhl-button-success:focus-visible { background: #20503a !important; color: #ffffff !important; }
-
         .serhl-button-danger { background: #c53030 !important; color: #ffffff !important; }
         .serhl-button-danger:hover { background: #9b2c2c !important; color: #ffffff !important; }
         .serhl-button-danger:active, .serhl-button-danger:focus, .serhl-button-danger:focus-visible { background: #8f2c2c !important; color: #ffffff !important; }
-
-        .serhl-option-row {
-            display: flex; align-items: center; justify-content: space-between;
-            margin-bottom: 10px; flex-wrap: wrap;
-        }
-        .serhl-option-label {
-            font-size: 12px; color: #4a5568; white-space: nowrap; margin-bottom: 4px;
-        }
-        .serhl-compact-row {
-            display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
-        }
-        .serhl-action-button {
-            padding: 7px 12px !important; font-size: 12px !important; font-weight: 500 !important; box-sizing: border-box !important;
-            height: 32px !important; min-height: 32px !important; line-height: 1 !important;
-            display: inline-flex !important; align-items: center !important; justify-content: center !important;
-            text-align: center !important;
-        }
-
-        .serhl-rules-container {
-            display: flex; border: 1px solid #e2e8f0; border-radius: 4px; background: #f8fafc;
-            height: 190px; margin-bottom: 3px; position: relative; overflow: hidden;
-        }
-
-        #serhl-line-numbers,
-        #serhl-sel-line-numbers {
-            min-width: 20px; padding: 8px 4px 8px 2px !important; background: #edf2f7;
-            border-right: 1px solid #e2e8f0; text-align: right !important; color: #a0aec0;
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace !important;
-            font-size: 11px !important; line-height: 15.4px !important; white-space: nowrap !important;
-            overflow: hidden !important; user-select: none !important; flex-shrink: 0; box-sizing: border-box !important;
-        }
-
-        #serhl-rules,
-        #serhl-sel-rules {
-            flex: 1; height: 100% !important; min-height: 0 !important; max-height: none !important;
-            font-size: 11px !important; padding: 8px !important; margin: 0 !important; border: none !important;
-            resize: none !important; background: transparent !important; box-sizing: border-box !important;
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace !important;
-            line-height: 15.4px !important; white-space: pre !important;
-            position: relative; z-index: 1;
-            overflow-x: auto !important; overflow-y: auto !important; outline: none !important; box-shadow: none !important;
-        }
-
-        .serhl-bracket-layer {
-            position: absolute; top: 0; right: 0; bottom: 0; left: 0;
-            z-index: 0; overflow: hidden; pointer-events: none;
-        }
-        .serhl-bracket-mirror {
-            position: absolute; top: 0; left: 0; visibility: hidden;
-            white-space: pre; pointer-events: none;
-            margin: 0 !important; padding: 0 !important; border: 0 !important;
-            text-indent: 0 !important; text-align: left !important;
-            -webkit-text-size-adjust: 100% !important; text-size-adjust: 100% !important;
-        }
+        .serhl-option-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; }
+        .serhl-option-label { font-size: 12px; color: var(--serhl-label-strong); white-space: nowrap; margin-bottom: 4px; }
+        .serhl-compact-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .serhl-action-button { padding: 7px 12px !important; font-size: 12px !important; font-weight: 500 !important; box-sizing: border-box !important; height: 32px !important; min-height: 32px !important; line-height: 1 !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; text-align: center !important; }
+        .serhl-rules-container { display: flex; border: 1px solid var(--serhl-editor-border); border-radius: 4px; background: var(--serhl-editor-bg); height: 190px; margin-bottom: 3px; position: relative; overflow: hidden; }
+        #serhl-line-numbers, #serhl-sel-line-numbers { min-width: 20px; padding: 8px 4px 8px 2px !important; background: var(--serhl-gutter-bg); border-right: 1px solid var(--serhl-editor-border); text-align: right !important; color: var(--serhl-dim); font-family: 'Consolas', 'Monaco', 'Courier New', monospace !important; font-size: 11px !important; line-height: 15.4px !important; white-space: nowrap !important; overflow: hidden !important; user-select: none !important; flex-shrink: 0; box-sizing: border-box !important; }
+        #serhl-rules, #serhl-sel-rules { flex: 1; height: 100% !important; min-height: 0 !important; max-height: none !important; font-size: 11px !important; padding: 8px !important; margin: 0 !important; border: none !important; resize: none !important; background: transparent !important; box-sizing: border-box !important; font-family: 'Consolas', 'Monaco', 'Courier New', monospace !important; line-height: 15.4px !important; white-space: pre !important; position: relative; z-index: 1; overflow-x: auto !important; overflow-y: auto !important; outline: none !important; box-shadow: none !important; color: var(--serhl-editor-fg) !important; }
+        .serhl-bracket-layer { position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+        .serhl-bracket-mirror { position: absolute; top: 0; left: 0; visibility: hidden; white-space: pre; pointer-events: none; margin: 0 !important; padding: 0 !important; border: 0 !important; text-indent: 0 !important; text-align: left !important; -webkit-text-size-adjust: 100% !important; text-size-adjust: 100% !important; }
         .serhl-bracket-hit { position: absolute; display: none; border-radius: 2px; pointer-events: none; }
-        .serhl-bracket-pair { background: rgba(49, 130, 206, 0.30); box-shadow: 0 0 0 1px rgba(49, 130, 206, 0.60); }
-        .serhl-bracket-enclosing { background: rgba(100, 116, 139, 0.16); }
-
+        .serhl-bracket-pair { background: var(--serhl-bracket-bg); box-shadow: 0 0 0 1px var(--serhl-bracket-ring); }
+        .serhl-bracket-enclosing { background: var(--serhl-bracket-enclosing); }
         :is(#serhl-rules, #serhl-sel-rules)::-webkit-scrollbar { width: 6px; height: 0px; }
-        :is(#serhl-rules, #serhl-sel-rules, #serhl-stats-content)::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
-        :is(#serhl-rules, #serhl-sel-rules, #serhl-stats-content)::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
-        :is(#serhl-rules, #serhl-sel-rules, #serhl-stats-content)::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
-
-        #serhl-stats-panel {
-            position: absolute; top: 10px; left: 15px; right: 15px; bottom: 50px;
-            background: white; border: 1px solid #e2e8f0; border-radius: 6px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05); z-index: 10; display: none;
-            flex-direction: column; overflow: hidden; box-sizing: border-box;
-        }
-
-        #serhl-stats-content {
-            padding: 12px; overflow-y: auto; flex: 1; scrollbar-width: thin;
-        }
-
-        .serhl-stats-title { color: #2d3748; }
-        .serhl-stats-item { color: #4a5568; }
-
+        :is(#serhl-rules, #serhl-sel-rules, #serhl-stats-content)::-webkit-scrollbar-track { background: var(--serhl-scroll-track); border-radius: 3px; }
+        :is(#serhl-rules, #serhl-sel-rules, #serhl-stats-content)::-webkit-scrollbar-thumb { background: var(--serhl-scroll-thumb); border-radius: 3px; }
+        :is(#serhl-rules, #serhl-sel-rules, #serhl-stats-content)::-webkit-scrollbar-thumb:hover { background: var(--serhl-scroll-thumb-hover); }
+        #serhl-stats-panel { position: absolute; top: 10px; left: 15px; right: 15px; bottom: 50px; background: var(--serhl-stats-bg); border: 1px solid var(--serhl-border); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); z-index: 10; display: none; flex-direction: column; overflow: hidden; box-sizing: border-box; }
+        #serhl-stats-content { padding: 12px; overflow-y: auto; flex: 1; scrollbar-width: thin; }
+        .serhl-stats-title { color: var(--serhl-fg); }
+        .serhl-stats-item { color: var(--serhl-label-strong); }
         #serhl-stats-content::-webkit-scrollbar { width: 6px; }
-
-        .serhl-quick-block {
-            position: absolute; cursor: pointer; z-index: 99; width: 24px; height: 24px;
-            display: flex; align-items: center; justify-content: center;
-            border-radius: 50%; background: transparent; user-select: none;
-            color: #2c5282;
-            transition: transform 0.2s;
-        }
-
-        .serhl-quick-block:hover {
-            transform: scale(1.1);
-        }
-
-    body.serhl-dark-on .serhl-quick-block {
-        color: #ffffff;
-    }
-
-        #serhl-block-confirm-dialog {
-            position: fixed; z-index: 10002; display: flex; flex-direction: column; gap: 6px;
-            width: 250px; max-width: calc(100vw - 16px); padding: 8px 10px;
-            background: #ffffff; color: #2d3748; border: 1px solid #e2e8f0; border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            font-size: 12px; text-align: left; line-height: 1.4; box-sizing: border-box;
-        }
+        .serhl-quick-block { position: absolute; cursor: pointer; z-index: 99; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: transparent; user-select: none; color: var(--serhl-quick-block); transition: transform 0.2s; }
+        #serhl-block-confirm-dialog { position: fixed; z-index: 10002; display: flex; flex-direction: column; gap: 6px; width: 250px; max-width: calc(100vw - 16px); padding: 8px 10px; background: var(--serhl-dialog-bg); color: var(--serhl-fg); border: 1px solid var(--serhl-border); border-radius: 8px; box-shadow: var(--serhl-dialog-shadow); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; text-align: left; line-height: 1.4; box-sizing: border-box; }
         #serhl-block-confirm-dialog .sfb-confirm-domain { font-size: 11px; color: #718096; word-break: break-all; margin-bottom: 2px; }
-        #serhl-block-confirm-dialog .sfb-confirm-option {
-            display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0; padding: 0;
-            border: none; background: transparent; font-weight: normal; white-space: nowrap;
-        }
-        #serhl-block-confirm-dialog .sfb-confirm-option input[type="radio"] {
-            margin: 0 !important; padding: 0 !important; flex-shrink: 0 !important; accent-color: #2c5282 !important;
-            cursor: pointer !important; width: auto !important; height: auto !important; min-width: 0 !important;
-            appearance: auto !important; -webkit-appearance: auto !important; display: inline-block !important;
-        }
+        #serhl-block-confirm-dialog .sfb-confirm-option { display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0; padding: 0; border: none; background: transparent; font-weight: normal; white-space: nowrap; }
+        #serhl-block-confirm-dialog .sfb-confirm-option input[type="radio"] { margin: 0 !important; padding: 0 !important; flex-shrink: 0 !important; accent-color: #2c5282 !important; cursor: pointer !important; width: auto !important; height: auto !important; min-width: 0 !important; appearance: auto !important; -webkit-appearance: auto !important; display: inline-block !important; }
         #serhl-block-confirm-dialog .sfb-confirm-option-disabled { cursor: not-allowed; opacity: 0.6; }
         #serhl-block-confirm-dialog .sfb-confirm-option-disabled input[type="radio"] { cursor: not-allowed !important; }
-        #serhl-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule { background: #edf2f7; color: #a0aec0; }
-
-        .serhl-switch input[type="checkbox"] {
-            opacity: 0 !important; width: 0 !important; height: 0 !important;
-            min-width: 0 !important; max-width: 0 !important; margin: 0 !important; padding: 0 !important;
-            position: absolute !important; pointer-events: none !important;
-            appearance: none !important; -webkit-appearance: none !important; border: none !important;
-        }
+        #serhl-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule { background: var(--serhl-disabled-bg); color: var(--serhl-disabled-fg); }
+        .serhl-switch input[type="checkbox"] { opacity: 0 !important; width: 0 !important; height: 0 !important; min-width: 0 !important; max-width: 0 !important; margin: 0 !important; padding: 0 !important; position: absolute !important; pointer-events: none !important; appearance: none !important; -webkit-appearance: none !important; border: none !important; }
         #serhl-block-confirm-dialog .sfb-confirm-label { flex-shrink: 0; min-width: 36px; white-space: nowrap; font-size: 12px; }
-        #serhl-block-confirm-dialog .sfb-confirm-rule {
-            flex: 1; min-width: 0; padding: 3px 6px; border: 1px solid #e2e8f0; border-radius: 4px;
-            font-size: 11px; font-family: 'Consolas', 'Monaco', monospace; background: #f7fafc;
-            color: #2d3748; outline: none; box-shadow: none; height: auto; box-sizing: border-box;
-        }
-        #serhl-block-confirm-dialog .sfb-confirm-rule:focus { border-color: #3182ce; background: #ffffff; }
+        #serhl-block-confirm-dialog .sfb-confirm-rule { flex: 1; min-width: 0; padding: 3px 6px; border: 1px solid var(--serhl-input-border); border-radius: 4px; font-size: 11px; font-family: 'Consolas', 'Monaco', monospace; background: var(--serhl-code-bg); color: var(--serhl-fg); outline: none; box-shadow: none; height: auto; box-sizing: border-box; }
+        #serhl-block-confirm-dialog .sfb-confirm-rule:focus { border-color: var(--serhl-focus); background: var(--serhl-input-bg); }
         #serhl-block-confirm-dialog .sfb-confirm-btns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
         #serhl-block-confirm-dialog .sfb-confirm-btns .serhl-button { height: 24px; padding: 0 10px; font-size: 11px; }
-    body.serhl-dark-on #serhl-block-confirm-dialog {
-        background: #171717; color: #f3f4f6; border-color: #374151;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-    }
-    body.serhl-dark-on #serhl-block-confirm-dialog .sfb-confirm-rule { background: #374151; border-color: #4b5563; color: #f3f4f6; }
-    body.serhl-dark-on #serhl-block-confirm-dialog .sfb-confirm-rule:focus { border-color: #60a5fa; background: #374151; }
-    body.serhl-dark-on #serhl-block-confirm-dialog .sfb-confirm-option-disabled .sfb-confirm-rule { background: #1f2937; color: #6b7280; }
-
-        .serhl-scroll-btn {
-            position: absolute; right: 7px; cursor: pointer; opacity: 0.5; font-size: 18px !important;
-            line-height: 1 !important; user-select: none !important; transition: opacity 0.2s, transform 0.2s;
-            background: transparent !important; border: none !important; padding: 0 !important; margin: 0 !important;
-            z-index: 10;
-        }
-
+        .serhl-scroll-btn { position: absolute; right: 7px; cursor: pointer; opacity: 0.5; font-size: 18px !important; line-height: 1 !important; user-select: none !important; transition: opacity 0.2s, transform 0.2s; background: transparent !important; border: none !important; padding: 0 !important; margin: 0 !important; z-index: 10; }
         .serhl-scroll-btn:hover { opacity: 1; transform: scale(1.2); }
         .serhl-quick-block:hover { transform: scale(1.1); opacity: 1; }
-
-        :is(.isv-r, .image-section, g-img, .is-extra-container) .serhl-quick-block,
-        :is(header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav, #extabar) .serhl-quick-block { display: none !important; }
-
-
-    body.serhl-dark-on #serhl-panel .serhl-option-label,
-    body.serhl-dark-on #serhl-panel .serhl-compact-row span { color: #f3f4f6 !important; }
-    body.serhl-dark-on :is(#serhl-panel, #serhl-selector-panel) .serhl-rules-container { border-color: #4b5563 !important; background: #1E1F21 !important; }
-    body.serhl-dark-on :is(#serhl-line-numbers, #serhl-sel-line-numbers) { background: #222629 !important; border-right-color: #4b5563 !important; color: #9ca3af !important; }
-    body.serhl-dark-on :is(#serhl-rules, #serhl-sel-rules) { background: transparent !important; color: #f3f4f6 !important; }
-    body.serhl-dark-on #serhl-rules::placeholder { color: #6b7280 !important; }
-    body.serhl-dark-on .serhl-bracket-pair { background: rgba(96, 165, 250, 0.38); box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.75); }
-    body.serhl-dark-on .serhl-bracket-enclosing { background: rgba(148, 163, 184, 0.22); }
-    body.serhl-dark-on #serhl-stats-panel { background: #171717 !important; border-color: #374151 !important; }
-    body.serhl-dark-on #serhl-stats-content { color: #f3f4f6 !important; }
-    body.serhl-dark-on #serhl-stats-content :is(.serhl-stats-title, .serhl-stats-item) { color: #f3f4f6 !important; }
-    body.serhl-dark-on #serhl-panel .serhl-compact-row button.serhl-button {
-        height: auto !important; min-height: 0 !important; width: auto !important; min-width: 0 !important;
-        flex: 0 0 auto !important; line-height: normal !important; padding: 3px 8px !important;
-        font-size: 11px !important; margin: 0 !important;
-    }
-
-        #serhl-hlcolor-panel h3, #serhl-selector-panel h3 {
-            margin: 0 0 8px 0 !important; font-size: 14px !important; color: inherit !important;
-            font-weight: 600 !important; padding: 0 !important; border: none !important;
-            background: transparent !important; letter-spacing: normal !important;
-        }
-
-        #serhl-hlcolor-panel h3 {
-            margin: 0 0 1px 0 !important; line-height: 1.2 !important;
-        }
-
-        #serhl-selector-panel h3 {
-            margin: 0 !important; line-height: 1.2 !important;
-        }
-
-        :is(#serhl-hlcolor-panel) .serhl-button,
-        :is(#serhl-panel, #serhl-selector-panel) .serhl-action-button {
-            height: 30px !important; min-height: 30px !important; max-height: 30px !important; padding: 0 12px !important;
-            font-size: 13px !important; font-weight: 500 !important; box-sizing: border-box !important; margin: 0 !important;
-            display: flex !important; align-items: center !important; justify-content: center !important;
-            text-align: center !important; line-height: 1 !important; border: none !important; border-radius: 4px !important;
-            appearance: none !important; -webkit-appearance: none !important; box-shadow: none !important;
-            background-image: none !important;
-        }
-
-
-    body.serhl-dark-on .serhl-window {
-        background: #171717 !important; color: #f3f4f6 !important; border-color: #374151 !important;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
-    }
-    body.serhl-dark-on #serhl-settings-panel label,
-    body.serhl-dark-on #serhl-hlcolor-panel .serhl-hlcolor-row label {
-        color: #9ca3af !important;
-    }
-    body.serhl-dark-on #serhl-settings-panel select,
-    body.serhl-dark-on #serhl-hlcolor-panel .serhl-hlcolor-row input {
-        background: #374151 !important; border-color: #4b5563 !important; color: #f3f4f6 !important;
-    }
-    body.serhl-dark-on #serhl-hlcolor-panel .serhl-hlcolor-row input:focus {
-        border-color: #60a5fa !important;
-    }
-    body.serhl-dark-on #serhl-hlcolor-panel .serhl-hlcolor-row .serhl-hlcolor-preview,
-    body.serhl-dark-on #serhl-hlcolor-current-preview,
-    body.serhl-dark-on #serhl-hlcolor-sv-canvas,
-    body.serhl-dark-on #serhl-hlcolor-hue-canvas {
-        border-color: #4b5563 !important;
-    }
-
+        :is(.isv-r, .image-section, g-img, .is-extra-container) .serhl-quick-block, :is(header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav, #extabar) .serhl-quick-block { display: none !important; }
+        body.serhl-dark-on #serhl-panel .serhl-compact-row span { color: #f3f4f6 !important; }
+        body.serhl-dark-on #serhl-rules::placeholder { color: #6b7280 !important; }
+        body.serhl-dark-on #serhl-stats-content { color: #f3f4f6 !important; }
+        body.serhl-dark-on #serhl-panel .serhl-compact-row button.serhl-button { height: auto !important; min-height: 0 !important; width: auto !important; min-width: 0 !important; flex: 0 0 auto !important; line-height: normal !important; padding: 3px 8px !important; font-size: 11px !important; margin: 0 !important; }
+        #serhl-hlcolor-panel h3, #serhl-selector-panel h3 { margin: 0 0 8px 0 !important; font-size: 14px !important; color: inherit !important; font-weight: 600 !important; padding: 0 !important; border: none !important; background: transparent !important; letter-spacing: normal !important; }
+        #serhl-hlcolor-panel h3 { margin: 0 0 1px 0 !important; line-height: 1.2 !important; }
+        #serhl-selector-panel h3 { margin: 0 !important; line-height: 1.2 !important; }
+        :is(#serhl-hlcolor-panel) .serhl-button, :is(#serhl-panel, #serhl-selector-panel) .serhl-action-button { height: 30px !important; min-height: 30px !important; max-height: 30px !important; padding: 0 12px !important; font-size: 13px !important; font-weight: 500 !important; box-sizing: border-box !important; margin: 0 !important; display: flex !important; align-items: center !important; justify-content: center !important; text-align: center !important; line-height: 1 !important; border: none !important; border-radius: 4px !important; appearance: none !important; -webkit-appearance: none !important; box-shadow: none !important; background-image: none !important; }
+        body.serhl-dark-on #serhl-settings-panel label { color: #9ca3af !important; }
+        body.serhl-dark-on #serhl-settings-panel select { background: #374151 !important; border-color: #4b5563 !important; color: #f3f4f6 !important; }
         /* 渐变动画 */
-        .serhl-panel-fade {
-            opacity: 0;
-            transform: translate(-50%, -48%);
-            transition: all 0.15s ease;
-            pointer-events: none;
-        }
-        .serhl-panel-fade.show {
-            opacity: 1;
-            transform: translate(-50%, -50%);
-            pointer-events: auto;
-        }
-
-        .serhl-window:not(.serhl-panel-fade) {
-            transition: opacity 0.1s ease;
-        }
-
+        .serhl-panel-fade { opacity: 0; transform: translate(-50%, -48%); transition: all 0.15s ease; pointer-events: none; }
+        .serhl-panel-fade.show { opacity: 1; transform: translate(-50%, -50%); pointer-events: auto; }
+        .serhl-window:not(.serhl-panel-fade) { transition: opacity 0.1s ease; }
         /* 屏蔽灰底 */
-        .serhl-blocked-visible,
-        .g.serhl-blocked-visible,
-        .MjjYud.serhl-blocked-visible {
-            background-color: #d1d5db !important; border-radius: 8px !important; padding: 8px !important;
-            transition: background 0.2s;
-        }
-
-    body.serhl-dark-on .serhl-blocked-visible,
-    body.serhl-dark-on .g.serhl-blocked-visible,
-    body.serhl-dark-on .MjjYud.serhl-blocked-visible {
-        background-color: #374151 !important;
-    }
-
-        .serhl-blocked-visible div,
-        .serhl-blocked-visible .yuRUbf,
-        .serhl-blocked-visible div[data-sokoban-container],
-        .serhl-blocked-visible div[data-snc] {
-            background-color: transparent !important; background: transparent !important; background-image: none !important;
-        }
-
-        .serhl-bubble-number {
-            color: #000000 !important;
-            line-height: 1 !important;
-        }
-
-    body.serhl-dark-on #serhl-status {
-        color: #a8c7fa !important;
-    }
-    body.serhl-dark-on .serhl-bubble-number {
-        color: #ffffff !important;
-    }
-
-        .serhl-matched-rule {
-            position: absolute; top: 2px; left: 50%; transform: translateX(-50%);
-            max-width: calc(100% - 70px); background: rgba(0, 0, 0, 0.2); color: #000000;
-            font-size: 12px; padding: 2px 8px; border-radius: 4px; white-space: nowrap;
-            overflow: hidden; text-overflow: ellipsis; z-index: 98; pointer-events: none;
-            font-family: monospace; backdrop-filter: blur(2px);
-            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-        }
-    body.serhl-dark-on .serhl-matched-rule {
-        background: rgba(0, 160, 0, 0.9);
-        color: #fff;
-    }
-
+        .serhl-blocked-visible, .g.serhl-blocked-visible, .MjjYud.serhl-blocked-visible { background-color: var(--serhl-blocked-bg) !important; border-radius: 8px !important; padding: 8px !important; transition: background 0.2s; }
+        .serhl-blocked-visible div, .serhl-blocked-visible .yuRUbf, .serhl-blocked-visible div[data-sokoban-container], .serhl-blocked-visible div[data-snc] { background-color: transparent !important; background: transparent !important; background-image: none !important; }
+        .serhl-bubble-number { color: var(--serhl-bubble-number) !important; line-height: 1 !important; }
+        .serhl-matched-rule { position: absolute; top: 2px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 70px); background: var(--serhl-matched-bg); color: var(--serhl-matched-fg); font-size: 12px; padding: 2px 8px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; z-index: 98; pointer-events: none; font-family: monospace; backdrop-filter: blur(2px); box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
         /* 高亮 */
-        #serhl-hlcolor-panel .serhl-hlcolor-row {
-            margin-bottom: 2px !important; padding: 0 !important; border: none !important;
-            background: transparent !important; display: flex !important; align-items: center !important; gap: 4px !important;
-            height: auto !important; min-height: 0 !important; max-height: none !important;
-        }
-        #serhl-hlcolor-panel .serhl-hlcolor-row label {
-            min-width: 20px !important; font-size: 12px !important; color: #4a5568 !important;
-            font-weight: 600 !important; margin: 0 !important; line-height: 1.2 !important;
-            padding: 0 !important; border: none !important; background: transparent !important;
-            height: auto !important; min-height: 0 !important; max-height: none !important;
-            display: block !important; box-sizing: border-box !important;
-        }
-        #serhl-hlcolor-panel .serhl-hlcolor-row .serhl-hlcolor-preview {
-            width: 12px !important; height: 12px !important; border-radius: 2px !important;
-            border: 1px solid #e2e8f0 !important; flex-shrink: 0 !important; cursor: pointer !important;
-            margin: 0 !important; padding: 0 !important; box-sizing: border-box !important;
-            min-height: 0 !important; max-height: none !important;
-        }
-        #serhl-hlcolor-panel .serhl-hlcolor-row input {
-            width: 70px !important; flex: none !important; padding: 2px 4px !important; margin: 0 !important;
-            border: 1px solid #e2e8f0 !important; border-radius: 3px !important; font-size: 11px !important;
-            font-family: 'Consolas', monospace !important; background: #ffffff !important; color: #2d3748 !important;
-            height: 20px !important; line-height: normal !important; box-shadow: none !important; outline: none !important;
-            display: block !important; font-weight: normal !important; box-sizing: border-box !important;
-            min-width: 0 !important; max-width: none !important; min-height: 0 !important; max-height: none !important;
-            transform: none !important; appearance: none !important; -webkit-appearance: none !important;
-        }
-        #serhl-hlcolor-panel .serhl-hlcolor-row input:focus {
-            border-color: #3182ce !important;
-        }
-        #serhl-hlcolor-panel .serhl-hlcolor-picker-wrapper {
-            display: flex !important; align-items: stretch !important; margin: 0 !important;
-        }
-        #serhl-hlcolor-sv-canvas, #serhl-hlcolor-hue-canvas {
-            cursor: crosshair !important; border-radius: 3px !important; border: 1px solid #e2e8f0 !important;
-        }
-        #serhl-hlcolor-sv-dot, #serhl-hlcolor-hue-dot {
-            position: absolute !important; pointer-events: none !important; transform: translate(-50%, -50%) !important;
-            border: 2px solid #ffffff !important; box-shadow: 0 0 3px rgba(0,0,0,0.55) !important; box-sizing: border-box !important; z-index: 2 !important;
-        }
+        #serhl-hlcolor-panel .serhl-hlcolor-row { margin-bottom: 2px !important; padding: 0 !important; border: none !important; background: transparent !important; display: flex !important; align-items: center !important; gap: 4px !important; height: auto !important; min-height: 0 !important; max-height: none !important; }
+        #serhl-hlcolor-panel .serhl-hlcolor-row label { min-width: 20px !important; font-size: 12px !important; color: var(--serhl-label) !important; font-weight: 600 !important; margin: 0 !important; line-height: 1.2 !important; padding: 0 !important; border: none !important; background: transparent !important; height: auto !important; min-height: 0 !important; max-height: none !important; display: block !important; box-sizing: border-box !important; }
+        #serhl-hlcolor-panel .serhl-hlcolor-row .serhl-hlcolor-preview { width: 12px !important; height: 12px !important; border-radius: 2px !important; border: 1px solid var(--serhl-input-border) !important; flex-shrink: 0 !important; cursor: pointer !important; margin: 0 !important; padding: 0 !important; box-sizing: border-box !important; min-height: 0 !important; max-height: none !important; }
+        #serhl-hlcolor-panel .serhl-hlcolor-row input { width: 70px !important; flex: none !important; padding: 2px 4px !important; margin: 0 !important; border: 1px solid var(--serhl-input-border) !important; border-radius: 3px !important; font-size: 11px !important; font-family: 'Consolas', monospace !important; background: var(--serhl-input-bg) !important; color: var(--serhl-fg) !important; height: 20px !important; line-height: normal !important; box-shadow: none !important; outline: none !important; display: block !important; font-weight: normal !important; box-sizing: border-box !important; min-width: 0 !important; max-width: none !important; min-height: 0 !important; max-height: none !important; transform: none !important; appearance: none !important; -webkit-appearance: none !important; }
+        #serhl-hlcolor-panel .serhl-hlcolor-row input:focus { border-color: var(--serhl-focus) !important; }
+        #serhl-hlcolor-panel .serhl-hlcolor-picker-wrapper { display: flex !important; align-items: stretch !important; margin: 0 !important; }
+        #serhl-hlcolor-sv-canvas, #serhl-hlcolor-hue-canvas { cursor: crosshair !important; border-radius: 3px !important; border: 1px solid var(--serhl-input-border) !important; }
+        #serhl-hlcolor-sv-dot, #serhl-hlcolor-hue-dot { position: absolute !important; pointer-events: none !important; transform: translate(-50%, -50%) !important; border: 2px solid #ffffff !important; box-shadow: 0 0 3px rgba(0,0,0,0.55) !important; box-sizing: border-box !important; z-index: 2 !important; }
         #serhl-hlcolor-sv-dot { width: 13px !important; height: 13px !important; border-radius: 50% !important; }
         #serhl-hlcolor-hue-dot { width: 30px !important; height: 6px !important; border-radius: 3px !important; }
-        #serhl-hlcolor-current-preview {
-            flex-shrink: 0 !important;
-            margin: 0 !important; padding: 0 !important; box-sizing: border-box !important;
-            min-height: 0 !important; max-height: none !important;
-        }
-        #serhl-hlcolor-code-text {
-            display: flex !important; align-items: center !important; justify-content: center !important;
-            width: 70px !important; height: 20px !important; flex: none !important;
-            margin: 0 !important; padding: 2px 4px !important; box-sizing: border-box !important;
-            border: 1px solid #e2e8f0 !important; border-radius: 3px !important;
-            background: #f7fafc !important; color: #2d3748 !important;
-            font-size: 11px !important; font-family: 'Consolas', monospace !important; font-weight: normal !important;
-            line-height: normal !important; min-height: 0 !important; max-height: none !important;
-            min-width: 0 !important; overflow: hidden !important; white-space: nowrap !important;
-        }
-
+        #serhl-hlcolor-current-preview { flex-shrink: 0 !important; margin: 0 !important; padding: 0 !important; box-sizing: border-box !important; min-height: 0 !important; max-height: none !important; }
+        #serhl-hlcolor-code-text { display: flex !important; align-items: center !important; justify-content: center !important; width: 70px !important; height: 20px !important; flex: none !important; margin: 0 !important; padding: 2px 4px !important; box-sizing: border-box !important; border: 1px solid var(--serhl-input-border) !important; border-radius: 3px !important; background: var(--serhl-code-bg) !important; color: var(--serhl-fg) !important; font-size: 11px !important; font-family: 'Consolas', monospace !important; font-weight: normal !important; line-height: normal !important; min-height: 0 !important; max-height: none !important; min-width: 0 !important; overflow: hidden !important; white-space: nowrap !important; }
         /* 开关 */
-        .serhl-switch {
-            position: relative !important; display: inline-block !important; width: 28px !important; height: 16px !important;
-            margin: 0 6px 0 0 !important; padding: 0 !important; flex-shrink: 0 !important;
-            border: none !important; box-shadow: none !important; background: transparent !important;
-            min-width: 0 !important; max-width: none !important; min-height: 0 !important; max-height: none !important;
-            box-sizing: border-box !important;
-        }
-
-        .serhl-switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-            position: absolute;
-        }
-
-        .serhl-slider {
-            position: absolute !important; cursor: pointer !important;
-            top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
-            background-color: #cbd5e0 !important; transition: .2s !important; border-radius: 16px !important;
-            border: none !important; box-shadow: none !important; margin: 0 !important; padding: 0 !important;
-            box-sizing: border-box !important;
-        }
-
-        .serhl-slider:before {
-            position: absolute !important; content: "" !important; height: 12px !important; width: 12px !important;
-            left: 2px !important; bottom: 2px !important; top: auto !important; right: auto !important;
-            background-color: #ffffff !important; transition: .2s !important; border-radius: 50% !important;
-            border: none !important; box-shadow: none !important; margin: 0 !important; padding: 0 !important;
-            box-sizing: border-box !important; transform: none !important;
-        }
-
-        .serhl-switch input:checked + .serhl-slider {
-            background-color: #2c5282 !important;
-        }
-
-        .serhl-switch input:checked + .serhl-slider:before {
-            transform: translateX(12px) !important;
-        }
-
-    body.serhl-dark-on .serhl-slider {
-        background-color: #4b5563 !important;
-    }
-    body.serhl-dark-on .serhl-switch input:checked + .serhl-slider {
-        background-color: #2c5282 !important;
-    }
-
-        #serhl-bubble-size-slider {
-            flex: 1 1 0% !important; margin: 0 0 0 5px !important;
-            height: 4px !important; min-height: 0 !important; max-height: none !important;
-            width: auto !important; min-width: 0 !important; max-width: none !important;
-            padding: 0 !important; border: none !important; border-radius: 2px !important;
-            background: #cbd5e0 !important; outline: none !important; box-shadow: none !important;
-            appearance: none !important; -webkit-appearance: none !important; -moz-appearance: none !important;
-            cursor: pointer !important; transform: none !important; vertical-align: middle !important;
-        }
-        #serhl-bubble-size-slider::-webkit-slider-thumb {
-            -webkit-appearance: none !important; width: 14px !important; height: 14px !important; border-radius: 50% !important;
-            background: #2c5282 !important; cursor: pointer !important; border: none !important;
-        }
-        #serhl-bubble-size-slider::-moz-range-thumb {
-            width: 14px !important; height: 14px !important; border-radius: 50% !important; background: #2c5282 !important;
-            cursor: pointer !important; border: none !important;
-        }
-
-        #serhl-toast-container {
-            position: fixed; top: 15px; right: 15px; z-index: 2147483647; display: flex;
-            flex-direction: column; align-items: stretch; gap: 8px; pointer-events: none;
-            max-width: min(320px, calc(100vw - 16px));
-        }
-
-        .serhl-toast {
-            pointer-events: auto; box-sizing: border-box; background: #ffffff;
-            border: 1px solid #e2e8f0; border-left: 3px solid #2c5282; border-radius: 6px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.12); color: #2d3748; font-size: 12px;
-            line-height: 1.4; padding: 8px 12px; word-break: break-all; cursor: pointer;
-            opacity: 0; transform: translateY(8px);
-            transition: opacity 0.25s ease, transform 0.25s ease;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
-
-        .serhl-toast.show {
-            opacity: 1;
-            transform: translateY(0);
-        }
-
-    body.serhl-dark-on .serhl-toast {
-        background: #171717 !important; color: #f3f4f6 !important;
-        border-top-color: #374151; border-right-color: #374151; border-bottom-color: #374151;
-    }
-
-        .serhl-toast-success { border-left-color: #276749; }
-        .serhl-toast-error { border-left-color: #c53030; }
-        .serhl-toast-info { border-left-color: #2c5282; }
-    `);
+        .serhl-switch { position: relative !important; display: inline-block !important; width: 28px !important; height: 16px !important; margin: 0 6px 0 0 !important; padding: 0 !important; flex-shrink: 0 !important; border: none !important; box-shadow: none !important; background: transparent !important; min-width: 0 !important; max-width: none !important; min-height: 0 !important; max-height: none !important; box-sizing: border-box !important; }
+        .serhl-slider { position: absolute !important; cursor: pointer !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; background-color: var(--serhl-switch-off) !important; transition: .2s !important; border-radius: 16px !important; border: none !important; box-shadow: none !important; margin: 0 !important; padding: 0 !important; box-sizing: border-box !important; }
+        .serhl-slider:before { position: absolute !important; content: "" !important; height: 12px !important; width: 12px !important; left: 2px !important; bottom: 2px !important; top: auto !important; right: auto !important; background-color: #ffffff !important; transition: .2s !important; border-radius: 50% !important; border: none !important; box-shadow: none !important; margin: 0 !important; padding: 0 !important; box-sizing: border-box !important; transform: none !important; }
+        .serhl-switch input:checked + .serhl-slider { background-color: var(--serhl-accent) !important; }
+        .serhl-switch input:checked + .serhl-slider:before { transform: translateX(12px) !important; }
+        #serhl-bubble-size-slider { flex: 1 1 0% !important; margin: 0 0 0 5px !important; height: 4px !important; min-height: 0 !important; max-height: none !important; width: auto !important; min-width: 0 !important; max-width: none !important; padding: 0 !important; border: none !important; border-radius: 2px !important; background: #cbd5e0 !important; outline: none !important; box-shadow: none !important; appearance: none !important; -webkit-appearance: none !important; -moz-appearance: none !important; cursor: pointer !important; transform: none !important; vertical-align: middle !important; }
+        #serhl-bubble-size-slider::-webkit-slider-thumb { -webkit-appearance: none !important; width: 14px !important; height: 14px !important; border-radius: 50% !important; background: var(--serhl-accent) !important; cursor: pointer !important; border: none !important; }
+        #serhl-bubble-size-slider::-moz-range-thumb { width: 14px !important; height: 14px !important; border-radius: 50% !important; background: var(--serhl-accent) !important; cursor: pointer !important; border: none !important; }
+        #serhl-toast-container { position: fixed; top: 15px; right: 15px; z-index: 2147483647; display: flex; flex-direction: column; align-items: stretch; gap: 8px; pointer-events: none; max-width: min(320px, calc(100vw - 16px)); }
+        .serhl-toast { pointer-events: auto; box-sizing: border-box; background: var(--serhl-toast-bg); border: 1px solid var(--serhl-border); border-left: 3px solid var(--serhl-accent); border-radius: 6px; box-shadow: var(--serhl-toast-shadow); color: var(--serhl-fg); font-size: 12px; line-height: 1.4; padding: 8px 12px; word-break: break-all; cursor: pointer; opacity: 0; transform: translateY(8px); transition: opacity 0.25s ease, transform 0.25s ease; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        .serhl-toast.show { opacity: 1; transform: translateY(0); }
+        .serhl-toast-success { border-left-color: var(--serhl-success); }
+        .serhl-toast-error { border-left-color: var(--serhl-danger); }
+        .serhl-toast-info { border-left-color: var(--serhl-accent); }`);
   }
 
   function injectGlobalStyles() {
@@ -3803,7 +3498,7 @@
 
   function applyBubbleStyle(element) {
     element.style.cssText = `
-            position: fixed; background: transparent; color: #2c5282; border-radius: 4px;
+            position: fixed; background: transparent; color: var(--serhl-bubble); border-radius: 4px;
             z-index: 10000; cursor: grab; font-weight: bold; user-select: none;
             transition: opacity 0.2s, text-shadow 0.2s, transform 0.2s; opacity: 0.8;
             font-family: Arial, sans-serif; text-align: center; box-sizing: border-box;
@@ -4018,7 +3713,9 @@
   }
 
   function persistConfig(updateModifiedTime = false) {
-    _rulesRevision++; GM_setValue(CONFIG_KEY, currentConfig);
+    const fingerprint = JSON.stringify(currentConfig.rules || []);
+    if (fingerprint !== _rulesFingerprint) { _rulesRevision++; _rulesFingerprint = fingerprint; }
+    GM_setValue(CONFIG_KEY, currentConfig);
   }
 
   const SETTINGS_PANEL_CHECKBOXES = {
@@ -4292,10 +3989,9 @@
         document.removeEventListener('pointerdown', _panelPressHandler); document.removeEventListener('mousedown', _panelPressHandler); _panelPressHandler = null;
       }
     };
-    clearPanelCloseTimers();
-
-    const opened = openPanel('serhl-panel', { bindClose: false, onExisting: () => clearPanelCloseTimers() });
+    const opened = openPanel('serhl-panel', { bindClose: false });
     if (!opened) return;
+    clearPanelCloseTimers();
     const { panel } = opened; panel._initialRules = Array.isArray(currentConfig.rules) ? [...currentConfig.rules] : [];
     const initialSize = getBubbleSize();
     panel.innerHTML = `
@@ -4469,6 +4165,157 @@
     }, 200);
   }
 
+  function mergeRules3Way(baseRules, localRules, cloudRules, preferLocal = true) {
+    baseRules = Array.isArray(baseRules) ? baseRules : []; localRules = Array.isArray(localRules) ? localRules : []; cloudRules = Array.isArray(cloudRules) ? cloudRules : [];
+
+    const baseKeys = new Set(baseRules.map(getRuleKey).filter(Boolean)); const localKeys = new Set(localRules.map(getRuleKey).filter(Boolean));
+    const cloudKeys = new Set(cloudRules.map(getRuleKey).filter(Boolean));
+    const localDeleted = new Set([...baseKeys].filter(k => !localKeys.has(k))); const cloudDeleted = new Set([...baseKeys].filter(k => !cloudKeys.has(k)));
+    const lineKey = (r) => getRuleKey((r || '').trim());
+    const rowsOf = (rules) => {
+      const rows = [];
+      for (const raw of rules) {
+        const trimmed = (raw || '').trim(); const key = lineKey(trimmed); if (key) rows.push({ key, line: trimmed });
+      }
+      return rows;
+    };
+    const baseRows = rowsOf(baseRules); const localRows = rowsOf(localRules); const cloudRows = rowsOf(cloudRules); const baseIndex = new Map();
+    baseRows.forEach((row, i) => { if (!baseIndex.has(row.key)) baseIndex.set(row.key, i); });
+
+    const sideMeta = (rows) => {
+      const index = new Map(); const line = new Map();
+      rows.forEach((row, i) => {
+        if (!index.has(row.key)) index.set(row.key, i); if (!line.has(row.key)) line.set(row.key, row.line);
+      });
+      return { index, line };
+    };
+    const localMeta = sideMeta(localRows); const cloudMeta = sideMeta(cloudRows); const lineOf = (meta, key) => (meta.line.has(key) ? meta.line.get(key) : null);
+    const lineSim = (a, b) => {
+      a = String(a || '').toLowerCase(); b = String(b || '').toLowerCase(); if (!a || !b) return 0;
+      let p = 0; while (p < a.length && p < b.length && a[p] === b[p]) p++;
+      let s = 0; while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+      return (p * 2 + s) / (a.length + b.length);
+    };
+    const bestRow = (rows, slotKey) => {
+      const baseLine = baseIndex.has(slotKey) ? baseRows[baseIndex.get(slotKey)].line : '';
+      let best = rows[0]; let score = -1;
+      for (const row of rows) { const v = lineSim(row.line, baseLine); if (v > score) { score = v; best = row; } }
+      return best;
+    };
+    const deleted = (key) => {
+      if (!localDeleted.has(key) && !cloudDeleted.has(key)) return false;
+      const baseLine = baseIndex.has(key) ? baseRows[baseIndex.get(key)].line : ''; const localLine = lineOf(localMeta, key); const cloudLine = lineOf(cloudMeta, key);
+      return (localLine === null || localLine === baseLine) && (cloudLine === null || cloudLine === baseLine);
+    };
+
+    const moved = (rows) => {
+      let prev = -1;
+      for (const row of rows) {
+        if (!baseIndex.has(row.key) || deleted(row.key)) continue; const at = baseIndex.get(row.key); if (at < prev) return true; prev = at;
+      }
+      return false;
+    };
+    const localMoved = moved(localRows); const cloudMoved = moved(cloudRows);
+    const orderSide = localMoved !== cloudMoved
+      ? (localMoved ? localMeta : cloudMeta)
+      : (localMoved ? localMeta : null);
+
+    const pickLine = (key) => {
+      const inBase = baseIndex.has(key); const inLocal = localMeta.line.has(key); const inCloud = cloudMeta.line.has(key); if (!inLocal && !inCloud) return '';
+      if (deleted(key) && !inBase) return '';
+      if (inLocal && !inCloud) return localMeta.line.get(key); if (inCloud && !inLocal) return cloudMeta.line.get(key);
+      if (!inBase) return localMeta.line.get(key); const baseLine = baseRows[baseIndex.get(key)].line; const localLine = localMeta.line.get(key); const cloudLine = cloudMeta.line.get(key);
+      if (localLine !== baseLine && cloudLine === baseLine) return localLine; if (cloudLine !== baseLine && localLine === baseLine) return cloudLine; if (localLine === baseLine && cloudLine === baseLine) return deleted(key) ? '' : localLine; return localLine;
+    };
+
+    const anchorBefore = (rows, at) => {
+      for (let i = at - 1; i >= 0; i--) {
+        if (baseIndex.has(rows[i].key) && !deleted(rows[i].key)) return rows[i].key;
+      }
+      return null;
+    };
+    const anchorAfter = (rows, at) => {
+      for (let i = at + 1; i < rows.length; i++) {
+        if (baseIndex.has(rows[i].key) && !deleted(rows[i].key)) return rows[i].key;
+      }
+      return null;
+    };
+    const END = {}; const place = new Map(); const pendingByAnchor = new Map();
+    const noteInsert = (key, anchor) => {
+      if (place.has(key)) return; place.set(key, anchor); if (!pendingByAnchor.has(anchor)) pendingByAnchor.set(anchor, []); pendingByAnchor.get(anchor).push(key);
+    };
+    const srcOf = (rows, gone) => {
+      const map = new Map(); let run = []; let lo = -1;
+      const flush = (hi) => {
+        if (!run.length) return;
+        const cand = []; for (const [bk, bi] of baseIndex) if (bi > lo && bi < hi && gone.has(bk)) cand.push(bk);
+        cand.sort((a, b) => baseIndex.get(a) - baseIndex.get(b));
+        const both = cand.filter(bk => localDeleted.has(bk) && cloudDeleted.has(bk));
+        if (cand.length === 1) {
+          const best = bestRow(run, cand[0]); map.set(best.key, cand[0]);
+          run.forEach(row => { if (row !== best) noteInsert(row.key, cand[0]); });
+        } else if (cand.length !== run.length && both.length === 1) {
+          const best = bestRow(run, both[0]); map.set(best.key, both[0]);
+          run.forEach(row => { if (row !== best) noteInsert(row.key, both[0]); });
+        } else for (let i = 0; i < run.length && i < cand.length; i++) map.set(run[i].key, cand[i]);
+        run = [];
+      };
+      rows.forEach(row => {
+        if (!baseIndex.has(row.key)) { run.push(row); return; }
+        const at = baseIndex.get(row.key); flush(at); lo = at;
+      });
+      flush(baseRows.length); return map;
+    };
+    const localSrc = srcOf(localRows, localDeleted); const cloudSrc = srcOf(cloudRows, cloudDeleted);
+    const sharedKeys = [...localKeys].filter(k => cloudKeys.has(k));
+    for (const k of sharedKeys) { const lb = localSrc.get(k); const cb = cloudSrc.get(k); if (lb !== undefined && cb === undefined) cloudSrc.set(k, lb); else if (cb !== undefined && lb === undefined) localSrc.set(k, cb); }
+    const groupBySrc = (srcMap, rows) => {
+      const groups = new Map(); rows.forEach(row => { const bk = srcMap.get(row.key); if (bk === undefined) return; if (!groups.has(bk)) groups.set(bk, []); const arr = groups.get(bk); if (arr.indexOf(row.key) === -1) arr.push(row.key); }); return groups;
+    };
+    const localGroups = groupBySrc(localSrc, localRows); const cloudGroups = groupBySrc(cloudSrc, cloudRows); const mappedKeys = new Set([...localSrc.keys(), ...cloudSrc.keys()]);
+    const pickedByBase = new Map();
+    const pickGroup = (bk) => {
+      const localKeys = localGroups.get(bk) || []; const cloudKeys = cloudGroups.get(bk) || [];
+      if (!cloudKeys.length) return localKeys; if (!localKeys.length) return cloudKeys;
+      const first = preferLocal ? localKeys : cloudKeys; const second = preferLocal ? cloudKeys : localKeys;
+      if (!first.some(k => second.indexOf(k) !== -1)) return first;
+      return first.concat(second.filter(k => first.indexOf(k) === -1));
+    };
+    new Set([...localGroups.keys(), ...cloudGroups.keys()]).forEach(bk => pickedByBase.set(bk, pickGroup(bk)));
+    const orderedRows = orderSide === cloudMeta ? cloudRows : localRows; const otherRows = orderSide === cloudMeta ? localRows : cloudRows;
+    orderedRows.forEach((row, i) => {
+      if (baseIndex.has(row.key) || deleted(row.key) || mappedKeys.has(row.key)) return; noteInsert(row.key, anchorBefore(orderedRows, i));
+    });
+    otherRows.forEach((row, i) => {
+      if (baseIndex.has(row.key) || deleted(row.key) || place.has(row.key) || mappedKeys.has(row.key)) return; const before = anchorBefore(otherRows, i); const after = anchorAfter(otherRows, i);
+      if (before !== null && after === null) noteInsert(row.key, END); else noteInsert(row.key, before);
+    });
+
+    const result = []; const seen = new Set();
+    const emit = (key) => {
+      if (!key || seen.has(key) || deleted(key)) return; const line = pickLine(key); if (!line) return; seen.add(key); result.push(line);
+    };
+    const emitPending = (anchor) => {
+      const keys = pendingByAnchor.get(anchor); if (keys) for (const key of keys) emit(key);
+    };
+
+    emitPending(null);
+    const slots = []; const slotSeen = new Set();
+    const addSlot = (key) => { if (!slotSeen.has(key)) { slotSeen.add(key); slots.push(key); } };
+    (orderSide ? (orderSide === localMeta ? localRows : cloudRows) : baseRows).forEach(row => {
+      if (baseIndex.has(row.key) && (!deleted(row.key) || pickedByBase.has(row.key))) addSlot(row.key);
+    });
+    baseRows.forEach(row => { if (pickedByBase.has(row.key)) addSlot(row.key); });
+    slots.forEach(key => {
+      const picked = pickedByBase.get(key);
+      if (picked) { picked.forEach(emit); seen.add(key); } else emit(key);
+      emitPending(key);
+    });
+    emitPending(END); for (const key of place.keys()) emit(key); baseRows.forEach((row) => emit(row.key)); for (const key of sharedKeys) emit(key);
+    for (const row of [...localRows, ...cloudRows]) if (!baseIndex.has(row.key) && !deleted(row.key) && !mappedKeys.has(row.key) && !seen.has(row.key)) emit(row.key);
+    return result;
+  }
+
   function saveConfig() {
     const rulesText = document.getElementById('serhl-rules').value;
 
@@ -4477,15 +4324,12 @@
     const baseRules = (panel && Array.isArray(panel._initialRules)) ? panel._initialRules : (Array.isArray(currentConfig.rules) ? currentConfig.rules : []);
     const rulesChanged = JSON.stringify(baseRules) !== JSON.stringify(userRules);
     adoptStoredConfigBeforeWrite();
-    const initialKeySet = new Set(baseRules.map(getRuleKey)); const userKeySet = new Set(userRules.map(getRuleKey));
-    const backgroundNewRules = (Array.isArray(currentConfig.rules) ? currentConfig.rules : []).filter(r => {
-      const k = getRuleKey(r); return k && !initialKeySet.has(k) && !userKeySet.has(k);
-    });
-    const finalRules = backgroundNewRules.length > 0 ? [...userRules, ...backgroundNewRules] : userRules;
+    const storedRules = Array.isArray(currentConfig.rules) ? currentConfig.rules : [];
+    const finalRules = JSON.stringify(baseRules) === JSON.stringify(storedRules) ? userRules : mergeRules3Way(baseRules, userRules, storedRules, true);
 
     currentConfig.rules = finalRules;
     persistConfig(rulesChanged);
-    if (panel) panel._initialRules = [...finalRules]; if (backgroundNewRules.length > 0) syncRulesTextarea();
+    if (panel) panel._initialRules = [...finalRules]; if (JSON.stringify(userRules) !== JSON.stringify(finalRules)) syncRulesTextarea();
     if (showHiddenResults) {
       showHiddenResults = false;
       if (currentConfig.collapseMode !== true) {
@@ -4856,10 +4700,12 @@
   }
 
   function regexSourceToLiteralText(source) {
-    let out = '';
+    let out = ''; let inClass = false;
     for (let i = 0; i < source.length; i++) {
       const ch = source[i];
       if (ch === '\\') { out += ch + (source[i + 1] || ''); i++; continue; }
+      if (inClass) { if (ch === ']') inClass = false; out += ch; continue; }
+      if (ch === '[') inClass = true;
       if (ch === '/') out += '\\/'; else out += ch;
     }
     return out;
@@ -5313,7 +5159,7 @@
   }
 
   function parseConfigHeader(lines) {
-    const rest = []; let settings = null, scanning = true;
+    const rest = []; let settings = null, selectors = null, scanning = true;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i], s = line.trim();
       if (scanning && i < 10) {
@@ -5327,11 +5173,39 @@
             if (!settings) settings = parsed; continue;
           }
         }
+        if (s.startsWith('# Selectors:')) {
+          const payload = s.slice('# Selectors:'.length).trim(); let parsed = null;
+          if (/^[\x7B\x5B]/.test(payload)) { try { parsed = JSON.parse(payload); } catch (e) {} }
+          if (parsed && !selectors && selectorPatchOk(parsed)) { selectors = parsed; continue; }
+          if (/^[\x7B\x5B]/.test(payload) && !selectors) continue;
+        }
         if (!s.startsWith('#')) scanning = false;
       }
       rest.push(line);
     }
-    return { settings, rest };
+    return { settings, selectors, rest };
+  }
+
+  function selectorPatchOk(v) {
+    if (Array.isArray(v)) return true;
+    if (!v || typeof v !== 'object') return false;
+    const flagsOk = (f) => { f = String(f || '').toLowerCase(); return /^[imsu]*$/.test(f) && new Set(f).size === f.length; };
+    const cssOk = (val) => { const list = typeof val === 'string' ? [val] : val; return Array.isArray(list) && list.every(s => typeof s === 'string' && !!s.trim() && !hasPseudoElement(s) && isValidCssSelector(s)); };
+    const reOk = (val) => {
+      if (typeof val === 'string') { const lit = val.match(/^\/(.*)\/([a-z]*)$/i); if (lit && !flagsOk(lit[2])) return false; try { new RegExp(lit ? lit[1] : val, lit ? lit[2] : ''); return true; } catch (e) { return false; } }
+      if (val && typeof val === 'object' && typeof val.source === 'string' && flagsOk(val.flags)) { try { new RegExp(val.source, String(val.flags || '').toLowerCase()); return true; } catch (e) { return false; } }
+      return false;
+    };
+    for (const key of Object.keys(v)) {
+      const def = v[key];
+      if (key === 'other' || !/^[A-Za-z0-9_-]+$/.test(key)) return false;
+      if (!def || typeof def !== 'object' || Array.isArray(def)) return false;
+      if ((def.disabled !== undefined && def.disabled !== null && typeof def.disabled !== 'boolean') || (def.disable !== undefined && def.disable !== null && typeof def.disable !== 'boolean')) return false;
+      if (def.extraElements !== undefined && def.extraElements !== null && (!Array.isArray(def.extraElements) || !def.extraElements.every(s => typeof s === 'string' && !!s.trim() && !hasTopLevelComma(s) && isValidCssSelector(':scope > :nth-child(1) ' + s)))) return false;
+      if (def.match !== undefined && def.match !== null && !reOk(def.match)) return false;
+      for (const f of ['containers', 'titles', 'snippets', 'links']) if (def[f] !== undefined && def[f] !== null && !cssOk(def[f])) return false;
+    }
+    return true;
   }
 
   function applyImportedSettings(settings) {
@@ -5351,17 +5225,19 @@
     pickTextFile('.txt,text/plain', (content) => {
       const rawLines = String(content || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n');
       const parsedHeader = parseConfigHeader(rawLines);
-      if (isNonRuleTextResponse(parsedHeader.rest, !!parsedHeader.settings, true)) { showToast(t('fileImportFailed'), 'error'); return; }
+      if (isNonRuleTextResponse(parsedHeader.rest, !!(parsedHeader.settings || parsedHeader.selectors), true)) { showToast(t('fileImportFailed'), 'error'); return; }
       const newRules = filterValidRuleLines(parsedHeader.rest);
       if (!hasEffectiveRules(newRules) && hasEffectiveRules(currentConfig.rules) && !confirm(t('importClearConfirm'))) return;
       if (parsedHeader.settings) applyImportedSettings(parsedHeader.settings);
+      const headerSelectors = parsedHeader.selectors; const selectorsApplied = !!headerSelectors && typeof headerSelectors === 'object' && !Array.isArray(headerSelectors);
+      if (selectorsApplied) { GM_setValue(SELECTORS_KEY, headerSelectors); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); }
       const textarea = document.getElementById('serhl-rules');
       if (textarea) {
         textarea.value = parsedHeader.rest.join('\n'); updateLineNumbers();
       }
       currentConfig.rules = newRules;
       const panel = document.getElementById('serhl-panel'); if (panel) panel._initialRules = [...currentConfig.rules];
-      persistConfig(true); applyConfigToMainPanel(); forceReprocessAll();
+      persistConfig(true); applyConfigToMainPanel(); if (selectorsApplied) refreshEngineSite(); else forceReprocessAll();
     });
   }
 
@@ -5396,7 +5272,8 @@
   }
 
   function ensureEngineSiteSetup() {
-    if (_engineSiteSetup || !isEngineSite()) return; _engineSiteSetup = true; _observedBody = document.body; injectGlobalStyles(); buildRuleIndex(); exposeDebugApi(); updateStatus(0); scanNewResults();
+    if (_engineSiteSetup || !isEngineSite()) return; _engineSiteSetup = true; _observedBody = document.body;
+    try { injectGlobalStyles(); buildRuleIndex(); exposeDebugApi(); updateStatus(0); scanNewResults(); } catch (e) { _engineSiteSetup = false; _observedBody = null; throw e; }
 
     let _pendingRecords = []; let _mutationRafPending = false;
     const flushMutations = () => {
@@ -5445,7 +5322,9 @@
         if (statusDirty) {
           updateStatus(document.querySelectorAll('[data-is-blocked="true"]').length);
         }
-        const hasAddedNodes = records.some(m => m.type === 'childList' && m.addedNodes.length > 0); if (hasAddedNodes) scanNewResults(); else if (statusDirty) reconcileHiddenParents();
+        const hasAddedNodes = records.some(m => m.type === 'childList' && m.addedNodes && m.addedNodes.length > 0);
+        const hasRemovedNodes = records.some(m => m.type === 'childList' && m.removedNodes && m.removedNodes.length > 0);
+        if (hasAddedNodes) scanNewResults(); else if (hasRemovedNodes || statusDirty) reconcileHiddenParents();
       } finally {
         if (_engineSiteSetup && _domObserver) {
           _domObserver.observe(document.documentElement, {
@@ -5554,7 +5433,10 @@
     } catch (e) {
       return false;
     }
-    currentConfig = stored; _rulesRevision++; return true;
+    const fingerprint = JSON.stringify(stored.rules || []);
+    currentConfig = stored;
+    if (fingerprint !== _rulesFingerprint) { _rulesRevision++; _rulesFingerprint = fingerprint; }
+    return true;
   }
 
   function getConfigStoreSignature() {
