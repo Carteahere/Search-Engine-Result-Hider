@@ -7,7 +7,7 @@
 
 ### 3.2 运行测试
 
-将`test`文件夹和脚本放至同一目录运行，测试会自动读取上一级目录 `.js` 脚本，按功能域分为：条件表达式解析、WebDAV同步与订阅、规则逻辑、选择器与引擎
+将 `test` 文件夹和脚本放至同一目录运行，测试会自动读取上一级目录 `.js` 脚本，按功能域分为：条件表达式解析、WebDAV同步与订阅、规则逻辑、选择器与引擎
 
 ```bash
 # 运行所有测试
@@ -24,7 +24,7 @@ node test/test-conditions.cjs 2>&1 | Select-String "failed"
 
 ### 3.3 调试模式
 
-开启脚本调试模式，使用[网页调试](https://greasyfork.org/zh-CN/scripts/475228)脚本或浏览器F12开发者工具 → Console标签查看输出
+开启脚本调试模式，使用 [网页调试](https://greasyfork.org/zh-CN/scripts/475228) 脚本或浏览器 F12 开发者工具 → Console 标签查看输出
 
 ```javascript
 // 正式版

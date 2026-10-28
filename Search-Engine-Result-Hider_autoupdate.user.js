@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.7.7
+// @version      8.7.8
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -86,6 +86,7 @@
     delete currentConfig.tombstones; delete currentConfig.ruleAddedTimes; delete currentConfig.subscriptionTombstones;
   }
   let showHiddenResults = false;
+  let _rulesRevision = 0, _rulesFingerprint = JSON.stringify(currentConfig.rules || []);
 
   // 选择器
   const SELECTORS = {
@@ -640,17 +641,17 @@
     toast.addEventListener('click', dismiss); timer = setTimeout(dismiss, duration); return { dismiss };
   }
 
-  const RULE_PREFIX_RE = /^(?:title|text|host|path|url|scheme)\//i;
-  const RULE_PREFIX_REGEX_RE = /^(?:title|text|host|path|url|scheme)\/(?:[^/\\]|\\.)*\//i;
+  const RULE_PREFIX_RE = /^(?:title|text|host|path|url|scheme|u|t)\//i;
+  const RULE_PREFIX_REGEX_RE = /^(?:title|text|host|path|url|scheme|u|t)\/(?:[^/\\]|\\.)*\//i;
   const RULE_LEADING_REGEX_RE = /^\/(?:[^/\\]|\\.)*\//;
-  const REGEX_CTX_A = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*=~$/i;
-  const REGEX_CTX_B = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)$/i;
-  const REGEX_CTX_C = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*=$/i;
+  const REGEX_CTX_A = /(?:^|[\s(&|!])(?:title|url|host|path|scheme|u|t)\s*=~$/i;
+  const REGEX_CTX_B = /(?:^|[\s(&|!])(?:title|url|host|path|scheme|u|t)$/i;
+  const REGEX_CTX_C = /(?:^|[\s(&|!])(?:title|url|host|path|scheme|u|t)\s*=$/i;
   const RULE_REGEX_LIT_RE = /^\/(?:[^/\\[\]()]|\\.|\[(?:[^\]\\]|\\.)*\]|\((?:[^/\\[\]()]|\\.)*\))+\//;
-  const REGEX_CTX_D = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*(?:\^=|\$=|\*=|:)$/i;
+  const REGEX_CTX_D = /(?:^|[\s(&|!])(?:title|url|host|path|scheme|u|t)\s*(?:\^=|\$=|\*=|:)$/i;
   function regexStartAhead(str, pos) {
     const prev = str.slice(Math.max(0, pos - 64), pos).trimEnd();
-    return REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(str.slice(pos, Math.min(str.length, pos + 4096)))) || (REGEX_CTX_D.test(prev) && regexCloseAhead(str, pos));
+    return REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && (RULE_REGEX_LIT_RE.test(str.slice(pos, Math.min(str.length, pos + 4096))) || (str[pos] === '/' && regexCloseAhead(str, pos)))) || (REGEX_CTX_D.test(prev) && regexCloseAhead(str, pos));
   }
   function regexCloseAhead(str, pos) {
     let inClass = false;
@@ -721,7 +722,7 @@
         let j = i + 3; while (j < n && /\s/.test(str[j])) j++;
         const hasParen = str[j] === '(';
         const end = hasParen ? findBalancedParenEnd(str, j) : -1;
-        const isCond = hasParen && (isBoundary || (end !== -1 && tailIsCond(end)));
+        const isCond = hasParen && (isBoundary || end === -1 || tailIsCond(end));
         if (strip) {
           if (isCond) atIf = true;
           i += 2; continue;
@@ -1490,8 +1491,8 @@
     const leafParser = (text) => {
       const trimmed = text.trim();
       const regexLeafFlags = (() => {
-        const m = trimmed.match(/^(?:title|url|host|path|scheme)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i); if (!m) return null;
-        const seg = m[2] || ''; const explicit = /^(?:title|url|host|path|scheme)\s*=\~\s*\//i.test(trimmed);
+        const m = trimmed.match(/^(?:title|url|host|path|scheme|u|t)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i); if (!m) return null;
+        const seg = m[2] || ''; const explicit = /^(?:title|url|host|path|scheme|u|t)\s*=\~\s*\//i.test(trimmed);
         return isUniqueFlagsStr(seg) || (explicit && /^[a-z]+$/i.test(seg)) ? seg.toLowerCase() : (isFlagsCandidateError(seg) ? seg : '');
       })();
       if (regexLeafFlags && getInvalidRegexFlags(regexLeafFlags)) {
@@ -1614,9 +1615,9 @@
   function parseConditionPart(trimmed, currentEngine, currentSite, currentCategory) {
     const enginePropMatch = trimmed.match(/^(?:\$site|engine)\s*[=:]\s*(?:['"](.*?)['"]|([^\s\)]+))\s*i?\s*$/i);
     if (enginePropMatch) {
-      const raw = (enginePropMatch[1] !== undefined ? enginePropMatch[1] : enginePropMatch[2]).trim().toLowerCase();
-      const target = raw.replace(/^ddg$/, 'duckduckgo'); const engine = String(currentEngine || '').toLowerCase();
-      return { matched: true, static: engine === target || engine === raw };
+      const norm = (v) => { const k = String(v || '').toLowerCase(); return k === 'ddg' || k === 'duckduckgo_lite' ? 'duckduckgo' : k === 'yahoo-japan' ? 'yahoo_japan' : k; };
+      const target = norm(enginePropMatch[1] !== undefined ? enginePropMatch[1] : enginePropMatch[2]);
+      return { matched: true, static: !!target && target === norm(currentEngine) };
     }
 
     const categoryMatch = trimmed.match(/^(?:\$category|category)\s*[=:]\s*(?:['"](.*?)['"]|([^\s\)]+))\s*i?\s*$/i);
@@ -1632,10 +1633,10 @@
       return { matched: true, static: curSite === target || curSite.endsWith(`.${target}`) };
     }
 
-    const shorthandRe = trimmed.match(/^(title|url|host|path|scheme)\/(.+)$/i);
+    const shorthandRe = trimmed.match(/^(title|url|host|path|scheme|u|t)\/(.+)$/i);
     if (shorthandRe) {
       const pre = parsePrefixedRegexRule(trimmed, shorthandRe[1].length + 1);
-      const condType = shorthandRe[1].toLowerCase();
+      const condType = (s => s === 'u' ? 'url' : s === 't' ? 'title' : s)(shorthandRe[1].toLowerCase());
       const badFlags = pre.flagsCandidate && (isFlagsCandidateError(pre.flagsCandidate) || (/^[imsu]+$/i.test(pre.flagsCandidate) && !!getInvalidRegexFlags(pre.flagsCandidate)));
       if (!pre.unclosed && String(pre.pattern || '').trim() && !getInvalidRegexFlags(pre.flags) && !badFlags) {
         return { matched: true, dynamic: { type: condType, op: '=~', regex: new RegExp(pre.pattern, pre.flags) } };
@@ -1643,23 +1644,23 @@
       return { matched: false };
     }
 
-    const eqRe = trimmed.match(/^(title|url|host|path|scheme)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
+    const eqRe = trimmed.match(/^(title|url|host|path|scheme|u|t)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
     const eqSeg = eqRe ? String(eqRe[3] || '') : ''; const eqFlags = eqRe && isUniqueFlagsStr(eqSeg) ? eqSeg.toLowerCase() : '';
-    const eqReOk = eqRe && !getInvalidRegexFlags(eqFlags) && (eqFlags || !eqSeg || (!/^(title|url|host|path|scheme)\s*=/i.test(trimmed) && !isFlagsCandidateError(eqSeg))) && (String(eqRe[2] || '').trim() || eqSeg);
-    const strMatch = eqReOk ? null : trimmed.match(/^(title|url|host|path|scheme)\s*(\^=|\$=|\*=|=|:)\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s"']+))\s*i?\s*$/i);
+    const eqReOk = eqRe && !getInvalidRegexFlags(eqFlags) && (eqFlags || !eqSeg || (!/^(title|url|host|path|scheme|u|t)\s*=/i.test(trimmed) && !isFlagsCandidateError(eqSeg))) && (String(eqRe[2] || '').trim() || eqSeg);
+    const strMatch = eqReOk ? null : trimmed.match(/^(title|url|host|path|scheme|u|t)\s*(\^=|\$=|\*=|=|:)\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s"']+))\s*i?\s*$/i);
     if (strMatch) {
       if (strMatch[5] !== undefined && strMatch[5].startsWith('~')) return { matched: false };
       const bareEq = (strMatch[2] === '=' && strMatch[5] !== undefined) ? strMatch[5].match(/^\/((?:[^/\\\[\]]|\\.|\[(?:[^\]\\]|\\.)*\])+)\/([a-z]*)$/i) : null;
       if (bareEq && (!bareEq[2] || isUniqueFlagsStr(bareEq[2]) || isFlagsCandidateError(bareEq[2]))) return { matched: false };
       const op = strMatch[2] === ':' ? '=' : strMatch[2];
       const rawVal = (strMatch[3] !== undefined ? strMatch[3] : (strMatch[4] !== undefined ? strMatch[4] : strMatch[5])); let val = rawVal.replace(/\\(["'])/g, '$1').toLowerCase();
-      const condType = strMatch[1].toLowerCase(); if (condType === 'host') val = val.startsWith('/') ? val : toASCIIHostname(val); return { matched: true, dynamic: { type: condType, op, val } };
+      const condType = (s => s === 'u' ? 'url' : s === 't' ? 'title' : s)(strMatch[1].toLowerCase()); if (condType === 'host') val = val.startsWith('/') ? val : toASCIIHostname(val); return { matched: true, dynamic: { type: condType, op, val } };
     }
 
-    const reMatch = trimmed.match(/^(title|url|host|path|scheme)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
+    const reMatch = trimmed.match(/^(title|url|host|path|scheme|u|t)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
     if (reMatch) {
-      const condType = reMatch[1].toLowerCase(); const seg = String(reMatch[3] || ''); const flags = isUniqueFlagsStr(seg) ? seg.toLowerCase() : '';
-      const shorthand = !/^(title|url|host|path|scheme)\s*=/i.test(trimmed);
+      const condType = (s => s === 'u' ? 'url' : s === 't' ? 'title' : s)(reMatch[1].toLowerCase()); const seg = String(reMatch[3] || ''); const flags = isUniqueFlagsStr(seg) ? seg.toLowerCase() : '';
+      const shorthand = !/^(title|url|host|path|scheme|u|t)\s*=/i.test(trimmed);
       if (flags) { if (getInvalidRegexFlags(flags)) return { matched: false }; }
       else if (shorthand ? isFlagsCandidateError(seg) : seg !== '') return { matched: false };
       if (!String(reMatch[2] || '').trim()) return { matched: false };
@@ -1746,9 +1747,9 @@
   function looksLikeCondExpr(str) {
     if (!isCondExprCore(str)) return false; if (/^\s*!\s*(?:[A-Z][a-zA-Z0-9_-]*)\s*:\s*\S/.test(str)) return false;
     if (/^\s*!\s+(?:title|url|description|version|expires|homepage|host|site|path|scheme)\s*:\s*\S/i.test(str)) return false;
-    if (!/^\s*(?:!|\(|\$site\b|\$category\b|engine\b|category\b|(?:site|title|url|host|path|scheme)\s*(?:=~|\^=|\$=|\*=|=|:|\/))/i.test(str)) return false;
-    return /(?:^|[\s(&|!])(?:\$site|\$category|engine|category|site|title|url|host|path|scheme)\s*(?:(?:=~|\^=|\$=|\*=|=|:)\s+\S|(?:=~|\^=|\$=|\*=|=|:)\S|\/)/i.test(str)
-      || /^\s*!\s*(?:(?:\$site|\$category|engine|category|site|title|url|host|path|scheme)\b|\()/i.test(str);
+    if (!/^\s*(?:!|\(|\$site\b|\$category\b|engine\b|category\b|(?:site|title|url|host|path|scheme|u|t)\s*(?:=~|\^=|\$=|\*=|=|:|\/))/i.test(str)) return false;
+    return /(?:^|[\s(&|!])(?:\$site|\$category|engine|category|site|title|url|host|path|scheme|u|t)\s*(?:(?:=~|\^=|\$=|\*=|=|:)\s+\S|(?:=~|\^=|\$=|\*=|=|:)\S|\/)/i.test(str)
+      || /^\s*!\s*(?:(?:\$site|\$category|engine|category|site|title|url|host|path|scheme|u|t)\b|\()/i.test(str);
   }
 
   function isScriptRuleLine(line) {
@@ -1817,7 +1818,7 @@
 
     let ruleToCheck = rule.trim(); if (ruleToCheck.startsWith('#')) return { valid: true, errors: [] }; ruleToCheck = stripRuleComment(ruleToCheck);
     if (!ruleToCheck) return { valid: true, errors: [] }; const errors = [];
-    let hlN = null; const hlValMatch = ruleToCheck.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|(?:[(!]|@if\b))/i);
+    let hlN = null; const hlValMatch = ruleToCheck.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|u|t|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|(?:[(!]|@if\b))/i);
     if (hlValMatch) {
       const N = parseInt(hlValMatch[1]);
       if (N < 1 || N > 5) {
@@ -2049,7 +2050,8 @@
           return escapeWildcardPart(part, false);
         })
         .join('\\/'); let bs = 0; for (let i = pattern.length - 2; i >= 0 && pattern[i] === '\\'; i--) bs++;
-        return pattern.endsWith('*') && bs % 2 === 0 ? regexStr : regexStr + '(?:[\\/?#:&]|$)';
+        const lastChar = pattern[pattern.length - 1]; const openEnd = bs % 2 === 0 && (pattern.endsWith('*') || '\\/?#:&='.includes(lastChar));
+        return openEnd ? regexStr : regexStr + '(?:[&#].*)?$';
     }
     return prefix + (hostIsFirst ? escapeHostPart(pattern) : escapeWildcardPart(pattern, false)) + '(?:[\\/?#:&]|$)';
   }
@@ -2150,7 +2152,7 @@
     try {
       pageContext = getSearchEngine() + '|' + getSearchCategory() + '|' + String(window.location.hostname || '');
     } catch (e) {}
-    const contentSignature = getRulesModifiedTime() + '|' + (_subscriptionStoreSignature || '') + '|' + currentConfig.language;
+    const contentSignature = getRulesModifiedTime() + '|' + _rulesRevision + '|' + (_subscriptionStoreSignature || '') + '|' + currentConfig.language;
     const signature = contentSignature + '|' + pageContext; if (compiledRules && compiledRules.indexSignature === signature) return;
     const contentChanged = !compiledRules || compiledRules.contentSignature !== contentSignature;
     subdomainCache.clear(); validationCache.clear();
@@ -2213,7 +2215,7 @@
         }
       };
 
-      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|(?:[(!]|@if\b))/i);
+      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|u|t|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|(?:[(!]|@if\b))/i);
       if (hlMatch) {
         const N = parseInt(hlMatch[1]); if (N < 1 || N > 5) return;
         const hlRule = rule.substring(hlMatch[0].length).trim(); if (!hlRule) return;
@@ -2488,10 +2490,11 @@
     return !decodeRedirectTarget(target);
   }
 
-  function getCleanUrl(link) {
+  function getCleanUrl(link, engine) {
     if (!link || !link.href) return '';
+    if (engine === undefined) engine = (typeof getSearchEngine === 'function') ? getSearchEngine() : '';
     let attr = '';
-    if (typeof link.getAttribute === 'function') {
+    if ((engine === 'so360' || engine === 'sogou') && typeof link.getAttribute === 'function') {
       attr = link.getAttribute('data-mdurl') || link.getAttribute('data-url') || link.getAttribute('linkurl') || '';
       if (!attr) {
         try {
@@ -3474,7 +3477,7 @@
     function processBatch() {
       if (batchId !== forceReprocessBatchId) return; const batchSize = 30; const end = Math.min(processIdx + batchSize, allResults.length);
       for (; processIdx < end; processIdx++) {
-        const result = allResults[processIdx]; resetResultStyles(result);
+        const result = allResults[processIdx]; if (!result.isConnected) continue; resetResultStyles(result);
         try {
           if (processSingleResult(result)) totalBlocked++;
         } catch (e) {
@@ -3932,6 +3935,8 @@
   }
 
   function persistConfig(updateModifiedTime = false) {
+    const fingerprint = JSON.stringify(currentConfig.rules || []);
+    if (fingerprint !== _rulesFingerprint) { _rulesRevision++; _rulesFingerprint = fingerprint; }
     const previous = normalizeConfig(GM_getValue(CONFIG_KEY, getDefaultConfig()));
     const rulesChanged = JSON.stringify(previous.rules) !== JSON.stringify(currentConfig.rules);
     const settingsChanged = !selectorsEqual(getSyncSettings(previous), getSyncSettings(currentConfig));
@@ -3947,6 +3952,7 @@
 
   function markLocalModifiedTime(key = LOCAL_LAST_MODIFIED_KEY) {
     const prev = GM_getValue(key, 0) || 0; const now = Math.max(Date.now(), prev + 1); GM_setValue(key, now);
+    const webdav = loadWebDAVConfig(); if (!webdav || !webdav.url || !isHttpsUrl(webdav.url)) return;
     Promise.resolve(getTrustedNow()).then(trusted => {
       if (GM_getValue(key, 0) === now && trusted > now) {
         GM_setValue(key, trusted);
@@ -4317,14 +4323,9 @@
       e.stopPropagation(); showSettingsPanel();
     };
 
-    const COMMENT_HEADING_REGEX = /^\s*#+\s+\S+/;
     function findCommentLineIndices(lines) {
       const indices = [];
-      for (let i = 0; i < lines.length; i++) {
-        if (COMMENT_HEADING_REGEX.test(lines[i])) {
-          indices.push(i);
-        }
-      }
+      for (let i = 0; i < lines.length; i++) if (lines[i][0] === '#') indices.push(i);
       return indices;
     }
 
@@ -5466,6 +5467,7 @@
 
   // 联网授时
   async function getNetworkTimeOffset() {
+    if (!_netTimeCheckedAt && typeof GM_getValue === 'function') { try { const c = GM_getValue('searchfilter_net_time_cache', null); if (c && typeof c === 'object' && typeof c.checkedAt === 'number' && Number.isFinite(c.checkedAt)) { _netTimeCheckedAt = c.checkedAt; _netTimeOffset = typeof c.offset === 'number' && Number.isFinite(c.offset) ? c.offset : null; } } catch (e) {} }
     const now = Date.now(); const ttl = _netTimeOffset === null ? NET_TIME_FAIL_TTL : NET_TIME_CACHE_TTL; if (_netTimeCheckedAt > 0 && now - _netTimeCheckedAt < ttl) return _netTimeOffset;
     if (_netTimeQuerying) return _netTimeQuerying;
     _netTimeQuerying = firstSuccess([
@@ -5484,9 +5486,9 @@
         const m = /(?:^|\n)ts=([0-9.]+)(?:\n|$)/.exec(String(resp.responseText || '')); const sec = m ? parseFloat(m[1]) : 0; return sec > 0 ? Math.round(sec * 1000) : 0;
       })
     ]).then(offset => {
-      _netTimeOffset = offset; _netTimeCheckedAt = Date.now(); return offset;
+      _netTimeOffset = offset; _netTimeCheckedAt = Date.now(); if (typeof GM_setValue === 'function') { try { GM_setValue('searchfilter_net_time_cache', { offset, checkedAt: _netTimeCheckedAt }); } catch (e) {} } return offset;
     }).catch(() => {
-      _netTimeOffset = null; _netTimeCheckedAt = Date.now(); return null;
+      _netTimeOffset = null; _netTimeCheckedAt = Date.now(); if (typeof GM_setValue === 'function') { try { GM_setValue('searchfilter_net_time_cache', { offset: null, checkedAt: _netTimeCheckedAt }); } catch (e) {} } return null;
     }).finally(() => {
       _netTimeQuerying = null;
     });
@@ -5937,237 +5939,119 @@
 
   // yaml解析
   function extractYamlRuleItems(lines) {
-    let hasSection = false; let inSection = false; let sectionKind = ''; let sectionIndent = -1; let name; const items = []; const sectionStack = [];
+    let hasSection = false, name; const items = [], sectionStack = [];
+    const yamlEscapes = { '0': '\0', a: '\x07', b: '\b', t: '\t', n: '\n', v: '\v', f: '\f', r: '\r', e: '\x1b', ' ': ' ', '"': '"', '/': '/', '\\': '\\', N: '\u0085', _: '\u00a0', L: '\u2028', P: '\u2029' };
     const stripQ = (raw) => {
       const s = raw.trim();
-      if (s.startsWith("'")) {
-        const match = s.match(/^'((?:[^']|'')*)'(?:\s*#.*)?$/); if (!match) throw new Error('Invalid YAML single-quoted scalar'); return match[1].replace(/''/g, "'");
-      }
-      if (s.startsWith('"')) {
-        const match = s.match(/^"((?:[^"\\]|\\.)*)"(?:\s*#.*)?$/); if (!match) throw new Error('Invalid YAML double-quoted scalar');
-        const escapes = { '0': '\0', a: '\x07', b: '\b', t: '\t', n: '\n',
-          v: '\v', f: '\f', r: '\r', e: '\x1b', ' ': ' ', '"': '"',
-          '/': '/', '\\': '\\', N: '\u0085', _: '\u00a0', L: '\u2028', P: '\u2029' };
-        return match[1].replace(/\\(x[0-9a-fA-F][0-9a-fA-F]|u[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]|U[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]|[\s\S])/g, (_, escape) => {
-          if (Object.prototype.hasOwnProperty.call(escapes, escape)) return escapes[escape];
-          if (/^(?:x[0-9a-fA-F][0-9a-fA-F]|u[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]|U[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])$/.test(escape)) {
-            const code = parseInt(escape.slice(1), 16); if (code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)) return String.fromCodePoint(code);
-          }
-          return '\\' + escape;
-        });
-      }
-      return s;
+      if (s.startsWith("'")) { const match = s.match(/^'((?:[^']|'')*)'/); return match ? match[1].replace(/''/g, "'") : s; }
+      if (!s.startsWith('"')) return s;
+      const match = s.match(/^"((?:[^"\\]|\\.)*)"/);
+      return match ? match[1].replace(/\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[\s\S])/g, (_, escape) => {
+        if (yamlEscapes[escape] !== undefined) return yamlEscapes[escape];
+        const code = /^[xuU]/.test(escape) ? parseInt(escape.slice(1), 16) : NaN;
+        return code <= 0x10ffff ? String.fromCodePoint(code) : '\\' + escape;
+      }) : s;
     };
-    const listKeyOf = (line) => {
-      const m = line.match(/^(\s*)(rules|blacklist|whitelist|matches)\s*:\s*(?:([|>])([-+]?\d*)\s*)?(?:#.*)?$/i); return m ? { key: m[2].toLowerCase(), indent: m[1].length, block: m[3] || '' } : null;
+    const keyOf = (line) => {
+      const m = line.match(/^(\s*)(rules|blacklist|whitelist|matches)\s*:\s*(?:\[(.*)\]\s*)?(?:#.*)?$/i); return m ? { key: m[2].toLowerCase(), indent: m[1].length, payload: m[3] } : null;
     };
-    const flowKeyOf = (line) => {
-      const m = line.match(/^(\s*)(rules|blacklist|whitelist|matches)\s*:\s*\[(.*?)\]\s*(?:#.*)?$/i); return m ? { key: m[2].toLowerCase(), payload: m[3], open: false } : null;
-    };
-    const flowOpenOf = (line) => {
-      const m = line.match(/^(\s*)(rules|blacklist|whitelist|matches)\s*:\s*\[(.*)$/i); if (!m || /\]\s*$/.test(m[3])) return null;
-      const payload = stripLineComment(m[3]); if (/\]\s*$/.test(payload)) return null;
-      return { key: m[2].toLowerCase(), indent: m[1].length, payload };
-    };
-    const flowCloseAt = (from) => {
-      for (let j = from; j < lines.length; j++) {
-        const stripped = stripLineComment(lines[j]); if (/^[a-zA-Z0-9_]+\s*:/.test(stripped)) continue;
-        const m = stripped.match(/^(.*)\]\s*$/);
-        if (m) return { line: j, prefix: m[1].trim() };
-      }
-      return null;
-    };
-    const isScalarEdge = (line, i) => i === 0 || /[\s,:[\]{}]/.test(line[i - 1]);
     const stripLineComment = (line) => {
       let quote = null;
       for (let i = 0; i < line.length; i++) {
         const ch = line[i];
-        if (quote === "'") {
-          if (ch === "'") { if (line[i + 1] === "'") i++; else quote = null; }
-          continue;
-        }
-        if (quote === '"') {
-          if (ch === '\\') i++;
-          else if (ch === '"') quote = null;
+        if (quote) {
+          if (ch === '\\' && quote === '"') i++;
+          else if (ch === quote) { if (quote === "'" && line[i + 1] === "'") i++; else quote = null; }
           continue;
         }
         if (ch === '#' && (i === 0 || /\s/.test(line[i - 1]))) return line.slice(0, i).trim();
-        if ((ch === "'" || ch === '"') && isScalarEdge(line, i)) quote = ch;
+        if ((ch === "'" || ch === '"') && (i === 0 || /[\s,:[\]{}]/.test(line[i - 1]))) quote = ch;
       }
-      if (quote !== null) { const m = line.match(/(^|\s)#/); if (m) return line.slice(m.index + m[1].length).trim(); }
       return line.trim();
     };
     const pushYamlItem = (rawItem, kind) => {
-      let item;
-      try {
-        item = stripQ(stripLineComment(rawItem));
-      } catch (e) {
-        if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[订阅] YAML列表项已跳过:', rawItem, e); return;
-      }
-      if (kind === 'whitelist' && item && !item.startsWith('@')) item = '@' + item; if (item) items.push(item);
+      let item = stripQ(stripLineComment(rawItem));
+      if (kind === 'whitelist' && item && !item.startsWith('@')) item = '@' + item;
+      if (item) items.push(item);
     };
     const joinFold = (from, baseIndent) => {
-      const chunks = []; let j = from; let contentIndent = -1;
+      const chunks = []; let j = from, contentIndent = -1;
       for (; j < lines.length; j++) {
-        const raw = lines[j]; if (!raw.trim()) continue; const ind = raw.search(/\S/); const trimmed = raw.trim();
+        const raw = lines[j]; if (!raw.trim()) continue; const ind = raw.search(/\S/), trimmed = raw.trim();
         if (trimmed.startsWith('-') || ind < baseIndent) break;
         if (contentIndent === -1) contentIndent = ind; else if (ind < contentIndent) break;
         chunks.push(trimmed);
       }
       return { text: chunks.join(' ').replace(/\s+/g, ' ').trim(), next: j };
     };
-    const flowLineItems = (listLines) => {
-      const out = [];
-      for (const line of listLines) {
-        const parts = []; let cur = ''; let quote = null;
-        for (let i = 0; i < line.length; i++) {
-          const ch = line[i];
-          if (quote === "'") {
-            cur += ch;
-            if (ch === "'") {
-              if (line[i + 1] === "'") { cur += "'"; i++; }
-              else quote = null;
-            }
-            continue;
-          }
-          if (quote === '"') {
-            cur += ch;
-            if (ch === '\\') { cur += line[i + 1] || ''; i++; }
-            else if (ch === '"') quote = null;
-            continue;
-          }
-          if (ch === "'" || ch === '"') { if (i === 0 || /[\s,:[\]{}]/.test(line[i - 1])) quote = ch; cur += ch; continue; }
-          if (ch === ',') { parts.push(cur.trim()); cur = ''; continue; }
+    const flowItems = (payload) => {
+      const out = []; let cur = '', quote = null;
+      for (let i = 0; i < payload.length; i++) {
+        const ch = payload[i];
+        if (quote) {
           cur += ch;
+          if (ch === '\\' && quote === '"') cur += payload[++i] || '';
+          else if (ch === quote) { if (quote === "'" && payload[i + 1] === "'") cur += payload[++i]; else quote = null; }
+          continue;
         }
-        parts.push(cur.trim()); for (const part of parts) { if (part) out.push(part); }
+        if ((ch === "'" || ch === '"') && (i === 0 || /[\s,:[\]{}]/.test(payload[i - 1]))) { quote = ch; cur += ch; }
+        else if (ch === ',') { if (cur.trim()) out.push(cur.trim()); cur = ''; }
+        else cur += ch;
       }
+      if (cur.trim()) out.push(cur.trim());
       return out;
     };
-    const splitFlowItems = (payload) => (payload.indexOf('\n') !== -1 ? flowLineItems(payload.split('\n')) : flowLineItems([payload]));
-    const pushFlowSeq = (raw, from, key) => {
-      let payload; let end = from;
-      if (raw.endsWith(']')) payload = raw.slice(1, raw.lastIndexOf(']'));
-      else {
-        const close = flowCloseAt(from + 1); if (!close) return -1;
-        payload = [raw.slice(1), ...lines.slice(from + 1, close.line).map((l) => stripLineComment(l)).filter(Boolean)].filter(Boolean).join('\n');
-        if (close.prefix) payload = payload ? payload + '\n' + close.prefix : close.prefix;
-        end = close.line;
-      }
-      for (const part of splitFlowItems(payload)) pushYamlItem(part, key);
-      return end;
-    };
     for (let idx = 0; idx < lines.length; idx++) {
-      const line = lines[idx]; const flowOpen = flowOpenOf(line);
-      if (flowOpen) {
-        const end = pushFlowSeq('[' + flowOpen.payload, idx, flowOpen.key);
-        if (end !== -1) { hasSection = true; idx = end; continue; }
-      }
-      const flow = flowKeyOf(line);
-      if (flow) {
-        hasSection = true;
-        for (const part of splitFlowItems(flow.payload)) pushYamlItem(part, flow.key);
-        continue;
-      }
-      const match = listKeyOf(line);
+      const line = lines[idx]; const match = keyOf(line);
       if (match) {
         hasSection = true;
         while (sectionStack.length && sectionStack[sectionStack.length - 1].indent >= match.indent) sectionStack.pop();
         sectionStack.push({ kind: match.key, indent: match.indent });
-        inSection = true; sectionKind = match.key; sectionIndent = match.indent;
-        if (match.block) {
-          let j = idx + 1; const blockLines = [];
-          for (; j < lines.length; j++) {
-            const raw = lines[j]; if (!raw.trim()) { blockLines.push(''); continue; }
-            if (raw.search(/\S/) <= match.indent) break; blockLines.push(raw.trim());
-          }
-          if (match.block === '|') { for (const bl of blockLines) if (bl) pushYamlItem(bl, match.key); }
-          else pushYamlItem(blockLines.filter(Boolean).join(' '), match.key);
-          idx = j - 1;
-        }
+        if (match.payload !== undefined && match.key !== 'matches') for (const part of flowItems(match.payload)) pushYamlItem(part, match.key);
         continue;
       }
-      if (!inSection) {
-        if (name === undefined) {
-          const nm = line.match(/^\s*name\s*:\s*(.+?)\s*$/);
-          if (nm) {
-            try {
-              name = stripQ(nm[1]);
-            } catch (e) {
-              name = nm[1].trim().replace(/^['"]|['"]$/g, '');
-            }
-          }
-        }
+      if (!sectionStack.length) {
+        if (name === undefined) { const nm = line.match(/^\s*name\s*:\s*(.+?)\s*$/); if (nm) name = stripQ(nm[1]); }
         continue;
       }
       const s = line.trim(); if (!s || s.startsWith('#')) continue;
-
-      const currentIndent = line.search(/\S/); const isListItem = s.startsWith('-');
-      while (sectionStack.length && sectionStack[sectionStack.length - 1].indent >= currentIndent + (isListItem ? 1 : 0)) sectionStack.pop();
-      if (!sectionStack.length) { inSection = false; sectionKind = ''; sectionIndent = -1; idx--; continue; }
-      sectionKind = sectionStack[sectionStack.length - 1].kind; sectionIndent = sectionStack[sectionStack.length - 1].indent;
-      if (s.startsWith('[')) { const end = pushFlowSeq(stripLineComment(s), idx, sectionKind); if (end !== -1) { idx = end; continue; } }
-
-      if (/^-\s+/.test(s)) {
-        let rawItem = s.replace(/^-\s+/, '').trim();
-        if (rawItem.charCodeAt(0) === 123 || rawItem.charCodeAt(0) === 91 || /^[a-zA-Z0-9_]+\s*:(?:\s|$)/.test(rawItem)) {
-          continue;
-        }
-        const fold = rawItem.match(/^(?:>|\|)\s*([-+]?\d*)\s*$/);
-        if (fold) {
-          const joined = joinFold(idx + 1, currentIndent); if (joined.text) pushYamlItem(joined.text, sectionKind); idx = Math.max(idx, joined.next - 1); continue;
-        }
-        pushYamlItem(rawItem, sectionKind); continue;
+      const indent = line.search(/\S/);
+      while (sectionStack.length && sectionStack[sectionStack.length - 1].indent >= indent + (s.startsWith('-') ? 1 : 0)) sectionStack.pop();
+      if (!sectionStack.length) { idx--; continue; }
+      const kind = sectionStack[sectionStack.length - 1].kind;
+      if (kind === 'matches' || !/^-\s+/.test(s)) continue;
+      const rawItem = s.replace(/^-\s+/, '').trim(); if (/^(?:[\u007b]|\[|[a-zA-Z0-9_]+\s*:(?:\s|$))/.test(rawItem)) continue;
+      const fold = rawItem.match(/^(?:>|\|)\s*[-+]?\d*\s*$/);
+      if (fold) {
+        const joined = joinFold(idx + 1, indent); if (joined.text) pushYamlItem(joined.text, kind); idx = Math.max(idx, joined.next - 1); continue;
       }
-      if (s === '-') {
-        let nextIdx = idx + 1; while (nextIdx < lines.length && (!lines[nextIdx].trim() || lines[nextIdx].trim().startsWith('#'))) nextIdx++;
-        if (nextIdx < lines.length) {
-          const nextLine = lines[nextIdx]; const nextIndent = nextLine.search(/\S/); const nextValue = nextLine.trim();
-          if (nextIndent > sectionIndent && nextValue && !nextValue.startsWith('-') && !/^[a-zA-Z0-9_]+\s*:(?:\s|$)/.test(nextValue)) {
-            let item;
-            try {
-              item = stripQ(stripLineComment(nextValue)).trim();
-            } catch (e) {
-              if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[订阅] YAML列表项已跳过:', nextValue, e); idx = nextIdx; continue;
-            }
-            if (sectionKind === 'whitelist' && item && !item.startsWith('@')) item = '@' + item; if (item) items.push(item); idx = nextIdx;
-          }
-        }
-      }
+      pushYamlItem(rawItem, kind);
     }
-    if (!hasSection) return null; return { items, name };
+    return { items, name, section: hasSection };
   }
 
   function parseRulesetContent(content) {
-    let lines = String(content || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n'); let meta = {}; let isYaml = false; let headLines = null; const firstContentIdx = lines.findIndex((l) => l.trim() !== '');
+    let lines = String(content || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n'); let meta = {}; let isYaml = false; let head = null; const firstContentIdx = lines.findIndex((l) => l.trim() !== '');
     if (firstContentIdx !== -1 && lines[firstContentIdx].trim() === '---') {
       const endIndex = lines.findIndex((l, i) => i > firstContentIdx && l.trim() === '---');
-      if (endIndex !== -1) {
-        headLines = lines.slice(firstContentIdx + 1, endIndex); const head = headLines.join('\n'); const nameMatch = head.match(/^name\s*:\s*(.+?)\s*$/m);
-        if (nameMatch) {
-          const raw = nameMatch[1].trim(); const quoted = (raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'")); meta.name = quoted ? raw.slice(1, -1) : raw;
-        }
-        if (/(?:^|\n)\s*(?:rules|blacklist|whitelist|matches)\s*:/i.test(head)) isYaml = true;
-        lines = lines.slice(endIndex + 1);
-      } else {
-        isYaml = true;
-      }
+      if (endIndex !== -1) { head = extractYamlRuleItems(lines.slice(firstContentIdx + 1, endIndex)); lines = lines.slice(endIndex + 1); }
+      else isYaml = true;
     }
+    if (head && head.name !== undefined) meta.name = head.name;
     if (!isYaml) {
       for (const line of lines) {
         const s = line.trim(); if (!s || s.startsWith('#')) continue;
-        if (/^(?:name|rules|blacklist|whitelist|matches|title|url)\s*:/i.test(s)) {
+        if (/^(?:name|rules|blacklist|whitelist|matches)\s*:/i.test(s)) {
           isYaml = true; break;
         }
         if (validateRule(s)) break;
       }
     }
     if (isYaml) {
-      const headYaml = headLines ? extractYamlRuleItems(headLines) : null; const bodyYaml = extractYamlRuleItems(lines);
-      if (headYaml || bodyYaml) {
-        const items = (headYaml ? headYaml.items : []).concat(bodyYaml ? bodyYaml.items : lines);
-        if (meta.name === undefined) meta.name = (bodyYaml && bodyYaml.name) || (headYaml && headYaml.name);
-        return { lines: items, meta };
+      const body = extractYamlRuleItems(lines);
+      if ((head && head.section) || body.section) {
+        if (meta.name === undefined) meta.name = body.name;
+        return { lines: (head && head.section ? head.items : []).concat(body.section ? body.items : lines), meta };
       }
     }
     return { lines, meta };
@@ -6966,6 +6850,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   async function checkAutoWebDAV() {
     if (!GM_getValue(WEBDAV_AUTO_SYNC_KEY, false)) return; const config = loadWebDAVConfig(); if (!config || !config.url) return; if (!isHttpsUrl(config.url)) return;
     if (isSerhPanelOpen()) return;
+    const localNow = Date.now(); const localLastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0);
+    if (localLastSync > 0 && localNow >= localLastSync - WEBDAV_TIME_TOLERANCE && localNow - localLastSync < WEBDAV_AUTO_SYNC_INTERVAL - AUTO_SYNC_TOLERANCE) return;
     const now = await getTrustedNow(); let lastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0); if (lastSync > now + WEBDAV_TIME_TOLERANCE) lastSync = 0;
     if (lastSync > 0 && now - lastSync < WEBDAV_AUTO_SYNC_INTERVAL - AUTO_SYNC_TOLERANCE) return;
     runBackgroundSync('webdav', async () => {
@@ -7335,7 +7221,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     } catch (e) {
       return false;
     }
-    currentConfig = stored; return true;
+    currentConfig = stored; const fingerprint = JSON.stringify(stored.rules || []);
+    if (fingerprint !== _rulesFingerprint) { _rulesRevision++; _rulesFingerprint = fingerprint; }
+    return true;
   }
 
   function getConfigStoreSignature() {

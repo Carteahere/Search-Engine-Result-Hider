@@ -20,23 +20,25 @@
 
 | 规则 | 说明 |
 | --- | --- |
-| `*://abc.example.com/*` | 匹配`abc.example.com` |
-| `*://*.example.com/*` | 匹配`example.com`及其子域名 |
-| `*://*.example.com/path/*` | 匹配`example.com`特定路径 |
-| `*://*.example.*` | 匹配`example.com`所有顶级/二级域名 |
-| `example.com` | 等效`*://*.example.com/*`的简单写法，大多数情况下建议加`*://*.`前缀 |
+| `*://abc.example.com/*` | 匹配 `abc.example.com` |
+| `*://*.example.com/*` | 匹配 `example.com`及其子域名 |
+| `*://*.example.com/path/*` | 匹配 `example.com` 的特定路径 |
+| `*://*.example.com:8080/*` | 匹配 `example.com` 的 `8080` 端口 |
+| `*://*.example.*` | 匹配 `example.com` 的所有顶级/二级域名 |
+| `example.com` | 等效 `*://*.example.com/*` 的简单写法，大多数情况下建议加 `*://*.` 前缀 |
+| `*://*.例子.com` | 等效 `*://*.xn--fsqu00a.com`，中文等 IDN 域名与 punycode 视为同一主机 |
 
-URL通配规则按匹配模式语义从URL开头匹配，主机通配`*`不跨越路径，`*.`前缀同时匹配裸域；中文等 IDN 域名与 punycode（如`例子.com`与`xn--fsqu00a.com`）视为同一主机
+URL通配规则按匹配模式语义从URL开头匹配，主机通配`*`不跨越路径
 
 ### 2.3 正则匹配：
 
 | 规则 | 说明 |
 | --- | --- |
-| `/pattern/flags` | 使用正则表达式匹配URL，如`/example\.(com\|net)/i` |
-| `title/pattern/flags` | 使用正则表达式匹配标题，如`title/.*屏蔽.*/i` |
-| `text/pattern/flags` | 使用正则表达式匹配摘要内容，如`text/.*广告.*/i` |
+| `/pattern/flags` | 正则表匹配URL，如 `/example\.(com\|net)/i` |
+| flags: `i`、`m`、`s`、`u` | 支持，其中 `s` 使用原生 dotAll 匹配（点号匹配换行） |
+| flags: `g`、`y` | 不支持，脚本规则只判断是否匹配不执行全局提取 |
 
-正则使用浏览器支持的 JavaScript `RegExp` flags，支持`i`、`m`、`s`、`u`，其中 `s` 使用原生 dotAll 匹配(点号匹配换行)；不支持`g`/`y`，脚本规则只判断是否匹配不执行全局提取，flags 自动检测`g`/`y`并报错
+正则使用浏览器支持的 JavaScript `RegExp`
 
 ### 2.4 标题匹配：
 
@@ -52,25 +54,27 @@ URL通配规则按匹配模式语义从URL开头匹配，主机通配`*`不跨�
 
 | 规则 | 说明 |
 | --- | --- |
-| `text/.*example.*/` | 匹配结果的网页描述内容(snippet)中包含`example`的结果 |
-| `text/.*example.*/i` | 同上，加i忽略大小写 |
+| `text/.*example.*/` | 匹配结果的网页描述内容(snippet)中包含 `example` 的结果 |
+| `text/.*example.*/i` | 同上，加 `i` 忽略大小写 |
 
 ### 2.6 白名单匹配：
 
 | 规则 | 说明 |
 | --- | --- |
-| `@*://*.com/*` | 放行所有以`.com`结尾域名页面 |
-| `@*://example.com/*` | 放行`example.com`主站 |
-| `@*://example.com/abc/*` | 放行`example.com`特定路径 |
-| `@*://*.example.com/*` | 放行`example.com`及其所有子域名 |
+| `@*://*.com/*` | 放行所有以 `.com` 结尾域名页面 |
+| `@*://example.com/*` | 放行 `example.com` 主站 |
+| `@*://example.com/abc/*` | 放行 `example.com` 特定路径 |
+| `@*://*.example.com/*` | 放行 `example.com` 及其所有子域名 |
+
+不支持 `@@` 写法
 
 ### 2.7 高亮规则：
 
 | 规则 | 说明 |
 | --- | --- |
-| `@N*://*.example.com/*` | 给`example.com`及其子域名的搜索结果加上颜色边框 |
-| `@Ntitle/.*示例.*/` | 给匹配到标题带有`示例`的结果加上颜色边框 |
-| `@1path $= ".pdf"` | 给链接以`.pdf`结尾的结果加上颜色边框 |
+| `@N*://*.example.com/*` | 给 `example.com` 及其子域名的搜索结果加上颜色边框 |
+| `@Ntitle/.*示例.*/` | 给标题带有`示例`的结果加上颜色边框 |
+| `@1path $= ".pdf"` | 给链接以 `.pdf` 结尾的结果加上颜色边框 |
 
 **说明：**
 1. `@N`和裸域名规则之间必须空格隔开，其他规则可忽略空格，如`@1 example.com`正常识别，`@1example.com`识别为白名单规则
@@ -80,55 +84,56 @@ URL通配规则按匹配模式语义从URL开头匹配，主机通配`*`不跨�
 
 ### 2.8 复合规则：
 
-**说明：**
-1. 在规则后添加 `@if(...)` 作为附加条件，多个 `@if` 条件同时生效（可用 `&` 合并为单个 `@if` ），复合规则默认忽略大小写
-2. `@if` 内支持逻辑运算：`|` 或、`&` 与、`!` 非，用括号嵌套分组，优先级 `!` > `&` > `|`
-3. `!` 取反的是条件本身，如 `!(title *= "关键词")` 会命中无标题的结果
-4. 条件表达式可**单独使用**，如 `host $= ".example.com"`、`path *= "/download/"`，对所有搜索结果生效
-5. 属性值支持省略引号，如 `@if($site=google)`、`@if(scheme=https)` 等无空格值可直接裸写 
-6. `$site`搜索引擎ID同 **2.9 自定义引擎**
+**`@if` 说明：**
+1. 在规则后添加 `@if(...)` 作为附加条件，可同时使用多个 `@if` 条件（可用 `&` 合并为单个 `@if` ），复合规则默认忽略大小写
+2. 条件表达式可单独使用，如 `host $= ".example.com"`、`path *= "/download/"`，对所有搜索结果生效
+3. 属性值支持省略引号，如 `@if($site=google)`、`@if(scheme=https)`
+4. `$site` 引擎ID同 **2.9 自定义引擎**
 
 **`@if` 支持条件：**
 
 | 条件类型 | 语法 | 说明 |
 | --- | --- | --- |
-| 搜索引擎 | `$site = "google"` | 仅在指定搜索引擎中生效，忽略大小写，分隔符可用`=`或`:`，值支持省略引号（如`$site=google`） |
-| 搜索类型 | `$category = "web"` | 仅在指定搜索类型中生效，可写`web`、`images`、`videos`、`news`，网页搜索默认为`web`，值支持省略引号（如`$category=images`） |
-| 搜索站点 | `site = "google.com.hk"` | 仅在指定搜索引擎地区站点中生效，值支持省略引号（如`site=google.com.hk`） |
+| 搜索引擎 | `$site = "google"` | 仅在指定搜索引擎中生效，忽略大小写，分隔符可用 `=` 或 `:` |
+| 搜索类型 | `$category = "web"` | 仅在指定搜索类型中生效，可写 `web`、`images`、`videos`、`news`，网页默认为 `web`号 |
+| 搜索站点 | `site = "google.com.hk"` | 仅在指定搜索引擎地区站点中生效 |
 | 标题包含 | `title *= "关键词"` | 标题中包含指定字符串`关键词` |
 | 标题精确 | `title = "关键词"` | 标题精确匹配指定字符串`关键词` |
 | 标题前缀 | `title ^= "关键词"` | 标题以指定字符串`关键词`开头 |
 | 标题后缀 | `title $= "关键词"` | 标题以指定字符串`关键词`结尾 |
-| 标题正则 | `title =~ /正则/`(或简写 `title/正则/`) | 标题匹配正则表达式，`=~` 可省略，字符集`[...]`内支持裸斜杠，结尾加`i`忽略大小写 |
+| 标题正则 | `title =~ /正则/`(或简写 `title/正则/`) | 标题匹配正则表达式，字符集 `[...]` 内支持裸斜杠，结尾加 `i` 忽略大小写 |
 | URL精确 | `url = "https://example.com/"` | URL与指定字符串完全一致 |
 | URL前缀 | `url ^= "https://abc.example.com"` | URL以指定字符串开头 |
 | URL后缀 | `url $= ".pdf"` | URL以指定字符串结尾 |
-| URL包含 | `url *= "example"` | URL中包含指定字符串`example` |
+| URL包含 | `url *= "example"` | URL中包含指定字符串 `example` |
 | URL正则 | `url =~ /正则/`(或简写 `url/正则/`) | URL匹配正则表达式，`=~` 可省略，字符集`[...]`内支持裸斜杠，结尾加`i`忽略大小写 |
-| URL主机 | `host $= ".example.com"` | 结果URL的主机名(hostname)匹配；`$=`兼容裸域，即`host $= ".example.com"`同时命中`example.com`与`www.example.com` |
-| URL路径 | `path *= "/download/"` | 结果URL的路径+查询串(pathname+search)匹配 |
-| URL协议 | `scheme = "https"` | 结果URL的协议匹配，如`https`/`http`，值支持省略引号（如`scheme=https`） |
-| 逻辑运算 | `\|` 或、`&` 与、`!` 非 | 组合任意条件 |
-| 括号分组 | `( )` | 嵌套组合子条件 |
+| URL主机 | `host $= ".example.com"` | 匹配结果URL主机，`$=` 兼容裸域，即 `host $= ".example.com"` 同时命中 `example.com` 与 `m.example.com` |
+| URL路径 | `path *= "/download/"` | 匹配结果URL路径 |
+| URL协议 | `scheme = "https"` | 匹配结果URL协议，如 `https` / `http` |
+| 逻辑运算 | `\|` 或、`&` 与、`!` 非 | 组合任意条件，`!` 取反的是条件本身，如 `!(title *= "关键词")` 会命中无标题的结果 |
+| 括号分组 | `(` `)` | 嵌套组合子条件 |
 
-`title`/`url`/`host`/`path`/`scheme` 均支持 `=`、`^=`、`$=`、`*=`、`=~`(及省略`=~`的简写如 `host/正则/`)，比较默认忽略大小写，`=~` 大小写由正则 flags 决定。兼容 uBlacklist 规则中的大小写修饰符 `i`(如 `title $= "Domain" i`)，此写法仅用于识别和兼容规则，脚本默认忽略大小写
+**条件逻辑：**
+1. `title` 别名 `t`、`url` 别名 `u`，如 `@if( t *="关键词")` 等效 `@if( title *="关键词")`
+2. `title`/`url`/`host`/`path`/`scheme` 均支持 `=`、`^=`、`$=`、`*=`、`=~` 及省略 `=~` 的简写（如 `host/正则/`），`=~` 大小写由正则 flags 决定，比较默认忽略大小写
+3. 兼容 uBlacklist 大小写修饰符 `i`（如 `title $= "Domain" i`），此写法仅用于识别和兼容规则，脚本默认忽略大小写
 
 **复合规则示例：**
 
 | 规则 | 说明 |
 | --- | --- |
-| `*://*.example.com/* @if(title *= "关键词")` | 屏蔽`example.com`的标题中含有`关键词`的结果 |
-| `*://*.example.com/* @if(title *= "关键词A" \| title *= "关键词B")` | 屏蔽`example.com`的标题中含`关键词A`或`关键词B`的结果 |
-| `*://*.example.com/* @if(title =~ /关键词A\|关键词B/i)` | 上条规则的正则写法，结尾需加`i`才会忽略大小写 |
-| `*://*.example.com/* @if(title *= "关键词" & !(url *= "test"))` | 屏蔽`example.com`的标题含`关键词`且URL中不含`test`的结果 |
-| `*://*.example.com/* @if(site = "google.com.hk")` | 仅在Google HK中屏蔽`example.com` |
-| `*://*.example.com/* @if($site = "google") @if(title *= "示例")` | 仅在Google中屏蔽标题含`示例`的`example.com`的结果 |
-| `*://*.example.com/* @if($category = "images")` | 仅在图片搜索中屏蔽`example.com` |
-| `*://*.example.com/* @if(title *= "a" \| title *= "b") @if(!(url *= "c"))` | 屏蔽标题含`a`或`b`且URL不含`c`的`example.com`的结果 |
-| `text/.*示例.*/ @if($site = "google" \| $site = "bing")` | 在Google或Bing中都屏蔽网页描述含`示例`的结果 |
-| `path *= "/download/"` | 屏蔽路径含`/download/`的结果 |
-| `host $= ".example.com" & path *= "/download/"` | 屏蔽`example.com`下路径含`/download/`的结果 |
-| `@1 path $= ".pdf"` | 高亮URL路径以`.pdf`结尾的结果 |
+| `*://*.example.com/* @if(title *= "关键词")` | 屏蔽 `example.com` 的标题中含有`关键词`的结果 |
+| `*://*.example.com/* @if(title *= "关键词A" \| title *= "关键词B")` | 屏蔽 `example.com` 的标题中含`关键词A`或`关键词B`的结果 |
+| `*://*.example.com/* @if(title =~ /关键词A\|关键词B/i)` | 上条规则的正则写法，结尾需加 `i` 才会忽略大小写 |
+| `*://*.example.com/* @if(title *= "关键词" & !(url *= "test"))` | 屏蔽 `example.com` 的标题含`关键词`且URL中不含 `test` 的结果 |
+| `*://*.example.com/* @if(site = "google.com.hk")` | 仅在 Google HK 中屏蔽 `example.com` |
+| `*://*.example.com/* @if($site = "google") @if(title *= "示例")` | 仅在 Google 中屏蔽标题含`示例`的 `example.com` 的结果 |
+| `*://*.example.com/* @if($category = "images")` | 仅在图片搜索中屏蔽 `example.com` |
+| `*://*.example.com/* @if(title *= "a" \| title *= "b") @if(!(url *= "c"))` | 屏蔽标题含 `a` 或 `b` 且 URL 不含 `c` 的 `example.com` 的结果 |
+| `text/.*示例.*/ @if($site = "google" \| $site = "bing")` | 在 Google 或 Bing 中都屏蔽网页描述含`示例`的结果 |
+| `path *= "/download/"` | 屏蔽路径含 `/download/` 的结果 |
+| `host $= ".example.com" & path *= "/download/"` | 屏蔽 `example.com` 的路径含 `/download/ `的结果 |
+| `@1 path $= ".pdf"` | 高亮 URL 路径以 `.pdf` 结尾的结果 |
 
 ### 2.9 自定义引擎：
 
@@ -162,7 +167,7 @@ bing: {disabled: true},
 
 **内置引擎ID：**
 
-`google`、`google_scholar`、`bing`、`duckduckgo`、`duckduckgo_lite`、`yandex`、`brave`、`ecosia`、`startpage`、`yahoo`、`yahoo_japan`、`so360`、`sogou`、`toutiao`、`quark`、`github`、`greasyfork`（在`@if($site=)`中，`ddg`是`duckduckgo`别名）
+`google`、`google_scholar`、`bing`、`duckduckgo`、`duckduckgo_lite`、`yandex`、`brave`、`ecosia`、`startpage`、`yahoo`、`yahoo_japan`、`so360`、`sogou`、`toutiao`、`quark`、`github`、`greasyfork`（在 `@if($site=)` 中，`yahoo-japan`＝`yahoo_japan`，`ddg`＝`duckduckgo`＝`duckduckgo_lite`）
 
 **说明：**
 
@@ -173,4 +178,4 @@ bing: {disabled: true},
 
 **自动分析：**
 
-若不知道怎么添加或抓取选择器，可以把搜索页面的离线文件（如 `.mht` / `.html` ）和格式表格发给Ai自动分析容器结构并生成对应选择器。部分搜索引擎/站点的移动端/桌面端/地区站点的容器命名不同，需要分别保存文件分析并填写多个选择器。
+如果不知道怎么添加或抓取选择器，可以把搜索页面的离线文件（如 `.mht` / `.html` ）和格式表格发给Ai自动分析容器结构并生成对应选择器。部分搜索引擎/站点的移动端/桌面端/地区站点的容器命名不同，需要分别保存文件分析并填写多个选择器。

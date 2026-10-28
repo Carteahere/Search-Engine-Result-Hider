@@ -24,7 +24,7 @@ Success output looks like `10 passed, 0 failed`
 
 ### 3.3 Debug Mode
 
-Enable script debug mode, use the [Web Debug](https://greasyfork.org/zh-CN/scripts/475228) script or browser F12 DevTools → Console tab to view output.
+Enable script debug mode, use the [网页调试](https://greasyfork.org/zh-CN/scripts/475228) script or browser F12 DevTools → Console tab to view output.
 
 ```javascript
 // Release version
