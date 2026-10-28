@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.7.7
+// @version      8.7.8
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version removes networking features including WebDAV Sync / Rule Subscription / Engine Subscription.
@@ -61,7 +61,7 @@
     return cfg;
   }
   let currentConfig = normalizeConfig(GM_getValue(CONFIG_KEY, getDefaultConfig()));
-  ['searchfilter_rule_tombstones', 'searchfilter_subscription_tombstones', 'searchfilter_rule_added_times', 'searchfilter_local_last_modified', 'searchfilter_settings_last_modified', 'searchfilter_selectors_last_modified', 'searchfilter_settings_time_migrated', 'searchfilter_webdav', 'searchfilter_subscription_url', 'searchfilter_subscription_last_update', 'searchfilter_subscription_rules', 'searchfilter_subscriptions', 'searchfilter_webdav_last_sync', 'searchfilter_webdav_auto_sync', 'searchfilter_webdav_sync_config', 'searchfilter_webdav_sync_selectors', 'searchfilter_webdav_sync_snapshot', 'searchfilter_subscription_sync_snapshot', 'searchfilter_webdav_last_sync_selectors', 'searchfilter_engine_subscriptions'].forEach(k => {
+  ['searchfilter_rule_tombstones', 'searchfilter_subscription_tombstones', 'searchfilter_rule_added_times'].forEach(k => {
     if (typeof GM_deleteValue === 'function') GM_deleteValue(k);
   });
   if (currentConfig && typeof currentConfig === 'object') {
@@ -542,17 +542,17 @@
     toast.addEventListener('click', dismiss); timer = setTimeout(dismiss, duration); return { dismiss };
   }
 
-  const RULE_PREFIX_RE = /^(?:title|text|host|path|url|scheme)\//i;
-  const RULE_PREFIX_REGEX_RE = /^(?:title|text|host|path|url|scheme)\/(?:[^/\\]|\\.)*\//i;
+  const RULE_PREFIX_RE = /^(?:title|text|host|path|url|scheme|u|t)\//i;
+  const RULE_PREFIX_REGEX_RE = /^(?:title|text|host|path|url|scheme|u|t)\/(?:[^/\\]|\\.)*\//i;
   const RULE_LEADING_REGEX_RE = /^\/(?:[^/\\]|\\.)*\//;
-  const REGEX_CTX_A = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*=~$/i;
-  const REGEX_CTX_B = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)$/i;
-  const REGEX_CTX_C = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*=$/i;
+  const REGEX_CTX_A = /(?:^|[\s(&|!])(?:title|url|host|path|scheme|u|t)\s*=~$/i;
+  const REGEX_CTX_B = /(?:^|[\s(&|!])(?:title|url|host|path|scheme|u|t)$/i;
+  const REGEX_CTX_C = /(?:^|[\s(&|!])(?:title|url|host|path|scheme|u|t)\s*=$/i;
   const RULE_REGEX_LIT_RE = /^\/(?:[^/\\[\]()]|\\.|\[(?:[^\]\\]|\\.)*\]|\((?:[^/\\[\]()]|\\.)*\))+\//;
-  const REGEX_CTX_D = /(?:^|[\s(&|!])(?:title|url|host|path|scheme)\s*(?:\^=|\$=|\*=|:)$/i;
+  const REGEX_CTX_D = /(?:^|[\s(&|!])(?:title|url|host|path|scheme|u|t)\s*(?:\^=|\$=|\*=|:)$/i;
   function regexStartAhead(str, pos) {
     const prev = str.slice(Math.max(0, pos - 64), pos).trimEnd();
-    return REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && RULE_REGEX_LIT_RE.test(str.slice(pos, Math.min(str.length, pos + 4096)))) || (REGEX_CTX_D.test(prev) && regexCloseAhead(str, pos));
+    return REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && (RULE_REGEX_LIT_RE.test(str.slice(pos, Math.min(str.length, pos + 4096))) || (str[pos] === '/' && regexCloseAhead(str, pos)))) || (REGEX_CTX_D.test(prev) && regexCloseAhead(str, pos));
   }
   function regexCloseAhead(str, pos) {
     let inClass = false;
@@ -623,7 +623,7 @@
         let j = i + 3; while (j < n && /\s/.test(str[j])) j++;
         const hasParen = str[j] === '(';
         const end = hasParen ? findBalancedParenEnd(str, j) : -1;
-        const isCond = hasParen && (isBoundary || (end !== -1 && tailIsCond(end)));
+        const isCond = hasParen && (isBoundary || end === -1 || tailIsCond(end));
         if (strip) {
           if (isCond) atIf = true;
           i += 2; continue;
@@ -1353,8 +1353,8 @@
     const leafParser = (text) => {
       const trimmed = text.trim();
       const regexLeafFlags = (() => {
-        const m = trimmed.match(/^(?:title|url|host|path|scheme)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i); if (!m) return null;
-        const seg = m[2] || ''; const explicit = /^(?:title|url|host|path|scheme)\s*=\~\s*\//i.test(trimmed);
+        const m = trimmed.match(/^(?:title|url|host|path|scheme|u|t)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i); if (!m) return null;
+        const seg = m[2] || ''; const explicit = /^(?:title|url|host|path|scheme|u|t)\s*=\~\s*\//i.test(trimmed);
         return isUniqueFlagsStr(seg) || (explicit && /^[a-z]+$/i.test(seg)) ? seg.toLowerCase() : (isFlagsCandidateError(seg) ? seg : '');
       })();
       if (regexLeafFlags && getInvalidRegexFlags(regexLeafFlags)) {
@@ -1477,9 +1477,9 @@
   function parseConditionPart(trimmed, currentEngine, currentSite, currentCategory) {
     const enginePropMatch = trimmed.match(/^(?:\$site|engine)\s*[=:]\s*(?:['"](.*?)['"]|([^\s\)]+))\s*i?\s*$/i);
     if (enginePropMatch) {
-      const raw = (enginePropMatch[1] !== undefined ? enginePropMatch[1] : enginePropMatch[2]).trim().toLowerCase();
-      const target = raw.replace(/^ddg$/, 'duckduckgo'); const engine = String(currentEngine || '').toLowerCase();
-      return { matched: true, static: engine === target || engine === raw };
+      const norm = (v) => { const k = String(v || '').toLowerCase(); return k === 'ddg' || k === 'duckduckgo_lite' ? 'duckduckgo' : k === 'yahoo-japan' ? 'yahoo_japan' : k; };
+      const target = norm(enginePropMatch[1] !== undefined ? enginePropMatch[1] : enginePropMatch[2]);
+      return { matched: true, static: !!target && target === norm(currentEngine) };
     }
 
     const categoryMatch = trimmed.match(/^(?:\$category|category)\s*[=:]\s*(?:['"](.*?)['"]|([^\s\)]+))\s*i?\s*$/i);
@@ -1495,10 +1495,10 @@
       return { matched: true, static: curSite === target || curSite.endsWith(`.${target}`) };
     }
 
-    const shorthandRe = trimmed.match(/^(title|url|host|path|scheme)\/(.+)$/i);
+    const shorthandRe = trimmed.match(/^(title|url|host|path|scheme|u|t)\/(.+)$/i);
     if (shorthandRe) {
       const pre = parsePrefixedRegexRule(trimmed, shorthandRe[1].length + 1);
-      const condType = shorthandRe[1].toLowerCase();
+      const condType = (s => s === 'u' ? 'url' : s === 't' ? 'title' : s)(shorthandRe[1].toLowerCase());
       const badFlags = pre.flagsCandidate && (isFlagsCandidateError(pre.flagsCandidate) || (/^[imsu]+$/i.test(pre.flagsCandidate) && !!getInvalidRegexFlags(pre.flagsCandidate)));
       if (!pre.unclosed && String(pre.pattern || '').trim() && !getInvalidRegexFlags(pre.flags) && !badFlags) {
         return { matched: true, dynamic: { type: condType, op: '=~', regex: new RegExp(pre.pattern, pre.flags) } };
@@ -1506,23 +1506,23 @@
       return { matched: false };
     }
 
-    const eqRe = trimmed.match(/^(title|url|host|path|scheme)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
+    const eqRe = trimmed.match(/^(title|url|host|path|scheme|u|t)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
     const eqSeg = eqRe ? String(eqRe[3] || '') : ''; const eqFlags = eqRe && isUniqueFlagsStr(eqSeg) ? eqSeg.toLowerCase() : '';
-    const eqReOk = eqRe && !getInvalidRegexFlags(eqFlags) && (eqFlags || !eqSeg || (!/^(title|url|host|path|scheme)\s*=/i.test(trimmed) && !isFlagsCandidateError(eqSeg))) && (String(eqRe[2] || '').trim() || eqSeg);
-    const strMatch = eqReOk ? null : trimmed.match(/^(title|url|host|path|scheme)\s*(\^=|\$=|\*=|=|:)\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s"']+))\s*i?\s*$/i);
+    const eqReOk = eqRe && !getInvalidRegexFlags(eqFlags) && (eqFlags || !eqSeg || (!/^(title|url|host|path|scheme|u|t)\s*=/i.test(trimmed) && !isFlagsCandidateError(eqSeg))) && (String(eqRe[2] || '').trim() || eqSeg);
+    const strMatch = eqReOk ? null : trimmed.match(/^(title|url|host|path|scheme|u|t)\s*(\^=|\$=|\*=|=|:)\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s"']+))\s*i?\s*$/i);
     if (strMatch) {
       if (strMatch[5] !== undefined && strMatch[5].startsWith('~')) return { matched: false };
       const bareEq = (strMatch[2] === '=' && strMatch[5] !== undefined) ? strMatch[5].match(/^\/((?:[^/\\\[\]]|\\.|\[(?:[^\]\\]|\\.)*\])+)\/([a-z]*)$/i) : null;
       if (bareEq && (!bareEq[2] || isUniqueFlagsStr(bareEq[2]) || isFlagsCandidateError(bareEq[2]))) return { matched: false };
       const op = strMatch[2] === ':' ? '=' : strMatch[2];
       const rawVal = (strMatch[3] !== undefined ? strMatch[3] : (strMatch[4] !== undefined ? strMatch[4] : strMatch[5])); let val = rawVal.replace(/\\(["'])/g, '$1').toLowerCase();
-      const condType = strMatch[1].toLowerCase(); if (condType === 'host') val = val.startsWith('/') ? val : toASCIIHostname(val); return { matched: true, dynamic: { type: condType, op, val } };
+      const condType = (s => s === 'u' ? 'url' : s === 't' ? 'title' : s)(strMatch[1].toLowerCase()); if (condType === 'host') val = val.startsWith('/') ? val : toASCIIHostname(val); return { matched: true, dynamic: { type: condType, op, val } };
     }
 
-    const reMatch = trimmed.match(/^(title|url|host|path|scheme)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
+    const reMatch = trimmed.match(/^(title|url|host|path|scheme|u|t)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
     if (reMatch) {
-      const condType = reMatch[1].toLowerCase(); const seg = String(reMatch[3] || ''); const flags = isUniqueFlagsStr(seg) ? seg.toLowerCase() : '';
-      const shorthand = !/^(title|url|host|path|scheme)\s*=/i.test(trimmed);
+      const condType = (s => s === 'u' ? 'url' : s === 't' ? 'title' : s)(reMatch[1].toLowerCase()); const seg = String(reMatch[3] || ''); const flags = isUniqueFlagsStr(seg) ? seg.toLowerCase() : '';
+      const shorthand = !/^(title|url|host|path|scheme|u|t)\s*=/i.test(trimmed);
       if (flags) { if (getInvalidRegexFlags(flags)) return { matched: false }; }
       else if (shorthand ? isFlagsCandidateError(seg) : seg !== '') return { matched: false };
       if (!String(reMatch[2] || '').trim()) return { matched: false };
@@ -1609,9 +1609,9 @@
   function looksLikeCondExpr(str) {
     if (!isCondExprCore(str)) return false; if (/^\s*!\s*(?:[A-Z][a-zA-Z0-9_-]*)\s*:\s*\S/.test(str)) return false;
     if (/^\s*!\s+(?:title|url|description|version|expires|homepage|host|site|path|scheme)\s*:\s*\S/i.test(str)) return false;
-    if (!/^\s*(?:!|\(|\$site\b|\$category\b|engine\b|category\b|(?:site|title|url|host|path|scheme)\s*(?:=~|\^=|\$=|\*=|=|:|\/))/i.test(str)) return false;
-    return /(?:^|[\s(&|!])(?:\$site|\$category|engine|category|site|title|url|host|path|scheme)\s*(?:(?:=~|\^=|\$=|\*=|=|:)\s+\S|(?:=~|\^=|\$=|\*=|=|:)\S|\/)/i.test(str)
-      || /^\s*!\s*(?:(?:\$site|\$category|engine|category|site|title|url|host|path|scheme)\b|\()/i.test(str);
+    if (!/^\s*(?:!|\(|\$site\b|\$category\b|engine\b|category\b|(?:site|title|url|host|path|scheme|u|t)\s*(?:=~|\^=|\$=|\*=|=|:|\/))/i.test(str)) return false;
+    return /(?:^|[\s(&|!])(?:\$site|\$category|engine|category|site|title|url|host|path|scheme|u|t)\s*(?:(?:=~|\^=|\$=|\*=|=|:)\s+\S|(?:=~|\^=|\$=|\*=|=|:)\S|\/)/i.test(str)
+      || /^\s*!\s*(?:(?:\$site|\$category|engine|category|site|title|url|host|path|scheme|u|t)\b|\()/i.test(str);
   }
 
   function isScriptRuleLine(line) {
@@ -1680,7 +1680,7 @@
 
     let ruleToCheck = rule.trim(); if (ruleToCheck.startsWith('#')) return { valid: true, errors: [] }; ruleToCheck = stripRuleComment(ruleToCheck);
     if (!ruleToCheck) return { valid: true, errors: [] }; const errors = [];
-    let hlN = null; const hlValMatch = ruleToCheck.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|(?:[(!]|@if\b))/i);
+    let hlN = null; const hlValMatch = ruleToCheck.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|u|t|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|(?:[(!]|@if\b))/i);
     if (hlValMatch) {
       const N = parseInt(hlValMatch[1]);
       if (N < 1 || N > 5) {
@@ -1912,7 +1912,8 @@
           return escapeWildcardPart(part, false);
         })
         .join('\\/'); let bs = 0; for (let i = pattern.length - 2; i >= 0 && pattern[i] === '\\'; i--) bs++;
-        return pattern.endsWith('*') && bs % 2 === 0 ? regexStr : regexStr + '(?:[\\/?#:&]|$)';
+        const lastChar = pattern[pattern.length - 1]; const openEnd = bs % 2 === 0 && (pattern.endsWith('*') || '\\/?#:&='.includes(lastChar));
+        return openEnd ? regexStr : regexStr + '(?:[&#].*)?$';
     }
     return prefix + (hostIsFirst ? escapeHostPart(pattern) : escapeWildcardPart(pattern, false)) + '(?:[\\/?#:&]|$)';
   }
@@ -2064,7 +2065,7 @@
         }
       };
 
-      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|(?:[(!]|@if\b))/i);
+      const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|u|t|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|(?:[(!]|@if\b))/i);
       if (hlMatch) {
         const N = parseInt(hlMatch[1]); if (N < 1 || N > 5) return;
         const hlRule = rule.substring(hlMatch[0].length).trim(); if (!hlRule) return;
@@ -2329,10 +2330,11 @@
     return !decodeRedirectTarget(target);
   }
 
-  function getCleanUrl(link) {
+  function getCleanUrl(link, engine) {
     if (!link || !link.href) return '';
+    if (engine === undefined) engine = (typeof getSearchEngine === 'function') ? getSearchEngine() : '';
     let attr = '';
-    if (typeof link.getAttribute === 'function') {
+    if ((engine === 'so360' || engine === 'sogou') && typeof link.getAttribute === 'function') {
       attr = link.getAttribute('data-mdurl') || link.getAttribute('data-url') || link.getAttribute('linkurl') || '';
       if (!attr) {
         try {
@@ -3311,7 +3313,7 @@
     function processBatch() {
       if (batchId !== forceReprocessBatchId) return; const batchSize = 30; const end = Math.min(processIdx + batchSize, allResults.length);
       for (; processIdx < end; processIdx++) {
-        const result = allResults[processIdx]; resetResultStyles(result);
+        const result = allResults[processIdx]; if (!result.isConnected) continue; resetResultStyles(result);
         try {
           if (processSingleResult(result)) totalBlocked++;
         } catch (e) {
@@ -4055,14 +4057,9 @@
       e.stopPropagation(); showSettingsPanel();
     };
 
-    const COMMENT_HEADING_REGEX = /^\s*#+\s+\S+/;
     function findCommentLineIndices(lines) {
       const indices = [];
-      for (let i = 0; i < lines.length; i++) {
-        if (COMMENT_HEADING_REGEX.test(lines[i])) {
-          indices.push(i);
-        }
-      }
+      for (let i = 0; i < lines.length; i++) if (lines[i][0] === '#') indices.push(i);
       return indices;
     }
 
