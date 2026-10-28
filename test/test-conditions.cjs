@@ -393,6 +393,15 @@ assert('条件-197: =/foo/g与=/foo/ii判定flag错误, ="/foo/ii"仍按字面�
 
 // 易错: stripIfConditions 需按位置降序裁剪, 优先级 !>&>| 且默认忽略大小写
 
+// 修复留档(主/Lite): @if内=接未配对括号裸正则不再截断, regexStartAhead对CTX_C回退regexCloseAhead
+{
+  const consts = src.split('\n').filter(l => /const (RULE_REGEX_LIT_RE|REGEX_CTX_[A-D]) =/.test(l)).map(l => l.replace('const ', 'var ')).join('\n');
+  const s = new Function(consts + '\n' + extractFn(src, 'regexCloseAhead') + '\n' + extractFn(src, 'regexStartAhead') + '\nreturn regexStartAhead;')();
+  const t = (rule) => { const p = rule.indexOf('=', rule.indexOf('@if')) + 2; return s(rule, p); };
+  assert('条件-198: =接未配对括号正则进正则态不截断', t('*://x.com/* @if(title = /a)b/)') === true);
+  assert('条件-199: =接字符串值a/b不进正则态', t('*://x.com/* @if(title = a/b)') === false);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 

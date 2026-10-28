@@ -2,7 +2,7 @@
 // 规则订阅 / WebDAV同步 / 联网授时
 // 命名：同步-序号: 描述; 授时-序号
 // 备注：同步不考虑墓碑机制
-// 忽略：防抖推迟同步、多标签页同时打开面板修改规则/设置数据冲突、同步规则尾接注释(如 example.com #注释 ，分块判断麻烦不再维护)
+// 忽略：防抖推迟同步、PUT期间改设置不同步、多标签页同时打开面板修改规则/设置数据冲突、规则尾接注释（如 example.com #注释 ，分块判断麻烦不再维护）、ublacklist极少使用的订阅项（<all_urls>、@N>5）
 
 (async () => {
 const fs = require('fs');
@@ -611,6 +611,32 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   const expect = 1790185623000 - Date.now();
   assert('授时-003: 前两源失败时回退cloudflare ts解析', typeof offset === 'number' && offset !== null && Math.abs(offset - expect) < 1000);
 }
+{
+  const store = new Map([['searchfilter_net_time_cache', { offset: 5000, checkedAt: Date.now() }]]);
+  const state = { calls: 0 };
+  const getOffset = new Function('GM_getValue', 'GM_setValue', 'state', `
+    ${netTimePrelude}
+    async function gmRequest() { state.calls++; throw new Error('network down'); }
+    ${extractFn(src, 'firstSuccess')}
+    ${extractFn(src, 'queryNetworkTimeEndpoint')}
+    ${extractFn(src, 'getNetworkTimeOffset')}
+    return getNetworkTimeOffset;
+  `)((k, d) => store.has(k) ? store.get(k) : d, (k, v) => store.set(k, v), state);
+  const offset = await getOffset();
+  assert('授时-004: 刷新后复用持久化授时缓存且不发请求', offset === 5000 && state.calls === 0);
+}
+{
+  const run = (webdav) => {
+    let trusted = 0;
+    const fn = new Function('GM_getValue', 'GM_setValue', 'loadWebDAVConfig', 'isHttpsUrl', 'getTrustedNow', `
+      const LOCAL_LAST_MODIFIED_KEY = 'searchfilter_local_last_modified';
+      ${extractFn(src, 'markLocalModifiedTime')}
+      return markLocalModifiedTime;
+    `)((k, d) => d, () => {}, () => webdav, (u) => /^https:/.test(u), () => { trusted++; return Date.now(); });
+    fn(); return trusted;
+  };
+  assert('授时-005: 未配置WebDAV时标记时间不联网', run({}) === 0 && run({ url: 'https://dav.example.com/' }) === 1);
+}
 
 // ---- 同步-087~088: 选择器快照目标校验(修复留档) ----
 {
@@ -707,6 +733,12 @@ assert('同步-096: 订阅/引擎订阅后台回调复查面板且放行force手
 
 // 留档观察: parseSyncHeader只扫描前10行, 属故意设计
 // 留档观察: mergeSelectors3Way用>而mergeRules3Way用>=, 相等时间戳时preferLocal倾向不同, 无数据错误(设计取舍)
+// 修复留档(主/Lite): Lite启动清理仅墓碑键, 双装时不删主版订阅/WebDAV/时间戳数据
+{
+  const lite = fs.readFileSync(path.join(scriptDir, 'Lite.user.js'), 'utf8');
+  const m = lite.match(/\['searchfilter_rule_tombstones'[^\]]*\]/);
+  assert('同步-102: Lite启动清理不含主版联网键', !!m && !/webdav|subscriptions|last_modified|migrated/.test(m[0]));
+}
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 })();

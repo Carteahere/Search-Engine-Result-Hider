@@ -198,8 +198,8 @@ const extraRoundTrip = api.parseSelectorText(api.serializeSelectors());
 check('选择器-045: 关联选择器合并保留且往返一致且校验通过', JSON.stringify(api.getSelectors().customExtra.extraElements) === JSON.stringify(extraDef.extraElements) && !extraRoundTrip.errors.length && api.sameSelectorDef(extraRoundTrip.config.customExtra, extraDef) && api.validateUserSelectors({ customExtra: extraDef }).length === 0);
 for (const value of ['+ tr', ['+ tr, body'], ['+ tr::after']]) check(`选择器-046: 非法关联配置被拒 ${JSON.stringify(value)}`, api.validateUserSelectors({ customExtra: { ...extraDef, extraElements: value } }).some((e) => e.includes('extraElements')));
 const parseCondition = new Function(extractFn(src, 'hostLabelToASCII') + extractFn(src, 'toASCIIHostname') + extractFn(src, 'parseConditionPart') + '; return parseConditionPart;')();
-check('选择器-049: 主站条件不匹配Lite且Lite条件匹配专有ID', parseCondition('$site=duckduckgo', 'duckduckgo_lite', 'lite.duckduckgo.com').static === false && parseCondition('$site=duckduckgo_lite', 'duckduckgo_lite', 'lite.duckduckgo.com').static === true && parseCondition('$site=duckduckgo_lite', 'duckduckgo', 'duckduckgo.com').static === false);
-check('选择器-049b: yahoo 与 yahoo_japan 不再互为别名', parseCondition('$site=yahoo', 'yahoo', 'search.yahoo.com').static === true && parseCondition('$site=yahoo_japan', 'yahoo_japan', 'search.yahoo.co.jp').static === true && parseCondition('$site=yahoo', 'yahoo_japan', 'search.yahoo.co.jp').static === false && parseCondition('$site=yahoo_japan', 'yahoo', 'search.yahoo.com').static === false);
+check('选择器-049: duckduckgo/ddg 为 Lite 别名', parseCondition('$site=duckduckgo', 'duckduckgo_lite', 'lite.duckduckgo.com').static === true && parseCondition('$site=ddg', 'duckduckgo_lite', 'lite.duckduckgo.com').static === true && parseCondition('$site=duckduckgo_lite', 'duckduckgo_lite', 'lite.duckduckgo.com').static === true && parseCondition('$site=duckduckgo', 'duckduckgo', 'duckduckgo.com').static === true);
+check('选择器-049b: yahoo 不与 yahoo_japan 互别名且支持 yahoo-japan', parseCondition('$site=yahoo', 'yahoo', 'search.yahoo.com').static === true && parseCondition('$site=yahoo_japan', 'yahoo_japan', 'search.yahoo.co.jp').static === true && parseCondition('$site=yahoo-japan', 'yahoo_japan', 'search.yahoo.co.jp').static === true && parseCondition('$site=yahooJapan', 'yahoo_japan', 'search.yahoo.co.jp').static === false && parseCondition('$site=yahoo', 'yahoo_japan', 'search.yahoo.co.jp').static === false && parseCondition('$site=yahoo_japan', 'yahoo', 'search.yahoo.com').static === false);
 })();
 
 
@@ -1225,6 +1225,11 @@ assert('选择器-205: 装配异常回滚_engineSiteSetup与_observedBody可重�
 // 留档观察: 图片搜索容器(bing/google/ddg/yandex/brave images)硬编码绕过订阅/自定义containers, 配套专用链接解包(设计)
 // 留档观察: Lite与正式版共享CONFIG_KEY, 同启时Lite启动清理会删正式版同步/订阅存储键, 勿双开
 // 修复留档: reconcileHiddenParents在blockedShown期间摘除yandex/google父容器标记致再隐藏留白, 已补!blockedShown()守卫(主/Lite)
+// 修复留档(主/Lite): forceReprocessAll分批对脱离DOM节点跳过, 防止污染计数与_hiddenParentCount
+{
+  const body = extractFn(src, 'forceReprocessAll');
+  assert('选择器-207b: processBatch循环含isConnected守卫', /const result = allResults\[processIdx\]; if \(!result\.isConnected\) continue;/.test(body));
+}
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 

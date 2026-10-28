@@ -1,7 +1,7 @@
 // 读取上一级目录的 *.*.*.user.js 或 Lite.user.js
 // 规则逻辑 / 优先级 / 统计 / 一键屏蔽 / 去除重定向 / 修复回归
 // 命名：规则-序号: 描述
-// 忽略：ipv6屏蔽识别(ipv6刷新频繁屏蔽无实际意义)、错误flags静默、切换语言不重建主面板
+// 忽略：ipv6屏蔽识别(ipv6刷新频繁屏蔽无实际意义)、错误flags静默、正则与flags间空格、切换语言不重建主面板
 
 (async () => {
 const fs = require('fs');
@@ -77,7 +77,7 @@ function makeRulesApi() {
     'extractIfConditions', 'validateCondition', 'analyzeRule', 'validateRule', 'cachedAnalyzeRule',
     'checkRuleMatchOptimized', 'isLocalEntry', 'isEngineHost', 'hasBareRegexSlash',
   ].map((n) => extractFn(src, n));
-  return new Function(`${SERH_CONSTS.flags}\n${SERH_CONSTS.lang}\n${SERH_T_FN}\nlet compiledRules;
+  return new Function(`${SERH_CONSTS.flags}\n${SERH_CONSTS.lang}\n${SERH_T_FN}\nlet compiledRules; let _rulesRevision = 0; let _rulesFingerprint = '[]';
 ${ENGINE_HOST_SRC}
 const validationCache = new Map();
 const subdomainCache = new Map();
@@ -177,6 +177,7 @@ assert('规则-045: 规则路径后的普通字符不越界', (() => {
   const c = api.compileRuleRegex('*://example.com/release');
   return !api.safeRegexTest(c.regex, 'https://example.com/releasex');
 })());
+assert('规则-282: 路径规则以分隔符结尾时按前缀匹配', match('*://*.example.com/download/', 'https://a.example.com/download/file.zip') && match('example.com/', 'https://example.com/abc') && match('*://example.com/search?q=', 'https://example.com/search?q=abc') && !match('*://example.com/release', 'https://example.com/releasex'));
 assert('规则-083: 查询参数规则命中后续参数', match('*://x.com/*?a=b', 'https://x.com/z?a=b&c=d'));
 
 // 尾部转义星号末尾锚定
@@ -220,6 +221,7 @@ assert('规则-074: flow引号项含逗号/花括号不被拆坏', JSON.stringif
 assert('规则-078: 映射形项不再导入为激活规则', JSON.stringify(collect('blacklist:\n  - url: https://example.com\n  - real.com\n')) === JSON.stringify(['real.com']));
 assert('规则-079: 折叠标量整段保留且后续项不丢', JSON.stringify(collect('rules:\n  - example.com\n  - >\n    *://folded.example.com/*\n  - kept.com\n')) === JSON.stringify(['example.com', '*://folded.example.com/*', 'kept.com']));
 assert('规则-081: 无空格冒号键形标量保留', JSON.stringify(collect('rules:\n  - localhost:8080/*\n  - user:pass@host/page\n')) === JSON.stringify(['localhost:8080/*', 'user:pass@host/page']));
+assert('规则-070: YAML matches 段不导入为屏蔽规则', JSON.stringify(collect('name: M\nmatches:\n  - "*://www.google.com/search*"\n  - "https://x.com/*"\nrules:\n  - keep.com\n')) === JSON.stringify(['keep.com']) && collect('matches: ["*://a.com/*"]\n').length === 0);
 
 // YAML 容错
 let threw = false, res;
@@ -405,6 +407,13 @@ assert('规则-164: 任意长度尾段含g/y不再静默并入正则', api.analy
 assert('规则-165: 畸形scheme拒绝; 具体scheme有效', api.analyzeRule('1*://example.com/*').valid === false && api.analyzeRule('http*://example.com/*').valid === false && api.analyzeRule('https://example.com/*').valid === true);
 assert('规则-169: 全转义斜杠=无闭合界定符按未闭合报错; 带闭合界定符有效', api.analyzeRule('title/https:\\/\\/foo\\/i').valid === false && api.analyzeRule('title/https:\\/\\/foo\\/i/').valid === true);
 assert('规则-171: title/无尾斜杠(含吞@if形态)直接报错', api.analyzeRule('title/abc @if(title *= "x")').valid === false && api.analyzeRule('title/abc/ @if(title *= "x")').valid === true);
+assert('规则-283: 目录白名单以/结尾放行子路径', (() => {
+  api.setState(['*://*.example.com/*', '@*://example.com/docs/']); api.buildRuleIndex();
+  const r = api.checkRuleMatchOptimized('https://example.com/docs/intro', 'example.com', 't', '', ['example.com', 'com']);
+  return !!r && r.whitelisted === true;
+})());
+assert('规则-284: 紧贴未闭合@if判无效', api.analyzeRule('*://x.com/*@if(scheme=https').valid === false && api.analyzeRule('@*://*.x.com/*@if(scheme=https').valid === false);
+assert('规则-285: 正则/字符串内@if(不误判', api.analyzeRule('title/@if(foo)/').valid === true);
 }
 
 // ---- 规则-244~245: @N 前缀大小写与脚本规则后行内注释 ----
@@ -437,6 +446,7 @@ assert('规则-192: bing ck 套 yahoo RU= 解到最终结果', (() => {
   const bingYahoo = { href: 'https://www.bing.com/ck/a?!&&u=a1' + Buffer.from('https://r.search.yahoo.com/_ylt=A/RU=https%3A%2F%2Fexample.com%2Fpage/RK=2/RS=x').toString('base64url') };
   return getCleanUrl(bingYahoo) === 'https://example.com/page';
 })());
+assert('规则-286: data-url仅360/搜狗读取, 自定义引擎用href', getCleanUrl({ href: 'https://target.example/a', getAttribute: (n) => n === 'data-url' ? 'https://cdn.example/x' : null }, 'example') === 'https://target.example/a' && getCleanUrl({ href: 'https://m.so.com/link?m=x', getAttribute: (n) => n === 'data-mdurl' ? 'https://target.example/a' : null }, 'so360') === 'https://target.example/a');
 const unwrap = new Function(`${ENGINE_HOST_SRC}\n` + ['decodeRedirectTarget', 'decodeBingCkTarget', 'unwrapRedirectUrl', 'isEngineHost'].map((n) => extractFn(src, n)).join('\n') + '\nreturn unwrapRedirectUrl;')();
 assert('规则-194: /aclk?adurl 与 /pagead/aclk 解包', unwrap('https://www.google.com/aclk?sa=l&adurl=https%3A%2F%2Fads.example.com%2Fx') === 'https://ads.example.com/x' && unwrap('https://www.google.com/pagead/aclk?adurl=https%3A%2F%2Fads.example.com%2Fy') === 'https://ads.example.com/y');
 const opaque = new Function(`${ENGINE_HOST_SRC}\n` + ['decodeRedirectTarget', 'isOpaqueRedirectUrl', 'isEngineHost'].map((n) => extractFn(src, n)).join('\n') + '\nreturn isOpaqueRedirectUrl;')();
