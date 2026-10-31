@@ -127,6 +127,13 @@ check('选择器-011c: 站点重叠时自定义引擎优先于订阅与内置', 
 api.setStore({});
 api.setSubStore([]);
 check('选择器-011e: 无自定义与订阅时回退内置引擎', api.getSearchEngine() === 'google' && api.getContainerSelector('google') === 'div.g, div.MjjYud');
+api.setHost('www.bing.com'); api.setHref('https://www.bing.com/images/search?q=x');
+api.setStore({ bing: { containers: 'div.custom-bing' } });
+check('011f: custom image containers win', api.getContainerSelector('bing') === 'div.custom-bing');
+api.setStore({});
+api.setSubStore([{ url: 'https://sub/y.js', enabled: true, selectors: { bing: { containers: 'div.sub-bing' } } }]);
+check('011g: subscribed image containers win', api.getContainerSelector('bing') === 'div.sub-bing');
+api.setSubStore([]); api.setHost('www.google.com'); api.setHref('https://www.google.com/');
 api.setSubStore([{ url: 'https://example.com/subs.js', enabled: true, selectors: { yahoo: { match: '^(?:[a-z]{1,6}\\.)?(?:search\\.)?yahoo\\.co\\.jp$', containers: '.sub-y' }, yahoo_japan: { match: '^search\\.yahoo\\.co\\.jp$', containers: '.sub-yj' } } }]);
 api.setHost('search.yahoo.co.jp');
 const yahooPick = api.getSearchEngine();

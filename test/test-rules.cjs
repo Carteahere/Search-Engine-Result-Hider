@@ -625,6 +625,30 @@ function createEnv(initRules) {
 {
   const { env, api, fakeInput } = createEnv(['old.com']);
   api.importRulesFromFile();
+  fakeInput.files = [{ _content: '# ScriptConfig: {"language":"en-US"}' }];
+  fakeInput.onchange({ target: fakeInput });
+  const saved = env.hooks.written.find((w) => w.key === 'searchfilter_blocker');
+  assert('规则-221b: 仅设置头文件不弹清空确认, 设置导入且本地规则保留', env.hooks.getConfirmCalls() === 0 && !!saved && saved.val.language === 'en-US' && saved.val.rules.join() === 'old.com');
+}
+{
+  const { env, api, fakeInput } = createEnv(['old.com']);
+  api.importRulesFromFile();
+  fakeInput.files = [{ _content: '# Selectors: {"bing":{"containers":".x"}}' }];
+  fakeInput.onchange({ target: fakeInput });
+  const saved = env.hooks.written.find((w) => w.key === 'searchfilter_blocker');
+  assert('规则-221c: 仅引擎头文件不弹清空确认, 选择器导入且本地规则保留', env.hooks.getConfirmCalls() === 0 && env.hooks.written.some((w) => w.key === 'searchfilter_selectors' && w.val.bing.containers === '.x') && !!saved && saved.val.rules.join() === 'old.com');
+}
+{
+  const { env, api, fakeInput } = createEnv(['old.com']);
+  api.importRulesFromFile();
+  fakeInput.files = [{ _content: '# ScriptConfig: {"subscriptions":[{"url":"https://s/1","name":"S1"}]}' }];
+  fakeInput.onchange({ target: fakeInput });
+  const saved = env.hooks.written.find((w) => w.key === 'searchfilter_blocker');
+  assert('规则-221d: 仅订阅头文件不弹清空确认, 订阅导入且本地规则保留', env.hooks.getConfirmCalls() === 0 && !!saved && saved.val.rules.join() === 'old.com' && !!env.hooks.subsSaved && env.hooks.subsSaved.some((s) => s.url === 'https://s/1'));
+}
+{
+  const { env, api, fakeInput } = createEnv(['old.com']);
+  api.importRulesFromFile();
   env.hooks.setConfirmAnswer(true);
   fakeInput.files = [{ _content: '' }];
   fakeInput.onchange({ target: fakeInput });
@@ -765,6 +789,8 @@ assert('规则-278: Lite mergeRules3Way与主版逐字节一致, 他侧删除不
   const header = '# Selectors:' + JSON.stringify({ example: { containers: '.result, .result2', match: '/^example\\.com$/' } });
   const parsed = liteParse([header, '*://a.com/*']);
   const bad = liteParse(['# Selectors:{bad', '*://a.com/*']);
+  const cfgBad = liteParse(['# ScriptConfig:{bad', '*://a.com/*']);
+  assert('281b: Lite drops malformed ScriptConfig header', cfgBad.settings === null && JSON.stringify(cfgBad.rest) === JSON.stringify(['*://a.com/*']));
   assert('规则-281: Lite导入识别# Selectors头且不把该行当规则', !!(parsed.selectors && parsed.selectors.example && parsed.selectors.example.containers === '.result, .result2') && JSON.stringify(parsed.rest) === JSON.stringify(['*://a.com/*']) && JSON.stringify(bad.rest) === JSON.stringify(['*://a.com/*']));
 }
 

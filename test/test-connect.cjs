@@ -2,7 +2,7 @@
 // 规则订阅 / WebDAV同步 / 联网授时
 // 命名：同步-序号: 描述; 授时-序号
 // 备注：同步不考虑墓碑机制
-// 忽略：防抖推迟同步、PUT期间改设置不同步、多标签页同时打开面板修改规则/设置数据冲突、规则尾接注释（如 example.com #注释 ，分块判断麻烦不再维护）、ublacklist极少使用的订阅项（<all_urls>、@N>5）
+// 忽略：防抖推迟同步、PUT期间改设置不同步、多标签页同时打开面板修改规则/设置数据冲突、三方合并错槽、规则尾接注释（如 example.com #注释 ，分块判断麻烦不再维护）、ublacklist极少使用的订阅项（<all_urls>、@N>5）
 
 (async () => {
 const fs = require('fs');
@@ -69,7 +69,7 @@ const baseSyncFns = [
   'firstSuccess', 'parseHttpDateHeader', 'queryNetworkTimeEndpoint', 'getNetworkTimeOffset', 'getTrustedNow',
   'extractValidCloudTimes', 'applyConfigToMainPanel',
   'buildSyncPayload', 'applyCloudSubscriptions', 'adoptStoredConfigIfNewer', 'getDefaultConfig', 'normalizeConfig',
-  'checkExternalConfigChange', 'triggerWebDAVSyncDelayed', 'performAutoWebDAVSync', 'performWebDAVDownload',
+  'checkExternalConfigChange', 'triggerWebDAVSyncDelayed', 'performAutoWebDAVSync', 'performWebDAVDownload', 'markWebDAVSyncFailure',
 ];
 const ruleValidateFns = [
   'hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'safeRegexTest', 'safeDecodeURIComponent', 'decodeUrlForMatch',
@@ -259,6 +259,7 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   await env.run(syncCfg);
   assert('同步-018: 自动同步遇到错误响应不合并', env.getCurrent().rules.join('|') === '*://local.example.com/*');
   assert('同步-019: 自动同步遇到错误响应不上传覆盖云端', !env.calls.some((c) => c.method === 'PUT'));
+  assert('同步-019b: 自动同步失败也记录时间, 刷新后不会立即重试', (env.store.get(KEYS.WEBDAV_LAST_SYNC_KEY) || 0) > 0);
 }
 
 // ---- 同步-075: 云端为空时首次上传不被时间戳挡住 ----
