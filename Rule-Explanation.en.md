@@ -108,7 +108,7 @@ The `@@` syntax not supported yet.
 | URL Contains | `url *= "example"` | URL contains the string `example` |
 | URL Regex | `url =~ /regex/` (or shorthand `url/regex/`) | URL matches regex; `=~` can be omitted; bare slashes are allowed inside `[...]`; trailing `i` ignores case |
 | URL Host | `host $= ".example.com"` | Matches the hostname of the result URL; `$=` is compatible with the bare domain, so `host $= ".example.com"` hits both `example.com` and `m.example.com` |
-| URL Path | `path *= "/download/"` | Matches the path of the result URL |
+| URL Path | `path *= "/download/"` | Matches the path of the result URL (`u.pathname` + `u.search`) |
 | URL Protocol | `scheme = "https"` | Matches the protocol of the result URL, e.g. `https` / `http` |
 | Logical Operation | `\|` OR, `&` AND, `!` NOT | Combines arbitrary conditions; `!` negates the condition itself, e.g. `!(title *= "keyword")` hits results without a title |
 | Parentheses Grouping | `( )` | Nests and groups sub-conditions |

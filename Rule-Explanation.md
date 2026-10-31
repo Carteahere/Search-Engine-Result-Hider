@@ -108,7 +108,7 @@ URL通配规则按匹配模式语义从URL开头匹配，主机通配`*`不跨�
 | URL包含 | `url *= "example"` | URL中包含指定字符串 `example` |
 | URL正则 | `url =~ /正则/`(或简写 `url/正则/`) | URL匹配正则表达式，`=~` 可省略，字符集`[...]`内支持裸斜杠，结尾加`i`忽略大小写 |
 | URL主机 | `host $= ".example.com"` | 匹配结果URL主机，`$=` 兼容裸域，即 `host $= ".example.com"` 同时命中 `example.com` 与 `m.example.com` |
-| URL路径 | `path *= "/download/"` | 匹配结果URL路径 |
+| URL路径 | `path *= "/download/"` | 匹配结果URL路径 (`u.pathname` + `u.search`) |
 | URL协议 | `scheme = "https"` | 匹配结果URL协议，如 `https` / `http` |
 | 逻辑运算 | `\|` 或、`&` 与、`!` 非 | 组合任意条件，`!` 取反的是条件本身，如 `!(title *= "关键词")` 会命中无标题的结果 |
 | 括号分组 | `(` `)` | 嵌套组合子条件 |
