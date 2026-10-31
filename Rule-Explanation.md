@@ -167,7 +167,9 @@ bing: {disabled: true},
 
 **内置引擎ID：**
 
-`google`、`google_scholar`、`bing`、`duckduckgo`、`duckduckgo_lite`、`yandex`、`brave`、`ecosia`、`startpage`、`yahoo`、`yahoo_japan`、`so360`、`sogou`、`toutiao`、`quark`、`github`、`greasyfork`（在 `@if($site=)` 中，`yahoo-japan`＝`yahoo_japan`，`ddg`＝`duckduckgo`＝`duckduckgo_lite`）
+`google`、`google_scholar`、`bing`、`duckduckgo`、`duckduckgo_lite`、`yandex`、`brave`、`ecosia`、`startpage`、`yahoo`、`yahoo_japan`、`so360`、`sogou`、`toutiao`、`quark`、`github`、`greasyfork`
+
+在 `@if($site = "engine")` 中，`yahoo-japan`＝`yahoo_japan`，`ddg`＝`duckduckgo`＝`duckduckgo_lite`
 
 **说明：**
 
