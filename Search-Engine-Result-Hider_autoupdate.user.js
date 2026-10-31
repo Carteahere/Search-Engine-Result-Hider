@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.7.8
+// @version      8.7.9
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -33,9 +33,10 @@
   if (window.top !== window.self) return; let preventPanelClose = false, _engineSiteSetup = false, _domObserver = null, _observedBody = null, _observedSelector = '';
   let _searchForm = null, _searchFormHandler = null, _urlChangeHandler = null, _panelCloseHandler = null, _panelPressHandler = null, _panelCloseTimer = null; let _syncIntervalIds = [];
   let _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap(), _peekUrlCache = new WeakMap(); const _hrefChangedContainers = new Set(), _contentChangedContainers = new Set(); let _pendingSubRefresh = false;
+  let _exportPick = { rules: true, subscription: false, engine: false, settings: false }, _exportMenuHandler = null;
 
   // 存储配置
-  const CONFIG_KEY = 'searchfilter_blocker', WEBDAV_KEY = 'searchfilter_webdav', SELECTORS_KEY = 'searchfilter_selectors';
+  const CONFIG_KEY = 'searchfilter_blocker', WEBDAV_KEY = 'searchfilter_webdav', SELECTORS_KEY = 'searchfilter_selectors', EXPORT_PICK_KEY = 'searchfilter_export_pick';
   const SUBSCRIPTION_URL_KEY = 'searchfilter_subscription_url', SUBSCRIPTION_LAST_UPDATE_KEY = 'searchfilter_subscription_last_update';
   const SUBSCRIPTION_RULES_KEY = 'searchfilter_subscription_rules', SUBSCRIPTIONS_KEY = 'searchfilter_subscriptions';
   const WEBDAV_LAST_SYNC_KEY = 'searchfilter_webdav_last_sync', LOCAL_LAST_MODIFIED_KEY = 'searchfilter_local_last_modified';
@@ -49,7 +50,7 @@
   const RESULT_RETRY_LIMIT = 3, RESULT_RETRY_DELAY = 200;
 
   // 默认配置
-  const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', uiScale: 'l', darkMode: 'system', exportConfig: false, collapseMode: false, removeRedirects: true, showSubBtn: true, showSyncBtn: true, bracketHighlight: true, language: 'zh-CN', subscriptionAutoUpdate: true, engineSubAutoUpdate: true };
+  const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', uiScale: 'l', darkMode: 'system', collapseMode: false, removeRedirects: true, showSubBtn: true, showSyncBtn: true, bracketHighlight: true, language: 'zh-CN', subscriptionAutoUpdate: true, engineSubAutoUpdate: true };
   const DEFAULT_HIGHLIGHT_COLORS = {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'};
   function getDefaultConfig() {
     return {
@@ -83,7 +84,7 @@
     GM_setValue(SETTINGS_TIME_MIGRATED_KEY, true);
   }
   if (currentConfig && typeof currentConfig === 'object') {
-    delete currentConfig.tombstones; delete currentConfig.ruleAddedTimes; delete currentConfig.subscriptionTombstones;
+    delete currentConfig.tombstones; delete currentConfig.ruleAddedTimes; delete currentConfig.subscriptionTombstones; delete currentConfig.exportConfig;
   }
   let showHiddenResults = false;
   let _rulesRevision = 0, _rulesFingerprint = JSON.stringify(currentConfig.rules || []);
@@ -414,12 +415,14 @@
   const isNotGoogleHost = (h) => !!h && !isEngineHost('google', h);
 
   function getContainerSelector(engine) {
+    const def = getSelectors()[engine] || SELECTORS.other; const builtin = SELECTORS[engine];
+    if (def.containers && (!builtin || def.containers !== builtin.containers)) return def.containers;
     if (isBingImagesPage(engine)) return 'li:has(div.iuscp), div.iuscp, div.imgpt';
     if (engine === 'google' && getSearchCategory() === 'images') return 'div[data-attrid="images universal"], div.isv-r';
     if (engine === 'duckduckgo' && getSearchCategory() === 'images') return 'li:has(> figure), figure';
     if (engine === 'yandex' && getSearchCategory() === 'images') return '.JustifierRowLayout-Item, div.SerpItem';
     if (engine === 'brave' && getSearchCategory() === 'images') return 'button.image-result, .image-wrapper';
-    return (getSelectors()[engine] || SELECTORS.other).containers;
+    return def.containers;
   }
 
   function isEngineSite() {
@@ -432,7 +435,7 @@
       enableFeature: '启用功能', blockDomain: '屏蔽域名', doubleConfirm: '二次确认', showMatchedSource: '来源显示',
       uiScale: 'UI比例', scaleM: '75%', scaleL: '100%', scaleXL: '125%', scaleXXL: '150%',
       darkMode: '深色模式', darkSystem: '跟随系统', darkLight: '浅色', darkDark: '深色',
-      exportConfig: '导出配置', collapseMode: '折叠模式', collapseModeHint: '开启后屏蔽结果只显示标题',
+      exportOptRules: '规则', exportOptSubscription: '订阅', exportOptEngine: '引擎', exportOptSettings: '设置', exportEmpty: '至少选择一项导出内容', collapseMode: '折叠模式', collapseModeHint: '开启后屏蔽结果只显示标题',
       showSubBtn: '订阅按钮', showSyncBtn: '同步按钮', bracketHighlight: '括号高亮',
       settingsBtn: '⚙️', settingsPanelTitle: '脚本设置',
       settingsSecBlock: '一键屏蔽', settingsSecUI: '界面显示', settingsSecOther: '其他设置', removeRedirects: '去除重定向',
@@ -503,7 +506,7 @@
       enableFeature: 'Enable Feature', blockDomain: 'Block Domain', doubleConfirm: 'Double Confirm', showMatchedSource: 'Show Source',
       uiScale: 'UI Scale', scaleM: '75%', scaleL: '100%', scaleXL: '125%', scaleXXL: '150%',
       darkMode: 'Dark Mode', darkSystem: 'System', darkLight: 'Light', darkDark: 'Dark',
-      exportConfig: 'Export Config', collapseMode: 'Collapse Mode', collapseModeHint: 'Blocked results will show titles only',
+      exportOptRules: 'Rules', exportOptSubscription: 'Subscriptions', exportOptEngine: 'Engines', exportOptSettings: 'Configs', exportEmpty: 'Select at least one item to export', collapseMode: 'Collapse Mode', collapseModeHint: 'Blocked results will show titles only',
       showSubBtn: 'Sub Button', showSyncBtn: 'Sync Button', bracketHighlight: 'Highlight Bracket',
       settingsBtn: '⚙️', settingsPanelTitle: 'Script Settings',
       settingsSecBlock: 'One-click Block', settingsSecUI: 'Interface', settingsSecOther: 'Other', removeRedirects: 'Remove redirects',
@@ -1131,7 +1134,7 @@
   }
 
   function fadeOutAndRemovePanel(panel, onClosed) {
-    panel.classList.remove('show'); panel._fading = true; let done = false;
+    closeExportMenu(); panel.classList.remove('show'); panel._fading = true; let done = false;
     const finish = () => {
       if (done) return; done = true; panel.remove(); if (onClosed) onClosed();
       if (!isSerhPanelOpen()) {
@@ -3593,6 +3596,12 @@
         #serh-block-confirm-dialog .sfb-confirm-rule:focus { border-color: var(--serh-focus); background: var(--serh-input-bg); }
         #serh-block-confirm-dialog .sfb-confirm-btns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
         #serh-block-confirm-dialog .sfb-confirm-btns .serh-button { height: 24px; padding: 0 10px; font-size: 11px; }
+        #serh-export-menu { position: fixed; z-index: 10002; display: flex; flex-direction: column; gap: 8px; max-width: calc(100vw - 16px); padding: 10px; background: var(--serh-dialog-bg); color: var(--serh-fg); border: 1px solid var(--serh-border); border-radius: 8px; box-shadow: var(--serh-dialog-shadow); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; line-height: 1.4; box-sizing: border-box; }
+        #serh-export-menu .serh-export-grid { display: grid; grid-template-columns: max-content max-content; gap: 8px .5em; }
+        #serh-export-menu label { display: flex; align-items: center; gap: 0; cursor: pointer; font-size: 12px; color: var(--serh-fg); margin: 0; padding: 0; white-space: nowrap; }
+        #serh-export-menu .serh-switch { margin: 0 .25em 0 0 !important; }
+        #serh-export-menu .serh-export-btns { display: flex; gap: 6px; justify-content: flex-end; }
+        #serh-export-menu .serh-button { height: 24px; padding: 0 10px; font-size: 11px; }
         .serh-scroll-btn { position: absolute; right: 7px; cursor: pointer; opacity: 0.5; font-size: 18px !important; line-height: 1 !important; user-select: none !important; transition: opacity 0.2s, transform 0.2s; background: transparent !important; border: none !important; padding: 0 !important; margin: 0 !important; z-index: 10; }
         .serh-scroll-btn:hover { opacity: 1; transform: scale(1.2); }
         .serh-quick-block:hover { transform: scale(1.1); opacity: 1; }
@@ -3910,7 +3919,7 @@
   }
 
   function getSyncSettings(config) {
-    const { rules, bubbleState, bubbleSize, selectors, subscriptions, syncedAt, rulesSyncedAt, settingsModifiedAt, selectorsSyncedAt, tombstones, ruleAddedTimes, subscriptionTombstones, ...settings } = config || {};
+    const { rules, bubbleState, bubbleSize, selectors, subscriptions, syncedAt, rulesSyncedAt, settingsModifiedAt, selectorsSyncedAt, tombstones, ruleAddedTimes, subscriptionTombstones, exportConfig, ...settings } = config || {};
     const unsafeKey = (k) => k === '__proto__' || k === 'constructor' || k === 'prototype';
     const cleanVal = (v) => {
       if (!v || typeof v !== 'object' || Array.isArray(v)) return v;
@@ -3968,7 +3977,7 @@
     'serh-set-show-bubble': 'showBubble', 'serh-set-show-count': 'showCount',
     'serh-set-panel-centered': 'panelCentered',
     'serh-set-disable-block': 'enabled', 'serh-set-debug': 'debug',
-    'serh-set-error-detection': 'errorDetection', 'serh-set-export-config': 'exportConfig', 'serh-set-collapse-mode': 'collapseMode'
+    'serh-set-error-detection': 'errorDetection', 'serh-set-collapse-mode': 'collapseMode'
   };
   const INVERTED_SETTINGS_CHECKBOXES = new Set(['serh-set-disable-block']);
 
@@ -4318,7 +4327,9 @@
       e.stopPropagation(); closePanel();
     };
     document.getElementById('serh-subscribe').onclick = showSubscriptionPanel; document.getElementById('serh-sync').onclick = showWebDAVPanel;
-    document.getElementById('serh-import-file').onclick = importRulesFromFile; document.getElementById('serh-export-file').onclick = exportRulesToFile;
+    document.getElementById('serh-import-file').onclick = importRulesFromFile; document.getElementById('serh-export-file').onclick = (e) => {
+      e.stopPropagation(); if (document.getElementById('serh-export-menu')) closeExportMenu(); else showExportMenu(e.currentTarget);
+    };
     document.getElementById('serh-open-settings').onclick = (e) => {
       e.stopPropagation(); showSettingsPanel();
     };
@@ -4407,7 +4418,7 @@
       });
     }
 
-    const closeZoneSelector = '#serh-status, #serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel, #serh-hlcolor-panel, #serh-selector-panel, #serh-block-confirm-dialog, #serh-settings-panel, .serh-quick-block';
+    const closeZoneSelector = '#serh-status, #serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel, #serh-hlcolor-panel, #serh-selector-panel, #serh-block-confirm-dialog, #serh-export-menu, #serh-settings-panel, .serh-quick-block';
     const isPanelZone = (target) => panel.contains(target) || !!(target.closest && target.closest(closeZoneSelector)); let pressStartedInside = false;
     const pressHandler = (e) => {
       if (e.isTrusted === false) return; pressStartedInside = isPanelZone(e.target);
@@ -4521,7 +4532,6 @@
               { id: 'serh-set-debug', labelKey: 'debugMode', checked: currentConfig.debug === true }
             ])}
             ${settingsRow([
-              { id: 'serh-set-export-config', labelKey: 'exportConfig', checked: currentConfig.exportConfig === true },
               { id: 'serh-set-collapse-mode', labelKey: 'collapseMode', checked: currentConfig.collapseMode === true }
             ])}
             <div style="display: flex; gap: 8px; margin: 0; padding: 0;">
@@ -4581,8 +4591,7 @@
       { id: 'serh-set-collapse-mode', key: 'collapseMode', apply: () => {
         applyCollapseMode(); forceReprocessAll();
         if (currentConfig.collapseMode === true) showToast(t('collapseModeHint'), 'info');
-      } },
-      { id: 'serh-set-export-config', key: 'exportConfig', apply: null }
+      } }
     ];
     settingsDefs.forEach(sw => {
       const el = document.getElementById(sw.id);
@@ -6678,6 +6687,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     applyConfigToMainPanel(); forceReprocessAll(); GM_setValue(WEBDAV_LAST_SYNC_KEY, trustedNow);
   }
 
+  function markWebDAVSyncFailure(ts) { GM_setValue(WEBDAV_LAST_SYNC_KEY, ts > 0 ? ts : Date.now()); }
+
   async function performAutoWebDAVSync(config, depth = 0) {
     adoptStoredConfigIfNewer(); const { folderUrl, fullUrl, headers } = getWebDAVRequest(config);
 
@@ -6686,11 +6697,11 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     if (resp.status !== 404) {
       const content = resp.responseText;
       if (isInvalidSyncResponse(content, resp.responseHeaders)) {
-        console.warn('[WebDAV] 云端返回异常内容，已跳过'); return;
+        console.warn('[WebDAV] 云端返回异常内容，已跳过'); markWebDAVSyncFailure(trustedNow); return;
       }
       parsedHeader = parseSyncHeader(content); cloudConfig = parsedHeader.config;
       if (isNonRuleTextResponse(parsedHeader.restLines, !!(parsedHeader.rawScriptConfig || parsedHeader.rawSelectors))) {
-        console.warn('[WebDAV] 云端返回非规则文本，已跳过'); return;
+        console.warn('[WebDAV] 云端返回非规则文本，已跳过'); markWebDAVSyncFailure(trustedNow); return;
       }
       cloudRules = parsedHeader.restLines.map(r => r.trim()).filter(r => r); const validHeaderTimes = [getCloudModifiedTime(parsedHeader.config, 'rulesSyncedAt', trustedNow)].filter(v => v > 0); let lastModTime = 0;
       if (resp.responseHeaders && typeof resp.responseHeaders === 'string') {
@@ -6727,12 +6738,12 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           if (err && err.message && err.message.includes('412')) {
             if (depth >= WEBDAV_SYNC_MAX_RETRIES) {
               console.warn(`[WebDAV] 云端并发更新冲突 (412) 重试 ${WEBDAV_SYNC_MAX_RETRIES} 次后放弃，等待下一轮同步`);
-              return;
+              markWebDAVSyncFailure(trustedNow); return;
             }
             console.warn(`[WebDAV] 云端并发更新冲突 (412)，稍后重试 (${depth + 1}/${WEBDAV_SYNC_MAX_RETRIES})`);
             await delay(WEBDAV_SYNC_RETRY_DELAY * Math.pow(2, depth)); return performAutoWebDAVSync(config, depth + 1);
           }
-          console.warn('[WebDAV] 空云端恢复上传失败:', err.message); return;
+          console.warn('[WebDAV] 空云端恢复上传失败:', err.message); markWebDAVSyncFailure(trustedNow); return;
         }
         forceReprocessAll(); GM_setValue(WEBDAV_LAST_SYNC_KEY, trustedNow); return;
       }
@@ -6748,7 +6759,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           console.warn(`[WebDAV] 云端文件被并发创建 (412)，重新同步 (${depth + 1}/${WEBDAV_SYNC_MAX_RETRIES})`);
           await delay(WEBDAV_SYNC_RETRY_DELAY * Math.pow(2, depth)); return performAutoWebDAVSync(config, depth + 1);
         }
-        console.warn('[WebDAV] 初始上传失败:', err.message); return;
+        console.warn('[WebDAV] 初始上传失败:', err.message); markWebDAVSyncFailure(trustedNow); return;
       }
     } else {
       const baseRules = getRuleSyncSnapshot(); let mergedRules;
@@ -6807,12 +6818,12 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           if (err && err.message && err.message.includes('412')) {
             if (depth >= WEBDAV_SYNC_MAX_RETRIES) {
               console.warn(`[WebDAV] 云端并发更新冲突 (412) 重试 ${WEBDAV_SYNC_MAX_RETRIES} 次后放弃，等待下一轮同步`);
-              return;
+              markWebDAVSyncFailure(trustedNow); return;
             }
             console.warn(`[WebDAV] 云端并发更新检测到版本冲突 (412)，稍后重试 (${depth + 1}/${WEBDAV_SYNC_MAX_RETRIES})`);
             await delay(WEBDAV_SYNC_RETRY_DELAY * Math.pow(2, depth)); return performAutoWebDAVSync(config, depth + 1);
           }
-          console.warn('[WebDAV] 上传失败:', err.message); return;
+          console.warn('[WebDAV] 上传失败:', err.message); markWebDAVSyncFailure(trustedNow); return;
         }
       } else {
         persistSyncSnapshots(mergedRules, { subs: mergedSubs, selectors: mergedSelectors, config });
@@ -6843,7 +6854,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       runBackgroundSync('webdav', async () => {
         if (isSerhPanelOpen()) { _webdavSyncPendingWhenPanelOpen = true; return; }
         await performAutoWebDAVSync(config);
-      }).catch(err => console.error('[WebDAV] 同步失败:', err.message));
+      }).catch(err => { markWebDAVSyncFailure(); console.error('[WebDAV] 同步失败:', err.message); });
     }, delayMs);
   }
 
@@ -6857,7 +6868,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     runBackgroundSync('webdav', async () => {
       const trustedNow = await getTrustedNow(); let currentLastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0); if (currentLastSync > trustedNow + WEBDAV_TIME_TOLERANCE) currentLastSync = 0;
       if (currentLastSync > 0 && trustedNow - currentLastSync < WEBDAV_AUTO_SYNC_INTERVAL - AUTO_SYNC_TOLERANCE) return; if (isSerhPanelOpen()) return; await performAutoWebDAVSync(config);
-    }).catch(err => console.error('[WebDAV] 同步失败:', err.message));
+    }).catch(err => { markWebDAVSyncFailure(); console.error('[WebDAV] 同步失败:', err.message); });
   }
 
   function timestampFilename(prefix, ext) {
@@ -6891,7 +6902,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       const hasHeader = !!(parsedHeader.rawScriptConfig || parsedHeader.rawSelectors);
       if (isNonRuleTextResponse(parsedHeader.restLines, hasHeader, true)) { showToast(t('fileImportFailed'), 'error'); return; }
       const newRules = filterValidRuleLines(parsedHeader.restLines);
-      if (!hasEffectiveRules(newRules) && hasEffectiveRules(currentConfig.rules) && !confirm(t('importClearConfirm'))) return;
+      const headerOnly = hasHeader && !parsedHeader.restLines.some(l => l.trim());
+      const replaceRules = !headerOnly && (hasEffectiveRules(newRules) || !hasEffectiveRules(currentConfig.rules) || confirm(t('importClearConfirm')));
       const headerConfig = parsedHeader.config;
       if (headerConfig && typeof headerConfig === 'object' && !Array.isArray(headerConfig)) {
         const headerSelectors = parsedHeader.rawSelectors ? headerConfig.selectors : null;
@@ -6907,25 +6919,56 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         }
       }
       if (headerConfig) { const importedSubs = Array.isArray(headerConfig.subscriptions) ? headerConfig.subscriptions : null; if (importedSubs && applyImportedSubscriptions(importedSubs) > 0) setTimeout(() => checkAutoSubscription(true), 1000); }
-      const textarea = document.getElementById('serh-rules');
-      if (textarea) {
-        textarea.value = parsedHeader.restLines.join('\n'); updateLineNumbers();
+      if (!replaceRules && !hasHeader) return;
+      if (replaceRules) {
+        const textarea = document.getElementById('serh-rules');
+        if (textarea) {
+          textarea.value = parsedHeader.restLines.join('\n'); updateLineNumbers();
+        }
+        currentConfig.rules = newRules;
+        const panel = document.getElementById('serh-panel'); if (panel) panel._initialRules = [...currentConfig.rules];
       }
-      currentConfig.rules = newRules;
-      const panel = document.getElementById('serh-panel'); if (panel) panel._initialRules = [...currentConfig.rules];
       persistConfig(true); applyConfigToMainPanel(); forceReprocessAll();
     });
   }
 
+  function loadExportPick() { const raw = GM_getValue(EXPORT_PICK_KEY, null); const out = { rules: true, subscription: false, engine: false, settings: false }; if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const k of Object.keys(out)) if (typeof raw[k] === 'boolean') out[k] = raw[k]; return out; }
+  function saveExportPick() { const raw = GM_getValue(EXPORT_PICK_KEY, null); const out = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? { ...raw } : {}; for (const k of Object.keys(_exportPick)) out[k] = !!_exportPick[k]; GM_setValue(EXPORT_PICK_KEY, out); }
+
+  function closeExportMenu() {
+    const menu = document.getElementById('serh-export-menu'); if (menu) menu.remove();
+    if (_exportMenuHandler) { document.removeEventListener('click', _exportMenuHandler); _exportMenuHandler = null; }
+  }
+
+  function showExportMenu(anchor) {
+    closeExportMenu(); _exportPick = loadExportPick();
+    const menu = document.createElement('div'); menu.id = 'serh-export-menu'; menu.style.visibility = 'hidden';
+    const opt = (key, labelKey) => `<label><span class="serh-switch"><input type="checkbox" data-export="${key}" ${_exportPick[key] ? 'checked' : ''}><span class="serh-slider"></span></span><span>${t(labelKey)}</span></label>`;
+    menu.innerHTML = `<div class="serh-export-grid">${opt('rules', 'exportOptRules')}${opt('settings', 'exportOptSettings')}${opt('engine', 'exportOptEngine')}${opt('subscription', 'exportOptSubscription')}</div><div class="serh-export-btns"><button id="serh-export-ok" class="serh-button serh-button-primary">${t('bcConfirm')}</button><button id="serh-export-cancel" class="serh-button serh-button-secondary">${t('cancel')}</button></div>`;
+    document.body.appendChild(menu);
+    const rect = anchor.getBoundingClientRect(), mw = menu.offsetWidth, mh = menu.offsetHeight;
+    let top = rect.bottom + 6; if (top + mh > innerHeight - 4) top = Math.max(4, rect.top - mh - 6);
+    menu.style.left = Math.max(4, Math.min(rect.left, innerWidth - mw - 4)) + 'px'; menu.style.top = top + 'px';
+    menu.style.visibility = '';
+    menu.querySelectorAll('input[data-export]').forEach(input => input.addEventListener('change', () => { _exportPick[input.dataset.export] = input.checked; saveExportPick(); }));
+    menu.querySelector('#serh-export-cancel').onclick = closeExportMenu;
+    menu.querySelector('#serh-export-ok').onclick = () => { closeExportMenu(); exportRulesToFile(); };
+    _exportMenuHandler = (e) => { if (!menu.contains(e.target) && !anchor.contains(e.target)) closeExportMenu(); };
+    setTimeout(() => { if (menu.isConnected) document.addEventListener('click', _exportMenuHandler); }, 0);
+  }
+
   function exportRulesToFile() {
-    preventPanelClose = true; const textarea = document.getElementById('serh-rules'); let content = textarea.value;
-    if (!content.trim()) {
-      showToast(t('noRulesExport'), 'error'); preventPanelClose = false; return;
-    }
-    if (currentConfig.exportConfig === true) {
-      content = '# ScriptConfig:' + JSON.stringify(Object.assign(getSyncSettings(currentConfig), { subscriptions: exportSubscriptionList() })) + '\n' + content;
-    }
-    downloadTextFile(timestampFilename('rules', 'txt'), content, 'text/plain;charset=utf-8'); preventPanelClose = false;
+    preventPanelClose = true; const textarea = document.getElementById('serh-rules'); const content = textarea ? textarea.value : '';
+    const pick = _exportPick;
+    if (!pick.rules && !pick.subscription && !pick.engine && !pick.settings) { showToast(t('exportEmpty'), 'error'); preventPanelClose = false; return; }
+    if (pick.rules && !content.trim()) { showToast(t('noRulesExport'), 'error'); preventPanelClose = false; return; }
+    const header = pick.settings ? getSyncSettings(currentConfig) : {};
+    if (pick.subscription) header.subscriptions = exportSubscriptionList();
+    let out = Object.keys(header).length ? '# ScriptConfig:' + JSON.stringify(header) + '\n' : '';
+    if (pick.engine) { const selectors = getUserSelectors(); if (Object.keys(selectors).length) out += '# Selectors:' + JSON.stringify(selectors) + '\n'; }
+    if (pick.rules) out += content;
+    if (!out.trim()) { showToast(t('exportEmpty'), 'error'); preventPanelClose = false; return; }
+    downloadTextFile(timestampFilename('rules', 'txt'), out, 'text/plain;charset=utf-8'); preventPanelClose = false;
   }
 
   let _menuCommandIds = [];
