@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.7.8
+// @version      8.7.9
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version removes networking features including WebDAV Sync / Rule Subscription / Engine Subscription.
@@ -31,12 +31,13 @@
   if (window.top !== window.self) return; let preventPanelClose = false, _engineSiteSetup = false, _domObserver = null, _observedBody = null, _observedSelector = '';
   let _searchForm = null, _searchFormHandler = null, _urlChangeHandler = null, _panelCloseHandler = null, _panelPressHandler = null, _panelCloseTimer = null;
   let _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap(), _peekUrlCache = new WeakMap(); const _hrefChangedContainers = new Set(), _contentChangedContainers = new Set();
+  let _exportPick = { rules: true, engine: false, settings: false }, _exportMenuHandler = null;
 
-  const CONFIG_KEY = 'searchfilter_blocker', SELECTORS_KEY = 'searchfilter_selectors';
+  const CONFIG_KEY = 'searchfilter_blocker', SELECTORS_KEY = 'searchfilter_selectors', EXPORT_PICK_KEY = 'searchfilter_export_pick';
   const HL_STATS_REGEX = /^@\d+/;
   const RESULT_RETRY_LIMIT = 3, RESULT_RETRY_DELAY = 200;
 
-  const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', uiScale: 'l', darkMode: 'system', exportConfig: false, collapseMode: false, removeRedirects: true, bracketHighlight: true, language: 'zh-CN' };
+  const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', uiScale: 'l', darkMode: 'system', collapseMode: false, removeRedirects: true, bracketHighlight: true, language: 'zh-CN' };
   const DEFAULT_HIGHLIGHT_COLORS = {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'};
   function getDefaultConfig() {
     return {
@@ -65,7 +66,7 @@
     if (typeof GM_deleteValue === 'function') GM_deleteValue(k);
   });
   if (currentConfig && typeof currentConfig === 'object') {
-    delete currentConfig.tombstones; delete currentConfig.ruleAddedTimes; delete currentConfig.subscriptionTombstones; delete currentConfig.showSubBtn; delete currentConfig.showSyncBtn; delete currentConfig.subscriptionAutoUpdate;
+    delete currentConfig.tombstones; delete currentConfig.ruleAddedTimes; delete currentConfig.subscriptionTombstones; delete currentConfig.showSubBtn; delete currentConfig.showSyncBtn; delete currentConfig.subscriptionAutoUpdate; delete currentConfig.exportConfig;
   }
   let showHiddenResults = false;
 
@@ -352,12 +353,14 @@
   const isNotGoogleHost = (h) => !!h && !isEngineHost('google', h);
 
   function getContainerSelector(engine) {
+    const def = getSelectors()[engine] || SELECTORS.other; const builtin = SELECTORS[engine];
+    if (def.containers && (!builtin || def.containers !== builtin.containers)) return def.containers;
     if (isBingImagesPage(engine)) return 'li:has(div.iuscp), div.iuscp, div.imgpt';
     if (engine === 'google' && getSearchCategory() === 'images') return 'div[data-attrid="images universal"], div.isv-r';
     if (engine === 'duckduckgo' && getSearchCategory() === 'images') return 'li:has(> figure), figure';
     if (engine === 'yandex' && getSearchCategory() === 'images') return '.JustifierRowLayout-Item, div.SerpItem';
     if (engine === 'brave' && getSearchCategory() === 'images') return 'button.image-result, .image-wrapper';
-    return (getSelectors()[engine] || SELECTORS.other).containers;
+    return def.containers;
   }
 
   function isEngineSite() {
@@ -370,7 +373,7 @@
       enableFeature: '启用功能', blockDomain: '屏蔽域名', doubleConfirm: '二次确认', showMatchedSource: '来源显示',
       uiScale: 'UI比例', scaleM: '75%', scaleL: '100%', scaleXL: '125%', scaleXXL: '150%',
       darkMode: '深色模式', darkSystem: '跟随系统', darkLight: '浅色', darkDark: '深色',
-      exportConfig: '导出配置', collapseMode: '折叠模式', collapseModeHint: '开启后屏蔽结果只显示标题',
+      exportOptRules: '规则', exportOptEngine: '引擎', exportOptSettings: '设置', exportEmpty: '请至少选择一项导出内容', collapseMode: '折叠模式', collapseModeHint: '开启后屏蔽结果只显示标题',
       bracketHighlight: '括号高亮',
       settingsBtn: '⚙️', settingsPanelTitle: '脚本设置',
       settingsSecBlock: '一键屏蔽', settingsSecUI: '界面显示', settingsSecOther: '其他设置', removeRedirects: '去除重定向',
@@ -425,7 +428,7 @@
       enableFeature: 'Enable Feature', blockDomain: 'Block Domain', doubleConfirm: 'Double Confirm', showMatchedSource: 'Show Source',
       uiScale: 'UI Scale', scaleM: '75%', scaleL: '100%', scaleXL: '125%', scaleXXL: '150%',
       darkMode: 'Dark Mode', darkSystem: 'System', darkLight: 'Light', darkDark: 'Dark',
-      exportConfig: 'Export Config', collapseMode: 'Collapse Mode', collapseModeHint: 'Blocked results will show titles only',
+      exportOptRules: 'Rules', exportOptEngine: 'Engines', exportOptSettings: 'Settings', exportEmpty: 'Select at least one item to export', collapseMode: 'Collapse Mode', collapseModeHint: 'Blocked results will show titles only',
       bracketHighlight: 'Highlight Bracket',
       settingsBtn: '⚙️', settingsPanelTitle: 'Script Settings',
       settingsSecBlock: 'One-click Block', settingsSecUI: 'Interface', settingsSecOther: 'Other', removeRedirects: 'Remove redirects',
@@ -1032,7 +1035,7 @@
   }
 
   function fadeOutAndRemovePanel(panel, onClosed) {
-    panel.classList.remove('show'); panel._fading = true; let done = false;
+    closeExportMenu(); panel.classList.remove('show'); panel._fading = true; let done = false;
     const finish = () => {
       if (done) return; done = true; panel.remove(); if (onClosed) onClosed();
     };
@@ -3427,6 +3430,12 @@
         #serhl-block-confirm-dialog .sfb-confirm-rule:focus { border-color: var(--serhl-focus); background: var(--serhl-input-bg); }
         #serhl-block-confirm-dialog .sfb-confirm-btns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
         #serhl-block-confirm-dialog .sfb-confirm-btns .serhl-button { height: 24px; padding: 0 10px; font-size: 11px; }
+        #serhl-export-menu { position: fixed; z-index: 10002; display: flex; flex-direction: column; gap: 8px; max-width: calc(100vw - 16px); padding: 10px; background: var(--serhl-dialog-bg); color: var(--serhl-fg); border: 1px solid var(--serhl-border); border-radius: 8px; box-shadow: var(--serhl-dialog-shadow); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; line-height: 1.4; box-sizing: border-box; }
+        #serhl-export-menu .serhl-export-grid { display: grid; grid-template-columns: max-content max-content; gap: 8px .5em; }
+        #serhl-export-menu label { display: flex; align-items: center; gap: 0; cursor: pointer; font-size: 12px; color: var(--serhl-fg); margin: 0; padding: 0; white-space: nowrap; }
+        #serhl-export-menu .serhl-switch { margin: 0 .25em 0 0 !important; }
+        #serhl-export-menu .serhl-export-btns { display: flex; gap: 6px; justify-content: flex-end; }
+        #serhl-export-menu .serhl-button { height: 24px; padding: 0 10px; font-size: 11px; }
         .serhl-scroll-btn { position: absolute; right: 7px; cursor: pointer; opacity: 0.5; font-size: 18px !important; line-height: 1 !important; user-select: none !important; transition: opacity 0.2s, transform 0.2s; background: transparent !important; border: none !important; padding: 0 !important; margin: 0 !important; z-index: 10; }
         .serhl-scroll-btn:hover { opacity: 1; transform: scale(1.2); }
         .serhl-quick-block:hover { transform: scale(1.1); opacity: 1; }
@@ -3728,7 +3737,7 @@
     'serhl-set-show-bubble': 'showBubble', 'serhl-set-show-count': 'showCount',
     'serhl-set-panel-centered': 'panelCentered',
     'serhl-set-disable-block': 'enabled', 'serhl-set-debug': 'debug',
-    'serhl-set-error-detection': 'errorDetection', 'serhl-set-export-config': 'exportConfig', 'serhl-set-collapse-mode': 'collapseMode'
+    'serhl-set-error-detection': 'errorDetection', 'serhl-set-collapse-mode': 'collapseMode'
   };
   const INVERTED_SETTINGS_CHECKBOXES = new Set(['serhl-set-disable-block']);
 
@@ -4052,7 +4061,9 @@
     document.getElementById('serhl-close').onclick = (e) => {
       e.stopPropagation(); closePanel();
     };
-    document.getElementById('serhl-import-file').onclick = importRulesFromFile; document.getElementById('serhl-export-file').onclick = exportRulesToFile;
+    document.getElementById('serhl-import-file').onclick = importRulesFromFile; document.getElementById('serhl-export-file').onclick = (e) => {
+      e.stopPropagation(); if (document.getElementById('serhl-export-menu')) closeExportMenu(); else showExportMenu(e.currentTarget);
+    };
     document.getElementById('serhl-open-settings').onclick = (e) => {
       e.stopPropagation(); showSettingsPanel();
     };
@@ -4141,7 +4152,7 @@
       });
     }
 
-    const closeZoneSelector = '#serhl-status, #serhl-hlcolor-panel, #serhl-selector-panel, #serhl-block-confirm-dialog, #serhl-settings-panel, .serhl-quick-block';
+    const closeZoneSelector = '#serhl-status, #serhl-hlcolor-panel, #serhl-selector-panel, #serhl-block-confirm-dialog, #serhl-export-menu, #serhl-settings-panel, .serhl-quick-block';
     const isPanelZone = (target) => panel.contains(target) || !!(target.closest && target.closest(closeZoneSelector)); let pressStartedInside = false;
     const pressHandler = (e) => {
       if (e.isTrusted === false) return; pressStartedInside = isPanelZone(e.target);
@@ -4402,7 +4413,6 @@
               { id: 'serhl-set-debug', labelKey: 'debugMode', checked: currentConfig.debug === true }
             ])}
             ${settingsRow([
-              { id: 'serhl-set-export-config', labelKey: 'exportConfig', checked: currentConfig.exportConfig === true },
               { id: 'serhl-set-collapse-mode', labelKey: 'collapseMode', checked: currentConfig.collapseMode === true }
             ])}
             <div style="display: flex; gap: 8px; margin: 0; padding: 0;">
@@ -4460,8 +4470,7 @@
       { id: 'serhl-set-collapse-mode', key: 'collapseMode', apply: () => {
         applyCollapseMode(); forceReprocessAll();
         if (currentConfig.collapseMode === true) showToast(t('collapseModeHint'), 'info');
-      } },
-      { id: 'serhl-set-export-config', key: 'exportConfig', apply: null }
+      } }
     ];
     settingsDefs.forEach(sw => {
       const el = document.getElementById(sw.id);
@@ -5164,11 +5173,12 @@
           rest.push(line); continue;
         }
         if (s.startsWith('# ScriptConfig:')) {
-          let parsed = null;
-          try { parsed = JSON.parse(s.slice('# ScriptConfig:'.length).trim()); } catch (e) {}
+          const payload = s.slice('# ScriptConfig:'.length).trim(); let parsed = null;
+          try { parsed = JSON.parse(payload); } catch (e) {}
           if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
             if (!settings) settings = parsed; continue;
           }
+          if (payload.startsWith('\x7B') && !settings) continue;
         }
         if (s.startsWith('# Selectors:')) {
           const payload = s.slice('# Selectors:'.length).trim(); let parsed = null;
@@ -5214,7 +5224,7 @@
   }
 
   function getExportSettings(config) {
-    const { rules, bubbleState, bubbleSize, selectors, subscriptions, syncedAt, rulesSyncedAt, settingsModifiedAt, selectorsSyncedAt, tombstones, ruleAddedTimes, subscriptionTombstones, ...settings } = config || {};
+    const { rules, bubbleState, bubbleSize, selectors, subscriptions, syncedAt, rulesSyncedAt, settingsModifiedAt, selectorsSyncedAt, tombstones, ruleAddedTimes, subscriptionTombstones, exportConfig, ...settings } = config || {};
     return settings;
   }
 
@@ -5224,27 +5234,60 @@
       const parsedHeader = parseConfigHeader(rawLines);
       if (isNonRuleTextResponse(parsedHeader.rest, !!(parsedHeader.settings || parsedHeader.selectors), true)) { showToast(t('fileImportFailed'), 'error'); return; }
       const newRules = filterValidRuleLines(parsedHeader.rest);
-      if (!hasEffectiveRules(newRules) && hasEffectiveRules(currentConfig.rules) && !confirm(t('importClearConfirm'))) return;
+      const hasHeader = !!(parsedHeader.settings || parsedHeader.selectors);
+      const headerOnly = hasHeader && !parsedHeader.rest.some(l => l.trim());
+      const replaceRules = !headerOnly && (hasEffectiveRules(newRules) || !hasEffectiveRules(currentConfig.rules) || confirm(t('importClearConfirm')));
       if (parsedHeader.settings) applyImportedSettings(parsedHeader.settings);
       const headerSelectors = parsedHeader.selectors; const selectorsApplied = !!headerSelectors && typeof headerSelectors === 'object' && !Array.isArray(headerSelectors);
       if (selectorsApplied) { GM_setValue(SELECTORS_KEY, headerSelectors); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); }
-      const textarea = document.getElementById('serhl-rules');
-      if (textarea) {
-        textarea.value = parsedHeader.rest.join('\n'); updateLineNumbers();
+      if (!replaceRules && !hasHeader) return;
+      if (replaceRules) {
+        const textarea = document.getElementById('serhl-rules');
+        if (textarea) {
+          textarea.value = parsedHeader.rest.join('\n'); updateLineNumbers();
+        }
+        currentConfig.rules = newRules;
+        const panel = document.getElementById('serhl-panel'); if (panel) panel._initialRules = [...currentConfig.rules];
       }
-      currentConfig.rules = newRules;
-      const panel = document.getElementById('serhl-panel'); if (panel) panel._initialRules = [...currentConfig.rules];
       persistConfig(true); applyConfigToMainPanel(); if (selectorsApplied) refreshEngineSite(); else forceReprocessAll();
     });
   }
 
+  function loadExportPick() { const raw = GM_getValue(EXPORT_PICK_KEY, null); const out = { rules: true, engine: false, settings: false }; if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const k of Object.keys(out)) if (typeof raw[k] === 'boolean') out[k] = raw[k]; return out; }
+  function saveExportPick() { const raw = GM_getValue(EXPORT_PICK_KEY, null); const out = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? { ...raw } : {}; for (const k of Object.keys(_exportPick)) out[k] = !!_exportPick[k]; GM_setValue(EXPORT_PICK_KEY, out); }
+
+  function closeExportMenu() {
+    const menu = document.getElementById('serhl-export-menu'); if (menu) menu.remove();
+    if (_exportMenuHandler) { document.removeEventListener('click', _exportMenuHandler); _exportMenuHandler = null; }
+  }
+
+  function showExportMenu(anchor) {
+    closeExportMenu(); _exportPick = loadExportPick();
+    const menu = document.createElement('div'); menu.id = 'serhl-export-menu'; menu.style.visibility = 'hidden';
+    const opt = (key, labelKey) => `<label><span class="serhl-switch"><input type="checkbox" data-export="${key}" ${_exportPick[key] ? 'checked' : ''}><span class="serhl-slider"></span></span><span>${t(labelKey)}</span></label>`;
+    menu.innerHTML = `<div class="serhl-export-grid">${opt('rules', 'exportOptRules')}${opt('settings', 'exportOptSettings')}${opt('engine', 'exportOptEngine')}</div><div class="serhl-export-btns"><button id="serhl-export-ok" class="serhl-button serhl-button-primary">${t('bcConfirm')}</button><button id="serhl-export-cancel" class="serhl-button serhl-button-secondary">${t('cancel')}</button></div>`;
+    document.body.appendChild(menu);
+    const rect = anchor.getBoundingClientRect(), mw = menu.offsetWidth, mh = menu.offsetHeight;
+    let top = rect.bottom + 6; if (top + mh > innerHeight - 4) top = Math.max(4, rect.top - mh - 6);
+    menu.style.left = Math.max(4, Math.min(rect.left, innerWidth - mw - 4)) + 'px'; menu.style.top = top + 'px';
+    menu.style.visibility = '';
+    menu.querySelectorAll('input[data-export]').forEach(input => input.addEventListener('change', () => { _exportPick[input.dataset.export] = input.checked; saveExportPick(); }));
+    menu.querySelector('#serhl-export-cancel').onclick = closeExportMenu;
+    menu.querySelector('#serhl-export-ok').onclick = () => { closeExportMenu(); exportRulesToFile(); };
+    _exportMenuHandler = (e) => { if (!menu.contains(e.target) && !anchor.contains(e.target)) closeExportMenu(); };
+    setTimeout(() => { if (menu.isConnected) document.addEventListener('click', _exportMenuHandler); }, 0);
+  }
+
   function exportRulesToFile() {
-    preventPanelClose = true; const textarea = document.getElementById('serhl-rules'); let content = textarea.value;
-    if (!content.trim()) {
-      showToast(t('noRulesExport'), 'error'); preventPanelClose = false; return;
-    }
-    if (currentConfig.exportConfig === true) content = '# ScriptConfig:' + JSON.stringify(getExportSettings(currentConfig)) + '\n' + content;
-    downloadTextFile(timestampFilename('rules', 'txt'), content, 'text/plain;charset=utf-8'); preventPanelClose = false;
+    preventPanelClose = true; const textarea = document.getElementById('serhl-rules'); const content = textarea ? textarea.value : '';
+    const pick = _exportPick;
+    if (!pick.rules && !pick.engine && !pick.settings) { showToast(t('exportEmpty'), 'error'); preventPanelClose = false; return; }
+    if (pick.rules && !content.trim()) { showToast(t('noRulesExport'), 'error'); preventPanelClose = false; return; }
+    let out = pick.settings ? '# ScriptConfig:' + JSON.stringify(getExportSettings(currentConfig)) + '\n' : '';
+    if (pick.engine) { const selectors = getUserSelectors(); if (Object.keys(selectors).length) out += '# Selectors:' + JSON.stringify(selectors) + '\n'; }
+    if (pick.rules) out += content;
+    if (!out.trim()) { showToast(t('exportEmpty'), 'error'); preventPanelClose = false; return; }
+    downloadTextFile(timestampFilename('rules', 'txt'), out, 'text/plain;charset=utf-8'); preventPanelClose = false;
   }
 
   let _menuCommandIds = [];
