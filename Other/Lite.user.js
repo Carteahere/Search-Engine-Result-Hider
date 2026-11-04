@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.7.9
+// @version      8.8.0
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version removes networking features including WebDAV Sync / Rule Subscription / Engine Subscription.
@@ -37,7 +37,7 @@
   const HL_STATS_REGEX = /^@\d+/;
   const RESULT_RETRY_LIMIT = 3, RESULT_RETRY_DELAY = 200;
 
-  const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', uiScale: 'l', darkMode: 'system', collapseMode: false, removeRedirects: true, bracketHighlight: true, language: 'zh-CN' };
+  const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', uiScale: 'l', darkMode: 'system', collapseMode: false, highlightWhitelist: false, removeRedirects: true, bracketHighlight: true, language: 'zh-CN' };
   const DEFAULT_HIGHLIGHT_COLORS = {1:'#CE2029', 2:'#FF8C00', 3:'#FFD700', 4:'#228B22', 5:'#1E90FF'};
   function getDefaultConfig() {
     return {
@@ -74,9 +74,9 @@
     bing: {
       match: /^(?:(?:www[2-4]?|cn|global|m)\.)?bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
       containers: 'li.b_algo, div.b_algo',
-      titles: ['h2 a', 'a h2', '.b_title'],
-      snippets: ['.b_caption p', '.b_snippet', '.b_paractl p', '.b_lineclamp2'],
-      links: ['h2 a[href]', '.b_title a[href]', '.b_algoheader a[href]', 'h3 a[href]', 'div[role="heading"] a[href]', 'a[href]'],
+      titles: ['h2 a', 'a h2', '.b_title', '.mc_vtvc_title', 'a.title'],
+      snippets: ['.b_caption p', '.b_snippet', '.b_paractl p', '.b_lineclamp2', '.mc_vtvc_meta', '.snippet'],
+      links: ['h2 a[href]', '.b_title a[href]', '.b_algoheader a[href]', 'h3 a[href]', 'div[role="heading"] a[href]', 'a.title[href]', 'a[href]'],
     },
     google_scholar: {
       match: /^(?:www\.)?scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/,
@@ -89,7 +89,7 @@
       match: /^https?:\/\/(?:(?:www|images|video|videos|search|encrypted|m)\.)?google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})(?::\d+)?\/(?:(?:search|webhp|imghp|videohp)(?:[/?#]|$)|[?#]|$)/i,
       containers: 'div.g, div.MjjYud',
       titles: ['h3', 'div[role="heading"]', '.LC20lb', '.DKV0Md', '.sXLaOe', '.c9DxTc', 'a h3'],
-      snippets: ['.st', '.VwiC3b', '.s3v9rd', '.IsZvec', '.lyLwlc', '.yXK7lf'],
+      snippets: ['.st', '.VwiC3b', '.s3v9rd', '.IsZvec', '.lyLwlc', '.yXK7lf', '.ITZIwc'],
       links: 'a[href]',
     },
     duckduckgo_lite: {
@@ -319,7 +319,7 @@
       } catch (e) {}
     }
     if (/^images\./.test(host) || /(?:^|\/)images?(?:\/|$)/.test(path) || /[?&](?:tbm=isch|udm=2|iax?=images)(?:&|$)/.test(search)) return 'images';
-    if (/^videos?\./.test(host) || /(?:^|\/)videos?(?:\/|$)/.test(path) || /[?&](?:tbm=vid|udm=7|iax?=videos)(?:&|$)/.test(search)) return 'videos';
+    if (/^videos?\./.test(host) || /(?:^|\/)videos?(?:\/|$)/.test(path) || /[?&](?:tbm=vids?|udm=(?:7|videos?|vids?)|iax?=videos)(?:&|$)/.test(search)) return 'videos';
     if (/^news\./.test(host) || /(?:^|\/)news(?:\/|$)/.test(path) || /[?&](?:tbm=nws|udm=12|iax?=news)(?:&|$)/.test(search)) return 'news';
     if (/(?:^|\.)toutiao\.com$/.test(host)) {
       const pd = (search.match(/[?&]pd=([a-z_]+)(?:&|$)/) || [])[1] || '';
@@ -356,7 +356,11 @@
     const def = getSelectors()[engine] || SELECTORS.other; const builtin = SELECTORS[engine];
     if (def.containers && (!builtin || def.containers !== builtin.containers)) return def.containers;
     if (isBingImagesPage(engine)) return 'li:has(div.iuscp), div.iuscp, div.imgpt';
+    if (engine === 'bing' && getSearchCategory() === 'videos') return 'div.mc_vtvc';
+    if (engine === 'bing' && getSearchCategory() === 'news') return 'div.news-card';
     if (engine === 'google' && getSearchCategory() === 'images') return 'div[data-attrid="images universal"], div.isv-r';
+    if (engine === 'google' && getSearchCategory() === 'videos') return 'div.PmEWq';
+    if (engine === 'google' && getSearchCategory() === 'news') return 'a.aJWbwf';
     if (engine === 'duckduckgo' && getSearchCategory() === 'images') return 'li:has(> figure), figure';
     if (engine === 'yandex' && getSearchCategory() === 'images') return '.JustifierRowLayout-Item, div.SerpItem';
     if (engine === 'brave' && getSearchCategory() === 'images') return 'button.image-result, .image-wrapper';
@@ -373,7 +377,7 @@
       enableFeature: '启用功能', blockDomain: '屏蔽域名', doubleConfirm: '二次确认', showMatchedSource: '来源显示',
       uiScale: 'UI比例', scaleM: '75%', scaleL: '100%', scaleXL: '125%', scaleXXL: '150%',
       darkMode: '深色模式', darkSystem: '跟随系统', darkLight: '浅色', darkDark: '深色',
-      exportOptRules: '规则', exportOptEngine: '引擎', exportOptSettings: '设置', exportEmpty: '请至少选择一项导出内容', collapseMode: '折叠模式', collapseModeHint: '开启后屏蔽结果只显示标题',
+      exportOptRules: '规则', exportOptEngine: '引擎', exportOptSettings: '设置', exportEmpty: '请至少选择一项导出内容', collapseMode: '折叠模式', collapseModeHint: '开启后屏蔽结果只显示标题', highlightWhitelist: '高亮白名单', highlightWhitelistHint: '开启后高亮规则附带白名单效果',
       bracketHighlight: '括号高亮',
       settingsBtn: '⚙️', settingsPanelTitle: '脚本设置',
       settingsSecBlock: '一键屏蔽', settingsSecUI: '界面显示', settingsSecOther: '其他设置', removeRedirects: '去除重定向',
@@ -428,7 +432,7 @@
       enableFeature: 'Enable Feature', blockDomain: 'Block Domain', doubleConfirm: 'Double Confirm', showMatchedSource: 'Show Source',
       uiScale: 'UI Scale', scaleM: '75%', scaleL: '100%', scaleXL: '125%', scaleXXL: '150%',
       darkMode: 'Dark Mode', darkSystem: 'System', darkLight: 'Light', darkDark: 'Dark',
-      exportOptRules: 'Rules', exportOptEngine: 'Engines', exportOptSettings: 'Settings', exportEmpty: 'Select at least one item to export', collapseMode: 'Collapse Mode', collapseModeHint: 'Blocked results will show titles only',
+      exportOptRules: 'Rules', exportOptEngine: 'Engines', exportOptSettings: 'Settings', exportEmpty: 'Select at least one item to export', collapseMode: 'Collapse Mode', collapseModeHint: 'Blocked results will show titles only', highlightWhitelist: 'Highlight Whitelist', highlightWhitelistHint: 'Highlight rules will also whitelist results',
       bracketHighlight: 'Highlight Bracket',
       settingsBtn: '⚙️', settingsPanelTitle: 'Script Settings',
       settingsSecBlock: 'One-click Block', settingsSecUI: 'Interface', settingsSecOther: 'Other', removeRedirects: 'Remove redirects',
@@ -548,11 +552,11 @@
   const RULE_PREFIX_RE = /^(?:title|text|host|path|url|scheme|u|t)\//i;
   const RULE_PREFIX_REGEX_RE = /^(?:title|text|host|path|url|scheme|u|t)\/(?:[^/\\]|\\.)*\//i;
   const RULE_LEADING_REGEX_RE = /^\/(?:[^/\\]|\\.)*\//;
-  const REGEX_CTX_A = /(?:^|[\s(&|!])(?:title|url|host|path|scheme|u|t)\s*=~$/i;
-  const REGEX_CTX_B = /(?:^|[\s(&|!])(?:title|url|host|path|scheme|u|t)$/i;
-  const REGEX_CTX_C = /(?:^|[\s(&|!])(?:title|url|host|path|scheme|u|t)\s*=$/i;
+  const REGEX_CTX_A = /(?:^|[\s(&|!])(?:title|text|url|host|path|scheme|u|t)\s*=~$/i;
+  const REGEX_CTX_B = /(?:^|[\s(&|!])(?:title|text|url|host|path|scheme|u|t)$/i;
+  const REGEX_CTX_C = /(?:^|[\s(&|!])(?:title|text|url|host|path|scheme|u|t)\s*=$/i;
   const RULE_REGEX_LIT_RE = /^\/(?:[^/\\[\]()]|\\.|\[(?:[^\]\\]|\\.)*\]|\((?:[^/\\[\]()]|\\.)*\))+\//;
-  const REGEX_CTX_D = /(?:^|[\s(&|!])(?:title|url|host|path|scheme|u|t)\s*(?:\^=|\$=|\*=|:)$/i;
+  const REGEX_CTX_D = /(?:^|[\s(&|!])(?:title|text|url|host|path|scheme|u|t)\s*(?:\^=|\$=|\*=|:)$/i;
   function regexStartAhead(str, pos) {
     const prev = str.slice(Math.max(0, pos - 64), pos).trimEnd();
     return REGEX_CTX_A.test(prev) || REGEX_CTX_B.test(prev) || (REGEX_CTX_C.test(prev) && (RULE_REGEX_LIT_RE.test(str.slice(pos, Math.min(str.length, pos + 4096))) || (str[pos] === '/' && regexCloseAhead(str, pos)))) || (REGEX_CTX_D.test(prev) && regexCloseAhead(str, pos));
@@ -1224,7 +1228,7 @@
     const pushChar = (ch) => { leaf += ch; };
     const canStartRegex = (pos) => {
       const s = leaf.trim(); if (s === '' || /(?:=~|~)$/.test(s)) return true;
-      if (/(?:=|\^=|\$=|\*=|:)$/.test(s) || /^(url|title|host|path|scheme)$/i.test(s)) {
+      if (/(?:=|\^=|\$=|\*=|:)$/.test(s) || /^(url|title|text|host|path|scheme|u|t)$/i.test(s)) {
         let j = pos + 1, inC = false;
         while (j < n) {
           const c = str[j];
@@ -1356,8 +1360,8 @@
     const leafParser = (text) => {
       const trimmed = text.trim();
       const regexLeafFlags = (() => {
-        const m = trimmed.match(/^(?:title|url|host|path|scheme|u|t)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i); if (!m) return null;
-        const seg = m[2] || ''; const explicit = /^(?:title|url|host|path|scheme|u|t)\s*=\~\s*\//i.test(trimmed);
+        const m = trimmed.match(/^(?:title|text|url|host|path|scheme|u|t)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i); if (!m) return null;
+        const seg = m[2] || ''; const explicit = /^(?:title|text|url|host|path|scheme|u|t)\s*=\~\s*\//i.test(trimmed);
         return isUniqueFlagsStr(seg) || (explicit && /^[a-z]+$/i.test(seg)) ? seg.toLowerCase() : (isFlagsCandidateError(seg) ? seg : '');
       })();
       if (regexLeafFlags && getInvalidRegexFlags(regexLeafFlags)) {
@@ -1386,10 +1390,11 @@
     if (!rest.length) return { type: 'const', value: isAnd }; return rest.length === 1 ? rest[0] : { type: isAnd ? 'and' : 'or', children: rest };
   }
 
-  function evalDynamicLeaf(cond, title, url) {
-    if (cond.type === 'title') {
-      if (!title || (cond.op !== '=~' && !cond.val)) return false; const lowerTitle = title.toLowerCase(); if (cond.op === '=') return lowerTitle === cond.val; if (cond.op === '^=') return lowerTitle.startsWith(cond.val);
-      if (cond.op === '$=') return lowerTitle.endsWith(cond.val); if (cond.op === '*=') return lowerTitle.includes(cond.val); if (cond.op === '=~') return safeRegexTest(cond.regex, title);
+  function evalDynamicLeaf(cond, title, url, snippet) {
+    if (cond.type === 'title' || cond.type === 'text') {
+      const source = cond.type === 'title' ? title : snippet;
+      if (!source || (cond.op !== '=~' && !cond.val)) return false; const lower = source.toLowerCase(); if (cond.op === '=') return lower === cond.val; if (cond.op === '^=') return lower.startsWith(cond.val);
+      if (cond.op === '$=') return lower.endsWith(cond.val); if (cond.op === '*=') return lower.includes(cond.val); if (cond.op === '=~') return safeRegexTest(cond.regex, source);
       return false;
     }
     if (cond.type === 'url') {
@@ -1460,21 +1465,21 @@
     return false;
   }
 
-  function evalCondAST(ast, title, url) {
+  function evalCondAST(ast, title, url, snippet) {
     if (!ast) return true;
     if (ast.type === 'and') {
       for (let i = 0; i < ast.children.length; i++) {
-        if (!evalCondAST(ast.children[i], title, url)) return false;
+        if (!evalCondAST(ast.children[i], title, url, snippet)) return false;
       }
       return true;
     }
     if (ast.type === 'or') {
       for (let i = 0; i < ast.children.length; i++) {
-        if (evalCondAST(ast.children[i], title, url)) return true;
+        if (evalCondAST(ast.children[i], title, url, snippet)) return true;
       }
       return false;
     }
-    if (ast.type === 'not') return !evalCondAST(ast.child, title, url); if (ast.type === 'leaf') return evalDynamicLeaf(ast.cond, title, url); return !!ast.value;
+    if (ast.type === 'not') return !evalCondAST(ast.child, title, url, snippet); if (ast.type === 'leaf') return evalDynamicLeaf(ast.cond, title, url, snippet); return !!ast.value;
   }
 
   function parseConditionPart(trimmed, currentEngine, currentSite, currentCategory) {
@@ -1498,7 +1503,7 @@
       return { matched: true, static: curSite === target || curSite.endsWith(`.${target}`) };
     }
 
-    const shorthandRe = trimmed.match(/^(title|url|host|path|scheme|u|t)\/(.+)$/i);
+    const shorthandRe = trimmed.match(/^(title|text|url|host|path|scheme|u|t)\/(.+)$/i);
     if (shorthandRe) {
       const pre = parsePrefixedRegexRule(trimmed, shorthandRe[1].length + 1);
       const condType = (s => s === 'u' ? 'url' : s === 't' ? 'title' : s)(shorthandRe[1].toLowerCase());
@@ -1509,10 +1514,10 @@
       return { matched: false };
     }
 
-    const eqRe = trimmed.match(/^(title|url|host|path|scheme|u|t)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
+    const eqRe = trimmed.match(/^(title|text|url|host|path|scheme|u|t)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
     const eqSeg = eqRe ? String(eqRe[3] || '') : ''; const eqFlags = eqRe && isUniqueFlagsStr(eqSeg) ? eqSeg.toLowerCase() : '';
-    const eqReOk = eqRe && !getInvalidRegexFlags(eqFlags) && (eqFlags || !eqSeg || (!/^(title|url|host|path|scheme|u|t)\s*=/i.test(trimmed) && !isFlagsCandidateError(eqSeg))) && (String(eqRe[2] || '').trim() || eqSeg);
-    const strMatch = eqReOk ? null : trimmed.match(/^(title|url|host|path|scheme|u|t)\s*(\^=|\$=|\*=|=|:)\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s"']+))\s*i?\s*$/i);
+    const eqReOk = eqRe && !getInvalidRegexFlags(eqFlags) && (eqFlags || !eqSeg || (!/^(title|text|url|host|path|scheme|u|t)\s*=/i.test(trimmed) && !isFlagsCandidateError(eqSeg))) && (String(eqRe[2] || '').trim() || eqSeg);
+    const strMatch = eqReOk ? null : trimmed.match(/^(title|text|url|host|path|scheme|u|t)\s*(\^=|\$=|\*=|=|:)\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s"']+))\s*i?\s*$/i);
     if (strMatch) {
       if (strMatch[5] !== undefined && strMatch[5].startsWith('~')) return { matched: false };
       const bareEq = (strMatch[2] === '=' && strMatch[5] !== undefined) ? strMatch[5].match(/^\/((?:[^/\\\[\]]|\\.|\[(?:[^\]\\]|\\.)*\])+)\/([a-z]*)$/i) : null;
@@ -1522,10 +1527,10 @@
       const condType = (s => s === 'u' ? 'url' : s === 't' ? 'title' : s)(strMatch[1].toLowerCase()); if (condType === 'host') val = val.startsWith('/') ? val : toASCIIHostname(val); return { matched: true, dynamic: { type: condType, op, val } };
     }
 
-    const reMatch = trimmed.match(/^(title|url|host|path|scheme|u|t)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
+    const reMatch = trimmed.match(/^(title|text|url|host|path|scheme|u|t)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
     if (reMatch) {
       const condType = (s => s === 'u' ? 'url' : s === 't' ? 'title' : s)(reMatch[1].toLowerCase()); const seg = String(reMatch[3] || ''); const flags = isUniqueFlagsStr(seg) ? seg.toLowerCase() : '';
-      const shorthand = !/^(title|url|host|path|scheme|u|t)\s*=/i.test(trimmed);
+      const shorthand = !/^(title|text|url|host|path|scheme|u|t)\s*=/i.test(trimmed);
       if (flags) { if (getInvalidRegexFlags(flags)) return { matched: false }; }
       else if (shorthand ? isFlagsCandidateError(seg) : seg !== '') return { matched: false };
       if (!String(reMatch[2] || '').trim()) return { matched: false };
@@ -1612,9 +1617,9 @@
   function looksLikeCondExpr(str) {
     if (!isCondExprCore(str)) return false; if (/^\s*!\s*(?:[A-Z][a-zA-Z0-9_-]*)\s*:\s*\S/.test(str)) return false;
     if (/^\s*!\s+(?:title|url|description|version|expires|homepage|host|site|path|scheme)\s*:\s*\S/i.test(str)) return false;
-    if (!/^\s*(?:!|\(|\$site\b|\$category\b|engine\b|category\b|(?:site|title|url|host|path|scheme|u|t)\s*(?:=~|\^=|\$=|\*=|=|:|\/))/i.test(str)) return false;
-    return /(?:^|[\s(&|!])(?:\$site|\$category|engine|category|site|title|url|host|path|scheme|u|t)\s*(?:(?:=~|\^=|\$=|\*=|=|:)\s+\S|(?:=~|\^=|\$=|\*=|=|:)\S|\/)/i.test(str)
-      || /^\s*!\s*(?:(?:\$site|\$category|engine|category|site|title|url|host|path|scheme|u|t)\b|\()/i.test(str);
+    if (!/^\s*(?:!|\(|\$site\b|\$category\b|engine\b|category\b|(?:site|title|text|url|host|path|scheme|u|t)\s*(?:=~|\^=|\$=|\*=|=|:|\/))/i.test(str)) return false;
+    return /(?:^|[\s(&|!])(?:\$site|\$category|engine|category|site|title|text|url|host|path|scheme|u|t)\s*(?:(?:=~|\^=|\$=|\*=|=|:)\s+\S|(?:=~|\^=|\$=|\*=|=|:)\S|\/)/i.test(str)
+      || /^\s*!\s*(?:(?:\$site|\$category|engine|category|site|title|text|url|host|path|scheme|u|t)\b|\()/i.test(str);
   }
 
   function isScriptRuleLine(line) {
@@ -1685,11 +1690,8 @@
     if (!ruleToCheck) return { valid: true, errors: [] }; const errors = [];
     let hlN = null; const hlValMatch = ruleToCheck.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|u|t|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|(?:[(!]|@if\b))/i);
     if (hlValMatch) {
-      const N = parseInt(hlValMatch[1]);
-      if (N < 1 || N > 5) {
-        return { valid: false, errors: [t('hlColorError')] };
-      }
-      hlN = N; ruleToCheck = ruleToCheck.substring(hlValMatch[0].length).trim(); if (!ruleToCheck) return { valid: false, errors: [t('emptyPrefixRule')] };
+      const N = parseInt(hlValMatch[1]); if (N < 1) return { valid: false, errors: [t('hlColorError')] };
+      hlN = N > 5 ? 1 : N; ruleToCheck = ruleToCheck.substring(hlValMatch[0].length).trim(); if (!ruleToCheck) return { valid: false, errors: [t('emptyPrefixRule')] };
     }
 
     if (/^@@if\b/i.test(ruleToCheck)) return { valid: false, errors: [t('invalidUrlWildcard', { rule: ruleToCheck })] };
@@ -1916,7 +1918,7 @@
         })
         .join('\\/'); let bs = 0; for (let i = pattern.length - 2; i >= 0 && pattern[i] === '\\'; i--) bs++;
         const lastChar = pattern[pattern.length - 1]; const openEnd = bs % 2 === 0 && (pattern.endsWith('*') || '\\/?#:&='.includes(lastChar));
-        return openEnd ? regexStr : regexStr + '(?:[&#].*)?$';
+        return openEnd ? regexStr : regexStr + '(?:[?&#].*)?$';
     }
     return prefix + (hostIsFirst ? escapeHostPart(pattern) : escapeWildcardPart(pattern, false)) + '(?:[\\/?#:&]|$)';
   }
@@ -2070,7 +2072,7 @@
 
       const hlMatch = rule.match(/^@(\d+)(?=\s|$|\*:\/\/|https?:\/\/|\/|title\/|text\/|(?:title|text|host|path|url|scheme|u|t|site|engine|category|\$site|\$category)\s*(?:=~|\^=|\$=|\*=|=|:|\/)|(?:[(!]|@if\b))/i);
       if (hlMatch) {
-        const N = parseInt(hlMatch[1]); if (N < 1 || N > 5) return;
+        let N = parseInt(hlMatch[1]); if (N < 1) return; if (N > 5) N = 1;
         const hlRule = rule.substring(hlMatch[0].length).trim(); if (!hlRule) return;
         let parsed;
         try {
@@ -2116,10 +2118,10 @@
     return validationCache.get(rule);
   }
 
-  function checkDynamicConditions(conditions, title, url) {
+  function checkDynamicConditions(conditions, title, url, snippet) {
     if (!conditions || !conditions.length) return true;
     for (let i = 0; i < conditions.length; i++) {
-      if (!evalCondAST(conditions[i], title, url)) return false;
+      if (!evalCondAST(conditions[i], title, url, snippet)) return false;
     }
     return true;
   }
@@ -2140,53 +2142,59 @@
     if (!subdomainLevels) subdomainLevels = getSubdomainLevels(domain);
     const lowerDomain = toASCIIHostname(domain);
 
-    const scanDomainMap = (map, filter) => {
+    const scanDomainMap = (map, filter, collect) => {
       for (const level of subdomainLevels) {
         const entries = map.get(level); if (!entries) continue;
         for (const entry of entries) {
           if (!filter(entry, level)) continue;
-          return entry;
+          if (collect) { collect(entry); continue; } return entry;
         }
       }
       return null;
     };
-    const scanPatterns = (patterns, value, filter, foldUrl) => {
+    const scanPatterns = (patterns, value, filter, foldUrl, collect) => {
       if (!value) return null;
       const alt = foldUrl ? decodeUrlForMatch(value) : '';
       for (const item of patterns) {
         if (filter && !filter(item)) continue;
-        if (safeRegexTest(item.regex, value) || (alt && alt !== value && safeRegexTest(item.regex, alt))) return item;
+        if (!(safeRegexTest(item.regex, value) || (alt && alt !== value && safeRegexTest(item.regex, alt)))) continue;
+        if (collect) { collect(item); continue; } return item;
       }
       return null;
     };
-    const scanConditionalDomains = (map, filter) => {
+    const scanConditionalDomains = (map, filter, collect) => {
       for (const level of subdomainLevels) {
         const rules = map.get(level); if (!rules) continue;
         for (const item of rules) {
-          if (!filter(item, level)) continue; if (!checkDynamicConditions(item.conditions, title, url)) continue;
-          return item;
+          if (!filter(item, level)) continue; if (!checkDynamicConditions(item.conditions, title, url, snippet)) continue;
+          if (collect) { collect(item); continue; } return item;
         }
       }
       return null;
     };
-    const scanConditionalRules = (rules, filter) => {
+    const scanConditionalRules = (rules, filter, collect) => {
       for (const item of rules) {
-        if (filter && !filter(item)) continue; if (!checkDynamicConditions(item.conditions, title, url)) continue; if (item.type === 'expr') return item;
+        if (filter && !filter(item)) continue; if (!checkDynamicConditions(item.conditions, title, url, snippet)) continue; if (item.type === 'expr') {
+          if (collect) { collect(item); continue; } return item;
+        }
         const value = item.type === 'title' ? title : item.type === 'text' ? snippet : url;
         const alt = (item.type === 'url' || item.type === 'regex') && value ? decodeUrlForMatch(value) : '';
         if ((item.type === 'url' || item.type === 'regex' || item.type === 'title' || item.type === 'text') &&
-            value && (safeRegexTest(item.regex, value) || (alt && alt !== value && safeRegexTest(item.regex, alt)))) return item;
+            value && (safeRegexTest(item.regex, value) || (alt && alt !== value && safeRegexTest(item.regex, alt)))) {
+          if (collect) { collect(item); continue; } return item;
+        }
       }
       return null;
     };
 
-    const hlEntry =
-      scanDomainMap(compiledRules.highlightDomains, (en, lv) => matchDomainEntryType(en.type, lv, lowerDomain)) ||
-      scanPatterns(compiledRules.highlightUrls, url, null, true) ||
-      scanPatterns(compiledRules.highlightTitles, title) ||
-      scanPatterns(compiledRules.highlightTexts, snippet) ||
-      scanConditionalDomains(compiledRules.highlightConditionalDomains, (it, lv) => matchDomainEntryType(it.domainType, lv, lowerDomain)) ||
-      scanConditionalRules(compiledRules.highlightConditionalRules); const highlightN = hlEntry ? hlEntry.N : 0;
+    let hlEntry = null;
+    const takeHl = (it) => { if (it.N > (hlEntry ? hlEntry.N : 0)) hlEntry = it; };
+    scanDomainMap(compiledRules.highlightDomains, (en, lv) => matchDomainEntryType(en.type, lv, lowerDomain), takeHl);
+    scanPatterns(compiledRules.highlightUrls, url, null, true, takeHl);
+    scanPatterns(compiledRules.highlightTitles, title, null, false, takeHl);
+    scanPatterns(compiledRules.highlightTexts, snippet, null, false, takeHl);
+    scanConditionalDomains(compiledRules.highlightConditionalDomains, (it, lv) => matchDomainEntryType(it.domainType, lv, lowerDomain), takeHl);
+    scanConditionalRules(compiledRules.highlightConditionalRules, null, takeHl); const highlightN = hlEntry ? hlEntry.N : 0;
 
     const findPair = (steps) => {
       for (const step of steps) {
@@ -2216,10 +2224,11 @@
     let whitelistHit = null; let blockedInfo = null;
     {
       const [wlHit] = findWhitelistPair();
-      if (!wlHit) {
+      whitelistHit = wlHit || (currentConfig.highlightWhitelist === true ? hlEntry : null);
+      if (!whitelistHit) {
         const [blHit] = findBlockedPair();
         if (blHit) blockedInfo = toBlockedInfo(blHit);
-      } else whitelistHit = wlHit;
+      }
     }
 
     const toHlInfo = () => (hlEntry ? {hlRule: hlEntry.originalRule, hlSource: hlEntry.source, hlSourceKey: hlEntry.sourceKey} : {});
@@ -2356,16 +2365,6 @@
     const rawHref = (link && link.href) || '';
     const keepRaw = currentConfig.removeRedirects === false;
     let rawUrl = keepRaw ? rawHref : getCleanUrl(link);
-    if (keepRaw && rawHref) {
-      try {
-        const rawHost = toASCIIHostname(new URL(toASCIIUrl(rawHref)).hostname).toLowerCase();
-        if (rawHost && isEngineSelfDomain(rawHost)) {
-          const cleaned = toASCIIUrl(getCleanUrl(link)) || rawHref;
-          const cleanedHost = toASCIIHostname(new URL(cleaned).hostname).toLowerCase();
-          if (cleanedHost && !isEngineSelfDomain(cleanedHost)) rawUrl = cleaned;
-        }
-      } catch (_) {}
-    }
     let url = toASCIIUrl(rawUrl) || rawUrl; let domain = '';
     try {
       domain = toASCIIHostname(new URL(url).hostname);
@@ -2491,13 +2490,33 @@
       return murl ? { href: murl, getAttribute: a => iusc.getAttribute(a), setAttribute: (a, v) => iusc.setAttribute(a, v) } : iusc;
     }
     if (engine === 'google' && getSearchCategory() === 'images') {
-      const card = result.querySelector('[data-lpage]');
+      const card = (typeof result.getAttribute === 'function' && result.getAttribute('data-lpage')) ? result : result.querySelector('[data-lpage]');
       if (card && /^https?:\/\//i.test(card.getAttribute('data-lpage') || '')) {
         const lp = card.getAttribute('data-lpage');
         return { href: lp, getAttribute: a => card.getAttribute(a), setAttribute: (a, v) => card.setAttribute(a, v) };
       }
       const imgres = result.querySelector('a[href*="/imgres"]');
       if (imgres) { try { const iu = new URL(imgres.href, location.origin).searchParams.get('imgurl'); if (iu) return { href: iu, getAttribute: a => imgres.getAttribute(a), setAttribute: (a, v) => imgres.setAttribute(a, v) }; } catch (_) {} }
+    }
+    if (engine === 'google' && getSearchCategory() === 'videos') {
+      const card = (typeof result.getAttribute === 'function' && result.getAttribute('data-curl')) ? result : result.querySelector('[data-curl]');
+      const curl = card && card.getAttribute('data-curl');
+      if (curl && /^https?:\/\//i.test(curl)) return { href: curl, getAttribute: a => card.getAttribute(a), setAttribute: (a, v) => card.setAttribute(a, v) };
+    }
+    if (engine === 'google' && getSearchCategory() === 'news') {
+      const a = result.tagName === 'A' ? result : (typeof result.closest === 'function' ? result.closest('a.aJWbwf') : null);
+      if (a && a.href) return a;
+    }
+    if (engine === 'bing' && getSearchCategory() === 'videos') {
+      const card = (typeof result.getAttribute === 'function' && result.getAttribute('ourl')) ? result : result.querySelector('[ourl]');
+      const ourl = card && card.getAttribute('ourl');
+      if (ourl && /^https?:\/\//i.test(ourl)) return { href: ourl, getAttribute: a => card.getAttribute(a), setAttribute: (a, v) => card.setAttribute(a, v) };
+    }
+    if (engine === 'bing' && getSearchCategory() === 'news') {
+      const title = result.querySelector('a.title[href]');
+      if (title && title.href) return title;
+      const direct = typeof result.getAttribute === 'function' ? (result.getAttribute('data-url') || result.getAttribute('url')) : '';
+      if (direct && /^https?:\/\//i.test(direct)) return { href: direct, getAttribute: a => result.getAttribute(a), setAttribute: (a, v) => result.setAttribute(a, v) };
     }
     if (engine === 'yandex' && getSearchCategory() === 'images') {
       const a = result.querySelector('a[href*="img_url="]');
@@ -2606,11 +2625,19 @@
       const iusc = result.querySelector('a.iusc');
       if (iusc) { try { const t = JSON.parse(iusc.getAttribute('m') || '{}').t; if (t) return String(t); } catch (_) {} }
     }
+    if (engine === 'bing') {
+      if (getSearchCategory() === 'videos') { const t = result.querySelector('.mc_vtvc_title'); if (t && t.textContent.trim()) return t.textContent.trim(); }
+      if (getSearchCategory() === 'news') { const t = result.querySelector('a.title'); if (t && t.textContent.trim()) return t.textContent.trim(); }
+    }
     const title = getResultText(result, (getSelectors()[engine] || SELECTORS.other).titles);
     if (!title && engine === 'google' && getSearchCategory() === 'images') {
-      const card = result.querySelector('[data-lpage]');
-      const txt = card ? (card.getAttribute('aria-label') || card.textContent || '').trim() : '';
-      if (txt) return txt.slice(0, 200);
+      const card = (typeof result.getAttribute === 'function' && result.getAttribute('data-lpage')) ? result : result.querySelector('[data-lpage]');
+      const label = card ? (card.getAttribute('aria-label') || '').trim() : '';
+      if (label) return label.slice(0, 200);
+      const img = result.querySelector('img[alt]');
+      if (img && img.alt) return img.alt.trim();
+      const fallback = card ? (card.textContent || '').trim() : '';
+      if (fallback) return fallback.slice(0, 200);
     }
     if (!title && (engine === 'duckduckgo' || engine === 'yandex') && getSearchCategory() === 'images') {
       const img = result.querySelector('img[alt]');
@@ -2625,6 +2652,14 @@
   }
 
   function getResultTitleElement(result, engine) {
+    if (engine === 'google' && getSearchCategory() === 'images') {
+      const img = result.querySelector('img[alt]') || result.querySelector('img');
+      if (img) return img;
+    }
+    if (engine === 'bing') {
+      if (getSearchCategory() === 'videos') { const t = result.querySelector('.mc_vtvc_title'); if (t) return t; }
+      if (getSearchCategory() === 'news') { const t = result.querySelector('a.title'); if (t) return t; }
+    }
     const selectors = (getSelectors()[engine] || SELECTORS.other).titles;
     if (!Array.isArray(selectors)) return null;
     for (const selector of selectors) {
@@ -3737,7 +3772,7 @@
     'serhl-set-show-bubble': 'showBubble', 'serhl-set-show-count': 'showCount',
     'serhl-set-panel-centered': 'panelCentered',
     'serhl-set-disable-block': 'enabled', 'serhl-set-debug': 'debug',
-    'serhl-set-error-detection': 'errorDetection', 'serhl-set-collapse-mode': 'collapseMode'
+    'serhl-set-error-detection': 'errorDetection', 'serhl-set-collapse-mode': 'collapseMode', 'serhl-set-highlight-whitelist': 'highlightWhitelist'
   };
   const INVERTED_SETTINGS_CHECKBOXES = new Set(['serhl-set-disable-block']);
 
@@ -3783,7 +3818,7 @@
 
   function applyGlobalConfigUi() { applyDarkModeClass(); applyUiScale(); applyCollapseMode(); }
 
-  function applyConfigToMainPanel() {
+  function applyConfigToMainPanel(syncRules = true) {
     applyGlobalConfigUi(); if (!document.getElementById('serhl-panel')) return;
     Object.keys(SETTINGS_PANEL_CHECKBOXES).forEach(id => {
       const el = document.getElementById(id); if (!el) return; const key = SETTINGS_PANEL_CHECKBOXES[id];
@@ -3801,7 +3836,7 @@
     const darkModeSync = document.getElementById('serhl-set-dark-mode'); if (darkModeSync) darkModeSync.value = ['light', 'dark'].includes(currentConfig.darkMode) ? currentConfig.darkMode : 'system';
     const langSync = document.getElementById('serhl-set-language'); if (langSync) langSync.value = currentConfig.language === 'en' ? 'en' : 'zh-CN';
     const textarea = document.getElementById('serhl-rules');
-    if (textarea && Array.isArray(currentConfig.rules)) {
+    if (syncRules && textarea && Array.isArray(currentConfig.rules)) {
       textarea.value = currentConfig.rules.join('\n'); updateLineNumbers();
     }
   }
@@ -4413,7 +4448,8 @@
               { id: 'serhl-set-debug', labelKey: 'debugMode', checked: currentConfig.debug === true }
             ])}
             ${settingsRow([
-              { id: 'serhl-set-collapse-mode', labelKey: 'collapseMode', checked: currentConfig.collapseMode === true }
+              { id: 'serhl-set-collapse-mode', labelKey: 'collapseMode', checked: currentConfig.collapseMode === true },
+              { id: 'serhl-set-highlight-whitelist', labelKey: 'highlightWhitelist', checked: currentConfig.highlightWhitelist === true }
             ])}
             <div style="display: flex; gap: 8px; margin: 0; padding: 0;">
                 ${settingsSelect('serhl-set-ui-scale', 'uiScale', [['s', t('scaleM')], ['l', t('scaleL')], ['xl', t('scaleXL')], ['xxl', t('scaleXXL')]], ['s', 'xl', 'xxl'].includes(currentConfig.uiScale) ? currentConfig.uiScale : 'l')}
@@ -4470,6 +4506,10 @@
       { id: 'serhl-set-collapse-mode', key: 'collapseMode', apply: () => {
         applyCollapseMode(); forceReprocessAll();
         if (currentConfig.collapseMode === true) showToast(t('collapseModeHint'), 'info');
+      } },
+      { id: 'serhl-set-highlight-whitelist', key: 'highlightWhitelist', apply: () => {
+        forceReprocessAll();
+        if (currentConfig.highlightWhitelist === true) showToast(t('highlightWhitelistHint'), 'info');
       } }
     ];
     settingsDefs.forEach(sw => {
@@ -5165,7 +5205,7 @@
   }
 
   function parseConfigHeader(lines) {
-    const rest = []; let settings = null, selectors = null, scanning = true;
+    const rest = []; let settings = null, selectors = null, scanning = true, invalidSelectors = false;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i], s = line.trim();
       if (scanning && i < 10) {
@@ -5181,23 +5221,25 @@
           if (payload.startsWith('\x7B') && !settings) continue;
         }
         if (s.startsWith('# Selectors:')) {
-          const payload = s.slice('# Selectors:'.length).trim(); let parsed = null;
-          if (/^[\x7B\x5B]/.test(payload)) { try { parsed = JSON.parse(payload); } catch (e) {} }
-          if (parsed && !selectors && selectorPatchOk(parsed)) { selectors = parsed; continue; }
-          if (/^[\x7B\x5B]/.test(payload) && !selectors) continue;
+          if (!selectors) {
+            const payload = s.slice('# Selectors:'.length).trim(); let parsed = null;
+            if (/^[\x7B\x5B]/.test(payload)) { try { parsed = JSON.parse(payload); } catch (e) {} }
+            if (parsed && selectorPatchOk(parsed)) selectors = parsed; else invalidSelectors = true;
+            continue;
+          }
         }
         if (!s.startsWith('#')) scanning = false;
       }
       rest.push(line);
     }
-    return { settings, selectors, rest };
+    return { settings, selectors, rest, invalidSelectors };
   }
 
   function selectorPatchOk(v) {
     if (Array.isArray(v)) return true;
     if (!v || typeof v !== 'object') return false;
     const flagsOk = (f) => { f = String(f || '').toLowerCase(); return /^[imsu]*$/.test(f) && new Set(f).size === f.length; };
-    const cssOk = (val) => { const list = typeof val === 'string' ? [val] : val; return Array.isArray(list) && list.every(s => typeof s === 'string' && !!s.trim() && !hasPseudoElement(s) && isValidCssSelector(s)); };
+    const cssOk = (val, allowEmpty = false) => { const list = typeof val === 'string' ? [val] : val; return Array.isArray(list) && list.every(s => typeof s === 'string' && ((allowEmpty && !s.trim()) || (!!s.trim() && !hasPseudoElement(s) && isValidCssSelector(s)))); };
     const reOk = (val) => {
       if (typeof val === 'string') { const lit = val.match(/^\/(.*)\/([a-z]*)$/i); if (lit && !flagsOk(lit[2])) return false; try { new RegExp(lit ? lit[1] : val, lit ? lit[2] : ''); return true; } catch (e) { return false; } }
       if (val && typeof val === 'object' && typeof val.source === 'string' && flagsOk(val.flags)) { try { new RegExp(val.source, String(val.flags || '').toLowerCase()); return true; } catch (e) { return false; } }
@@ -5210,7 +5252,7 @@
       if ((def.disabled !== undefined && def.disabled !== null && typeof def.disabled !== 'boolean') || (def.disable !== undefined && def.disable !== null && typeof def.disable !== 'boolean')) return false;
       if (def.extraElements !== undefined && def.extraElements !== null && (!Array.isArray(def.extraElements) || !def.extraElements.every(s => typeof s === 'string' && !!s.trim() && !hasTopLevelComma(s) && isValidCssSelector(':scope > :nth-child(1) ' + s)))) return false;
       if (def.match !== undefined && def.match !== null && !reOk(def.match)) return false;
-      for (const f of ['containers', 'titles', 'snippets', 'links']) if (def[f] !== undefined && def[f] !== null && !cssOk(def[f])) return false;
+      for (const f of ['containers', 'titles', 'snippets', 'links']) if (def[f] !== undefined && def[f] !== null && !cssOk(def[f], f !== 'containers')) return false;
     }
     return true;
   }
@@ -5232,9 +5274,13 @@
     pickTextFile('.txt,text/plain', (content) => {
       const rawLines = String(content || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n');
       const parsedHeader = parseConfigHeader(rawLines);
-      if (isNonRuleTextResponse(parsedHeader.rest, !!(parsedHeader.settings || parsedHeader.selectors), true)) { showToast(t('fileImportFailed'), 'error'); return; }
-      const newRules = filterValidRuleLines(parsedHeader.rest);
       const hasHeader = !!(parsedHeader.settings || parsedHeader.selectors);
+      if (isNonRuleTextResponse(parsedHeader.rest, hasHeader, true)) { showToast(t('fileImportFailed'), 'error'); return; }
+      if (parsedHeader.invalidSelectors) {
+        showToast(t('selectorJsonError'), 'error');
+        if (!hasHeader && !hasEffectiveRules(parsedHeader.rest)) return;
+      }
+      const newRules = filterValidRuleLines(parsedHeader.rest);
       const headerOnly = hasHeader && !parsedHeader.rest.some(l => l.trim());
       const replaceRules = !headerOnly && (hasEffectiveRules(newRules) || !hasEffectiveRules(currentConfig.rules) || confirm(t('importClearConfirm')));
       if (parsedHeader.settings) applyImportedSettings(parsedHeader.settings);
@@ -5249,7 +5295,7 @@
         currentConfig.rules = newRules;
         const panel = document.getElementById('serhl-panel'); if (panel) panel._initialRules = [...currentConfig.rules];
       }
-      persistConfig(true); applyConfigToMainPanel(); if (selectorsApplied) refreshEngineSite(); else forceReprocessAll();
+      persistConfig(true); applyConfigToMainPanel(replaceRules); if (selectorsApplied) refreshEngineSite(); else forceReprocessAll();
     });
   }
 
@@ -5412,7 +5458,7 @@
 
     const wrapHistoryMethod = (method) => {
       const orig = history[method];
-      if (typeof orig !== 'function' || orig._serhWrapped) return;
+      if (typeof orig !== 'function' || orig._serhlWrapped) return;
       const wrapped = function(...args) {
         const ret = orig.apply(this, args);
         try {
@@ -5420,7 +5466,7 @@
         } catch (e) {}
         return ret;
       };
-      wrapped._serhWrapped = true;
+      wrapped._serhlWrapped = true;
       history[method] = wrapped;
     };
     wrapHistoryMethod('pushState'); wrapHistoryMethod('replaceState'); window.addEventListener('serhl:locationchange', _urlChangeHandler);

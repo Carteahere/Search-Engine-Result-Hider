@@ -1,9 +1,9 @@
 bing: {
   match: /^(?:(?:www[2-4]?|cn|global|m)\.)?bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
   containers: 'li.b_algo, div.b_algo',
-  titles: ['h2 a', 'a h2', '.b_title'],
-  snippets: ['.b_caption p', '.b_snippet', '.b_paractl p', '.b_lineclamp2'],
-  links: ['h2 a[href]', '.b_title a[href]', '.b_algoheader a[href]', 'h3 a[href]', 'div[role="heading"] a[href]', 'a[href]'],
+  titles: ['h2 a', 'a h2', '.b_title', '.mc_vtvc_title', 'a.title'],
+  snippets: ['.b_caption p', '.b_snippet', '.b_paractl p', '.b_lineclamp2', '.mc_vtvc_meta', '.snippet'],
+  links: ['h2 a[href]', '.b_title a[href]', '.b_algoheader a[href]', 'h3 a[href]', 'div[role="heading"] a[href]', 'a.title[href]', 'a[href]'],
 },
 google_scholar: {
   match: /^(?:www\.)?scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/,
@@ -16,7 +16,7 @@ google: {
   match: /^https?:\/\/(?:(?:www|images|video|videos|search|encrypted|m)\.)?google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})(?::\d+)?\/(?:(?:search|webhp|imghp|videohp)(?:[/?#]|$)|[?#]|$)/i,
   containers: 'div.g, div.MjjYud',
   titles: ['h3', 'div[role="heading"]', '.LC20lb', '.DKV0Md', '.sXLaOe', '.c9DxTc', 'a h3'],
-  snippets: ['.st', '.VwiC3b', '.s3v9rd', '.IsZvec', '.lyLwlc', '.yXK7lf'],
+  snippets: ['.st', '.VwiC3b', '.s3v9rd', '.IsZvec', '.lyLwlc', '.yXK7lf', '.ITZIwc'],
   links: 'a[href]',
 },
 duckduckgo_lite: {
