@@ -66,7 +66,7 @@ Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、S
 | 规则 | 示例 | 说明 |
 | --- | --- | --- |
 | URL | `*://*.example.com/*` | 屏蔽 `example.com` |
-| URL | `*://*.例子.com` | 等效屏蔽 `*://*.xn--fsqu00a.com` |
+| URL | `*://*.例子.com/*` | 等效屏蔽 `*://*.xn--fsqu00a.com` |
 | 正则 | `/example\.(com\|net)/i` | 屏蔽 `example.com` 和 `example.net` |
 | 标题 | `title/.*example.*/i` | 屏蔽标题含 `example` 的结果 |
 | 摘要 | `text/.*example.*/i` | 屏蔽网页描述内容(snippet)含 `example` 的结果 |

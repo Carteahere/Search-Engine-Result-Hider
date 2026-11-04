@@ -64,7 +64,7 @@ Simple Rule Explanation:
 | Type | Example | Explanation |
 | --- | --- |--- |
 | URL | `*://*.example.com/*` | block `example.com` |
-| URL | `*://*.例子.com` | Equivalent blocking `*://*.xn--fsqu00a.com` |
+| URL | `*://*.例子.com/*` | Equivalent blocking `*://*.xn--fsqu00a.com` |
 | regex | `/example\.(com\|net)/i` | block `example.com` and `example.net` |
 | title | `title/.*example.*/i` | block results whose title contains `example` |
 | snippet | `text/.*example.*/i` | block results whose page description (snippet) contains `example` |

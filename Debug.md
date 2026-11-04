@@ -92,7 +92,7 @@ d.checkRuleMatchOptimized(
 | 正则 flags 无效: {flags} | `/x/g、title/x/gi` | 不支持 `g`/`y`（脚本只判断是否匹配）；或使用了不存在的 flag | 删除 `g`/`y`，仅用 `i`/`m`/`s`/`u` |
 | `@if(...)` 括号未闭合 | `*://x.com/* @if(title *= "a"` | `@if( `的括号不配对 | 补全右括号 `)` |
 | `@if()` 条件不能为空 | `*://x.com/* @if()` | 括号内没有条件 | 填入条件表达式 |
-| 未知 `@if` 条件: {part} | `@if(foo = "a")` | 条件键名不在支持列表（`$site`/`$category`/`site`/`title`/`url`/`host`/`path`/`scheme`） | 检查键名拼写 |
+| 未知 `@if` 条件: {part} | `@if(foo = "a")` | 条件键名不在支持列表（`$site`/`$category`/`site`/`title`/`text`/`url`/`host`/`path`/`scheme`） | 检查键名拼写 |
 | 条件正则无效: {part} | `@if(title =~ /(/)` | `@if` 内 `=~` 正则本身语法错误 | 修正正则 |
 | `@if` 表达式语法错误: {part} | `@if(title *= )` | 条件表达式缺操作数、括号分组不完整等 | 补全表达式 |
 | URL规则无效 | 通配规则转正则后无法编译 | URL 通配符内部异常 | 简化规则结构重试 |

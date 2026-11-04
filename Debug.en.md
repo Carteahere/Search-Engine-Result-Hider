@@ -93,7 +93,7 @@ Error output
 | Invalid regular expression flags: {flags} | `/x/g`, `title/x/gi` | `g`/`y` are unsupported (the script only tests for a match); or a non-existent flag | Remove `g`/`y`, use only `i`/`m`/`s`/`u` |
 | Unbalanced `@if(...)` parentheses | `*://x.com/* @if(title *= "a"` | Parentheses of `@if(` are not paired | Add the closing `)` |
 | `@if()` condition cannot be empty | `*://x.com/* @if()` | No condition inside the parentheses | Enter a condition expression |
-| Unknown `@if` condition: {part} | `@if(foo = "a")` | Key not in the supported list (`$site`/`$category`/`site`/`title`/`url`/`host`/`path`/`scheme`) | Check the key spelling |
+| Unknown `@if` condition: {part} | `@if(foo = "a")` | Key not in the supported list (`$site`/`$category`/`site`/`title`/`text`/`url`/`host`/`path`/`scheme`) | Check the key spelling |
 | Invalid condition regex: {part} | `@if(title =~ /(/)` | The `=~` regex inside `@if` is itself invalid | Fix the regex |
 | Syntax error in `@if` expression: {part} | `@if(title *= )` | Missing operand, incomplete parenthesis grouping, etc. | Complete the expression |
 | Invalid URL rule | Wildcard rule fails to compile into a regex | Internal wildcard conversion exception | Simplify the rule structure and retry |

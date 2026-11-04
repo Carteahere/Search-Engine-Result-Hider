@@ -78,9 +78,9 @@ The `@@` syntax not supported yet.
 
 **Notes:**
 1. `@N` must be separated by a space from a bare domain rule; other rules may omit the space. For example, `@1 example.com` is recognized normally, while `@1example.com` is recognized as a whitelist rule.
-2. Only 5 colors are supported, `@N` = `@1`–`@5`; open the custom color panel from the script menu.
-3. Supports conditional expressions, such as `@N+host/path/url/scheme`.
-4. Unlike uBlacklist, where highlighting implies a whitelist effect, a highlighting rule only adds a display: a result that matches both a highlighting rule and the blacklist is still blocked.
+2. Open the custom color panel through the script menu option. It only supports 5 colors, where `@N` ranges from `@1` to `@5`. When `N` > 5, the effect reverts to `@1`. When multiple highlighting rules are matched, only the effect with the largest `N` is displayed.
+3. Supports conditional expressions, such as `@N+host/path/url/text/scheme`.
+4. Unlike uBlacklist, where highlighting implies a whitelist effect, a highlighting rule only adds a display: a result that matches both a highlighting rule and the blacklist is still blocked. The highlighting rules will only have a whitelist effect when the `Highlight Whitelist` switch is turned on.
 
 ### 2.8 Composite Rules:
 
@@ -102,6 +102,11 @@ The `@@` syntax not supported yet.
 | Title Prefix | `title ^= "keyword"` | Title starts with the string `keyword` |
 | Title Suffix | `title $= "keyword"` | Title ends with the string `keyword` |
 | Title Regex | `title =~ /regex/` (or shorthand `title/regex/`) | Title matches regex; bare slashes are allowed inside `[...]`; trailing `i` ignores case |
+| Snippet Contains | `text *= "keyword"` | Result snippet contains the string `keyword` |
+| Snippet Exact | `text = "keyword"` | Result snippet exactly matches the string `keyword` |
+| Snippet Prefix | `text ^= "keyword"` | Result snippet starts with the string `keyword` |
+| Snippet Suffix | `text $= "keyword"` | Result snippet ends with the string `keyword` |
+| Snippet Regex | `text =~ /regex/` (or shorthand `text/regex/`) | Result snippet matches regex; bare slashes are allowed inside `[...]`; trailing `i` ignores case |
 | URL Exact | `url = "https://example.com/"` | URL is exactly the string |
 | URL Prefix | `url ^= "https://abc.example.com"` | URL starts with the string |
 | URL Suffix | `url $= ".pdf"` | URL ends with the string |
@@ -115,7 +120,7 @@ The `@@` syntax not supported yet.
 
 **Condition Logic:**
 1. `title` has the alias `t`, `url` has the alias `u`; e.g. `@if(t *= "keyword")` is equivalent to `@if(title *= "keyword")`.
-2. `title`/`url`/`host`/`path`/`scheme` all support `=`, `^=`, `$=`, `*=`, `=~` and the shorthand omitting `=~` (e.g. `host/regex/`); `=~` case sensitivity follows the regex flags, while other comparisons ignore case by default.
+2. `title`/`text`/`url`/`host`/`path`/`scheme` all support `=`, `^=`, `$=`, `*=`, `=~` and the shorthand omitting `=~` (e.g. `host/regex/`); `=~` case sensitivity follows the regex flags, while other comparisons ignore case by default.
 3. The uBlacklist case modifier `i` (e.g. `title $= "Domain" i`) is recognized for compatibility only; the script ignores case by default.
 
 **Composite Rule Examples:**
@@ -125,10 +130,10 @@ The `@@` syntax not supported yet.
 | `*://*.example.com/* @if(title *= "keyword")` | Block `example.com` results whose title contains `keyword` |
 | `*://*.example.com/* @if(title *= "keywordA" \| title *= "keywordB")` | Block `example.com` results whose title contains `keywordA` or `keywordB` |
 | `*://*.example.com/* @if(title =~ /keywordA\|keywordB/i)` | Regex form of the rule above; a trailing `i` is required to ignore case |
+| `*://*.example.com/* @if(text *= "keyword")` | Block `example.com` results whose snippet contains `keyword` |
 | `*://*.example.com/* @if(title *= "keyword" & !(url *= "test"))` | Block `example.com` results whose title contains `keyword` and URL does not contain `test` |
 | `*://*.example.com/* @if(site = "google.com.hk")` | Block `example.com` only on Google HK |
 | `*://*.example.com/* @if($site = "google") @if(title *= "example")` | On Google only, block `example.com` results whose title contains `example` |
-| `*://*.example.com/* @if($category = "images")` | Block `example.com` only in image search |
 | `*://*.example.com/* @if(title *= "a" \| title *= "b") @if(!(url *= "c"))` | Block `example.com` results whose title contains `a` or `b` and URL does not contain `c` |
 | `text/.*example.*/ @if($site = "google" \| $site = "bing")` | On Google or Bing, block results whose snippet contains `example` |
 | `path *= "/download/"` | Block results whose path contains `/download/` |
@@ -179,4 +184,4 @@ In `@if($site = "engine")`, `yahoo-japan` = `yahoo_japan`, `ddg` = `duckduckgo` 
 
 **Auto-analysis:**
 
-If you are unsure how to add or capture selectors, send offline files of the search page (such as `.mht` or `.html`) along with a formatted table to the AI; it will analyze the container structure and generate the corresponding selectors. Since container naming may differ across mobile, desktop, or regional versions of search engines and web sites, save and analyze a file for each version and fill in multiple selectors accordingly.
+If you are unsure how to add or capture selectors, send offline files of the search page (such as `.mht` or `.html`) along with a formatted table to the AI; it will analyze the container structure and generate the corresponding selectors. The naming conventions for containers on mobile/desktop/regional sites of the same website may vary, necessitating the separate saving and analysis of files, as well as the filling out of multiple selectors.
