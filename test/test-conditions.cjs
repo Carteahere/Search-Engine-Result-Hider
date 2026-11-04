@@ -92,9 +92,9 @@ function condExpr(str, engine = 'google', siteHost = 'www.google.com', category 
   const folded = m.foldCondExpr(ast);
   return folded.type === 'const' ? { const: folded.value } : { ast: folded };
 }
-function ev(folded, title, url) {
+function ev(folded, title, url, snippet) {
   if (folded.const !== undefined) return folded.const;
-  return m.evalCondAST(folded.ast, title, url);
+  return m.evalCondAST(folded.ast, title, url, snippet);
 }
 
 // ==== 一、条件表达式解析与识别 ====
@@ -165,6 +165,10 @@ r = condExpr('title=~/未闭合', 'google');
 r = condExpr('url/example\\.(com|net)/', 'google');
 assert('条件-050: url简写正则内括号与|整吞', !r.errors && ev(r, 't', 'https://example.com/') === true && ev(r, 't', 'https://example.net/') === true && ev(r, 't', 'https://other.net/') === false);
 r = condExpr('url/example\\.net/i', 'google');
+assert('条件-045: text条件按正文匹配', (() => {
+  const a = condExpr('text *= "广告"', 'google'); const b = condExpr('text =~ /spam/i', 'google'); const c = condExpr('text/推广/', 'google');
+  return !a.errors && !b.errors && !c.errors && ev(a, '', 'https://x/', '页面广告内容') === true && ev(a, '', 'https://x/', '正常内容') === false && ev(b, '', 'https://x/', 'SPAM here') === true && ev(c, '', 'https://x/', '推广信息') === true;
+})());
 r = condExpr('url/example\\.com/ | title *= "kw"', 'google');
 r = condExpr('!(url $= ".pdf")', 'google');
 r = condExpr('url ^= "https://ex.com"', 'google');
@@ -272,7 +276,7 @@ assert('条件-121: $site命中折叠恒真', p.coreRule === '' && p.staticPass 
 m.setEnv('bing', 'www.bing.com');
 m.setEnv('google', 'www.google.com');
 
-assert('条件-125: 高亮越界无效', m.analyzeRule('@9 host $= ".example.com"').valid === false);
+assert('条件-125: 高亮越界回退@1且@0仍报错', m.analyzeRule('@9 host $= ".example.com"').valid === true && m.analyzeRule('@0 host $= ".example.com"').valid === false);
 assert('条件-131: 损坏的@if全部报错并丢弃', [
   'title/x/ @if(foo $= "bar")',
   'title/x/ @if(title =~ /bad(/)',
@@ -400,6 +404,12 @@ assert('条件-197: =/foo/g与=/foo/ii判定flag错误, ="/foo/ii"仍按字面�
   const t = (rule) => { const p = rule.indexOf('=', rule.indexOf('@if')) + 2; return s(rule, p); };
   assert('条件-198: =接未配对括号正则进正则态不截断', t('*://x.com/* @if(title = /a)b/)') === true);
   assert('条件-199: =接字符串值a/b不进正则态', t('*://x.com/* @if(title = a/b)') === false);
+  // ---- 条件-200: YAML文档标记内rules保留(修复留档) ----
+  assert('条件-200: YAML文档标记内rules保留且与正文合并', (() => {
+    const r1 = m.parseRulesetContent('---\nname: Test\nrules:\n  - example.com\n  - title/.*广告.*/i\n---\n');
+    const r2 = m.parseRulesetContent('---\nname: X\nrules:\n  - a.com\n---\n*://b.com/*\n');
+    return r1.meta.name === 'Test' && r1.lines.filter(Boolean).join('|') === 'example.com|title/.*广告.*/i' && r2.lines.filter(Boolean).join('|') === 'a.com|*://b.com/*';
+  })());
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

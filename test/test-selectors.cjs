@@ -134,6 +134,13 @@ api.setStore({});
 api.setSubStore([{ url: 'https://sub/y.js', enabled: true, selectors: { bing: { containers: 'div.sub-bing' } } }]);
 check('011g: subscribed image containers win', api.getContainerSelector('bing') === 'div.sub-bing');
 api.setSubStore([]); api.setHost('www.google.com'); api.setHref('https://www.google.com/');
+api.setHref('https://www.google.com/search?q=x&tbm=vid'); const gVideoCont = api.getContainerSelector('google');
+api.setHref('https://www.google.com/search?q=x&tbm=nws'); const gNewsCont = api.getContainerSelector('google');
+api.setHost('www.bing.com');
+api.setHref('https://www.bing.com/videos/search?q=x'); const bVideoCont = api.getContainerSelector('bing');
+api.setHref('https://www.bing.com/news/search?q=x'); const bNewsCont = api.getContainerSelector('bing');
+check('选择器-211: 视频/新闻按真实卡片容器返回', gVideoCont === 'div.PmEWq' && gNewsCont === 'a.aJWbwf' && bVideoCont === 'div.mc_vtvc' && bNewsCont === 'div.news-card');
+api.setHost('www.google.com');
 api.setSubStore([{ url: 'https://example.com/subs.js', enabled: true, selectors: { yahoo: { match: '^(?:[a-z]{1,6}\\.)?(?:search\\.)?yahoo\\.co\\.jp$', containers: '.sub-y' }, yahoo_japan: { match: '^search\\.yahoo\\.co\\.jp$', containers: '.sub-yj' } } }]);
 api.setHost('search.yahoo.co.jp');
 const yahooPick = api.getSearchEngine();
@@ -602,6 +609,8 @@ for (const [i, [location, expected]] of pageCases.entries()) assert(`选择器-0
 // 搜索分类检测(每引擎保留代表)
 const catCases = [
   [{ hostname: 'www.google.com', pathname: '/search', search: '?udm=7' }, 'videos'],
+  [{ hostname: 'www.google.com', pathname: '/search', search: '?q=x&udm=vids' }, 'videos'],
+  [{ hostname: 'www.google.com', pathname: '/search', search: '?q=x&tbm=vids' }, 'videos'],
   [{ hostname: 'www.bing.com', pathname: '/images/search', search: '?q=x' }, 'images'],
   [{ hostname: 'duckduckgo.com', pathname: '/', search: '?iax=images' }, 'images'],
   [{ hostname: 'www.startpage.com', pathname: '/sp/search', search: '?query=x&category=images' }, 'web'],
@@ -1087,6 +1096,45 @@ return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS
   };
   const g5 = linkApiG.getResultLink(resGoto, 'google');
   check('选择器-163: goto包裹经pill→cite完整文本恢复可见域名', !!g5 && g5.href === 'https://blog.hubspot.com');
+}
+
+// ---- 图片/视频/新闻真实卡片容器取链接 ----
+{
+  const linkApiC = new Function('SELECTORS', `
+    function toASCIIHostname(h) { return h; }
+    function toASCIIUrl(u) { return u; }
+    function getSelectors() { return SELECTORS; }
+    let currentHref = 'https://www.google.com/search?q=x&tbm=isch';
+    const window = { location: { hostname: 'www.google.com', get href() { return currentHref; }, origin: 'https://www.google.com' } };
+    const location = window.location;
+    let _engineCacheHost = null; let _engineCacheResult = 'other'; let _categoryCacheHref = null; let _categoryCacheResult = 'web';
+    ${src.match(/const ENGINE_HOST_REGEXES = \{[\s\S]*?\n  \};/)[0]}
+    function isEngineHost(engine, host) { const re = ENGINE_HOST_REGEXES[engine]; return !!re && re.test(String(host || '')); }
+    const isNotGoogleHost = (h) => !!h && !isEngineHost('google', h);
+    ${extractFn(src, 'getSearchEngine')}
+    ${extractFn(src, 'getSearchCategory')}
+    ${extractFn(src, 'isBingImagesPage')}
+    ${extractFn(src, 'decodeRedirectTarget')}
+    ${extractFn(src, 'decodeBingCkTarget')}
+    ${extractFn(src, 'isOpaqueRedirectUrl')}
+    ${extractFn(src, 'unwrapRedirectUrl')}
+    ${extractFn(src, 'getResultLink')}
+    return { getResultLink, setHref: (h) => { currentHref = h; } };
+  `)(eval(`(${getSelectorsObjectText()})`));
+  const selfAttr = (name, value) => ({ tagName: 'DIV', getAttribute: (a) => a === name ? value : null, setAttribute() {}, querySelector: () => null });
+  const childAttr = (sel, name, value) => ({ tagName: 'DIV', getAttribute: () => null, setAttribute() {}, querySelector: (s) => s === sel ? selfAttr(name, value) : null });
+  const gImg = linkApiC.getResultLink(selfAttr('data-lpage', 'https://img.example.com/page'), 'google');
+  linkApiC.setHref('https://www.google.com/search?q=x&tbm=vid');
+  const gVid = linkApiC.getResultLink(childAttr('[data-curl]', 'data-curl', 'https://www.youtube.com/watch?v=abc'), 'google');
+  linkApiC.setHref('https://www.google.com/search?q=x&tbm=nws');
+  const gNewsEl = { tagName: 'A', href: 'https://www.google.com/goto?url=abc', getAttribute: () => null, setAttribute() {}, querySelector: () => null };
+  const gNews = linkApiC.getResultLink(gNewsEl, 'google');
+  linkApiC.setHref('https://www.bing.com/videos/search?q=x');
+  const bVid = linkApiC.getResultLink(childAttr('[ourl]', 'ourl', 'https://video.example.com/v'), 'bing');
+  linkApiC.setHref('https://www.bing.com/news/search?q=x');
+  const bNews = linkApiC.getResultLink({ tagName: 'DIV', getAttribute: () => null, setAttribute() {}, querySelector: (s) => s === 'a.title[href]' ? { href: 'https://news.example.com/a' } : null }, 'bing');
+  check('选择器-212: Google图片自身data-lpage/视频data-curl/新闻卡片链接', gImg.href === 'https://img.example.com/page' && gVid.href === 'https://www.youtube.com/watch?v=abc' && gNews === gNewsEl);
+  check('选择器-213: Bing视频ourl/新闻a.title链接', bVid.href === 'https://video.example.com/v' && bNews.href === 'https://news.example.com/a');
 }
 
 // ---- match字符串字面量与引擎同口径 ----

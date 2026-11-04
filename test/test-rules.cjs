@@ -85,7 +85,7 @@ let currentEngine = 'google', currentSite = 'www.google.com', currentCategory = 
 const window = { location: { get hostname() { return currentSite; } } };
 function getSearchEngine() { return currentEngine; }
 function getSearchCategory() { return currentCategory; }
-const currentConfig = { rules: [], debug: false };
+const currentConfig = { rules: [], debug: false, highlightWhitelist: false };
 let subscriptions = [];
 function getSubscriptions() { return subscriptions; }
 function getAllSubscriptionRules() { const r = []; subscriptions.filter(s => s.enabled).forEach(s => { if (s.rules && Array.isArray(s.rules)) r.push(...s.rules); }); return r; }
@@ -97,6 +97,7 @@ return {
   buildRuleIndex, checkRuleMatchOptimized, analyzeRule, validateRule, validateUrlWildcard,
   getCR: () => compiledRules, setCR: (cr) => { compiledRules = cr; },
   setState: (rules, subs) => { currentConfig.rules = rules; subscriptions = subs || []; _testRulesRev++; _subscriptionStoreSignature = 'test' + _testRulesRev; },
+  setConfig: (cfg) => Object.assign(currentConfig, cfg),
 };`)();
 }
 // 订阅规则过滤沙箱
@@ -179,6 +180,8 @@ assert('规则-045: 规则路径后的普通字符不越界', (() => {
 })());
 assert('规则-282: 路径规则以分隔符结尾时按前缀匹配', match('*://*.example.com/download/', 'https://a.example.com/download/file.zip') && match('example.com/', 'https://example.com/abc') && match('*://example.com/search?q=', 'https://example.com/search?q=abc') && !match('*://example.com/release', 'https://example.com/releasex'));
 assert('规则-083: 查询参数规则命中后续参数', match('*://x.com/*?a=b', 'https://x.com/z?a=b&c=d'));
+// ---- 规则-287: 普通字符结尾路径匹配后续查询串(修复留档, 主/Lite) ----
+assert('规则-287: 普通字符结尾路径匹配后续查询串', match('*://example.com/page', 'https://example.com/page?utm_source=x') && match('*://*.example.com/*.pdf', 'https://a.example.com/a.pdf?dl=1') && !match('*://example.com/page', 'https://example.com/pagex') && SERH_RAW_EXTRACT(src, 'wildcardToRegex') === SERH_RAW_EXTRACT(fs.readFileSync(path.join(scriptDir, 'Lite.user.js'), 'utf8'), 'wildcardToRegex'));
 
 // 尾部转义星号末尾锚定
 const wcMatch = (rule, url) => new RegExp(api.wildcardToRegex(rule), 'i').test(url);
@@ -262,6 +265,11 @@ assert('规则-097: @N前缀需要分隔符', (() => {
   return !c.highlightDomains.has('fast.com') && c.whitelistDomains.has('2fast.com');
 })());
 
+assert('规则-098: 高亮级别>5回退@1', (() => {
+  api.setState(['@9 *://*.over.com/*'], []); api.buildRuleIndex();
+  return api.getCR().highlightDomains.get('over.com')?.[0]?.N === 1;
+})());
+
 api.setState(['*://**.com/*', 'title/foo/gi', '/abc/gi', '/foo'], []);
 api.buildRuleIndex();
 cr2 = api.getCR();
@@ -332,6 +340,14 @@ assert('规则-125: 高亮与屏蔽同时返回; 仅高亮无屏蔽', (() => {
   const rA = doCheck(crA), rB = doCheck(crB);
   return rA && rA.highlight === 2 && rA.blocked === true && rB && rB.highlight === 3 && !rB.blocked;
 })());
+assert('规则-126: 多个高亮命中取最高N', (() => {
+  const cr = makeCR();
+  cr.highlightDomains.set('example.com', [{ N: 1, type: 'wildcard' }, { N: 3, type: 'wildcard' }]);
+  const r1 = doCheck(cr, url, host, 'title');
+  cr.highlightTitles.push({ N: 5, regex: /title/ });
+  const r2 = doCheck(cr, url, host, 'title');
+  return r1 && r1.highlight === 3 && r2 && r2.highlight === 5;
+})());
 assert('规则-127: 裸域父域TLD级规则经regex回退命中黑名单与白名单', (() => {
   api.setState(['*://*.com/*'], []);
   api.buildRuleIndex();
@@ -358,6 +374,19 @@ assert('规则-128: 空域名回退白名单@+命中规则可解订阅屏蔽死�
   api.setState(wl, [{ enabled: true, url: 's1', rules: sub }]);
   api.buildRuleIndex();
   return cases.every((c) => { const r = api.checkRuleMatchOptimized(...c); return !r || r.blocked !== true; });
+})());
+assert('规则-129: 高亮白名单开启后高亮命中不再屏蔽', (() => {
+  const cr = makeCR(); cr.highlightDomains.set('example.com', [{ N: 2, type: 'wildcard', isLocal: true }]); addBlDomain(cr, 'example.com', 'wildcard', 'example.com', '本地规则');
+  api.setConfig({ highlightWhitelist: false }); const off = doCheck(cr);
+  api.setConfig({ highlightWhitelist: true }); const on = doCheck(cr); api.setConfig({ highlightWhitelist: false });
+  return off && off.blocked === true && off.highlight === 2 && on && on.blocked !== true && on.whitelisted === true && on.highlight === 2;
+})());
+assert('规则-129b: @if text条件按正文命中', (() => {
+  api.setState(['*://*.example.com/* @if(text *= "广告")'], []);
+  api.buildRuleIndex();
+  const hit = api.checkRuleMatchOptimized('https://www.example.com/x', 'www.example.com', '标题', '页面广告内容', sl);
+  const miss = api.checkRuleMatchOptimized('https://www.example.com/x', 'www.example.com', '标题', '正常内容', sl);
+  return hit && hit.blocked === true && (!miss || miss.blocked !== true);
 })());
 }
 
@@ -613,6 +642,24 @@ function createEnv(initRules) {
   assert('规则-211: 有配置头但正文全是垃圾文本也被拒绝', env.textarea.value === '' && env.hooks.written.length === 0 && env.hooks.applyCalls === undefined);
 }
 
+// 空links选择器头可导入且坏头不触发清空确认(修复留档)
+{
+  const { env, api, fakeInput } = createEnv(['old.com']);
+  api.importRulesFromFile();
+  fakeInput.files = [{ _content: '# Selectors:{"bing":{"links":""}}' }];
+  fakeInput.onchange({ target: fakeInput });
+  const sel = env.hooks.written.find((w) => w.key === 'searchfilter_selectors');
+  const cfg = env.hooks.written.find((w) => w.key === 'searchfilter_blocker');
+  assert('规则-290: 空links选择器头可导入且不清空本地规则', !!(sel && sel.val.bing.links === '') && env.hooks.getConfirmCalls() === 0 && !!(cfg && cfg.val.rules.join() === 'old.com'));
+}
+{
+  const { env, api, fakeInput } = createEnv(['old.com']);
+  api.importRulesFromFile();
+  fakeInput.files = [{ _content: '# Selectors:{"bing":{"containers":""}}' }];
+  fakeInput.onchange({ target: fakeInput });
+  assert('规则-291: 无效选择器头不触发清空确认且不改配置', env.hooks.getConfirmCalls() === 0 && env.hooks.written.length === 0 && env.textarea.value === '');
+}
+
 // 空规则文件导入清空前需确认(修复留档)
 {
   const { env, api, fakeInput } = createEnv(['old.com']);
@@ -692,6 +739,10 @@ function createEnv(initRules) {
   assert('规则-214: 重复头取首个, 后部伪头按注释保留正文', r.config.a === 1 && r.config.b === undefined && r.restLines.join('\n') === '# ScriptConfig: {"b":2}\nrule1');
   r = run('# ScriptConfig:{"syncedAt":12\nrule1');
   assert('规则-215: JSON截断头行剔除出 restLines 且不重发', r.config === null && r.rawScriptConfig === null && r.restLines.join('\n') === 'rule1');
+  r = run('# Selectors:{"bing":{"links":"","titles":[""]}}\nrule1');
+  assert('规则-288: 空links与空标题项选择器头可解析且正文保留', !!(r.rawSelectors && r.config && r.config.selectors && r.config.selectors.bing.links === '' && r.config.selectors.bing.titles[0] === '') && r.invalidSelectors === false && r.restLines.join('\n') === 'rule1');
+  r = run('# Selectors:{"bing":{"containers":""}}\nrule1');
+  assert('规则-289: 无效选择器头标记invalidSelectors且不丢正文', r.invalidSelectors === true && r.rawSelectors === null && r.restLines.join('\n') === 'rule1');
   r = run('\uFEFF# title: my rules\n# author: me\n*://bad.example.com/*');
 }
 })();
@@ -790,8 +841,11 @@ assert('规则-278: Lite mergeRules3Way与主版逐字节一致, 他侧删除不
   const parsed = liteParse([header, '*://a.com/*']);
   const bad = liteParse(['# Selectors:{bad', '*://a.com/*']);
   const cfgBad = liteParse(['# ScriptConfig:{bad', '*://a.com/*']);
+  const emptyLinks = liteParse(['# Selectors:' + JSON.stringify({ bing: { links: '' } }), '*://a.com/*']);
+  const badSel = liteParse(['# Selectors:{"bing":{"containers":""}}']);
   assert('281b: Lite drops malformed ScriptConfig header', cfgBad.settings === null && JSON.stringify(cfgBad.rest) === JSON.stringify(['*://a.com/*']));
   assert('规则-281: Lite导入识别# Selectors头且不把该行当规则', !!(parsed.selectors && parsed.selectors.example && parsed.selectors.example.containers === '.result, .result2') && JSON.stringify(parsed.rest) === JSON.stringify(['*://a.com/*']) && JSON.stringify(bad.rest) === JSON.stringify(['*://a.com/*']));
+  assert('规则-292: Lite空links头可解析且坏头标记invalidSelectors', !!(emptyLinks.selectors && emptyLinks.selectors.bing.links === '') && badSel.invalidSelectors === true && JSON.stringify(badSel.rest) === JSON.stringify([]));
 }
 
 // ---- 规则-279/280: URL规则解码匹配 / 通配校验撇号(修复留档) ----
