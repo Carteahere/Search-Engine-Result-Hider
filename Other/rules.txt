@@ -1,31 +1,35 @@
-# 26-10 可能误杀 仅供参考
+# 261106 可能误杀 仅供参考
 # ==== 文件 ====
+/^https?:\/\/[^\s"<>]+\.doc(?:[?#].*)?$/i
 /^https?:\/\/[^\s"<>]+\.pdf(?:[?#].*)?$/i
 /^https?:\/\/[^\s"<>]+\.xlsx?(?:[?#].*)?$/i
 # ==== 标题-摘要 ====
+text/.*一句话总结.*/
+text/.*暂无购买权限.*/
+text/.*来到了没有知识存在的荒原.*/
+text/.*验证码_哔哩哔哩.*/
 title/.*(威|葳|㣲|幑|薇|嶶|溦|徽)信.*/
 title/.*(威|葳|㣲|幑|薇|嶶|溦|徽|微)芯.*/
 title/.*[+加]\s*q{1,2}\s*\d{5,}.*/i
+title/.*╅微.*/
 title/.*吧友互助吧.*/
-title/.*笔趣阁.*/
-title/.*来到了没有知识存在的荒原.*/
-title/.*知乎 - 有问题,就会有答案.*/
-title/.*知乎 - 有问题，就会有答案.*/
 title/.*最新章节在线阅读.*/
-title/.*pikpak.*优惠码.*/i
+title/.*来到了没有知识存在的荒原.*/
+title/.*知乎.*有问题,就会有答案.*/
+title/.*知乎.*有问题，就会有答案.*/
+title/.*笔趣阁.*/
 title/^(?=.*app)(?=.*(?:体育|娱乐|彩票)).*/i
 title/^(?=.*clash)(?=.*(?:官|中文|教程)).*/i
 title/^(?=.*github)(?=.*(?:教程网|中文站|中文网)).*/i
+title/^(?=.*pikpak)(?=.*优惠).*/i
 title/^(?=.*telegram)(?=.*(?:86|短信)).*/i
 title/^(?=.*YSM)(?=.*爱发电).*/i
-text/.*来到了没有知识存在的荒原.*/
-text/.*验证码_哔哩哔哩.*/
-text/.*暂无购买权限.*/
 # ==== 域名-条件 ====
 *://*.ali213.net/* @if(title *= "视频指南")
 *://*.gamersky.com/* @if(title =~ /视频|修改器/)
 *://*.github.com/* @if(title *= "pikpak")
 *://*.news.qq.com/* @if(title =~ /攻略|一图流/)
+text/.*总的来说.*/ @if(host $= ".zhihu.com")
 # ==== 社区 ====
 *://*.51cto.com/*
 *://*.ali213.net/*
@@ -47,10 +51,11 @@ text/.*暂无购买权限.*/
 *://*.learn.microsoft.com/*
 *://*.linux.do/*
 *://*.php.cn/*
+*://*.reddit.com/r/China*
 *://*.support.huaweicloud.com/*
+*://*.toutiao.com/*
 *://community.oneplus.com/*
 # ==== 搜索引流 ====
-/^https://pcedu\.pconline\.com\.cn/\d{1,5}/\d{1,15}\.html$/
 *://*.3g.ali213.net/down/*
 *://*.acfun.cn/error/*
 *://*.agents.baidu.com/*
@@ -59,9 +64,9 @@ text/.*暂无购买权限.*/
 *://*.baidu.com/f?kw=*
 *://*.baidu.com/from=*
 *://*.baidu.com/hottopic/*
+*://*.baidu.com/sf/vsearch?pd=*
 *://*.baidu.com/sf?openapi=*
 *://*.baidu.com/sf?pd=video_page*
-*://*.baidu.com/sf/vsearch?pd=*
 *://*.baidu.com/tashuo/*
 *://*.baidu.com/video/*
 *://*.baidu.com/vsearch/*
@@ -122,12 +127,13 @@ text/.*暂无购买权限.*/
 *://*.sogou.com/sohu/*
 *://*.startup.aliyun.com/info/*
 *://*.tgstat.com/*
-*://*.tieba.com/f?kw*
 *://*.tieba.com/f/*
+*://*.tieba.com/f?kw*
 *://*.tiktok.com/*/photo/*
 *://*.tiktok.com/*/video/*
 *://*.tiktok.com/discover/*
 *://*.tiktok.com/tag/*
+*://*.toutiao.com/video/*
 *://*.toutiao.com/zixun/*
 *://*.tv.sohu.com/item/*
 *://*.tv.yandex.com/search/?text=*
@@ -162,6 +168,7 @@ text/.*暂无购买权限.*/
 *://wuu.wikipedia.org/*
 *://zh-classical.wikipedia.org/*
 *://zh-yue.wikipedia.org/*
+/^https:\/\/pcedu\.pconline\.com\.cn\/\d{1,5}\/\d{1,15}\.html$/i
 # ==== 购物平台 ====
 *://*.1688.com/*
 *://*.aeoncity.com.hk/*
@@ -299,6 +306,7 @@ text/.*暂无购买权限.*/
 *://*.abbreviationfinder.org/*
 *://*.acgknow.info/*
 *://*.adatai.com/*
+*://*.aethovpn.com/*
 *://*.aigamewang.com/*
 *://*.aigei.com/*
 *://*.aiqicha.baidu.com/*
@@ -342,11 +350,12 @@ text/.*暂无购买权限.*/
 *://*.beihangsoft.cn/*
 *://*.benziyun.com/*
 *://*.biligame.com.cn/*
+*://*.biniku.com/*
 *://*.biyezhao.me.sjtu.edu.cn/*
 *://*.bjsn.org.cn/*
 *://*.blog.gitcode.com/*
-*://*.blog.mypikpak.com/*
 *://*.blog.ytso.com/*
+*://*.blogs.nonelinear.com.cn/*
 *://*.bohe.cn/*
 *://*.book.it-ie.com/*
 *://*.bosquejokids.com/*
@@ -418,6 +427,7 @@ text/.*暂无购买权限.*/
 *://*.dnfziliao.com/*
 *://*.doc360.baidu.com/*
 *://*.doc361.com/*
+*://*.doc88.com/*
 *://*.docin.com/*
 *://*.docs.github.com/*
 *://*.docs.pingcode.com/*
@@ -426,6 +436,7 @@ text/.*暂无购买权限.*/
 *://*.down.gamersky.com/*
 *://*.downkuai.com/*
 *://*.download.cnet.com/*
+*://*.download.pikpak.org/*
 *://*.downxia.com/*
 *://*.doyo.cn/*
 *://*.dreamstime.com/*
@@ -434,10 +445,13 @@ text/.*暂无购买权限.*/
 *://*.dsxue.com/*
 *://*.duanwen.cc/*
 *://*.duote.com/*
+*://*.duotin.com/*
 *://*.dvg.cn/*
 *://*.eaaog.com/*
 *://*.east.im/*
 *://*.ee001.com/*
+*://*.en-nexusmods.com/*
+*://*.en.download.it/*
 *://*.en.handinglaw.com/*
 *://*.en.pinkoi.com/*
 *://*.eoffcn.com/*
@@ -450,6 +464,7 @@ text/.*暂无购买权限.*/
 *://*.familydoctor.com.cn/*
 *://*.fanwen118.com/*
 *://*.fanwendu.com/*
+*://*.fanweng.com/*
 *://*.fazhiyi.com/*
 *://*.fengba.net/*
 *://*.findprice.com.tw/*
@@ -461,6 +476,7 @@ text/.*暂无购买权限.*/
 *://*.fortress.com.hk/*
 *://*.fpwap.com/*
 *://*.frankoberlesr.ca/*
+*://*.freecodecamp.org/*
 *://*.fuliba2023.net/*
 *://*.fxxz.com/*
 *://*.g.pconline.com.cn/*
@@ -487,6 +503,7 @@ text/.*暂无购买权限.*/
 *://*.githubdocs.cn/*
 *://*.gk100.com/*
 *://*.gl.ali213.net/*
+*://*.go-vpn.com/*
 *://*.godshen.com/*
 *://*.golue.com/*
 *://*.grand-screen.com/*
@@ -497,6 +514,7 @@ text/.*暂无购买权限.*/
 *://*.gzjtr.com/*
 *://*.h6room.com/*
 *://*.hackhome.com/*
+*://*.hanboshi.com/*
 *://*.hangge.com/*
 *://*.haodou.com/*
 *://*.haozhuangji.com/*
@@ -531,6 +549,7 @@ text/.*暂无购买权限.*/
 *://*.inline.app/*
 *://*.investimento.setur.ce.gov.br/*
 *://*.ipapers.net/*
+*://*.ipdodo.com/*
 *://*.is96.com/*
 *://*.it699.cn/*
 *://*.itsacg.com/*
@@ -547,6 +566,7 @@ text/.*暂无购买权限.*/
 *://*.jinghaopharma.com/*
 *://*.jingyan.baidu.com/*
 *://*.jinjia.com.cn/*
+*://*.jinshouji.com/*
 *://*.jinsihou.com.cn/*
 *://*.jiyx.com/*
 *://*.joeyslimo.com/*
@@ -567,11 +587,13 @@ text/.*暂无购买权限.*/
 *://*.kuaishoumaizan.com.cn/*
 *://*.kuaishoushuangji.com.cn/*
 *://*.kuazhi.com/*
+*://*.kuku.baidu.com/*
 *://*.kuliyx.com/*
 *://*.kunjuke.com/*
 *://*.kuyumanhua.com/*
 *://*.kxdw.com/*
 *://*.ladwen.com/*
+*://*.landing.pikpak.org/*
 *://*.ldshop.gg/*
 *://*.ledouwan.com/*
 *://*.levenx.com/*
@@ -656,6 +678,8 @@ text/.*暂无购买权限.*/
 *://*.news.17173.com/*
 *://*.news.4399.com/*
 *://*.news.hctcasting.com/*
+*://*.nexus-mops.com/*
+*://*.nexustool.com.cn/*
 *://*.nodebe4.github.io/*
 *://*.np.huya.com/*
 *://*.ntdfriends.com.tw/*
@@ -697,6 +721,7 @@ text/.*暂无购买权限.*/
 *://*.ping0.co/*
 *://*.pipimanhua.com/*
 *://*.pixabay.com/*
+*://*.poloapi.com/*
 *://*.price.com.hk/*
 *://*.pricerite.com.hk/*
 *://*.primevideo.com/*
@@ -713,6 +738,7 @@ text/.*暂无购买权限.*/
 *://*.quword.com/*
 *://*.qyxsy.blog.fc2blog.us/*
 *://*.ranktracker.com/*
+*://*.rapidgator.net/*
 *://*.raremoviecollector.com/*
 *://*.rawpixel.com/*
 *://*.read01.com/*
@@ -730,6 +756,7 @@ text/.*暂无购买权限.*/
 *://*.search.tudou.com/*
 *://*.sechub.in/*
 *://*.secure.mydown.com/*
+*://*.shared-it.com/*
 *://*.shixueshi.cn/*
 *://*.shop.theclub.com.hk/*
 *://*.shopee.vn/*
@@ -757,6 +784,7 @@ text/.*暂无购买权限.*/
 *://*.switch618.com/*
 *://*.swsmile.info/*
 *://*.sygl.17173.com/*
+*://*.syku2.com/*
 *://*.szb.chinalxnet.com/*
 *://*.sztg.com.cn/*
 *://*.taaog.com/*
@@ -764,6 +792,7 @@ text/.*暂无购买权限.*/
 *://*.taocili.com/*
 *://*.tataog.com/*
 *://*.tatiao.com/*
+*://*.tech.china.com/*
 *://*.technical.city/*
 *://*.techpowerup.com/*
 *://*.tgbus.com/*
@@ -800,6 +829,7 @@ text/.*暂无购买权限.*/
 *://*.volcengine.com/*
 *://*.vyuan8.com/*
 *://*.wandanji.cc/*
+*://*.wangluopaicha.com/*
 *://*.wangyouhub.com/*
 *://*.wanjiadongli.com/*
 *://*.wanjiadongli.github.io/*
@@ -815,6 +845,7 @@ text/.*暂无购买权限.*/
 *://*.wenxuecity.com/*
 *://*.westelm.com/*
 *://*.wiki1.smtiaojiao.wiki/*
+*://*.wikiwand.com/*
 *://*.wilsoncomm.com.hk/*
 *://*.windowsreport.com/*
 *://*.writehelp.cn/*
@@ -826,6 +857,7 @@ text/.*暂无购买权限.*/
 *://*.xiaokupan.com/*
 *://*.xiaolincoding.com/*
 *://*.xiaolu.pro/*
+*://*.xiaomiui.net/*
 *://*.xiaoyangtongzhi.cn/*
 *://*.xiazai.sogou.com/*
 *://*.xiazai.zol.com.cn/*
@@ -846,6 +878,7 @@ text/.*暂无购买权限.*/
 *://*.xunyou.com/*
 *://*.xzhao.net/*
 *://*.xzji.com/*
+*://*.y8m.cn/*
 *://*.yank-note.com/*
 *://*.yanknote.com/*
 *://*.yanmishe.cn/*
@@ -870,7 +903,9 @@ text/.*暂无购买权限.*/
 *://*.ysgcgw.com.cn/*
 *://*.yuhuatour.com/*
 *://*.yundiesc.com/*
+*://*.yunlogin.com/*
 *://*.yxbao.com/*
+*://*.z865.com/*
 *://*.zaixianpusa.com/*
 *://*.zavx.cn/*
 *://*.zh-cn.androidguias.com/*
@@ -889,3 +924,4 @@ text/.*暂无购买权限.*/
 *://*.zn50.cc/*
 *://*.zsbaocheng.net/*
 *://*.zzzyk.com.cn/*
+*://8.217.118.4/*
