@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.8.0
+// @version      8.8.1
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version removes networking features including WebDAV Sync / Rule Subscription / Engine Subscription.
@@ -72,14 +72,34 @@
 
   const SELECTORS = {
     bing: {
-      match: /^(?:(?:www[2-4]?|cn|global|m)\.)?bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
+      match: /^(?:(?:www[2-4]?|cn|global|m)\.)?bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i,
       containers: 'li.b_algo, div.b_algo',
       titles: ['h2 a', 'a h2', '.b_title', '.mc_vtvc_title', 'a.title'],
       snippets: ['.b_caption p', '.b_snippet', '.b_paractl p', '.b_lineclamp2', '.mc_vtvc_meta', '.snippet'],
       links: ['h2 a[href]', '.b_title a[href]', '.b_algoheader a[href]', 'h3 a[href]', 'div[role="heading"] a[href]', 'a.title[href]', 'a[href]'],
+      categories: {
+        images: {
+          match: /^https?:\/\/images\.|^https?:\/\/[^/?#]+\/images(?:[\/?#]|$)/i,
+          containers: 'li:has(div.iuscp), div.iuscp, div.imgpt',
+          titles: ['a.iusc@json:m.t', 'img[alt]@attr:alt'],
+          links: ['a.iusc@json:m.purl', 'a.iusc@json:m.murl'],
+        },
+        videos: {
+          match: /^https?:\/\/[^/?#]+\/videos?(?:[\/?#]|$)/i,
+          containers: 'div.mc_vtvc',
+          titles: ['.mc_vtvc_title'],
+          links: ['[ourl]@attr:ourl', 'a.mc_vtvc_link[href]', 'a[href]'],
+        },
+        news: {
+          match: /^https?:\/\/[^/?#]+\/news(?:[\/?#]|$)/i,
+          containers: 'div.news-card, .newscard',
+          titles: ['a.title'],
+          links: ['a.title[href]', '[data-url]@attr:data-url', '[url]@attr:url', 'a[href]'],
+        },
+      },
     },
     google_scholar: {
-      match: /^(?:www\.)?scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/,
+      match: /^(?:www\.)?scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i,
       containers: 'div.gs_r.gs_or.gs_scl',
       titles: ['h3.gs_rt a', 'h3.gs_rt', '.gs_rt'],
       snippets: ['.gs_rs'],
@@ -91,9 +111,28 @@
       titles: ['h3', 'div[role="heading"]', '.LC20lb', '.DKV0Md', '.sXLaOe', '.c9DxTc', 'a h3'],
       snippets: ['.st', '.VwiC3b', '.s3v9rd', '.IsZvec', '.lyLwlc', '.yXK7lf', '.ITZIwc'],
       links: 'a[href]',
+      categories: {
+        images: {
+          match: /^https?:\/\/images\.|\/(?:imghp|imgres)|[?&](?:tbm=(?:isch|imgs)|udm=(?:2|imgs))(?:&|#|$)/i,
+          containers: 'div.ivg-i, div[data-attrid="images universal"], div.isv-r',
+          titles: ['img[alt]@attr:alt', 'img@attr:alt'],
+          links: ['[data-lpage]@attr:data-lpage', 'a[href*="/imgres"]@query:href.imgurl', 'a[href]'],
+        },
+        videos: {
+          match: /^https?:\/\/videos?\.|\/videohp|[?&](?:tbm=(?:vid|vids)|udm=(?:7|vids))(?:&|#|$)/i,
+          containers: 'div.PmEWq',
+          titles: ['h3'],
+          links: ['[data-curl]@attr:data-curl', 'a[href]'],
+        },
+        news: {
+          match: /[?&](?:tbm=nws|udm=12)(?:&|#|$)/i,
+          containers: 'a.aJWbwf, [data-news-cluster-id]',
+          links: [':scope[href]', 'a[href]'],
+        },
+      },
     },
     duckduckgo_lite: {
-      match: /^lite\.duckduckgo\.com$/,
+      match: /^lite\.duckduckgo\.com$/i,
       containers: 'tr:has(.result-link)',
       titles: ['.result-link'],
       snippets: ['.result-snippet'],
@@ -101,77 +140,136 @@
       extraElements: ['+ tr:not(:has(.result-link))', '+ tr:not(:has(.result-link)) + tr:not(:has(.result-link))', '+ tr:not(:has(.result-link)) + tr:not(:has(.result-link)) + tr:not(:has(.result-link))'],
     },
     duckduckgo: {
-      match: /^(?:(?:www|html|start|m|safe|noai)\.)?(?:duckduckgo\.com|ddg\.gg)$/,
+      match: /^(?:(?:www|html|start|m|safe|noai)\.)?(?:duckduckgo\.com|ddg\.gg)$/i,
       containers: '[data-testid="result"], [data-testid="web-vertical"] li > article, .result, .web-result, .tile',
       titles: ['a[data-testid="result-title-a"]', '.result__title', '.tile__title', '.tile--title__title', 'h2 a', 'a h2', 'h2'],
       snippets: ['[data-testid="result-snippet"]', '[data-result="snippet"]', '.result__snippet'],
       links: ['a[data-testid="result-extras-url-link"]', 'a[data-testid="result-title-a"]', 'h2 > a', '.result__url', 'a[href]'],
+      categories: {
+        images: {
+          match: /[?&]iax=images(?:&|#|$)/i,
+          containers: 'li:has(> figure), figure',
+          titles: ['img[alt]@attr:alt', 'img@attr:alt'],
+        },
+        videos: { match: /[?&]iax=videos?(?:&|#|$)/i },
+        news: { match: /[?&]iar=news(?:&|#|$)/i },
+      },
     },
     yandex: {
-      match: /^(?:(?:www|m)\.)?(?:ya\.ru|yandex\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,}))$/,
+      match: /^(?:(?:www|m)\.)?(?:ya\.ru|yandex\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,}))$/i,
       containers: 'div.Organic',
       titles: ['.OrganicTitle'],
       snippets: ['.OrganicText'],
       links: ['.OrganicTitle a', '.Path-Item a', 'a.Link', 'a[href]'],
+      categories: {
+        images: {
+          match: /^https?:\/\/images\.|^https?:\/\/[^/?#]+\/images(?:[\/?#]|$)/i,
+          containers: '.JustifierRowLayout-Item, div.SerpItem',
+          titles: ['img[alt]@attr:alt', 'img@attr:alt'],
+          links: ['a[href*="img_url="]@query:href.img_url', 'a[href]'],
+        },
+        videos: { match: /^https?:\/\/[^/?#]+\/videos?(?:[\/?#]|$)/i },
+        news: { match: /^https?:\/\/[^/?#]+\/news(?:[\/?#]|$)/i },
+      },
     },
     brave: {
-      match: /^search\.brave\.com$/,
+      match: /^search\.brave\.com$/i,
       containers: '.snippet[data-type="web"], .snippet[data-type="news"], .snippet[data-type="videos"], .image-wrapper',
       titles: ['.title', '.snippet-title', '.img-title'],
       snippets: ['.generic-snippet .content', '.generic-snippet', '.line-clamp-dynamic', '.snippet-description', '.description'],
       links: ['a[href]'],
+      categories: {
+        images: {
+          match: /search\.brave\.com\/images(?:[\/?]|$)/i,
+          containers: 'button.image-result, .image-wrapper',
+          titles: ['.image-metadata-title', '.img-title'],
+          links: ['img[src*="imgs.search.brave.com"]@b64url', 'a[href]'],
+        },
+      },
     },
     ecosia: {
-      match: /^(?:(?:www|m)\.)?ecosia\.org$/,
+      match: /^(?:(?:www|m)\.)?ecosia\.org$/i,
       containers: 'article[data-test-id="organic-result"], article[data-test-id="videos-result"], article[data-test-id="news-result"], article[data-test-id="images-result"]',
       titles: ['h2[data-test-id="result-title"]', '.result-title__heading', 'h2.image-result__details-title', 'h2'],
       snippets: ['[data-test-id="web-result-description"]', '[data-test-id="news-result-description"]', '.web-result__description', '.news-result__description', '.video-result__description', '.result__description'],
       links: ['a[data-test-id="result-link"][href]', 'a.image-result__details-link[href]', 'a.image-result__link[href]', 'a[href]'],
     },
     startpage: {
-      match: /^(?:(?:www|eu|m)\.)?startpage\.com$/,
+      match: /^(?:(?:www|eu|m)\.)?startpage\.com$/i,
       containers: 'div.result, .w-gl__result',
       titles: ['a.result-link', 'h2.wgl-title', 'a.wgl-site-title', '.w-gl__result-title'],
       snippets: ['p.description', '.result__main > p', '.w-gl__description'],
       links: ['a.result-link[href]', 'a.wgl-site-title[href]', 'a.wgl-display-url[href]', 'a.display-url[href]', '.w-gl__result-title[href]', 'a[href]'],
+      categories: {
+        images: { match: /[?&]cat=images(?:&|#|$)/i },
+        videos: { match: /[?&]cat=video(?:&|#|$)/i },
+        news: { match: /[?&]cat=news(?:&|#|$)/i },
+      },
     },
     yahoo_japan: {
-      match: /^(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.co\.jp$/,
-      containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo',
+      match: /^(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.co\.jp$/i,
+      containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo, #contents section:has(a h3)',
       titles: ['h3', '.s-title', 'h2 a', 'a h2', '.b_title', '.title'],
       snippets: ['.sw-Card__description', '.sw-Card__snippet', '.sw-Text__body', 'p', '.b_caption p', '.b_snippet', '.b_paractl p'],
-      links: ['h3 a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
+      links: ['a:has(> h3)', 'a.sw-Card__space', 'h3 a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
+      categories: {
+        images: {
+          match: /^https?:\/\/images\.|\/image\/search(?:[\/?#]|$)/i,
+          containers: '.sw-ThumbnailGrid__columnItem, #isr div:has(> a[data-cl-params]), a.sw-Thumbnail',
+          titles: ['.sw-ThumbnailGrid__title', 'img[alt]@attr:alt', 'img@attr:alt'],
+          snippets: ['.sw-ThumbnailGrid__domain'],
+          links: ['a.sw-Thumbnail@clparams:targurl', 'a@clparams:targurl', 'a[href]'],
+        },
+        videos: { match: /^https?:\/\/videos?\./i },
+        news: { match: /^https?:\/\/news\./i },
+      },
     },
     yahoo: {
-      match: /^(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/,
-      containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo',
+      match: /^(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i,
+      containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo, #web ol > li > div',
       titles: ['h3', '.s-title', 'h2 a', 'a h2', '.b_title', '.title'],
       snippets: ['.sw-Card__description', '.sw-Card__snippet', '.sw-Text__body', 'p', '.b_caption p', '.b_snippet', '.b_paractl p'],
-      links: ['h3 a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
+      links: ['a:has(> h3)', 'a.sw-Card__space', 'h3 a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
+      categories: {
+        images: {
+          match: /^https?:\/\/images\.|\/search\/images(?:[\/?#]|$)/i,
+          containers: '.sw-ThumbnailGrid__columnItem, #isr div:has(> a[data-cl-params]), a.sw-Thumbnail',
+          titles: ['.sw-ThumbnailGrid__title', 'img[alt]@attr:alt', 'img@attr:alt'],
+          snippets: ['.sw-ThumbnailGrid__domain'],
+          links: ['a.sw-Thumbnail@clparams:targurl', 'a@clparams:targurl', 'a[href]'],
+        },
+        videos: { match: /^https?:\/\/videos?\./i },
+        news: { match: /^https?:\/\/news\./i },
+      },
     },
     so360: {
-      match: /^(?:www\.|m\.)?so\.com$/,
+      match: /^(?:www\.|m\.)?so\.com$/i,
       containers: 'li.res-list, div.res-list',
       titles: ['h3.res-title a', 'h3 a', '.res-title', '.g-title a', '.g-title'],
       snippets: ['.res-desc', '.mh-desc', '.summary'],
       links: ['h3 a[href]', 'a.alink[href]', '.g-linkinfo a[href]', 'a[href]'],
     },
     sogou: {
-      match: /^(?:www\.|m\.|wap\.)?sogou\.com$/,
+      match: /^(?:www\.|m\.|wap\.)?sogou\.com$/i,
       containers: 'div.vrwrap:has(h3), .reactResult, div.vrResult',
       titles: ['h3.vr-title a', '.vr-title a', 'a[class*="saTitle"]', '.vr-title', 'h3.vr-tit', 'h3 a', 'h3'],
       snippets: ['.space-txt', '.star-wiki', '.str_info', 'p.sa-text-clamp3', '[class*="saText"]'],
       links: ['h3.vr-title a[href]', '.vr-title a[href]', 'a[class*="saTitle"][href]', 'h3 a[href]', 'a.citeLinkClass[href]', 'a[href]'],
     },
     toutiao: {
-      match: /^(?:so|m)\.toutiao\.com$/,
+      match: /^(?:so|m)\.toutiao\.com$/i,
       containers: '.result-content',
       titles: ['.l-card-title a', '.l-card-title', '.cs-header a', 'a[href*="/search/jump"]'],
       snippets: ['.l-paragraph', '.cs-card-content .text-regular', '.l-source', '.cs-source'],
       links: ['a.l-card-title[href]', '.cs-header a[href]', 'a[href*="/search/jump"]', 'a[href]:not([href*="/search?"])'],
+      categories: {
+        images: { match: /[?&]pd=atlas(?:&|#|$)/i },
+        news: { match: /[?&]pd=information(?:&|#|$)/i },
+        videos: { match: /[?&]pd=[a-z_]*video/i },
+      },
     },
     quark: {
-      match: /^(?:(?:quark|yz)\.)?(?:(?:www|m)\.)?sm\.cn$/,
+      match: /^(?:(?:quark|yz)\.)?(?:(?:www|m)\.)?sm\.cn$/i,
       containers: 'div.qk-card',
       titles: ['.qk-title-text', '.qk-title', 'a.qk-link-wrapper'],
       snippets: ['.qk-paragraph-text', '.qk-paragraph'],
@@ -220,14 +318,34 @@
   }
 
   const builtinSelectorOf = (key) => (SELECTORS[key] && typeof SELECTORS[key] === 'object') ? SELECTORS[key] : {};
+  const CATEGORY_FIELDS = ['containers', 'titles', 'snippets', 'links', 'extraElements', 'button', 'match'];
+  function normalizeCategoryMap(cats) {
+    if (!cats || typeof cats !== 'object' || Array.isArray(cats)) return undefined;
+    const out = {};
+    for (const name of Object.keys(cats)) {
+      const cat = cats[name];
+      if (!cat || typeof cat !== 'object' || Array.isArray(cat)) continue;
+      const clean = {};
+      for (const f of CATEGORY_FIELDS) {
+        if (cat[f] === undefined) continue;
+        if (f === 'titles' || f === 'snippets' || f === 'links' || f === 'extraElements') clean[f] = normalizeSelectorList(cat[f]);
+        else if (f === 'match' && cat[f] instanceof RegExp) clean[f] = { source: cat[f].source, flags: cat[f].flags || '' };
+        else clean[f] = cat[f];
+      }
+      if (Object.keys(clean).length) out[name] = clean;
+    }
+    return out;
+  }
   function mergeSelectorDef(def, base) {
     const links = def.links !== undefined ? (Array.isArray(def.links) ? normalizeSelectorList(def.links) : (typeof def.links === 'string' && def.links ? def.links : 'a[href]')) : (base.links || 'a[href]');
+    const categories = def.categories !== undefined ? normalizeCategoryMap(def.categories) : (base.categories || undefined);
     return {
       containers: typeof def.containers === 'string' ? def.containers : (base.containers || ''),
       titles: def.titles !== undefined ? normalizeSelectorList(def.titles) : (base.titles || []),
       snippets: def.snippets !== undefined ? normalizeSelectorList(def.snippets) : (base.snippets || []),
       extraElements: def.extraElements !== undefined ? normalizeSelectorList(def.extraElements) : (base.extraElements || []),
       links: links.length ? links : 'a[href]',
+      ...(categories ? { categories } : {}),
       ...(def.button !== undefined ? { button: def.button !== false } : (base.button !== undefined ? { button: base.button !== false } : {}))
     };
   }
@@ -289,7 +407,7 @@
   }
 
   function resetSelectorCache() {
-    activeSelectors = null; _engineCacheHost = null; _engineCacheResult = 'other'; _observedSelector = ''; _categoryCacheHref = null; _categoryCacheResult = 'web';
+    activeSelectors = null; _engineCacheHost = null; _engineCacheResult = 'other'; _observedSelector = ''; _categoryCacheHref = null; _categoryCacheResult = 'web'; _catDefCacheKey = null; _catDefCache = null;
   }
 
   let _engineCacheHost = null; let _engineCacheResult = 'other';
@@ -304,36 +422,31 @@
     return (_engineCacheResult = 'other');
   }
 
-  let _categoryCacheHref = null; let _categoryCacheResult = 'web';
-  function getSearchCategory(loc) {
-    if (loc === undefined) {
+  let _categoryCacheHref = null; let _categoryCacheResult = 'web'; let _categoryCacheEngine = null;
+  function getSearchCategory(loc, engineArg) {
+    if (loc === undefined || loc === null) {
       const href = String(window.location && window.location.href || '');
-      if (_categoryCacheHref === href) return _categoryCacheResult;
-      const r = getSearchCategory(window.location); _categoryCacheHref = href; _categoryCacheResult = r; return r;
+      const engine = getSearchEngine();
+      if (_categoryCacheHref === href && _categoryCacheEngine === engine) return _categoryCacheResult;
+      const r = getSearchCategory(window.location, engine);
+      _categoryCacheHref = href; _categoryCacheEngine = engine; _categoryCacheResult = r; return r;
     }
-    loc = loc || window.location; if (!loc) return 'web'; let path = String(loc.pathname || '').toLowerCase(); let search = String(loc.search || '').toLowerCase();
-    const host = String(loc.hostname || '').toLowerCase();
-    if ((!path || !search) && loc.href) {
-      try {
-        const u = new URL(loc.href); if (!path) path = u.pathname.toLowerCase(); if (!search) search = u.search.toLowerCase();
-      } catch (e) {}
-    }
-    if (/^images\./.test(host) || /(?:^|\/)images?(?:\/|$)/.test(path) || /[?&](?:tbm=isch|udm=2|iax?=images)(?:&|$)/.test(search)) return 'images';
-    if (/^videos?\./.test(host) || /(?:^|\/)videos?(?:\/|$)/.test(path) || /[?&](?:tbm=vids?|udm=(?:7|videos?|vids?)|iax?=videos)(?:&|$)/.test(search)) return 'videos';
-    if (/^news\./.test(host) || /(?:^|\/)news(?:\/|$)/.test(path) || /[?&](?:tbm=nws|udm=12|iax?=news)(?:&|$)/.test(search)) return 'news';
-    if (/(?:^|\.)toutiao\.com$/.test(host)) {
-      const pd = (search.match(/[?&]pd=([a-z_]+)(?:&|$)/) || [])[1] || '';
-      if (pd === 'atlas') return 'images'; if (pd === 'information') return 'news'; if (pd.indexOf('video') !== -1) return 'videos';
-    }
-    if (/(?:^|\.)startpage\.com$/.test(host)) {
-      const cat = (search.match(/[?&]cat=([a-z]+)(?:&|$)/) || [])[1] || '';
-      if (cat === 'images' || cat === 'video' || cat === 'news') return cat === 'video' ? 'videos' : cat;
+    const engine = engineArg !== undefined ? engineArg : getSearchEngine();
+    const href = String((loc || window.location) && (loc || window.location).href || window.location.href || '');
+    const cats = (getSelectors()[engine] || SELECTORS.other).categories;
+    if (cats && typeof cats === 'object') {
+      for (const name of Object.keys(cats)) {
+        const def = cats[name]; if (!def || typeof def !== 'object' || name === 'web') continue;
+        let m = null;
+        try {
+          if (def.match instanceof RegExp) m = def.match;
+          else if (typeof def.match === 'string' && def.match) { const mm = def.match.match(/^\/(.*)\/([a-z]*)$/i); m = new RegExp(mm ? mm[1] : def.match, mm ? mm[2].toLowerCase().replace(/[^imsu]/g, '') : 'i'); }
+          else if (def.match && typeof def.match === 'object' && typeof def.match.source === 'string' && def.match.source) m = new RegExp(def.match.source, String(def.match.flags || '').toLowerCase().replace(/[^imsu]/g, ''));
+        } catch (e) {}
+        try { if (m && m.test(href)) return name; } catch (e) {}
+      }
     }
     return 'web';
-  }
-
-  function isBingImagesPage(engine) {
-    return engine === 'bing' && getSearchCategory() === 'images';
   }
 
   const ENGINE_HOST_REGEXES = {
@@ -352,19 +465,27 @@
   }
   const isNotGoogleHost = (h) => !!h && !isEngineHost('google', h);
 
+  let _catDefCacheKey = null; let _catDefCache = null;
+  function resolveCategoryDef(engine) {
+    const def = getSelectors()[engine] || SELECTORS.other;
+    const category = getSearchCategory();
+    const cacheKey = engine + '|' + category;
+    if (_catDefCacheKey === cacheKey) return _catDefCache;
+    const cat = def.categories && typeof def.categories === 'object' ? def.categories[category] : null;
+    let resolved = def;
+    if (cat && typeof cat === 'object') {
+      resolved = { ...def };
+      for (const k of ['containers', 'titles', 'snippets', 'links', 'extraElements', 'button']) {
+        if (cat[k] !== undefined) resolved[k] = cat[k];
+      }
+      resolved = mergeSelectorDef(resolved, def);
+    }
+    _catDefCacheKey = cacheKey; _catDefCache = resolved;
+    return resolved;
+  }
+
   function getContainerSelector(engine) {
-    const def = getSelectors()[engine] || SELECTORS.other; const builtin = SELECTORS[engine];
-    if (def.containers && (!builtin || def.containers !== builtin.containers)) return def.containers;
-    if (isBingImagesPage(engine)) return 'li:has(div.iuscp), div.iuscp, div.imgpt';
-    if (engine === 'bing' && getSearchCategory() === 'videos') return 'div.mc_vtvc';
-    if (engine === 'bing' && getSearchCategory() === 'news') return 'div.news-card';
-    if (engine === 'google' && getSearchCategory() === 'images') return 'div[data-attrid="images universal"], div.isv-r';
-    if (engine === 'google' && getSearchCategory() === 'videos') return 'div.PmEWq';
-    if (engine === 'google' && getSearchCategory() === 'news') return 'a.aJWbwf';
-    if (engine === 'duckduckgo' && getSearchCategory() === 'images') return 'li:has(> figure), figure';
-    if (engine === 'yandex' && getSearchCategory() === 'images') return '.JustifierRowLayout-Item, div.SerpItem';
-    if (engine === 'brave' && getSearchCategory() === 'images') return 'button.image-result, .image-wrapper';
-    return def.containers;
+    return resolveCategoryDef(engine).containers;
   }
 
   function isEngineSite() {
@@ -612,7 +733,6 @@
         if (!/\s/.test(ch)) atIf = false;
         continue;
       }
-      if (ch === "'") { inSQ = true; continue; }
       if (ch === '"') { inDQ = true; continue; }
       if (ch === '/' && !inRE) {
         if (regexStartAhead(str, i)) { inRE = true; continue; }
@@ -1189,7 +1309,7 @@
       if (!abs) return safeDecodeURIComponent(raw);
       const u = new URL(raw.startsWith('//') ? 'http:' + raw : raw); const host = toUnicodeHostname(u.hostname);
       const auth = u.username ? u.username + (u.password ? ':' + u.password : '') + '@' : ''; const port = u.port ? ':' + u.port : '';
-      const tail = safeDecodeURIComponent(u.pathname + u.search) + safeDecodeURIComponent(u.hash);
+      const tail = safeDecodeURIComponent(u.pathname) + u.search + u.hash;
       return (raw.startsWith('//') ? '//' : u.protocol + '//') + auth + host + port + tail;
     } catch (_) { return safeDecodeURIComponent(raw); }
   }
@@ -1439,7 +1559,7 @@
         : cond.type === 'path' ? (u.pathname + u.search)
         : u.protocol.slice(0, -1); const value = raw.toLowerCase(); let altValue = value; let altCmpVal = cmpVal;
       if (cond.type === 'path') {
-        altValue = safeDecodeURIComponent(raw).toLowerCase(); altCmpVal = safeDecodeURIComponent(cmpVal).toLowerCase();
+        altValue = (safeDecodeURIComponent(u.pathname) + u.search).toLowerCase(); altCmpVal = safeDecodeURIComponent(cmpVal).toLowerCase();
       }
       if (cond.op === '=') return value === cmpVal || altValue === altCmpVal; if (cond.op === '^=') return value.startsWith(cmpVal) || altValue.startsWith(altCmpVal);
       if (cond.op === '$=') {
@@ -1456,9 +1576,10 @@
           try {
             unicodeHost = toUnicodeHostname(uHost);
           } catch (_) {}
-          return safeRegexTest(cond.regex, raw) || safeRegexTest(cond.regex, uHost) || safeRegexTest(cond.regex, unicodeHost);
+          const unicodeFullHost = u.port ? unicodeHost + ':' + u.port : unicodeHost;
+          return safeRegexTest(cond.regex, raw) || safeRegexTest(cond.regex, uHost) || safeRegexTest(cond.regex, unicodeHost) || safeRegexTest(cond.regex, u.host) || safeRegexTest(cond.regex, unicodeFullHost);
         }
-        return safeRegexTest(cond.regex, raw) || safeRegexTest(cond.regex, safeDecodeURIComponent(raw));
+        return safeRegexTest(cond.regex, raw) || safeRegexTest(cond.regex, cond.type === 'path' ? safeDecodeURIComponent(u.pathname) + u.search : safeDecodeURIComponent(raw));
       }
       return false;
     }
@@ -2405,17 +2526,20 @@
     }
   }
 
+  function queryResultSelector(result, selector) {
+    try { return result.matches && result.matches(selector) ? result : result.querySelector(selector); } catch (e) { return null; }
+  }
   function getResultText(result, selectors) {
     if (!Array.isArray(selectors)) return '';
     for (const selector of selectors) {
-      let elem = null; try { elem = result.querySelector(selector); } catch (e) { continue; }
+      const elem = queryResultSelector(result, selector);
       const text = elem ? elem.textContent.trim() : ''; if (text) return text;
     }
     return '';
   }
 
   function getResultSnippet(result, engine) {
-    const selectors = (getSelectors()[engine] || SELECTORS.other).snippets; const snippet = getResultText(result, selectors); if (snippet) return snippet;
+    const selectors = resolveCategoryDef(engine).snippets; const snippet = getResultText(result, selectors); if (snippet) return snippet;
     for (const element of getResultExtraElements(result, engine)) {
       let matchedSelf = false;
       for (const selector of selectors) {
@@ -2429,7 +2553,7 @@
   }
 
   function getResultExtraElements(result, engine = getSearchEngine()) {
-    const selectors = (getSelectors()[engine] || SELECTORS.other).extraElements; const parent = result.parentElement; if (!parent || !Array.isArray(selectors) || !selectors.length) return [];
+    const selectors = resolveCategoryDef(engine).extraElements; const parent = result.parentElement; if (!parent || !Array.isArray(selectors) || !selectors.length) return [];
     const index = Array.prototype.indexOf.call(parent.children, result) + 1; const elements = new Set();
     for (const selector of selectors) {
       if (typeof selector !== 'string' || !selector.trim() || hasTopLevelComma(selector)) continue;
@@ -2482,69 +2606,98 @@
     }
   }
 
-  function getResultLink(result, engine) {
-    if (isBingImagesPage(engine)) {
-      const iusc = result.querySelector('a.iusc'); if (!iusc) return null;
-      let murl = '';
-      try { const m = JSON.parse(iusc.getAttribute('m') || '{}'); murl = m.purl || m.murl || ''; } catch (_) {}
-      return murl ? { href: murl, getAttribute: a => iusc.getAttribute(a), setAttribute: (a, v) => iusc.setAttribute(a, v) } : iusc;
-    }
-    if (engine === 'google' && getSearchCategory() === 'images') {
-      const card = (typeof result.getAttribute === 'function' && result.getAttribute('data-lpage')) ? result : result.querySelector('[data-lpage]');
-      if (card && /^https?:\/\//i.test(card.getAttribute('data-lpage') || '')) {
-        const lp = card.getAttribute('data-lpage');
-        return { href: lp, getAttribute: a => card.getAttribute(a), setAttribute: (a, v) => card.setAttribute(a, v) };
+  function extractLinkFromElement(el, spec) {
+    if (!el) return null;
+    const mode = spec.mode, arg = spec.arg;
+    try {
+      if (mode === 'attr') {
+        if (!arg || arg === 'href') { if (el.href) return el; return null; }
+        const v = el.getAttribute(arg);
+        if (v && /^https?:\/\//i.test(v)) return { href: v, getAttribute: a => el.getAttribute(a), setAttribute: (a, v2) => el.setAttribute(a, v2) };
+        return null;
       }
-      const imgres = result.querySelector('a[href*="/imgres"]');
-      if (imgres) { try { const iu = new URL(imgres.href, location.origin).searchParams.get('imgurl'); if (iu) return { href: iu, getAttribute: a => imgres.getAttribute(a), setAttribute: (a, v) => imgres.setAttribute(a, v) }; } catch (_) {} }
-    }
-    if (engine === 'google' && getSearchCategory() === 'videos') {
-      const card = (typeof result.getAttribute === 'function' && result.getAttribute('data-curl')) ? result : result.querySelector('[data-curl]');
-      const curl = card && card.getAttribute('data-curl');
-      if (curl && /^https?:\/\//i.test(curl)) return { href: curl, getAttribute: a => card.getAttribute(a), setAttribute: (a, v) => card.setAttribute(a, v) };
-    }
-    if (engine === 'google' && getSearchCategory() === 'news') {
-      const a = result.tagName === 'A' ? result : (typeof result.closest === 'function' ? result.closest('a.aJWbwf') : null);
-      if (a && a.href) return a;
-    }
-    if (engine === 'bing' && getSearchCategory() === 'videos') {
-      const card = (typeof result.getAttribute === 'function' && result.getAttribute('ourl')) ? result : result.querySelector('[ourl]');
-      const ourl = card && card.getAttribute('ourl');
-      if (ourl && /^https?:\/\//i.test(ourl)) return { href: ourl, getAttribute: a => card.getAttribute(a), setAttribute: (a, v) => card.setAttribute(a, v) };
-    }
-    if (engine === 'bing' && getSearchCategory() === 'news') {
-      const title = result.querySelector('a.title[href]');
-      if (title && title.href) return title;
-      const direct = typeof result.getAttribute === 'function' ? (result.getAttribute('data-url') || result.getAttribute('url')) : '';
-      if (direct && /^https?:\/\//i.test(direct)) return { href: direct, getAttribute: a => result.getAttribute(a), setAttribute: (a, v) => result.setAttribute(a, v) };
-    }
-    if (engine === 'yandex' && getSearchCategory() === 'images') {
-      const a = result.querySelector('a[href*="img_url="]');
-      if (a) { try { const u = new URL(a.href, location.origin).searchParams.get('img_url'); if (u && /^https?:\/\//i.test(u)) return { href: u, getAttribute: x => a.getAttribute(x), setAttribute: (x, v) => a.setAttribute(x, v) }; } catch (_) {} }
-    }
-    if (engine === 'brave' && getSearchCategory() === 'images') {
-      const img = result.querySelector('img[src*="imgs.search.brave.com"]');
-      if (img) {
-        const segs = (img.getAttribute('src') || '').split('?')[0].split('/');
+      if (mode === 'json') {
+        let obj = null;
+        try { obj = JSON.parse(el.getAttribute(arg.attr) || '{}'); } catch (_) { return null; }
+        let cur = obj;
+        for (const seg of arg.path) { if (cur && typeof cur === 'object') cur = cur[seg]; else { cur = undefined; break; } }
+        if (typeof cur === 'string' && /^https?:\/\//i.test(cur)) return { href: cur, getAttribute: a => el.getAttribute(a), setAttribute: (a, v2) => el.setAttribute(a, v2) };
+        return null;
+      }
+      if (mode === 'query') {
+        const raw = (arg.attr === 'href' && el.href) ? el.href : el.getAttribute(arg.attr);
+        if (!raw) return null;
+        try { const v = new URL(raw, location.origin).searchParams.get(arg.param); if (v && /^https?:\/\//i.test(v)) return { href: v, getAttribute: a => el.getAttribute(a), setAttribute: (a, v2) => el.setAttribute(a, v2) }; } catch (_) {}
+        try { const v2 = new URL(raw).searchParams.get(arg.param); if (v2 && /^https?:\/\//i.test(v2)) return { href: v2, getAttribute: a => el.getAttribute(a), setAttribute: (a, v3) => el.setAttribute(a, v3) }; } catch (_) {}
+        return null;
+      }
+      if (mode === 'b64url') {
+        let src = el.getAttribute('src') || el.getAttribute('data-src') || '';
+        src = src.split('?')[0];
+        const segs = src.split('/');
         for (let i = 1; i < segs.length; i++) {
           let b64 = segs.slice(i).join('').replace(/-/g, '+').replace(/_/g, '/'); if (b64.length % 4) b64 += '='.repeat(4 - b64.length % 4);
-          try { const u = atob(b64); if (/^https?:\/\//i.test(u)) return { href: u, getAttribute: x => img.getAttribute(x), setAttribute: (x, v) => img.setAttribute(x, v) }; } catch (_) {}
+          try { const u = atob(b64); if (/^https?:\/\//i.test(u)) return { href: u, getAttribute: a => el.getAttribute(a), setAttribute: (a, v2) => el.setAttribute(a, v2) }; } catch (_) {}
         }
+        return null;
       }
+      if (mode === 'clparams') {
+        const raw = el.getAttribute('data-cl-params') || '';
+        if (!raw) return null;
+        const m = raw.match(new RegExp('(?:^|;)' + arg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':([^;]*)'));
+        let v = m && m[1] ? m[1].trim() : '';
+        if (v && /^https?:\/\//i.test(v)) return { href: v, getAttribute: a => el.getAttribute(a), setAttribute: (a, v2) => el.setAttribute(a, v2) };
+        if (v && /^(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/|$)/i.test(v)) return { href: 'https://' + v, getAttribute: a => el.getAttribute(a), setAttribute: (a, v2) => el.setAttribute(a, v2) };
+        return null;
+      }
+    } catch (_) {}
+    return null;
+  }
+  function parseTopLevelAt(selector, modes) {
+    let quote = ''; let depth = 0;
+    for (let i = selector.length - 1; i >= 0; i--) {
+      const c = selector[i];
+      if (quote) { if (c === quote && selector[i - 1] !== '\\') quote = ''; continue; }
+      if (c === '"' || c === "'") { quote = c; continue; }
+      if (c === ']' || c === ')') depth++;
+      else if ((c === '[' || c === '(') && depth) depth--;
+      else if (c === '@' && !depth) { const m = selector.slice(i + 1).match(new RegExp('^(?:' + modes + ')(?::|$)')); if (m) return i; }
     }
-    const linkSelectors = (getSelectors()[engine] || SELECTORS.other).links; let foundEl = null;
-    if (Array.isArray(linkSelectors)) {
-      for (let selector of linkSelectors) {
-        try {
-          const el = result.querySelector(selector);
-          if (el && el.href) {
-            foundEl = el; break;
-          }
-        } catch (_) {}
+    return -1;
+  }
+  function parseLinkSpec(selector) {
+    const at = typeof selector === 'string' ? parseTopLevelAt(selector, 'attr|json|query|b64url|clparams') : -1;
+    if (at === -1) return null;
+    const spec = { css: selector.slice(0, at), mode: selector.slice(at + 1).split(':')[0] };
+    const arg = selector.slice(at + 1).slice(spec.mode.length + 1);
+    if (spec.mode === 'json') {
+      const dot = arg.indexOf('.');
+      if (dot <= 0) return null;
+      spec.arg = { attr: arg.slice(0, dot), path: arg.slice(dot + 1).split('.') };
+    } else if (spec.mode === 'query') {
+      const dot = arg.indexOf('.');
+      if (dot <= 0) return null;
+      spec.arg = { attr: arg.slice(0, dot), param: arg.slice(dot + 1) };
+    } else if (spec.mode === 'attr') spec.arg = arg || 'href';
+    else spec.arg = arg;
+    return spec;
+  }
+  function getResultLink(result, engine) {
+    const rawDefs = resolveCategoryDef(engine).links;
+    const linkDefs = Array.isArray(rawDefs) ? rawDefs : (typeof rawDefs === 'string' && rawDefs ? [rawDefs] : []);
+    let foundEl = null;
+    for (const selector of linkDefs) {
+      const spec = parseLinkSpec(selector);
+      if (spec) {
+        let el = null;
+        try { el = spec.css ? (result.matches && result.matches(spec.css) ? result : result.querySelector(spec.css)) : result; } catch (_) {}
+        foundEl = extractLinkFromElement(el, spec);
+        if (foundEl) return foundEl;
+        continue;
       }
-    } else if (typeof linkSelectors === 'string') {
       try {
-        const el = result.querySelector(linkSelectors); if (el && el.href) foundEl = el;
+        const el = result.matches && result.matches(selector) ? result : result.querySelector(selector);
+        if (el && el.href) { foundEl = el; break; }
       } catch (_) {}
     }
     if (engine === 'bing' && foundEl && foundEl.href) {
@@ -2620,50 +2773,59 @@
     return foundEl;
   }
 
+  function getResultTextFromSpec(result, spec) {
+    const el = spec.css ? result.querySelector(spec.css) : result;
+    if (!el) return '';
+    if (spec.mode === 'attr') return String(el.getAttribute(spec.arg) || '').trim();
+    if (spec.mode === 'json') {
+      try {
+        let cur = JSON.parse(el.getAttribute(spec.arg.attr) || '{}');
+        for (const seg of spec.arg.path) { if (cur && typeof cur === 'object') cur = cur[seg]; else { cur = undefined; break; } }
+        return typeof cur === 'string' ? cur.trim() : '';
+      } catch (_) { return ''; }
+    }
+    return (el.textContent || '').trim();
+  }
+  function parseTitleSpec(selector) {
+    const at = typeof selector === 'string' ? parseTopLevelAt(selector, 'attr|json|text') : -1;
+    if (at === -1) return null;
+    const spec = { css: selector.slice(0, at), mode: selector.slice(at + 1).split(':')[0] };
+    const arg = selector.slice(at + 1).slice(spec.mode.length + 1);
+    if (spec.mode === 'json') {
+      const dot = arg.indexOf('.');
+      if (dot <= 0) return null;
+      spec.arg = { attr: arg.slice(0, dot), path: arg.slice(dot + 1).split('.') };
+    } else spec.arg = arg || (spec.mode === 'text' ? '' : 'alt');
+    return spec;
+  }
   function getResultTitle(result, engine) {
-    if (isBingImagesPage(engine)) {
-      const iusc = result.querySelector('a.iusc');
-      if (iusc) { try { const t = JSON.parse(iusc.getAttribute('m') || '{}').t; if (t) return String(t); } catch (_) {} }
+    const titleSelectors = resolveCategoryDef(engine).titles;
+    if (Array.isArray(titleSelectors)) {
+      for (const selector of titleSelectors) {
+        const spec = parseTitleSpec(selector);
+        if (spec) {
+          const text = getResultTextFromSpec(result, spec);
+          if (text) return text.slice(0, 200);
+          continue;
+        }
+        const text = getResultText(result, [selector]);
+        if (text) return text;
+      }
     }
-    if (engine === 'bing') {
-      if (getSearchCategory() === 'videos') { const t = result.querySelector('.mc_vtvc_title'); if (t && t.textContent.trim()) return t.textContent.trim(); }
-      if (getSearchCategory() === 'news') { const t = result.querySelector('a.title'); if (t && t.textContent.trim()) return t.textContent.trim(); }
-    }
-    const title = getResultText(result, (getSelectors()[engine] || SELECTORS.other).titles);
-    if (!title && engine === 'google' && getSearchCategory() === 'images') {
-      const card = (typeof result.getAttribute === 'function' && result.getAttribute('data-lpage')) ? result : result.querySelector('[data-lpage]');
-      const label = card ? (card.getAttribute('aria-label') || '').trim() : '';
-      if (label) return label.slice(0, 200);
-      const img = result.querySelector('img[alt]');
-      if (img && img.alt) return img.alt.trim();
-      const fallback = card ? (card.textContent || '').trim() : '';
-      if (fallback) return fallback.slice(0, 200);
-    }
-    if (!title && (engine === 'duckduckgo' || engine === 'yandex') && getSearchCategory() === 'images') {
-      const img = result.querySelector('img[alt]');
-      if (img && img.alt) return img.alt.trim();
-    }
-    if (!title && engine === 'brave' && getSearchCategory() === 'images') {
-      const el = result.querySelector('.image-metadata-title') || result;
-      const txt = (el.textContent || '').trim();
-      if (txt) return txt.slice(0, 200);
-    }
-    return title;
+    return '';
   }
 
   function getResultTitleElement(result, engine) {
-    if (engine === 'google' && getSearchCategory() === 'images') {
-      const img = result.querySelector('img[alt]') || result.querySelector('img');
-      if (img) return img;
-    }
-    if (engine === 'bing') {
-      if (getSearchCategory() === 'videos') { const t = result.querySelector('.mc_vtvc_title'); if (t) return t; }
-      if (getSearchCategory() === 'news') { const t = result.querySelector('a.title'); if (t) return t; }
-    }
-    const selectors = (getSelectors()[engine] || SELECTORS.other).titles;
+    const selectors = resolveCategoryDef(engine).titles;
     if (!Array.isArray(selectors)) return null;
     for (const selector of selectors) {
-      let elem = null; try { elem = result.querySelector(selector); } catch (e) { continue; }
+      const spec = parseTitleSpec(selector);
+      if (spec) {
+        const elem = spec.css ? queryResultSelector(result, spec.css) : result;
+        if (elem) return elem;
+        continue;
+      }
+      const elem = queryResultSelector(result, selector);
       if (elem && elem.textContent && elem.textContent.trim()) return elem;
     }
     return null;
@@ -2832,7 +2994,7 @@
     const isBlocked = result.getAttribute('data-is-blocked') === 'true';
     if (!domain && !isBlocked) return; if (result.closest('header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav')) return;
     if (engine === 'google') {
-      if (result.classList.contains('isv-r') || result.querySelector('g-img')) {
+      if (result.classList.contains('isv-r') || result.classList.contains('ivg-i') || result.querySelector('g-img')) {
         if (!result.querySelector('h3')) return;
       }
       if (!result.closest('#center_col')) return;
@@ -2948,6 +3110,13 @@
     });
   }
 
+  function yandexResultBlocks(parent) {
+    if (!parent || typeof parent.querySelectorAll !== 'function') return [];
+    let sel = 'div.Organic';
+    try { sel = getContainerSelector('yandex') || sel; } catch (e) {}
+    try { return Array.from(parent.children).filter(el => typeof el.matches === 'function' && el.matches(sel)); } catch (e) { return Array.from(parent.children); }
+  }
+
   function visibleUnblocked(el) {
     return el.style.display !== 'none' && el.getAttribute('data-is-blocked') !== 'true';
   }
@@ -2971,7 +3140,7 @@
     if (origDisplay !== null) { result.style.display = origDisplay; result.removeAttribute('data-serhl-orig-display'); }
     if (result.parentElement && result.parentElement.dataset.blockerYandexParent) {
       const parent = result.parentElement;
-      const stillHasBlockedHidden = Array.from(parent.children).some(el =>
+      const stillHasBlockedHidden = yandexResultBlocks(parent).some(el =>
         el !== result && el.getAttribute('data-is-blocked') === 'true' && el.style.display === 'none');
       const parentOrig = parent.getAttribute('data-serhl-orig-display');
       if (stillHasBlockedHidden) {
@@ -3008,9 +3177,10 @@
   function reconcileHiddenParents() {
     if (_hiddenParentCount <= 0) return;
     document.querySelectorAll('[data-blocker-yandex-parent]').forEach(parent => {
-      const stillHiddenBlocked = Array.from(parent.children).some(el =>
+      const blocks = yandexResultBlocks(parent);
+      const stillHiddenBlocked = blocks.some(el =>
         el.style.display === 'none' && el.getAttribute('data-is-blocked') === 'true');
-      const hasVisibleUnblocked = Array.from(parent.children).some(visibleUnblocked);
+      const hasVisibleUnblocked = blocks.some(visibleUnblocked);
       if (parent.getAttribute('data-is-blocked') !== 'true' && !blockedShown() && (!stillHiddenBlocked || hasVisibleUnblocked)) restoreParentDisplay(parent);
     });
     document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
@@ -3067,7 +3237,7 @@
   function getGridLeaves(cell) {
     if (!cell || typeof cell.querySelectorAll !== 'function') return [];
     try {
-      const isv = Array.from(cell.querySelectorAll('div.isv-r')); if (isv.length) return isv;
+      const isv = Array.from(cell.querySelectorAll('div.isv-r, div.ivg-i')); if (isv.length) return isv;
       const cards = Array.from(cell.querySelectorAll('div[data-attrid="images universal"]')); if (cards.length) return cards;
       return Array.from(cell.querySelectorAll('div.iuscp, div.imgpt')).filter(el => el.querySelector && el.querySelector('a.iusc') && !Array.from(el.querySelectorAll('div.iuscp, div.imgpt')).some(child => child.querySelector && child.querySelector('a.iusc')));
     } catch (e) { return []; }
@@ -3129,7 +3299,7 @@
       result.setAttribute('data-blocker-processed', 'true'); result.setAttribute('data-is-blocked', 'true');
 
       if (engine === 'yandex') {
-        const parent = result.parentElement; if (parent) hideParentIfNoVisibleSiblings(parent, parent.children, 'data-blocker-yandex-parent');
+        const parent = result.parentElement; if (parent) hideParentIfNoVisibleSiblings(parent, yandexResultBlocks(parent), 'data-blocker-yandex-parent');
       }
 
       if (engine === 'google' && result.matches && result.matches('div.g, div.tF2Cxc, div.MjjYud')) {
@@ -3247,7 +3417,8 @@
       }
       return true;
     });
-    if (isBingImagesPage(getSearchEngine())) {
+    const engine = getSearchEngine();
+    if (engine === 'bing' && getSearchCategory() === 'images') {
       const seen = new Set();
       return kept.filter(el => {
         const iusc = el.querySelector ? el.querySelector('a.iusc') : null;
@@ -3337,6 +3508,7 @@
   }
 
   function forceReprocessAll() {
+    if (!currentConfig.enabled) showHiddenResults = false;
     if (!isEngineSite()) return; buildRuleIndex(); exposeDebugApi();
 
     const engine = getSearchEngine(); const selector = getContainerSelector(engine); if (!selector) return; syncObservedSelector(selector);
@@ -3474,7 +3646,7 @@
         .serhl-scroll-btn { position: absolute; right: 7px; cursor: pointer; opacity: 0.5; font-size: 18px !important; line-height: 1 !important; user-select: none !important; transition: opacity 0.2s, transform 0.2s; background: transparent !important; border: none !important; padding: 0 !important; margin: 0 !important; z-index: 10; }
         .serhl-scroll-btn:hover { opacity: 1; transform: scale(1.2); }
         .serhl-quick-block:hover { transform: scale(1.1); opacity: 1; }
-        :is(.isv-r, .image-section, g-img, .is-extra-container) .serhl-quick-block, :is(header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav, #extabar) .serhl-quick-block { display: none !important; }
+        :is(.isv-r, .ivg-i, .image-section, g-img, .is-extra-container) .serhl-quick-block, :is(header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav, #extabar) .serhl-quick-block { display: none !important; }
         body.serhl-dark-on #serhl-panel .serhl-compact-row span { color: #f3f4f6 !important; }
         body.serhl-dark-on #serhl-rules::placeholder { color: #6b7280 !important; }
         body.serhl-dark-on #serhl-stats-content { color: #f3f4f6 !important; }
@@ -3737,7 +3909,7 @@
       });
     } else {
       document.querySelectorAll('[data-blocker-yandex-parent]').forEach(parent => {
-        hideParentIfNoVisibleSiblings(parent, parent.children, 'data-blocker-yandex-parent');
+        hideParentIfNoVisibleSiblings(parent, yandexResultBlocks(parent), 'data-blocker-yandex-parent');
       });
       document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
         hideParentIfNoVisibleSiblings(parent, googleResultBlocks(parent), 'data-blocker-google-parent');
@@ -4764,19 +4936,40 @@
   function serializeSelectors(base) {
     const merged = base || getSelectors(); const parts = [];
     const keyToText = (key) => /^[A-Za-z_$][\w$]*$/.test(key) ? key : `'${escapeJsString(key)}'`;
+    const matchToText = (match) => {
+      const m = matchDefToParts(match);
+      return (m.source || m.flags) ? `/${regexSourceToLiteralText(m.source)}/${m.flags}` : `''`;
+    };
+    const catToText = (catName, cat, indent = '') => {
+      const links = Array.isArray(cat.links)
+        ? `[${(cat.links || []).map(s => `'${escapeJsString(s)}'`).join(', ')}]`
+        : `'${escapeJsString(cat.links || '')}'`;
+      return `${indent}${keyToText(catName)}: {\n` +
+        (cat.match !== undefined ? `${indent}  match: ${matchToText(cat.match)},\n` : '') +
+        (cat.containers !== undefined ? `${indent}  containers: '${escapeJsString(cat.containers)}',\n` : '') +
+        (cat.titles !== undefined ? `${indent}  titles: [${(cat.titles || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` : '') +
+        (cat.snippets !== undefined ? `${indent}  snippets: [${(cat.snippets || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` : '') +
+        (cat.links !== undefined ? `${indent}  links: ${links},\n` : '') +
+        (cat.extraElements !== undefined ? `${indent}  extraElements: [${(cat.extraElements || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` : '') +
+        (cat.button !== undefined ? `${indent}  button: ${cat.button !== false},\n` : '') +
+        `${indent}}`;
+    };
     const defToText = (def, disabled) => {
       const links = Array.isArray(def.links)
         ? `[${(def.links || []).map(s => `'${escapeJsString(s)}'`).join(', ')}]`
         : `'${escapeJsString(def.links || 'a[href]')}'`;
-      const m = matchDefToParts(def.match);
-      const matchText = (m.source || m.flags) ? `/${regexSourceToLiteralText(m.source)}/${m.flags}` : `''`;
+      const cats = normalizeCategoryMap(def.categories);
+      const catsText = cats && Object.keys(cats).length
+        ? `  categories: {\n${Object.keys(cats).map(n => catToText(n, cats[n], '    ')).join(',\n')},\n  },\n`
+        : '';
       return `{\n` +
-        `  match: ${matchText},\n` +
+        `  match: ${matchToText(def.match)},\n` +
         `  containers: '${escapeJsString(def.containers || '')}',\n` +
         `  titles: [${(def.titles || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
         `  snippets: [${(def.snippets || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
         `  links: ${links},\n` +
         `  extraElements: [${(def.extraElements || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
+        catsText +
         (def.button !== undefined ? `  button: ${def.button !== false},\n` : '') +
         (disabled ? `  disabled: true,\n` : '') +
         `}`;
@@ -4784,7 +4977,7 @@
     for (const key of Object.keys(merged)) {
       if (key === 'other') continue; const def = merged[key];
       if (def && def.disabled) {
-        let hasCustom = !!(def.match || def.containers || (def.titles && def.titles.length) || (def.snippets && def.snippets.length) || (def.extraElements && def.extraElements.length));
+        let hasCustom = !!(def.match || def.containers || (def.titles && def.titles.length) || (def.snippets && def.snippets.length) || (def.extraElements && def.extraElements.length) || (normalizeCategoryMap(def.categories) && Object.keys(normalizeCategoryMap(def.categories)).length));
         if (!hasCustom && def.links !== undefined) {
           const norm = (v) => JSON.stringify(normalizeSelectorList(v)); hasCustom = norm(def.links) !== norm('a[href]');
         }
@@ -4816,6 +5009,16 @@
 
   function validateUserSelectors(config) {
     if (!config || typeof config !== 'object' || Array.isArray(config)) return [t('selectorJsonError')]; const errors = [];
+    const checkSel = (value, field, parser, label) => {
+      const spec = parser ? parser(value) : null;
+      if (spec) { if (spec.css && (!isValidCssSelector(spec.css) || hasPseudoElement(spec.css))) errors.push(t('selectorInvalidCss', { key: label, field, value })); return; }
+      if (field === 'extraElements') {
+        if (!value.trim() || hasTopLevelComma(value) || hasPseudoElement(value) || !isValidCssSelector(':scope > :nth-child(1) ' + value)) errors.push(t('selectorInvalidCss', { key: label, field, value }));
+        return;
+      }
+      if (!isValidCssSelector(value) || hasPseudoElement(value)) errors.push(t('selectorInvalidCss', { key: label, field, value }));
+    };
+    const parserOf = (field) => field === 'titles' ? parseTitleSpec : field === 'links' ? parseLinkSpec : null;
     for (const key of Object.keys(config)) {
       const def = config[key];
       if (key === 'other') { errors.push(t('selectorReservedKey', { key })); continue; }
@@ -4835,6 +5038,35 @@
       if (def.disabled !== undefined && def.disabled !== null && typeof def.disabled !== 'boolean') errors.push(t('selectorInvalidBool', { key, field: 'disabled' }));
       if (def.disable !== undefined && def.disable !== null && typeof def.disable !== 'boolean') errors.push(t('selectorInvalidBool', { key, field: 'disable' }));
       if (def.button !== undefined && def.button !== null && typeof def.button !== 'boolean') errors.push(t('selectorInvalidBool', { key, field: 'button' }));
+      if (def.categories !== undefined) {
+        if (!def.categories || typeof def.categories !== 'object' || Array.isArray(def.categories)) {
+          errors.push(t('selectorFieldRequired', { key, field: 'categories' }));
+        } else {
+          for (const catName of Object.keys(def.categories)) {
+            const cat = def.categories[catName];
+            if (!cat || typeof cat !== 'object' || Array.isArray(cat)) { errors.push(t('selectorFieldRequired', { key, field: 'categories.' + catName })); continue; }
+            if (!/^[A-Za-z0-9_-]+$/.test(catName)) { errors.push(t('selectorInvalidKey', { key: key + '.' + catName })); continue; }
+            if (cat.match !== undefined) {
+              if (typeof cat.match === 'string' && cat.match) {
+                const lit = cat.match.match(/^\/(.*)\/([a-z]*)$/i); const badLit = lit ? getInvalidRegexFlags(lit[2]) : '';
+                if (badLit) errors.push(t('invalidRegexFlags', { flags: badLit }));
+                else { try { lit ? new RegExp(lit[1], lit[2].toLowerCase()) : new RegExp(cat.match); } catch (e) { errors.push(t('selectorInvalidRegex', { key: key + '.' + catName })); } }
+              } else if (cat.match && typeof cat.match === 'object' && typeof cat.match.source === 'string' && cat.match.source) {
+                try { new RegExp(cat.match.source, String(cat.match.flags || '').toLowerCase().replace(/[^imsu]/g, '')); } catch (e) { errors.push(t('selectorInvalidRegex', { key: key + '.' + catName })); }
+                const badFlags = getInvalidRegexFlags(String(cat.match.flags || '')); if (badFlags) errors.push(t('invalidRegexFlags', { flags: badFlags }));
+              } else errors.push(t('selectorFieldRequired', { key: key + '.' + catName, field: 'match' }));
+            }
+            if (cat.containers !== undefined) {
+              if (typeof cat.containers !== 'string' || (cat.containers.trim() && (!isValidCssSelector(cat.containers) || hasPseudoElement(cat.containers)))) errors.push(t('selectorInvalidCss', { key: key + '.' + catName, field: 'containers', value: cat.containers }));
+            }
+            for (const field of ['titles', 'snippets', 'links', 'extraElements']) {
+              const value = cat[field]; if (value === undefined || value === null) continue;
+              if (!Array.isArray(value) && typeof value !== 'string') { errors.push(t('selectorFieldRequired', { key: key + '.' + catName, field })); continue; }
+              for (const s of normalizeSelectorList(value)) checkSel(s, field, parserOf(field), key + '.' + catName);
+            }
+          }
+        }
+      }
       if (def.disabled === true || def.disable === true) continue; if ((def.disabled === false || def.disable === false) && Object.keys(def).every(k => k === 'disabled' || k === 'disable')) continue;
       if (typeof def.match === 'string' && def.match) {
         const lit = def.match.match(/^\/(.*)\/([a-z]*)$/i); const badLit = lit ? getInvalidRegexFlags(lit[2]) : '';
@@ -4856,20 +5088,11 @@
         if (!Array.isArray(value) && typeof value !== 'string') {
           errors.push(t('selectorFieldRequired', { key, field })); continue;
         }
-        for (const s of normalizeSelectorList(value)) {
-          if (!isValidCssSelector(s) || hasPseudoElement(s)) errors.push(t('selectorInvalidCss', { key, field, value: s }));
-        }
+        for (const s of normalizeSelectorList(value)) checkSel(s, field, parserOf(field), key);
       }
       if (def.links === undefined || def.links === null) continue;
-      if (typeof def.links === 'string') {
-        if (def.links && (!isValidCssSelector(def.links) || hasPseudoElement(def.links))) errors.push(t('selectorInvalidCss', { key, field: 'links', value: def.links }));
-      } else if (Array.isArray(def.links)) {
-        for (const s of normalizeSelectorList(def.links)) {
-          if (!isValidCssSelector(s) || hasPseudoElement(s)) errors.push(t('selectorInvalidCss', { key, field: 'links', value: s }));
-        }
-      } else {
-        errors.push(t('selectorFieldRequired', { key, field: 'links' }));
-      }
+      if (typeof def.links !== 'string' && !Array.isArray(def.links)) { errors.push(t('selectorFieldRequired', { key, field: 'links' })); continue; }
+      for (const s of normalizeSelectorList(def.links)) checkSel(s, 'links', parseLinkSpec, key);
     }
     return errors;
   }
@@ -4883,7 +5106,8 @@
   function sameSelectorDef(a, b) {
     if (!a || !b) return false; if (!!a.disabled !== !!b.disabled || !!a.disable !== !!b.disable) return false; const aM = matchDefToParts(a.match); const bM = matchDefToParts(b.match); if (aM.source !== bM.source || aM.flags !== bM.flags) return false;
     if ((a.containers || '') !== (b.containers || '')) return false; const norm = (v) => JSON.stringify(normalizeSelectorList(v)); if (norm(a.titles) !== norm(b.titles)) return false;
-    if (norm(a.snippets) !== norm(b.snippets)) return false; if (norm(a.extraElements) !== norm(b.extraElements)) return false; if (norm(a.links) !== norm(b.links)) return false; if ((a.button === false) !== (b.button === false)) return false; return true;
+    if (norm(a.snippets) !== norm(b.snippets)) return false; if (norm(a.extraElements) !== norm(b.extraElements)) return false; if (norm(a.links) !== norm(b.links)) return false; if ((a.button === false) !== (b.button === false)) return false;
+    const aC = JSON.stringify(normalizeCategoryMap(a.categories) || {}); const bC = JSON.stringify(normalizeCategoryMap(b.categories) || {}); if (aC !== bC) return false; return true;
   }
 
   function diffSelectorDefFields(def, builtin) {
@@ -4898,6 +5122,7 @@
     for (const k of ['titles', 'snippets', 'extraElements', 'links']) {
       if (def[k] !== undefined && norm(def[k]) !== norm(builtin[k])) diff[k] = def[k];
     }
+    if (def.categories !== undefined && JSON.stringify(normalizeCategoryMap(def.categories) || {}) !== JSON.stringify(normalizeCategoryMap(builtin.categories) || {})) diff.categories = def.categories;
     if (def.button !== undefined && (def.button !== false) !== (builtin.button !== false)) diff.button = def.button !== false;
     return diff;
   }
@@ -5039,6 +5264,55 @@
           if (!closed) return fail(); let k = j; while (k < n && /[a-z]/i.test(s[k])) k++; const flags = s.slice(j, k);
           if (flags && getInvalidRegexFlags(flags)) return { config: null, errors: [t('invalidRegexFlags', { flags })] }; i = k; if (field !== 'match') return fail();
           def[field] = flags ? { source: src, flags: flags.toLowerCase() } : src;
+        } else if (s[i] === '{') {
+          if (field !== 'categories') return fail();
+          i++; const cats = {};
+          while (true) {
+            skipWs(); if (i >= n) return fail();
+            if (s[i] === ',') { i++; continue; }
+            if (s[i] === '}') { i++; break; }
+            const catName = readKey(); if (catName === null) return fail(); skipWs(); if (s[i] !== ':') return fail(); i++; skipWs(); if (s[i] !== '{') return fail(); i++;
+            const cat = {};
+            while (true) {
+              skipWs(); if (i >= n) return fail();
+              if (s[i] === ',') { i++; continue; }
+              if (s[i] === '}') { i++; break; }
+              const cField = readKey(); if (cField === null) return fail(); skipWs(); if (s[i] !== ':') return fail(); i++; skipWs();
+              if (s[i] === '/') {
+                let j = i + 1, src = '', inClass = false, closed = false;
+                while (j < n) {
+                  const ch = s[j];
+                  if (ch === '\\') { src += ch + (s[j + 1] || ''); j += 2; continue; }
+                  if (inClass) { if (ch === ']') inClass = false; src += ch; j++; continue; }
+                  if (ch === '[') { inClass = true; src += ch; j++; continue; }
+                  if (ch === '/') { closed = true; j++; break; }
+                  src += ch; j++;
+                }
+                if (!closed) return fail(); let k = j; while (k < n && /[a-z]/i.test(s[k])) k++; const flags = s.slice(j, k);
+                if (flags && getInvalidRegexFlags(flags)) return { config: null, errors: [t('invalidRegexFlags', { flags })] }; i = k; if (cField !== 'match') return fail();
+                cat[cField] = flags ? { source: src, flags: flags.toLowerCase() } : src;
+              } else if (s[i] === '\'' || s[i] === '"') {
+                const val = readString(); if (val === null) return fail(); cat[cField] = normalizeMatchLiteral(cField, val);
+              } else if (s[i] === '[') {
+                i++; const arr = [];
+                while (true) {
+                  skipWs(); if (i >= n) return fail();
+                  if (s[i] === ',') { i++; continue; }
+                  if (s[i] === ']') { i++; break; }
+                  if (s[i] === '\'' || s[i] === '"') {
+                    const val = readString(); if (val === null) return fail(); arr.push(val);
+                  } else return fail();
+                }
+                cat[cField] = arr;
+              } else if (s.startsWith('true', i) && !/[\w$]/.test(s[i + 4] || '')) {
+                cat[cField] = true; i += 4;
+              } else if (s.startsWith('false', i) && !/[\w$]/.test(s[i + 5] || '')) {
+                cat[cField] = false; i += 5;
+              } else return fail();
+            }
+            cats[catName] = cat;
+          }
+          def[field] = cats;
         } else if (s[i] === '\'' || s[i] === '"') {
           const val = readString(); if (val === null) return fail(); def[field] = normalizeMatchLiteral(field, val);
         } else if (s[i] === '[') {
@@ -5328,10 +5602,9 @@
     preventPanelClose = true; const textarea = document.getElementById('serhl-rules'); const content = textarea ? textarea.value : '';
     const pick = _exportPick;
     if (!pick.rules && !pick.engine && !pick.settings) { showToast(t('exportEmpty'), 'error'); preventPanelClose = false; return; }
-    if (pick.rules && !content.trim()) { showToast(t('noRulesExport'), 'error'); preventPanelClose = false; return; }
     let out = pick.settings ? '# ScriptConfig:' + JSON.stringify(getExportSettings(currentConfig)) + '\n' : '';
     if (pick.engine) { const selectors = getUserSelectors(); if (Object.keys(selectors).length) out += '# Selectors:' + JSON.stringify(selectors) + '\n'; }
-    if (pick.rules) out += content;
+    if (pick.rules && content.trim()) out += content;
     if (!out.trim()) { showToast(t('exportEmpty'), 'error'); preventPanelClose = false; return; }
     downloadTextFile(timestampFilename('rules', 'txt'), out, 'text/plain;charset=utf-8'); preventPanelClose = false;
   }
