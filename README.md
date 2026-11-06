@@ -5,7 +5,8 @@
 [中文](README.md) | [English](README.en.md)
 
 在仅支持安装脚本的浏览器上实现复杂规则屏蔽搜索结果功能  
-兼容uBlacklist基础规则，支持URL匹配、正则匹配、标题匹配、结果摘要(snippet)匹配、高亮目标结果、白名单匹配、`@if` 附加判断条件，以及添加**自定义引擎/站点**  
+兼容uBlacklist基础规则，支持URL匹配、正则匹配、标题匹配、结果摘要(snippet)匹配、高亮目标结果、白名单匹配、`@if` 附加判断条件、图片/视频/新闻等搜索页面屏蔽，以及添加**自定义引擎站点**
+
 当前适配搜索引擎：  
 Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、Startpage、Yahoo(&Japan)、360搜索、搜狗、头条搜索、夸克(&神马)、GitHub搜索、GreasyFork搜索
 
@@ -39,7 +40,7 @@ Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、S
 1. 自动同步后台运行，每1h三方快照合并同步一次，手动上传/下载为强制覆盖，云端文件在首次上传后每次上传都会生成 `rules.txt.bak` 备份文件
 2. 地址只支持**https**和完整路径，如坚果云 `https://dav.jianguoyun.com/dav/your_folder/`，路径文件夹不存在时会自动创建，文件名如 `rules.txt` 修改后需手动上传覆盖一次
 3. 油猴无安全存储API，密码只能本地混淆处理，安全起见必须使用单独应用密码
-4. 同步时为确保时间戳准确，会自动访问一次 timeapi / akamai / cloudflare 授时点，访问失败默认使用 webdav 的 date 时间戳
+4. 同步时为确保时间戳准确，会自动访问一次 timeapi / akamai / cloudflare 联网授时点，访问失败或关闭 `时间校准` 开关则默认使用 webdav 的 `date` 时间戳
 
 ### 1.4 关于订阅：
 
@@ -77,6 +78,5 @@ Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、S
 
 ## 截图
 
-<img width="400" height="250" alt="01" src="https://github.com/user-attachments/assets/a8297817-1856-434e-a329-b98adbfbad91" />
-<br/>
-<img width="250" height="85" alt="02" src="https://github.com/user-attachments/assets/b5eb4eac-9bc5-44a4-a0eb-a38076c35e4d" />
+![01](https://github.com/user-attachments/assets/a8297817-1856-434e-a329-b98adbfbad91)  
+![02](https://github.com/user-attachments/assets/b5eb4eac-9bc5-44a4-a0eb-a38076c35e4d)

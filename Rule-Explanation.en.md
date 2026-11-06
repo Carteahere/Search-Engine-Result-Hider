@@ -95,7 +95,7 @@ The `@@` syntax not supported yet.
 | Condition Type | Syntax | Description |
 | --- | --- | --- |
 | Search Engine | `$site = "google"` | Only takes effect on the specified engine; case-insensitive, separator can be `=` or `:` |
-| Search Type | `$category = "web"` | Only takes effect on the specified search type; can be `web`, `images`, `videos`, `news`; web search defaults to `web` |
+| Search Type | `$category = "web"` | Only takes effect on the specified search type; built-in types are `web`, `images`, `videos`, `news`; web search defaults to `web`. |
 | Search Site | `site = "google.com.hk"` | Only takes effect on the specified regional site of the search engine |
 | Title Contains | `title *= "keyword"` | Title contains the string `keyword` |
 | Title Exact | `title = "keyword"` | Title exactly matches the string `keyword` |
@@ -145,6 +145,13 @@ The `@@` syntax not supported yet.
 Open the edit panel via the script manager menu `🖋️ Custom Engine` (JS format, same structure as the built-in [Selectors.js](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js)).  
 Not limited to search engines; theoretically any web site with a container can be added.
 
+**Built-in engine IDs:**
+
+`google`, `google_scholar`, `bing`, `duckduckgo`, `duckduckgo_lite`, `yandex`, `brave`, `ecosia`, `startpage`, `yahoo`, `yahoo_japan`, `so360`, `sogou`, `toutiao`, `quark`, `github`, `greasyfork`  
+In `@if($site = "engine")`, `yahoo-japan` = `yahoo_japan`, `ddg` = `duckduckgo` = `duckduckgo_lite`
+
+**Engine selector structure:**
+
 | Field | Type | Description |
 | --- | --- | --- |
 | `match` | regex | Required, hostname matching regex literal |
@@ -152,36 +159,67 @@ Not limited to search engines; theoretically any web site with a container can b
 | `links` | string \| string\[\] | Optional, link selector, defaults to `a[href]` |
 | `titles` | string \| string\[\] | Optional, title selector list |
 | `snippets` | string \| string\[\] | Optional, snippet selector list |
+| `button` | boolean | Optional, `button: false` hides the **One-click Block** button in this engine (without affecting the one-click block switch); `button: true` or missing, the button is shown by default |
+| `disabled` | boolean | Optional, alias `disable`; `disabled: true` disables the engine, `disabled: false` or missing restores the built-in |
 | `extraElements` | string\[\] | Optional, array of relative CSS selectors starting from each result container to pick associated elements |
-| `button` | boolean | Optional, `button: false` hides the **One-click Block** button in this engine (without affecting the one-click block switch); when missing or `button: true`, the button is shown by default |
-| `disabled` | boolean | Optional, alias `disable`; `disabled: true` disables the engine, `disabled: false` restores the built-in |
+| `categories` | object | Optional, search-type category definitions, see below |
+
+**Search type categories:**
+
+Similar to the uBlacklist classification matching substructure, selectors and `match` are defined separately for specific search types of search engines such as images/videos/news, and the `match` regular expression for each classification is attempted to match the entire URL in the declared order. If a match is found, that classification is adopted. If no match is found or no classification is declared, the default is `web` (the top-level selector). Classification names are allowed to contain letters/numbers/`_`/`-`, with `web`, `images`, `videos`, and `news` being built-in by default.  
+Within a category you can write `match`(Required), `containers`, `links`, `titles`, `snippets`, `button`, `extraElements`; fields not written are inherited from the top-level definition.
+
+| Rule | Description |
+| --- | --- |
+| `categories.images.match: /tbm=isch\|udm=2/` | When the URL matches, treat the page as image search |
+| `categories.videos.containers: 'div.card'` | Use a dedicated container selector on video search pages |
+
+**Advanced links / titles extraction syntax:**
+
+When the link or title does not sit directly on `href` / the element (e.g. the real target of an image result is stored in a JSON attribute), append an `@` extraction directive to the selector:
+
+| Syntax | Description | Example |
+| --- | --- | --- |
+| `sel@attr:name` | Reads the element's `name` attribute value; `sel@attr` is equivalent to a normal link reading `href` | Bing video `[ourl]@attr:ourl` |
+| `sel@json:attr.path.path` | Parses the JSON in the element's `attr` attribute and reads by path | Bing image `a.iusc@json:m.purl` |
+| `sel@query:attr.param` | Reads a query parameter from the URL in the element's `attr` attribute (usually `href`) | Google image `a[href*="/imgres"]@query:href.imgurl` |
+| `sel@b64url` | Decodes a URL from the base64 fragment in the element's `src` | Brave image `img[src*="imgs.search.brave.com"]@b64url` |
+| `sel@attr:name` (in titles) | Uses an attribute's text as the title; `sel@json:` works the same way | `img@attr:alt` |
 
 **Examples:**
 
 ```javascript
-example: {
+example_engine: {
   match: /^(?:(?:www|m)\.)?example\.com$/,
   containers: '.result',
   titles: ['.title'],
   snippets: ['.content'],
   links: 'a[href]',
+  categories: {
+    images: {
+      match: /\/images\//,
+      containers: 'div.img-card',
+      titles: ['img@attr:alt'],
+      links: ['a.thumb@json:data.url', 'a[href]'],
+    },
+    videos: {
+      match: /\/videos\//,
+      containers: 'div.video-card' },
+    },
   button: false,
 },
 bing: {disabled: true},
 ```
 
-**Built-in engine IDs:**  
-`google`, `google_scholar`, `bing`, `duckduckgo`, `duckduckgo_lite`, `yandex`, `brave`, `ecosia`, `startpage`, `yahoo`, `yahoo_japan`, `so360`, `sogou`, `toutiao`, `quark`, `github`, `greasyfork`
-
-In `@if($site = "engine")`, `yahoo-japan` = `yahoo_japan`, `ddg` = `duckduckgo` = `duckduckgo_lite`
-
 **Notes:**
 
 1. Custom engines support the `$site = "Engine ID"` condition as well as block/highlight/whitelist rules; selector fields do not support pseudo-elements such as `::after`.
-2. Engine IDs allow only letters/digits/`_`/`-`; `other` is a reserved key and cannot be used. A custom engine with the same ID as a built-in engine, or an overlapping site, overrides the built-in selector. Priority: Custom engines > subscription engines > built-in engines.
+2. Engine IDs are allowed to contain letters/numbers/`_`/`-`; `other` is a reserved key and cannot be used. A custom engine with the same ID as a built-in engine, or an overlapping site, overrides the built-in selector. Priority: Custom engines > subscription engines > built-in engines.
 3. On save, only keys that differ from the built-ins are stored; unmodified built-ins are not written to storage. Changing a value back to the built-in one, or using Reset, restores following script updates. When no selector matches, it falls back to `other` (empty) by default.
 4. When adding a non-engine site with search functionality (in-site search), write the rule so that it applies only to that site. For example, on `m.example.com`, write `title/.*keyword.*/i @if($site = "example")`: the target site is the current non-engine site, which avoids blocking results containing the same keyword on external sites.
 
 **Auto-analysis:**
 
-If you are unsure how to add or capture selectors, send offline files of the search page (such as `.mht` or `.html`) along with a formatted table to the AI; it will analyze the container structure and generate the corresponding selectors. The naming conventions for containers on mobile/desktop/regional sites of the same website may vary, necessitating the separate saving and analysis of files, as well as the filling out of multiple selectors.
+1. Conversion script: Download [auto_convert_mht.cmd](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/auto_convert_mht.cmd) and run it in the same directory as the `.mht` offline file of the target webpage. This conversion script can perform basic container structure analysis and generate the corresponding `.js` selector file.
+2. AI generation: If the conversion script cannot recognize or knows how to grab selectors, it is recommended to send the custom engine description and `.mht` / `.html` offline files to AI for analyzing the structure and generating corresponding selectors.
+3. The naming of containers for mobile/desktop/regional sites of the same website may vary, requiring separate offline file analysis and filling in multiple selectors.

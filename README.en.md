@@ -4,8 +4,9 @@
 
 [中文](README.md) | [English](README.en.md)
 
-Implements complex-rule search result blocking on browsers that only support user script installation.  
-Compatible with uBlacklist basic rules, supports URL matching, regular expression matching, title matching, result snippet matching, highlighting target results, whitelist matching, `@if` additional judgment conditions, and adding **custom engines/sites**.  
+Implements complex-rule search result blocking on browsers that only support scripts installation.  
+Compatible with uBlacklist basic rules, supports URL matching, regular expression matching, title matching, result snippet matching, highlighting target results, whitelist matching, `@if` additional judgment conditions, blocking on image/video/news search pages, and adding **custom engine sites**.
+
 Currently supported search engines:  
 Bing, Google, Google Scholar, DuckDuckGo(&lite), Yandex, Brave, Ecosia, Startpage, Yahoo(&Japan), 360 Search, Sogou, Toutiao, Quark(&Shenma), GitHub Search, GreasyFork Search
 
@@ -24,28 +25,28 @@ Lite Version [Lite](https://raw.githubusercontent.com/Carteahere/Search-Engine-R
 - Rule subscription
 - WebDAV sync
 - Script manager menu  
-┣ Open panel  
-┣ Custom engine  
-┗ Custom highlight colors
+  ┣ Open panel  
+  ┣ Custom engine  
+  ┗ Custom highlight colors
 
 Partial setting instructions:
 1. Show Source: Enabled by default, when disabled, the rules that match the blocked results will not be shown on it.
 2. Folding mode: Disabled by default, when enabled, blocked results will show titles only.
-3. Bubble Action: Open the panel by default; after switching to show results mode, tap shows/hides blocked results, long press opens the panel, and clicking the block button for blocked results again removes the block.
+3. Bubble Action: The floating ball opens the panel on tap by default; when switched to `Show/Hide Results` mode, tapping shows/hides blocked results and long-pressing opens the panel, and clicking the block button on a blocked result again unblocks it.
 
 ### 1.3 About WebDAV:
 
-1. Auto-sync runs in the background, 3-Way Merge Sync once every 1h, manual upload/download is mandatory overwrite. After the initial upload, a backup file named `rules.txt.bak` is generated for each subsequent upload of the cloud file.
-2. Address only supports **https** and full paths, e.g., Nutstore `https://dav.jianguoyun.com/dav/your_folder/`; the folder is created automatically if it does not exist, after changing the file name such as `rules.txt` need to manually upload and overwrite it once.
-3. Tampermonkey lacks a secure storage API, so passwords can only be saved using local obfuscation; for security reasons, you must use a dedicated application password.
-4. To ensure the accuracy of the timestamp during synchronization, the timeapi / akamai / cloudflare timing point will be automatically accessed once. If the access fails, the webdav date timestamp will be used by default.
+1. Auto-sync runs in the background with a 3-way snapshot merge sync once every 1h; manual upload/download is a forced overwrite, and after the first upload the cloud file generates a `rules.txt.bak` backup file on every subsequent upload.
+2. The address only supports **https** and full paths, e.g., Nutstore `https://dav.jianguoyun.com/dav/your_folder/`; the folder is created automatically if the path does not exist, and after changing the file name such as `rules.txt` you need to manually upload and overwrite it once.
+3. Tampermonkey has no secure storage API, so passwords can only be saved with local obfuscation; for security, you must use a separate application password.
+4. To ensure the accuracy of timestamps during synchronization, an automatic access will be made to the timeapi / akamai / cloudflare networking timing points. If the access fails or the `Time Calibration` switch is turned off, the `date` timestamp from WebDAV will be used by default.
 
 ### 1.4 About Subscriptions:
 
-1. Rule subscription updates also run in the background, fetching once every 12h. It supports plain text remote links encoded in `UTF-8` such as [rules.txt](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt) , subscription rules are appended after local rules. 
+1. Rule subscription updates also run in the background, fetching once every 12h. It supports `UTF-8` plain text remote links such as [rules.txt](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt), and subscription rules are appended after local rules.
 2. Compatible with `.yaml` uBlacklist subscription format, do not support `##` / `#@#` uBO rules, they are filtered out automatically on subscription import.
 3. The search engine subscription supports `.js` / `.json`, with [Selectors.js](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js) being built-in by default and the engines list being automatically updated.
-4. Subscription/synchronization requires cross-domain request permissions, if a permission prompt appears, select `Always allow all`.
+4. Subscription/synchronization requires cross-origin request permissions; if a permission prompt appears, select `Always allow all`.
 
 ### 1.5 Other:
 
@@ -56,25 +57,25 @@ Partial setting instructions:
 
 ## Docs
 
-For detailed rule syntax and tutorial custom engines, see [Rule-Explanation](Rule-Explanation.en.md)
+For detailed rule syntax and custom engine setup, see [Rule-Explanation](Rule-Explanation.en.md)
 
-For debug mode and rules detection error instructions, see [Debug](Debug.en.md)
+For debug mode and rule self-check error instructions, see [Debug](Debug.en.md)
 
-Simple Rule Explanation:
-| Type | Example | Explanation |
-| --- | --- |--- |
+Simple rule examples:
+
+| Rule | Example | Description |
+| --- | --- | --- |
 | URL | `*://*.example.com/*` | block `example.com` |
 | URL | `*://*.例子.com/*` | Equivalent blocking `*://*.xn--fsqu00a.com` |
 | regex | `/example\.(com\|net)/i` | block `example.com` and `example.net` |
 | title | `title/.*example.*/i` | block results whose title contains `example` |
-| snippet | `text/.*example.*/i` | block results whose page description (snippet) contains `example` |
-| highlight | `@1*://*.example.com/*` | adds a colored border to results from `example.com` |
-| whitelist | `@*://*.example.com/*` | allows `example.com` |
-| `@if` conditional statements | `*://*.example.com/* @if(title *= "keyword")` | block results from `example.com` whose title contains `keyword` |
-| multiple `@if` conditional statements | `*://*.example.com/* @if((title *= "a" \| title *= "b") & !(url *= "c"))` | Block `example.com` results whose title contains `a` or `b` and URL does not contain `c` |
+| snippet | `text/.*example.*/i` | block results whose page description content (snippet) contains `example` |
+| highlight | `@1*://*.example.com/*` | add a colored border to `example.com` results |
+| whitelist | `@*://*.example.com/*` | allow `example.com` |
+| `@if` condition | `*://*.example.com/* @if(title *= "keyword")` | block `example.com` results whose title contains `keyword` |
+| multiple `@if` conditions | `*://*.example.com/* @if((title *= "a" \| title *= "b") & !(url *= "c"))` | block `example.com` results whose title contains `a` or `b` and whose URL does not contain `c` |
 
 ## Screenshots
 
-<img width="400" height="250" alt="01" src="https://github.com/user-attachments/assets/a8297817-1856-434e-a329-b98adbfbad91" />
-<br/>
-<img width="250" height="85" alt="02" src="https://github.com/user-attachments/assets/b5eb4eac-9bc5-44a4-a0eb-a38076c35e4d" />
+![01](https://github.com/user-attachments/assets/a8297817-1856-434e-a329-b98adbfbad91)  
+![02](https://github.com/user-attachments/assets/b5eb4eac-9bc5-44a4-a0eb-a38076c35e4d)
