@@ -67,7 +67,7 @@ function makeWcApi() {
 }
 // 规则索引/校验沙箱, setCR 用于手工构造索引
 function makeRulesApi() {
-  const fns = ['hostLabelToASCII', 'toASCIIHostname', 'toASCIIUrl', 'safeRegexTest', 'safeDecodeURIComponent', 'decodeUrlForMatch', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
+  const fns = ['hostLabelToASCII', 'toASCIIHostname', 'punycodeDecodeLabel', 'toUnicodeHostname', 'toASCIIUrl', 'safeRegexTest', 'safeDecodeURIComponent', 'decodeUrlForMatch', 'stripRuleComment', 'getInvalidRegexFlags', 'parseConditionPart',
     'tokenizeCondExpr', 'parseCondExprTokens', 'analyzeCondExpr', 'foldCondExpr',
     'evalDynamicLeaf', 'evalCondAST', 'extractBalancedParens', 'findIfOccurrences', 'stripIfConditions',
     'evaluateCondition', 'isCondExprCore', 'looksLikeCondExpr', 'absorbStandaloneExpr',
@@ -459,6 +459,21 @@ assert('规则-245: 脚本规则后的行内##注释被截断, 裸域元素规�
 // stripRuleComment 保留 @/@N 前缀, 避免误删同核心的白名单/高亮规则
 }
 // 易错留档: 前缀规则模式含未转义/且注释以/结尾时, scanRuleString 的 isBadRegexTail 保护会跳过注释剥离, 注释混入正则致规则静默失效
+// 修复留档: 撇号视为纯字符(scanRuleString不再置位inSQ), URL含撇号时注释剥离与@if识别恢复, @if内单引号保护由findBalancedParenEnd承担(主/Lite)
+{
+  const strip = new Function(extractFn(src, 'stripRuleComment') + '\nreturn stripRuleComment;')();
+  // 修复后源码已无撇号置位分支; findBalancedParenEnd 的单引号保护不受影响
+  const scan = new Function(extractFn(src, 'scanRuleString') + '\nreturn scanRuleString;')();
+  assert('规则-295: URL撇号+行尾注释剥离(主版)', strip("@*://example.com/it's # note") === "@*://example.com/it's");
+  assert('规则-296: URL撇号+@if识别(主版)', scan("*://x.com/a'b @if(title *= \"a\")", 'scan').occurrences.length === 1);
+  assert('规则-297: @if内单引号值含)仍按引号配平(主版)', (() => { const o = scan("*://x.com/* @if(site = 'a)b')", 'scan').occurrences; return o.length === 1 && o[0].endIndex === 28; })());
+  const liteSrc = fs.readFileSync(path.join(scriptDir, 'Lite.user.js'), 'utf8');
+  const liteStrip = new Function(extractFn(liteSrc, 'stripRuleComment') + '\nreturn stripRuleComment;')();
+  const liteScan = new Function(extractFn(liteSrc, 'scanRuleString') + '\nreturn scanRuleString;')();
+  assert('规则-298: URL撇号+行尾注释剥离(Lite)', liteStrip("@*://example.com/it's # note") === "@*://example.com/it's");
+  assert('规则-299: URL撇号+@if识别(Lite)', liteScan("*://x.com/a'b @if(title *= \"a\")", 'scan').occurrences.length === 1);
+  assert('规则-300: @if内单引号值含)仍按引号配平(Lite)', (() => { const o = liteScan("*://x.com/* @if(site = 'a)b')", 'scan').occurrences; return o.length === 1 && o[0].endIndex === 28; })());
+}
 
 // ---- 规则-180~19x: 重定向解包 ----
 {
@@ -729,6 +744,28 @@ function createEnv(initRules) {
   fakeInput.onchange({ target: fakeInput });
 }
 
+// 空规则勾选时跳过内容, 其它导出项不受阻断
+{
+  const calls = { download: [], toast: [] };
+  const makeExport = (pick) => new Function('document', 'showToast', 'downloadTextFile', `
+    let preventPanelClose = false;
+    const _exportPick = ${JSON.stringify(pick)};
+    const currentConfig = { rules: [] };
+    function t(key) { return key; }
+    function getSyncSettings() { return { showBubble: true }; }
+    function exportSubscriptionList() { return []; }
+    function getUserSelectors() { return {}; }
+    function timestampFilename() { return 'x.txt'; }
+    ${extractFn(src, 'exportRulesToFile')}
+    return { exportRulesToFile };
+  `)({ getElementById: () => ({ value: '' }) }, (m, type) => calls.toast.push([m, type]), (name, content) => calls.download.push([name, content]));
+  makeExport({ rules: true, subscription: false, engine: false, settings: true }).exportRulesToFile();
+  const ok = calls.download.length === 1 && calls.download[0][1].includes('# ScriptConfig:') && !calls.toast.length;
+  calls.download.length = 0; calls.toast.length = 0;
+  makeExport({ rules: true, subscription: false, engine: false, settings: false }).exportRulesToFile();
+  assert('规则-295: 空规则勾选时跳过内容, 仅勾规则仍报空', ok && calls.download.length === 0 && calls.toast.length === 1 && calls.toast[0][1] === 'error');
+}
+
 // 同步头解析(仅剥离头行, 其余#注释保留)
 {
   const run = (content) => new Function('currentConfig', 'console', `${parseSyncHeaderFn}\nreturn parseSyncHeader;`)({ debug: false }, { warn: () => {} })(content);
@@ -860,6 +897,22 @@ assert('规则-278: Lite mergeRules3Way与主版逐字节一致, 他侧删除不
   const r2 = chk('https://www.example.com/%E8%B7%AF%E5%BE%84', 'x');
   const r3 = chk('https://www.example.com/%E8%B7%AF%E5%BE%84', 'y');
   assert('规则-280: 普通及带@if的URL规则都按解码后的百分号编码路径命中', !!(r && r.blocked === true) && !!(r2 && r2.blocked === true) && !(r3 && r3.blocked === true));
+}
+{
+  const api = makeRulesApi(); api.setState(['/example\\.com\\/admin/i'], []); api.buildRuleIndex();
+  const r = api.checkRuleMatchOptimized('https://evil.com/?u=https%3A%2F%2Fexample.com%2Fadmin', 'evil.com', '', '', ['evil.com', 'com']);
+  assert('规则-293: URL正则不解码query中的编码URL', !(r && r.blocked));
+}
+{
+  const api = makeRulesApi(); api.setState(['/example\\.com\\/admin/i'], []); api.buildRuleIndex();
+  const frag = api.checkRuleMatchOptimized('https://evil.com/#https%3A%2F%2Fexample.com%2Fadmin', 'evil.com', '', '', ['evil.com', 'com']);
+  const path = api.checkRuleMatchOptimized('https://evil.com/path/https%3A%2F%2Fexample.com%2Fadmin', 'evil.com', '', '', ['evil.com', 'com']);
+  assert('规则-296: URL正则不解码fragment中的编码URL, 仍按解码pathname匹配', !(frag && frag.blocked) && !!(path && path.blocked));
+}
+{
+  const api = makeRulesApi(); api.setState(['*://*.example.com/* @if(host =~ /:8080$/)'], []); api.buildRuleIndex();
+  const r = api.checkRuleMatchOptimized('http://example.com:8080/x', 'example.com', '', '', ['example.com', 'com']);
+  assert('规则-294: host正则规则可匹配端口', !!(r && r.blocked));
 }
 
 // 易错: 优先级依赖规则拼接顺序, getRuleKey 以去注释正文为键会合并重复行

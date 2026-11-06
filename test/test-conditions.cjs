@@ -411,6 +411,10 @@ assert('条件-197: =/foo/g与=/foo/ii判定flag错误, ="/foo/ii"仍按字面�
     return r1.meta.name === 'Test' && r1.lines.filter(Boolean).join('|') === 'example.com|title/.*广告.*/i' && r2.lines.filter(Boolean).join('|') === 'a.com|*://b.com/*';
   })());
 }
+{
+  const frag = m.parseRuleWithConditions('url =~ /example\\.com\\/admin/').dynamicConditions[0];
+  assert('条件-201: url =~不解码fragment中的编码URL, 仍按解码pathname匹配', m.evalCondAST(frag, 't', 'https://evil.com/#https%3A%2F%2Fexample.com%2Fadmin') === false && m.evalCondAST(frag, 't', 'https://evil.com/path/https%3A%2F%2Fexample.com%2Fadmin') === true);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

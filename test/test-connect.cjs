@@ -2,7 +2,7 @@
 // 规则订阅 / WebDAV同步 / 联网授时
 // 命名：同步-序号: 描述; 授时-序号
 // 备注：同步不考虑墓碑机制
-// 忽略：防抖推迟同步、PUT期间改设置不同步、多标签页同时打开面板修改规则/设置数据冲突、三方合并错槽、规则尾接注释（如 example.com #注释 ，分块判断麻烦不再维护）、ublacklist极少使用的订阅项（如<all_urls>）、引擎订阅字段不含必选项时合并问题、YAML多行flow列表识别
+// 忽略：防抖推迟同步、PUT期间改设置不同步、多标签页同时打开面板修改规则/设置数据冲突、三方合并错槽、规则尾接注释（分块判断麻烦不再维护）、ublacklist极少使用的订阅项（如<all_urls>）、引擎订阅字段不含必选项时合并问题、YAML多行flow列表识别
 
 (async () => {
 const fs = require('fs');
@@ -52,6 +52,7 @@ const KEYS = {
   LOCAL_LAST_MODIFIED_KEY: 'searchfilter_local_last_modified',
   SETTINGS_LAST_MODIFIED_KEY: 'searchfilter_settings_last_modified',
   WEBDAV_LAST_SYNC_KEY: 'searchfilter_webdav_last_sync',
+  WEBDAV_PENDING_KEY: 'searchfilter_webdav_pending',
   WEBDAV_SYNC_SNAPSHOT_KEY: 'searchfilter_webdav_sync_snapshot',
   SUBSCRIPTION_SYNC_SNAPSHOT_KEY: 'searchfilter_subscription_sync_snapshot',
   WEBDAV_LAST_SYNC_SELECTORS_KEY: 'searchfilter_webdav_last_sync_selectors',
@@ -123,6 +124,7 @@ function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], local
     const SELECTORS_KEY = ${JSON.stringify(KEYS.SELECTORS_KEY)};
     const LOCAL_LAST_MODIFIED_KEY = ${JSON.stringify(KEYS.LOCAL_LAST_MODIFIED_KEY)};
     const WEBDAV_LAST_SYNC_KEY = ${JSON.stringify(KEYS.WEBDAV_LAST_SYNC_KEY)};
+    const WEBDAV_PENDING_KEY = ${JSON.stringify(KEYS.WEBDAV_PENDING_KEY)};
     const WEBDAV_SYNC_SNAPSHOT_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_SNAPSHOT_KEY)};
     const SUBSCRIPTION_SYNC_SNAPSHOT_KEY = ${JSON.stringify(KEYS.SUBSCRIPTION_SYNC_SNAPSHOT_KEY)};
     const MAX_SUBSCRIPTIONS = 100;
@@ -739,6 +741,11 @@ assert('同步-096: 订阅/引擎订阅后台回调复查面板且放行force手
   const lite = fs.readFileSync(path.join(scriptDir, 'Lite.user.js'), 'utf8');
   const m = lite.match(/\['searchfilter_rule_tombstones'[^\]]*\]/);
   assert('同步-102: Lite启动清理不含主版联网键', !!m && !/webdav|subscriptions|last_modified|migrated/.test(m[0]));
+}
+{
+  const trigger = extractFn(src, 'triggerWebDAVSyncDelayed');
+  const checkAuto = extractFn(src, 'checkAutoWebDAV');
+  assert('同步-103: 面板待同步标志持久化并在检查时绕过1小时门限', /WEBDAV_PENDING_KEY, true/.test(trigger) && /const pending = GM_getValue\(WEBDAV_PENDING_KEY, false\)/.test(checkAuto) && /!pending/.test(checkAuto));
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

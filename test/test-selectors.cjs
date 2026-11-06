@@ -28,6 +28,8 @@ function extractFn(text, fnName) {
     if (/scanRuleString\(|RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_[A-D]\b/.test(fn)) prelude.push(text.split('\n').filter((l) => /^\s*const (?:RULE_\w+|REGEX_CTX_[A-D]) =/.test(l)).map((l) => l.replace('const ', 'var ')).join('\n'), rawExtract(text, 'findBalancedParenEnd'), rawExtract(text, 'scanRuleString'), rawExtract(text, 'isBadRegexTail'), rawExtract(text, 'regexCloseAhead'), rawExtract(text, 'regexStartAhead'));
     if (/encodeNonAscii\(/.test(fn)) prelude.push(rawExtract(text, 'encodeNonAscii'));
     if (/isUniqueFlagsStr\(|isFlagsCandidateError\(/.test(fn)) prelude.push(['isUniqueFlagsStr', 'isFlagsCandidateError'].map((n) => rawExtract(text, n)).join('\n'));
+    if (/parseTopLevelAt\(/.test(fn)) prelude.push(rawExtract(text, 'parseTopLevelAt'));
+    if (/yandexResultBlocks\(/.test(fn)) prelude.push('function getContainerSelector() { return \'div.Organic\'; }', rawExtract(text, 'yandexResultBlocks'));
   }
   if (['scanNewResults', 'teardownEngineSite'].includes(fnName)) prelude.push('function restoreResultExtraElements() {}\nfunction reconcileHiddenParents() {}\nfunction restoreAllHiddenParents() {}');
   return prelude.concat([fn]).join('\n');
@@ -80,20 +82,21 @@ function GM_getValue(key, defaultValue) {
 }
 const badCss = new Set(['div>>>', 'a[[', 'p:unknownpseudo(']);
 global.document = { querySelector(selector) { if (badCss.has(selector)) { const e = new Error('invalid selector'); e.name = 'SyntaxError'; throw e; } return null; } };
-const fns = ['normalizeSelectorList', 'hasTopLevelComma', 'mergeSelectorDef', 'getUserSelectors', 'getEngineSubscriptions', 'saveEngineSubscriptions', 'parseSelectorMatch', 'coerceSelectorDef', 'getSubscribedSelectors', 'getBaseSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'getSearchCategory', 'isBingImagesPage', 'isEngineSite', 'getContainerSelector', 'isValidCssSelector', 'hasPseudoElement', 'validateUserSelectors', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'normalizeMatchLiteral', 'parseSelectorText', 'sameSelectorDef', 'diffSelectorDefFields', 'diffUserSelectors', 'pruneUserSelectors'].map((n) => extractFn(src, n));
+const fns = ['normalizeSelectorList', 'hasTopLevelComma', 'normalizeCategoryMap', 'mergeSelectorDef', 'getUserSelectors', 'getEngineSubscriptions', 'saveEngineSubscriptions', 'parseSelectorMatch', 'coerceSelectorDef', 'coerceCategoryMatch', 'getSubscribedSelectors', 'getBaseSelectors', 'getSelectors', 'resetSelectorCache', 'getSearchEngine', 'getSearchCategory', 'resolveCategoryDef', 'isEngineSite', 'getContainerSelector', 'isValidCssSelector', 'hasPseudoElement', 'validateUserSelectors', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'normalizeMatchLiteral', 'parseSelectorText', 'sameSelectorDef', 'diffSelectorDefFields', 'diffUserSelectors', 'pruneUserSelectors', 'parseLinkSpec', 'parseTitleSpec'].map((n) => extractFn(src, n));
 const builtinSelectorOfLine = src.match(/const builtinSelectorOf = .+?;/);
 if (!builtinSelectorOfLine) throw new Error('builtinSelectorOf not found');
 const body = `
 const ENGINE_SUBSCRIPTIONS_KEY = 'searchfilter_engine_subscriptions'; const BUILTIN_ENGINE_SUB_URL = 'https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js'; const SELECTORS_KEY = 'searchfilter_selectors';
 const SUPPORTED_REGEX_FLAGS = 'imsu';
-const SELECTORS = ${selectorsObjectText}; let activeSelectors = null; let _engineCacheHost = null; let _categoryCacheHref = null; let _categoryCacheResult = 'web';
+const SELECTORS = ${selectorsObjectText}; let activeSelectors = null; let _engineCacheHost = null; let _categoryCacheHref = null; let _categoryCacheResult = 'web'; let _categoryCacheEngine = null; let _catDefCacheKey = null; let _catDefCache = null;
+const CATEGORY_FIELDS = ['containers', 'titles', 'snippets', 'links', 'extraElements', 'button', 'match'];
 ${src.match(/const ENGINE_HOST_REGEXES = \{[\s\S]*?\n  \};/)[0]}
 function isEngineHost(engine, host) { const re = ENGINE_HOST_REGEXES[engine]; return !!re && re.test(String(host || '')); }
 ${builtinSelectorOfLine[0]} let _engineCacheResult = 'other'; let _observedSelector = '';
 const window = { location: { get hostname() { return currentHost; }, get href() { return currentHref; } } }; let currentHost = 'www.google.com'; let currentHref = 'https://www.google.com/';
 function t(key, params = {}) { let text = key; for (const [k, v] of Object.entries(params || {})) text += ':' + v; return text; } function GM_setValue(key, value) { if (key === 'searchfilter_selectors') storeRef.current = value; }
 ${fns.join('\n')}
-return { getSelectors, getUserSelectors, getSearchEngine, isEngineSite, getContainerSelector, validateUserSelectors, resetSelectorCache, normalizeSelectorList, serializeSelectors, parseSelectorText, diffUserSelectors, pruneUserSelectors, sameSelectorDef,
+return { getSelectors, getUserSelectors, getSearchEngine, getSearchCategory, isEngineSite, getContainerSelector, validateUserSelectors, resetSelectorCache, normalizeSelectorList, serializeSelectors, parseSelectorText, diffUserSelectors, pruneUserSelectors, sameSelectorDef,
   setHost: (h) => { currentHost = h; currentHref = 'https://' + h + '/'; }, setHref: (h) => { currentHref = h; }, setStore: (obj) => { storeRef.current = obj; resetSelectorCache(); }, setSubStore: (obj) => { subStoreRef.current = obj; resetSelectorCache(); } };
 `;
 const api = new Function('GM_getValue', 'storeRef', 'subStoreRef', body)(GM_getValue, storeRef, subStoreRef);
@@ -129,17 +132,18 @@ api.setSubStore([]);
 check('选择器-011e: 无自定义与订阅时回退内置引擎', api.getSearchEngine() === 'google' && api.getContainerSelector('google') === 'div.g, div.MjjYud');
 api.setHost('www.bing.com'); api.setHref('https://www.bing.com/images/search?q=x');
 api.setStore({ bing: { containers: 'div.custom-bing' } });
-check('011f: custom image containers win', api.getContainerSelector('bing') === 'div.custom-bing');
+// 留档观察: 图片搜索容器按分类优先(设计), 顶层containers覆盖仅在分类未定义containers时生效
+check('011f: custom image containers win', api.getContainerSelector('bing') === 'li:has(div.iuscp), div.iuscp, div.imgpt');
 api.setStore({});
 api.setSubStore([{ url: 'https://sub/y.js', enabled: true, selectors: { bing: { containers: 'div.sub-bing' } } }]);
-check('011g: subscribed image containers win', api.getContainerSelector('bing') === 'div.sub-bing');
+check('011g: subscribed image containers win', api.getContainerSelector('bing') === 'li:has(div.iuscp), div.iuscp, div.imgpt');
 api.setSubStore([]); api.setHost('www.google.com'); api.setHref('https://www.google.com/');
 api.setHref('https://www.google.com/search?q=x&tbm=vid'); const gVideoCont = api.getContainerSelector('google');
 api.setHref('https://www.google.com/search?q=x&tbm=nws'); const gNewsCont = api.getContainerSelector('google');
 api.setHost('www.bing.com');
 api.setHref('https://www.bing.com/videos/search?q=x'); const bVideoCont = api.getContainerSelector('bing');
 api.setHref('https://www.bing.com/news/search?q=x'); const bNewsCont = api.getContainerSelector('bing');
-check('选择器-211: 视频/新闻按真实卡片容器返回', gVideoCont === 'div.PmEWq' && gNewsCont === 'a.aJWbwf' && bVideoCont === 'div.mc_vtvc' && bNewsCont === 'div.news-card');
+check('选择器-211: 视频/新闻按真实卡片容器返回', gVideoCont === 'div.PmEWq' && gNewsCont === 'a.aJWbwf, [data-news-cluster-id]' && bVideoCont === 'div.mc_vtvc' && bNewsCont === 'div.news-card, .newscard');
 api.setHost('www.google.com');
 api.setSubStore([{ url: 'https://example.com/subs.js', enabled: true, selectors: { yahoo: { match: '^(?:[a-z]{1,6}\\.)?(?:search\\.)?yahoo\\.co\\.jp$', containers: '.sub-y' }, yahoo_japan: { match: '^search\\.yahoo\\.co\\.jp$', containers: '.sub-yj' } } }]);
 api.setHost('search.yahoo.co.jp');
@@ -197,7 +201,8 @@ check('选择器-041: 存储里 disabled 为字符串 false 不误禁用引擎',
 api.setStore({ bing: { disable: true } });
 check('选择器-043: disable:true 引擎被停用且 disable:false 空覆盖不破坏内置', (() => { api.setHost('www.bing.com'); const r = api.getSearchEngine() === 'other'; api.setStore({ bing: { disable: false } }); return r && api.getSearchEngine() === 'bing' && api.getContainerSelector('bing') === 'li.b_algo, div.b_algo'; })());
 api.setStore({});
-storeRef.current = { bing: JSON.parse(JSON.stringify(bingCopy)), myse: { match: 'a', containers: '.x' } };
+const bingSnapshot = api.getSelectors().bing;
+storeRef.current = { bing: { ...bingSnapshot, match: bingSnapshot.match.source }, myse: { match: 'a', containers: '.x' } };
 api.resetSelectorCache();
 api.pruneUserSelectors();
 check('选择器-044: 旧版固化的内置副本被清理', storeRef.current && !('bing' in storeRef.current) && !!storeRef.current.myse);
@@ -211,6 +216,17 @@ api.setStore({ customExtra: extraDef });
 const extraRoundTrip = api.parseSelectorText(api.serializeSelectors());
 check('选择器-045: 关联选择器合并保留且往返一致且校验通过', JSON.stringify(api.getSelectors().customExtra.extraElements) === JSON.stringify(extraDef.extraElements) && !extraRoundTrip.errors.length && api.sameSelectorDef(extraRoundTrip.config.customExtra, extraDef) && api.validateUserSelectors({ customExtra: extraDef }).length === 0);
 for (const value of ['+ tr', ['+ tr, body'], ['+ tr::after']]) check(`选择器-046: 非法关联配置被拒 ${JSON.stringify(value)}`, api.validateUserSelectors({ customExtra: { ...extraDef, extraElements: value } }).some((e) => e.includes('extraElements')));
+const catNameCases = [['my-shop', true], ['Cat_2-x', true], ['ca t', false], ['cat!', false]];
+for (const [name, ok] of catNameCases) check(`选择器-047: 自定义分类名 ${name} ${ok ? '通过' : '被拒'}`, (api.validateUserSelectors({ c1: { match: 'a', containers: '.x', categories: { [name]: { match: 'b', containers: '.y' } } } }).length === 0) === ok);
+api.setStore({ catname: { match: '(?:^|\\.)cat\\.example$', categories: { 'my-shop': { match: /[?&]shop=1/, containers: 'div.shop-card', titles: ['h3'], links: 'a[href]' } } } });
+api.setHost('cat.example'); api.setHref('https://cat.example/search?q=x&shop=1');
+check('选择器-048: 自定义分类按match识别且容器生效', api.getSearchEngine() === 'catname' && api.getSearchCategory() === 'my-shop' && api.getContainerSelector('catname') === 'div.shop-card');
+api.setStore({}); api.setHost('www.bing.com'); api.setHref('https://www.bing.com/search?q=example.com/images/');
+check('选择器-048b: Bing网页查询串含/images/不被误判为图片分类', api.getSearchCategory() === 'web');
+api.setHref('https://www.bing.com/images/search?q=test');
+check('选择器-048c: Bing图片路径仍识别为图片分类', api.getSearchCategory() === 'images');
+check('选择器-048d: 顶层links/titles的@json/@attr不再被CSS校验误拒', api.validateUserSelectors({ ex: { match: 'a', containers: '.x', links: ['a@json:data.url', 'a[href]'], titles: ['img@attr:alt'] } }).length === 0);
+api.setHost('www.google.com'); api.setHref('https://www.google.com/');
 const parseCondition = new Function(extractFn(src, 'hostLabelToASCII') + extractFn(src, 'toASCIIHostname') + extractFn(src, 'parseConditionPart') + '; return parseConditionPart;')();
 check('选择器-049: duckduckgo/ddg 为 Lite 别名', parseCondition('$site=duckduckgo', 'duckduckgo_lite', 'lite.duckduckgo.com').static === true && parseCondition('$site=ddg', 'duckduckgo_lite', 'lite.duckduckgo.com').static === true && parseCondition('$site=duckduckgo_lite', 'duckduckgo_lite', 'lite.duckduckgo.com').static === true && parseCondition('$site=duckduckgo', 'duckduckgo', 'duckduckgo.com').static === true);
 check('选择器-049b: yahoo 不与 yahoo_japan 互别名且支持 yahoo-japan', parseCondition('$site=yahoo', 'yahoo', 'search.yahoo.com').static === true && parseCondition('$site=yahoo_japan', 'yahoo_japan', 'search.yahoo.co.jp').static === true && parseCondition('$site=yahoo-japan', 'yahoo_japan', 'search.yahoo.co.jp').static === true && parseCondition('$site=yahooJapan', 'yahoo_japan', 'search.yahoo.co.jp').static === false && parseCondition('$site=yahoo', 'yahoo_japan', 'search.yahoo.co.jp').static === false && parseCondition('$site=yahoo_japan', 'yahoo', 'search.yahoo.com').static === false);
@@ -256,7 +272,7 @@ function createEnv() {
     let currentConfig = { enabled: true, debug: false }; let showHiddenResults = false;
     let _observedSelector = ''; let currentSelector = '.a, .b';
     let activeSelectors = null; let _engineCacheHost = '';
-    function getSearchEngine() { return 'test'; } function isBingImagesPage() { return false; } function getContainerSelector() { return currentSelector; }
+    function getSearchEngine() { return 'test'; } function getSearchCategory() { return 'web'; } function getContainerSelector() { return currentSelector; }
     function resetResultStyles(el) { el.resetCount++; }
     ${extractFn(src, 'resetSelectorCache')}
     ${extractFn(src, 'filterNestedContainers')}
@@ -294,7 +310,7 @@ function createEnv() {
   api.clearStaleObserved('.a');
 }
 {
-  const filterFn = new Function(`function isBingImagesPage() { return false; } function getSearchEngine() { return 'test'; }\n${extractFn(src, 'filterNestedContainers')}\nreturn filterNestedContainers;`)();
+  const filterFn = new Function(`function getSearchCategory() { return 'web'; } function getSearchEngine() { return 'test'; }\n${extractFn(src, 'filterNestedContainers')}\nreturn filterNestedContainers;`)();
   function makeNode(children, links) {
     const node = { children: children || [], links: links || [] };
     node.querySelectorAll = (sel) => (sel === 'a[href]' ? node.links : []);
@@ -316,14 +332,14 @@ function createEnv() {
   const weird = { querySelector() { throw new Error('bad'); }, querySelectorAll() { throw new Error('bad'); }, contains() { return false; } };
 }
 {
-  const bingFilter = new Function(`function isBingImagesPage() { return true; } function getSearchEngine() { return 'bing'; } function getResultLink(el) { return el.link; }\n${extractFn(src, 'filterNestedContainers')}\nreturn filterNestedContainers;`)();
+  const bingFilter = new Function(`function getSearchCategory() { return 'images'; } function getSearchEngine() { return 'bing'; } function getResultLink(el) { return el.link; }\n${extractFn(src, 'filterNestedContainers')}\nreturn filterNestedContainers;`)();
   const mk = (iusc) => ({ iusc, querySelectorAll: () => [], querySelector: (sel) => (sel === 'a.iusc' ? iusc : null), contains: () => false });
   const shared = { id: 'iusc-1' }, otherIusc = { id: 'iusc-2' };
   const outer = mk(shared), inner = mk(shared), other = mk(otherIusc);
   const kept = bingFilter([outer, inner, other], 'div.g');
   check('选择器-067: Bing图片同一卡片的嵌套容器按 a.iusc 文档序去重', kept.length === 2 && kept[0] === outer && kept[1] === other);
   check('选择器-176: Bing图片同来源页的不同图片不被去重', bingFilter([mk({ id: 'i1' }), mk({ id: 'i2' })], 'div.g').length === 2);
-  const liteFilter = new Function(`function isBingImagesPage() { return true; } function getSearchEngine() { return 'bing'; }\n${extractFn(readRepoFile('Lite.user.js'), 'filterNestedContainers')}\nreturn filterNestedContainers;`)();
+  const liteFilter = new Function(`function getSearchCategory() { return 'images'; } function getSearchEngine() { return 'bing'; }\n${extractFn(readRepoFile('Lite.user.js'), 'filterNestedContainers')}\nreturn filterNestedContainers;`)();
 }
 })();
 
@@ -606,15 +622,15 @@ const pageCases = [
 ];
 for (const [i, [location, expected]] of pageCases.entries()) assert(`选择器-096b-${i + 1}: ${location.href} -> ${expected}`, factory({ location }, selectors).getSearchEngine() === expected);
 
-// 搜索分类检测(每引擎保留代表)
+// 搜索分类检测(每引擎保留代表) — loc.href 与真实 location 同口径, 由 hostname/pathname/search 拼出
 const catCases = [
-  [{ hostname: 'www.google.com', pathname: '/search', search: '?udm=7' }, 'videos'],
-  [{ hostname: 'www.google.com', pathname: '/search', search: '?q=x&udm=vids' }, 'videos'],
-  [{ hostname: 'www.google.com', pathname: '/search', search: '?q=x&tbm=vids' }, 'videos'],
-  [{ hostname: 'www.bing.com', pathname: '/images/search', search: '?q=x' }, 'images'],
-  [{ hostname: 'duckduckgo.com', pathname: '/', search: '?iax=images' }, 'images'],
-  [{ hostname: 'www.startpage.com', pathname: '/sp/search', search: '?query=x&category=images' }, 'web'],
-  [{ hostname: 'so.toutiao.com', pathname: '/search', search: '?keyword=x&pd=video' }, 'videos'],
+  [{ hostname: 'www.google.com', pathname: '/search', search: '?udm=7', href: 'https://www.google.com/search?udm=7' }, 'videos'],
+  [{ hostname: 'www.google.com', pathname: '/search', search: '?q=x&udm=vids', href: 'https://www.google.com/search?q=x&udm=vids' }, 'videos'],
+  [{ hostname: 'www.google.com', pathname: '/search', search: '?q=x&tbm=vids', href: 'https://www.google.com/search?q=x&tbm=vids' }, 'videos'],
+  [{ hostname: 'www.bing.com', pathname: '/images/search', search: '?q=x', href: 'https://www.bing.com/images/search?q=x' }, 'images'],
+  [{ hostname: 'duckduckgo.com', pathname: '/', search: '?iax=images', href: 'https://duckduckgo.com/?iax=images' }, 'images'],
+  [{ hostname: 'www.startpage.com', pathname: '/sp/search', search: '?query=x&category=images', href: 'https://www.startpage.com/sp/search?query=x&category=images' }, 'web'],
+  [{ hostname: 'so.toutiao.com', pathname: '/search', search: '?keyword=x&pd=video', href: 'https://so.toutiao.com/search?keyword=x&pd=video' }, 'videos'],
 ];
 for (const [i, [loc, expected]] of catCases.entries()) assert(`选择器-098-${i + 1}: category ${loc.hostname}${loc.pathname}${loc.search} -> ${expected}`, factory({ location: loc }, selectors).getSearchCategory(loc) === expected);
 })();
@@ -654,7 +670,7 @@ function createLockEnv(tabId, ttl = 2000) {
 // 结果摘要后备提取遇到相对选择器不得抛异常
 await (async () => {
   const selectorsDecl = src.match(/const SELECTORS = \{[\s\S]*?\n  \};/)[0];
-  const getResultSnippet = new Function('GM_getValue', 'let activeSelectors = null;\nconst SELECTORS_KEY = \'searchfilter_selectors\'; const ENGINE_SUBSCRIPTIONS_KEY = \'searchfilter_engine_subscriptions\'; const BUILTIN_ENGINE_SUB_URL = \'https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js\'; function t(key) { return key; } function resetSelectorCache() { activeSelectors = null; }\n' + selectorsDecl + '\n' + src.match(/const builtinSelectorOf = .+?;/)[0] + '\n' + ['normalizeSelectorList', 'hasTopLevelComma', 'getUserSelectors', 'getEngineSubscriptions', 'saveEngineSubscriptions', 'parseSelectorMatch', 'coerceSelectorDef', 'getSubscribedSelectors', 'getBaseSelectors', 'getSelectors', 'getResultText', 'getResultExtraElements', 'getResultSnippet'].map((n) => extractFn(src, n)).join('\n') + '\nreturn getResultSnippet;')(() => undefined);
+  const getResultSnippet = new Function('GM_getValue', 'let activeSelectors = null;\nconst SELECTORS_KEY = \'searchfilter_selectors\'; const ENGINE_SUBSCRIPTIONS_KEY = \'searchfilter_engine_subscriptions\'; const BUILTIN_ENGINE_SUB_URL = \'https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js\'; function t(key) { return key; } function resetSelectorCache() { activeSelectors = null; }\nconst CATEGORY_FIELDS = [\'containers\', \'titles\', \'snippets\', \'links\', \'extraElements\', \'button\', \'match\'];\nlet _catDefCacheKey = null; let _catDefCache = null; let _categoryCacheHref = null; let _categoryCacheResult = \'web\'; let _categoryCacheEngine = null;\nfunction getSearchCategory() { return \'web\'; }\n' + selectorsDecl + '\n' + src.match(/const builtinSelectorOf = .+?;/)[0] + '\n' + ['normalizeSelectorList', 'hasTopLevelComma', 'normalizeCategoryMap', 'mergeSelectorDef', 'getUserSelectors', 'getEngineSubscriptions', 'saveEngineSubscriptions', 'parseSelectorMatch', 'coerceSelectorDef', 'coerceCategoryMatch', 'getSubscribedSelectors', 'getBaseSelectors', 'getSelectors', 'resolveCategoryDef', 'queryResultSelector', 'getResultText', 'getResultExtraElements', 'getResultSnippet'].map((n) => extractFn(src, n)).join('\n') + '\nreturn getResultSnippet;')(() => undefined);
   const throwIfRel = (fn) => (sel) => { if (sel.startsWith('+')) { const e = new Error(sel + ' is not a valid selector'); e.name = 'SyntaxError'; throw e; } return fn(sel); };
   let threw = false, out = '';
   const extraRow = { textContent: '  extra text  ', matches: throwIfRel(() => false), querySelector: throwIfRel(() => null), contains: () => false };
@@ -675,7 +691,7 @@ await (async () => {
 {
   const mkEl = (tag, cls) => ({ tagName: tag, className: cls, style: { display: '' }, attrs: {}, children: [], parentElement: null, grid: false,
     setAttribute(k, v) { this.attrs[k] = v; }, getAttribute(k) { return this.attrs[k] ?? null; },
-    querySelectorAll(sel) { const out = []; const walk = (n) => { for (const c of n.children) { if (sel === 'div.isv-r' && c.className === 'isv-r') out.push(c); walk(c); } }; walk(this); return out; } });
+    querySelectorAll(sel) { const out = []; const walk = (n) => { for (const c of n.children) { if (sel === 'div.isv-r, div.ivg-i' && (c.className === 'isv-r' || c.className === 'ivg-i')) out.push(c); walk(c); } }; walk(this); return out; } });
   const add = (p, c) => { c.parentElement = p; p.children.push(c); return c; };
   const mkMark = (srcText) => new Function('getComputedStyle', `
     let _hiddenParentCount = 0;
@@ -726,7 +742,9 @@ await (async () => {
   const RL = apiL.parseSelectorText(DEF);
   const apiSer = new Function(`
     const SELECTORS = {};
+    const CATEGORY_FIELDS = ['containers', 'titles', 'snippets', 'links', 'extraElements', 'button', 'match'];
     ${extractFn(src, 'normalizeSelectorList')}
+    ${extractFn(src, 'normalizeCategoryMap')}
     ${extractFn(src, 'regexSourceToLiteralText')}
     ${extractFn(src, 'escapeJsString')}
     ${extractFn(src, 'matchDefToParts')}
@@ -988,12 +1006,15 @@ await (async () => {
       function toASCIIUrl(u) { return u; }
       function getSelectors() { return SELECTORS; }
       const window = { location: { hostname: 'www.bing.com', href: 'https://www.bing.com/search?q=x' } };
-      let _engineCacheHost = null; let _engineCacheResult = 'other'; let _categoryCacheHref = null; let _categoryCacheResult = 'web';
+      let _engineCacheHost = null; let _engineCacheResult = 'other'; let _categoryCacheHref = null; let _categoryCacheResult = 'web'; let _categoryCacheEngine = null; let _catDefCacheKey = null; let _catDefCache = null;
+      function getSearchCategory() { return 'web'; }
       ${src.match(/const ENGINE_HOST_REGEXES = \{[\s\S]*?\n  \};/)[0]}
       function isEngineHost(engine, host) { const re = ENGINE_HOST_REGEXES[engine]; return !!re && re.test(String(host || '')); }
       ${extractFn(src, 'getSearchEngine')}
-      ${extractFn(src, 'getSearchCategory')}
-      ${extractFn(src, 'isBingImagesPage')}
+      ${extractFn(src, 'mergeSelectorDef')}
+      ${extractFn(src, 'resolveCategoryDef')}
+      ${extractFn(src, 'parseLinkSpec')}
+      ${extractFn(src, 'extractLinkFromElement')}
       ${extractFn(src, 'decodeRedirectTarget')}
       ${extractFn(src, 'decodeBingCkTarget')}
       ${extractFn(src, 'isOpaqueRedirectUrl')}
@@ -1020,10 +1041,11 @@ await (async () => {
   const builtinBing = selectorsObj.bing;
 
   const selStore = { current: undefined };
-  const selFns = ['normalizeSelectorList', 'mergeSelectorDef', 'getUserSelectors', 'getEngineSubscriptions', 'saveEngineSubscriptions', 'parseSelectorMatch', 'coerceSelectorDef', 'getSubscribedSelectors', 'getBaseSelectors', 'getSelectors', 'resetSelectorCache', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'normalizeMatchLiteral', 'parseSelectorText', 'sameSelectorDef', 'diffSelectorDefFields', 'diffUserSelectors'].map((n) => extractFn(src, n));
+  const selFns = ['normalizeSelectorList', 'normalizeCategoryMap', 'mergeSelectorDef', 'getUserSelectors', 'getEngineSubscriptions', 'saveEngineSubscriptions', 'parseSelectorMatch', 'coerceSelectorDef', 'coerceCategoryMatch', 'getSubscribedSelectors', 'getBaseSelectors', 'getSelectors', 'resetSelectorCache', 'getInvalidRegexFlags', 'regexSourceToLiteralText', 'escapeJsString', 'matchDefToParts', 'serializeSelectors', 'normalizeMatchLiteral', 'parseSelectorText', 'sameSelectorDef', 'diffSelectorDefFields', 'diffUserSelectors'].map((n) => extractFn(src, n));
   const selApi = new Function('GM_getValue', 'storeRef', `
 const SELECTORS_KEY = 'searchfilter_selectors'; const ENGINE_SUBSCRIPTIONS_KEY = 'searchfilter_engine_subscriptions'; const BUILTIN_ENGINE_SUB_URL = 'https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js';
 const SUPPORTED_REGEX_FLAGS = 'imsu';
+const CATEGORY_FIELDS = ['containers', 'titles', 'snippets', 'links', 'extraElements', 'button', 'match'];
 const SELECTORS = ${getSelectorsObjectText()};
 let activeSelectors = null;
 let _engineCacheHost = null;
@@ -1051,7 +1073,7 @@ const t = (key) => key;
 const isValidCssSelector = () => true;
 const hasPseudoElement = (s) => /::/.test(String(s));
 const builtinSelectorOf = (key) => (SELECTORS[key] && typeof SELECTORS[key] === 'object') ? SELECTORS[key] : {};
-${['normalizeSelectorList', 'getInvalidRegexFlags', 'matchDefToParts', 'resetSelectorCache', 'getUserSelectors', 'getEngineSubscriptions', 'saveEngineSubscriptions', 'parseSelectorMatch', 'coerceSelectorDef', 'getSubscribedSelectors', 'getBaseSelectors', 'parseSelectorText', 'validateUserSelectors', 'sameSelectorDef', 'pruneUserSelectors'].map((n) => extractFn(src, n)).join('\n')}
+${['normalizeSelectorList', 'normalizeCategoryMap', 'getInvalidRegexFlags', 'matchDefToParts', 'resetSelectorCache', 'getUserSelectors', 'getEngineSubscriptions', 'saveEngineSubscriptions', 'parseSelectorMatch', 'coerceSelectorDef', 'coerceCategoryMatch', 'getSubscribedSelectors', 'getBaseSelectors', 'parseSelectorText', 'validateUserSelectors', 'sameSelectorDef', 'pruneUserSelectors'].map((n) => extractFn(src, n)).join('\n')}
 return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS, getStored: () => stored, setStored: (v) => { stored = v; } };
   `)();
   const parsedTrue = fixApi.parseSelectorText('{"bing": true}');
@@ -1070,13 +1092,16 @@ return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS
     function getSelectors() { return SELECTORS; }
     const window = { location: { hostname: 'www.google.com', href: 'https://www.google.com/search?q=x', origin: 'https://www.google.com' } };
     const location = window.location;
-    let _engineCacheHost = null; let _engineCacheResult = 'other'; let _categoryCacheHref = null; let _categoryCacheResult = 'web';
+    let _engineCacheHost = null; let _engineCacheResult = 'other'; let _categoryCacheHref = null; let _categoryCacheResult = 'web'; let _categoryCacheEngine = null; let _catDefCacheKey = null; let _catDefCache = null;
+    function getSearchCategory() { return 'web'; }
     ${src.match(/const ENGINE_HOST_REGEXES = \{[\s\S]*?\n  \};/)[0]}
     function isEngineHost(engine, host) { const re = ENGINE_HOST_REGEXES[engine]; return !!re && re.test(String(host || '')); }
     const isNotGoogleHost = (h) => !!h && !isEngineHost('google', h);
     ${extractFn(src, 'getSearchEngine')}
-    ${extractFn(src, 'getSearchCategory')}
-    ${extractFn(src, 'isBingImagesPage')}
+    ${extractFn(src, 'mergeSelectorDef')}
+    ${extractFn(src, 'resolveCategoryDef')}
+    ${extractFn(src, 'parseLinkSpec')}
+    ${extractFn(src, 'extractLinkFromElement')}
     ${extractFn(src, 'decodeRedirectTarget')}
     ${extractFn(src, 'decodeBingCkTarget')}
     ${extractFn(src, 'isOpaqueRedirectUrl')}
@@ -1098,6 +1123,51 @@ return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS
   check('选择器-163: goto包裹经pill→cite完整文本恢复可见域名', !!g5 && g5.href === 'https://blog.hubspot.com');
 }
 
+// ---- 顶层 links 字符串提取 / 容器自身标题 ----
+{
+  const linkApiS = new Function('SELECTORS', `
+    function toASCIIHostname(h) { return h; }
+    function toASCIIUrl(u) { return u; }
+    function getSelectors() { return SELECTORS; }
+    const window = { location: { hostname: 'search.example.com', href: 'https://search.example.com/', origin: 'https://search.example.com' } };
+    const location = window.location;
+    let _engineCacheHost = null; let _engineCacheResult = 'other'; let _categoryCacheHref = null; let _categoryCacheResult = 'web'; let _categoryCacheEngine = null; let _catDefCacheKey = null; let _catDefCache = null;
+    function getSearchCategory() { return 'web'; }
+    ${src.match(/const ENGINE_HOST_REGEXES = \{[\s\S]*?\n  \};/)[0]}
+    function isEngineHost(engine, host) { const re = ENGINE_HOST_REGEXES[engine]; return !!re && re.test(String(host || '')); }
+    const isNotGoogleHost = (h) => !!h && !isEngineHost('google', h);
+    ${extractFn(src, 'getSearchEngine')}
+    ${extractFn(src, 'mergeSelectorDef')}
+    ${extractFn(src, 'resolveCategoryDef')}
+    ${extractFn(src, 'parseLinkSpec')}
+    ${extractFn(src, 'extractLinkFromElement')}
+    ${extractFn(src, 'decodeRedirectTarget')}
+    ${extractFn(src, 'decodeBingCkTarget')}
+    ${extractFn(src, 'isOpaqueRedirectUrl')}
+    ${extractFn(src, 'unwrapRedirectUrl')}
+    ${extractFn(src, 'getResultLink')}
+    return { getResultLink };
+  `)({ test: { match: /search\.example\.com/, containers: '.r', titles: [], snippets: [], links: 'a.thumb@json:data.url' } });
+  const thumb = { getAttribute: (a) => a === 'data' ? '{"url":"https://example.com/x"}' : null, setAttribute() {} };
+  const res = { matches: () => false, querySelector: (s) => s === 'a.thumb' ? thumb : null };
+  const l = linkApiS.getResultLink(res, 'test');
+  check('选择器-214: 顶层links字符串@json提取生效', !!l && l.href === 'https://example.com/x');
+}
+{
+  const titleApi = new Function(`
+    function resolveCategoryDef() { return { titles: ['a.result'], snippets: ['.snip'] }; }
+    ${extractFn(src, 'queryResultSelector')}
+    ${extractFn(src, 'getResultText')}
+    ${extractFn(src, 'parseTitleSpec')}
+    ${extractFn(src, 'getResultTextFromSpec')}
+    ${extractFn(src, 'getResultTitle')}
+    ${extractFn(src, 'getResultTitleElement')}
+    return { getResultTitle, getResultTitleElement, getResultText };
+  `)();
+  const res = { textContent: 'Example title', matches: (s) => s === 'a.result' || s === '.snip', querySelector: () => null };
+  check('选择器-215: 结果容器自身作为标题/摘要时仍可提取', titleApi.getResultTitle(res, 'test') === 'Example title' && titleApi.getResultText(res, ['.snip']) === 'Example title' && titleApi.getResultTitleElement(res, 'test') === res);
+}
+
 // ---- 图片/视频/新闻真实卡片容器取链接 ----
 {
   const linkApiC = new Function('SELECTORS', `
@@ -1105,15 +1175,21 @@ return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS
     function toASCIIUrl(u) { return u; }
     function getSelectors() { return SELECTORS; }
     let currentHref = 'https://www.google.com/search?q=x&tbm=isch';
-    const window = { location: { hostname: 'www.google.com', get href() { return currentHref; }, origin: 'https://www.google.com' } };
+    const window = { location: { get hostname() { return new URL(currentHref).hostname; }, get href() { return currentHref; }, get origin() { return new URL(currentHref).origin; } } };
     const location = window.location;
-    let _engineCacheHost = null; let _engineCacheResult = 'other'; let _categoryCacheHref = null; let _categoryCacheResult = 'web';
+    let _engineCacheHost = null; let _engineCacheResult = 'other'; let _categoryCacheHref = null; let _categoryCacheResult = 'web'; let _categoryCacheEngine = null; let _catDefCacheKey = null; let _catDefCache = null;
+    const CATEGORY_FIELDS = ['containers', 'titles', 'snippets', 'links', 'extraElements', 'button', 'match'];
     ${src.match(/const ENGINE_HOST_REGEXES = \{[\s\S]*?\n  \};/)[0]}
     function isEngineHost(engine, host) { const re = ENGINE_HOST_REGEXES[engine]; return !!re && re.test(String(host || '')); }
     const isNotGoogleHost = (h) => !!h && !isEngineHost('google', h);
     ${extractFn(src, 'getSearchEngine')}
     ${extractFn(src, 'getSearchCategory')}
-    ${extractFn(src, 'isBingImagesPage')}
+    ${extractFn(src, 'normalizeSelectorList')}
+    ${extractFn(src, 'normalizeCategoryMap')}
+    ${extractFn(src, 'mergeSelectorDef')}
+    ${extractFn(src, 'resolveCategoryDef')}
+    ${extractFn(src, 'parseLinkSpec')}
+    ${extractFn(src, 'extractLinkFromElement')}
     ${extractFn(src, 'decodeRedirectTarget')}
     ${extractFn(src, 'decodeBingCkTarget')}
     ${extractFn(src, 'isOpaqueRedirectUrl')}
@@ -1121,19 +1197,24 @@ return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS
     ${extractFn(src, 'getResultLink')}
     return { getResultLink, setHref: (h) => { currentHref = h; } };
   `)(eval(`(${getSelectorsObjectText()})`));
-  const selfAttr = (name, value) => ({ tagName: 'DIV', getAttribute: (a) => a === name ? value : null, setAttribute() {}, querySelector: () => null });
+  const selfAttr = (name, value) => { const el = { tagName: 'DIV', getAttribute: (a) => a === name ? value : null, setAttribute() {}, querySelector: (s) => (s === `[${name}]` ? el : null) }; return el; };
   const childAttr = (sel, name, value) => ({ tagName: 'DIV', getAttribute: () => null, setAttribute() {}, querySelector: (s) => s === sel ? selfAttr(name, value) : null });
   const gImg = linkApiC.getResultLink(selfAttr('data-lpage', 'https://img.example.com/page'), 'google');
   linkApiC.setHref('https://www.google.com/search?q=x&tbm=vid');
   const gVid = linkApiC.getResultLink(childAttr('[data-curl]', 'data-curl', 'https://www.youtube.com/watch?v=abc'), 'google');
   linkApiC.setHref('https://www.google.com/search?q=x&tbm=nws');
-  const gNewsEl = { tagName: 'A', href: 'https://www.google.com/goto?url=abc', getAttribute: () => null, setAttribute() {}, querySelector: () => null };
+  const gNewsEl = { tagName: 'A', href: 'https://www.google.com/goto?url=abc', getAttribute: () => null, setAttribute() {}, querySelector: (sel) => (sel === ':scope[href]' || sel === 'a[href]' ? gNewsEl : null) };
   const gNews = linkApiC.getResultLink(gNewsEl, 'google');
   linkApiC.setHref('https://www.bing.com/videos/search?q=x');
   const bVid = linkApiC.getResultLink(childAttr('[ourl]', 'ourl', 'https://video.example.com/v'), 'bing');
   linkApiC.setHref('https://www.bing.com/news/search?q=x');
-  const bNews = linkApiC.getResultLink({ tagName: 'DIV', getAttribute: () => null, setAttribute() {}, querySelector: (s) => s === 'a.title[href]' ? { href: 'https://news.example.com/a' } : null }, 'bing');
+  const bNewsEl = { tagName: 'DIV', getAttribute: () => null, setAttribute() {}, querySelector: (s) => s === 'a.title[href]' ? { href: 'https://news.example.com/a' } : null };
+  const bNews = linkApiC.getResultLink(bNewsEl, 'bing');
   check('选择器-212: Google图片自身data-lpage/视频data-curl/新闻卡片链接', gImg.href === 'https://img.example.com/page' && gVid.href === 'https://www.youtube.com/watch?v=abc' && gNews === gNewsEl);
+  const selfNews = { tagName: 'A', href: 'https://news.example.com/x', getAttribute: () => null, setAttribute() {}, matches: (s) => s === ':scope[href]', querySelector: () => null };
+  linkApiC.setHref('https://www.google.com/search?q=x&tbm=nws');
+  const gNewsSelf = linkApiC.getResultLink(selfNews, 'google');
+  check('选择器-212b: Google新闻容器自身为a时仍能取到href', gNewsSelf === selfNews);
   check('选择器-213: Bing视频ourl/新闻a.title链接', bVid.href === 'https://video.example.com/v' && bNews.href === 'https://news.example.com/a');
 }
 
@@ -1141,9 +1222,11 @@ return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS
 {
   const mkEnv = (srcText) => new Function(`
     const SUPPORTED_REGEX_FLAGS = 'imsu';
+    const CATEGORY_FIELDS = ['containers', 'titles', 'snippets', 'links', 'extraElements', 'button', 'match'];
     function t(key, params = {}) { let text = key; for (const [k, v] of Object.entries(params || {})) text += ':' + v; return text; }
     function isValidCssSelector() { return true; } function hasPseudoElement() { return false; }
     ${extractFn(srcText, 'normalizeSelectorList')}
+    ${extractFn(srcText, 'normalizeCategoryMap')}
     ${extractFn(srcText, 'getInvalidRegexFlags')}
     ${extractFn(srcText, 'matchDefToParts')}
     ${extractFn(srcText, 'sameSelectorDef')}
@@ -1284,6 +1367,83 @@ assert('选择器-205: 装配异常回滚_engineSiteSetup与_observedBody可重�
 {
   const body = extractFn(src, 'forceReprocessAll');
   assert('选择器-207b: processBatch循环含isConnected守卫', /const result = allResults\[processIdx\]; if \(!result\.isConnected\) continue;/.test(body));
+}
+{
+  const liteSrc = fs.readFileSync(path.join(scriptDir, 'Lite.user.js'), 'utf8');
+  const guard = (text) => /if \(!currentConfig\.enabled\) showHiddenResults = false;/.test(extractFn(text, 'forceReprocessAll'));
+  check('选择器-208b: 禁用时forceReprocess重置显示隐藏状态(主/Lite)', guard(src) && guard(liteSrc));
+}
+{
+  const liteCat = new Function(`
+    const SELECTORS = { other: {} };
+    function getSelectors() { return { cat: { categories: { shop: { match: { source: '[?&]shop=1', flags: 'i' } } } } }; }
+    function getSearchEngine() { return 'cat'; }
+    let _categoryCacheHref = null, _categoryCacheResult = 'web', _categoryCacheEngine = null;
+    ${extractFn(readRepoFile('Lite.user.js'), 'getSearchCategory')}
+    return getSearchCategory;
+  `)();
+  check('选择器-209: Lite分类match对象{source,flags}可生效', liteCat({ href: 'https://cat.example/?shop=1' }) === 'shop');
+}
+// ---- 选择器-216/217: @提取指令顶层@解析 / match字符串默认i / yandex父隐藏按容器过滤 ----
+{
+  // 修复留档: yandex父隐藏须按结果容器过滤children, 广告位等可见兄弟误判为未屏蔽致父容器不隐藏(主/Lite)
+  const liteSrc = fs.readFileSync(path.join(scriptDir, 'Lite.user.js'), 'utf8');
+  const mkYx = (srcText) => new Function(`
+    let _hiddenParentCount = 0;
+    let showHiddenResults = false;
+    const currentConfig = { collapseMode: false };
+    function blockedShown() { return showHiddenResults || currentConfig.collapseMode === true; }
+    function getContainerSelector() { return 'div.Organic'; }
+    ${extractFn(srcText, 'yandexResultBlocks')}
+    ${extractFn(srcText, 'visibleUnblocked')}
+    ${extractFn(srcText, 'saveOriginalDisplay')}
+    ${extractFn(srcText, 'hideParentIfNoVisibleSiblings')}
+    return { hideParentIfNoVisibleSiblings, yandexResultBlocks, getCount: () => _hiddenParentCount };
+  `)();
+  for (const [label, s] of [['主版', src], ['Lite', liteSrc]]) {
+    const fns = mkYx(s);
+    const li = { children: [], style: { display: '' }, attrs: {}, setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return this.attrs[k] || null; }, hasAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k); }, removeAttribute(k) { delete this.attrs[k]; } };
+    const organic = { matches: (sel) => sel === 'div.Organic', style: { display: 'none' }, attrs: { 'data-is-blocked': 'true' }, getAttribute(k) { return this.attrs[k] || null; }, setAttribute() {} };
+    const ad = { matches: (sel) => sel !== 'div.Organic', style: { display: 'block' }, attrs: {}, getAttribute(k) { return this.attrs[k] || null; }, setAttribute() {} };
+    li.children.push(organic, ad);
+    fns.hideParentIfNoVisibleSiblings(li, fns.yandexResultBlocks(li), 'data-blocker-yandex-parent');
+    check(`选择器-216: yandex父隐藏忽略广告位兄弟仅按结果容器判定(${label})`, li.style.display === 'none' && li.getAttribute('data-blocker-yandex-parent') === 'true');
+  }
+}
+{
+  // 修复留档: @提取指令须匹配引号外顶层@, 属性值含@attr字样的合法选择器不再被贪婪截断(主/Lite)
+  const liteSrc = fs.readFileSync(path.join(scriptDir, 'Lite.user.js'), 'utf8');
+  for (const [label, s] of [['主版', src], ['Lite', liteSrc]]) {
+    const apiAt = new Function(`
+      ${extractFn(s, 'parseTopLevelAt')}
+      ${extractFn(s, 'parseLinkSpec')}
+      ${extractFn(s, 'parseTitleSpec')}
+      return { parseLinkSpec, parseTitleSpec };
+    `)();
+    const quoted = apiAt.parseLinkSpec('a[data-x="v@attr:y"]');
+    const normal = apiAt.parseLinkSpec('a.iusc@json:m.purl');
+    const titleQuoted = apiAt.parseTitleSpec('img[title="a@json:x.y"]');
+    const titleNormal = apiAt.parseTitleSpec('a.iusc@json:m.t');
+    check(`选择器-217: 引号内@attr不误截/正常@指令仍解析(${label})`, quoted === null && !!normal && normal.mode === 'json' && normal.css === 'a.iusc' && titleQuoted === null && !!titleNormal && titleNormal.mode === 'json' && titleNormal.css === 'a.iusc');
+  }
+}
+{
+  // 修复留档: 引擎match按i处理由Selectors.js内置正则显式带i承担, 脚本匹配点保持原样(主/Lite)
+  const liteSrc = fs.readFileSync(path.join(scriptDir, 'Lite.user.js'), 'utf8');
+  // 脚本匹配点无补i逻辑
+  const gseSrc = extractFn(src, 'getSearchEngine');
+  check('选择器-218: 匹配点无补i逻辑且内置match形态保持(主版)', !/def\.match\.flags \+ 'i'/.test(gseSrc) && (() => { const pm = new Function(extractFn(src, 'parseSelectorMatch') + '\nreturn parseSelectorMatch;')(); const plain = pm({ match: 'WWW\\.Example\\.Com' }, null); return plain instanceof RegExp && plain.ignoreCase === false; })());
+  check('选择器-218b: 匹配点无补i逻辑(Lite)', !/def\.match\.flags \+ 'i'/.test(extractFn(liteSrc, 'getSearchEngine')));
+  // Selectors.js内置选择器所有match显式带i
+  const selSrc = fs.readFileSync(path.join(scriptDir, 'Selectors.js'), 'utf8');
+  let noI = 0;
+  for (const line of selSrc.split('\n')) {
+    const idx = line.indexOf('match: /');
+    if (idx === -1) continue;
+    const lastSlash = line.trimEnd().lastIndexOf('/');
+    if (!/i/.test(line.trimEnd().slice(lastSlash + 1))) noI++;
+  }
+  check('选择器-218c: Selectors.js内置match全部显式带i', noI === 0);
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
