@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.8.1
+// @version      8.8.2
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version removes networking features including WebDAV Sync / Rule Subscription / Engine Subscription.
@@ -207,11 +207,11 @@
       },
     },
     yahoo_japan: {
-      match: /^(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.co\.jp$/i,
+      match: /^(?:(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.co\.jp|https?:\/\/news\.yahoo\.co\.jp\/search(?:[\/?#].*)?)$/i,
       containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo, #contents section:has(a h3)',
       titles: ['h3', '.s-title', 'h2 a', 'a h2', '.b_title', '.title'],
       snippets: ['.sw-Card__description', '.sw-Card__snippet', '.sw-Text__body', 'p', '.b_caption p', '.b_snippet', '.b_paractl p'],
-      links: ['a:has(> h3)', 'a.sw-Card__space', 'h3 a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
+      links: ['a:has(> h3)', 'a.sw-Card__titleInner[href]', 'a.sw-Card__space', 'h3 a', '.s-title a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
       categories: {
         images: {
           match: /^https?:\/\/images\.|\/image\/search(?:[\/?#]|$)/i,
@@ -220,8 +220,14 @@
           snippets: ['.sw-ThumbnailGrid__domain'],
           links: ['a.sw-Thumbnail@clparams:targurl', 'a@clparams:targurl', 'a[href]'],
         },
-        videos: { match: /^https?:\/\/videos?\./i },
-        news: { match: /^https?:\/\/news\./i },
+        videos: { match: /^https?:\/\/videos?\.|\/video\/search(?:[\/?#]|$)/i },
+        news: {
+          match: /^https?:\/\/news\./i,
+          containers: 'li:has(a[href*="/articles/"])',
+          titles: ['p', '.newsFeed_item_body div a[href*="/articles/"]', '.newsFeed_item_body a[href*="/articles/"]', 'a[href*="/articles/"]'],
+          snippets: ['p'],
+          links: ['a[href*="/articles/"]'],
+        },
       },
     },
     yahoo: {
@@ -229,7 +235,7 @@
       containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo, #web ol > li > div',
       titles: ['h3', '.s-title', 'h2 a', 'a h2', '.b_title', '.title'],
       snippets: ['.sw-Card__description', '.sw-Card__snippet', '.sw-Text__body', 'p', '.b_caption p', '.b_snippet', '.b_paractl p'],
-      links: ['a:has(> h3)', 'a.sw-Card__space', 'h3 a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
+      links: ['a:has(> h3)', 'a.sw-Card__titleInner[href]', 'a.sw-Card__space', 'h3 a', '.s-title a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
       categories: {
         images: {
           match: /^https?:\/\/images\.|\/search\/images(?:[\/?#]|$)/i,
@@ -238,7 +244,7 @@
           snippets: ['.sw-ThumbnailGrid__domain'],
           links: ['a.sw-Thumbnail@clparams:targurl', 'a@clparams:targurl', 'a[href]'],
         },
-        videos: { match: /^https?:\/\/videos?\./i },
+        videos: { match: /^https?:\/\/videos?\.|\/video\/search(?:[\/?#]|$)/i },
         news: { match: /^https?:\/\/news\./i },
       },
     },
@@ -246,12 +252,12 @@
       match: /^(?:www\.|m\.)?so\.com$/i,
       containers: 'li.res-list, div.res-list',
       titles: ['h3.res-title a', 'h3 a', '.res-title', '.g-title a', '.g-title'],
-      snippets: ['.res-desc', '.mh-desc', '.summary'],
+      snippets: ['.res-desc', '.res-list-summary', '.mh-desc', '.summary'],
       links: ['h3 a[href]', 'a.alink[href]', '.g-linkinfo a[href]', 'a[href]'],
     },
     sogou: {
       match: /^(?:www\.|m\.|wap\.)?sogou\.com$/i,
-      containers: 'div.vrwrap:has(h3), .reactResult, div.vrResult',
+      containers: 'div.vrwrap:has(h3), div.reactResult:has(h3), div.reactResult:has(.vr-title), div.vrResult',
       titles: ['h3.vr-title a', '.vr-title a', 'a[class*="saTitle"]', '.vr-title', 'h3.vr-tit', 'h3 a', 'h3'],
       snippets: ['.space-txt', '.star-wiki', '.str_info', 'p.sa-text-clamp3', '[class*="saText"]'],
       links: ['h3.vr-title a[href]', '.vr-title a[href]', 'a[class*="saTitle"][href]', 'h3 a[href]', 'a.citeLinkClass[href]', 'a[href]'],
@@ -259,17 +265,22 @@
     toutiao: {
       match: /^(?:so|m)\.toutiao\.com$/i,
       containers: '.result-content',
-      titles: ['.l-card-title a', '.l-card-title', '.cs-header a', 'a[href*="/search/jump"]'],
-      snippets: ['.l-paragraph', '.cs-card-content .text-regular', '.l-source', '.cs-source'],
-      links: ['a.l-card-title[href]', '.cs-header a[href]', 'a[href*="/search/jump"]', 'a[href]:not([href*="/search?"])'],
+      titles: ['.cs-header a', 'a[href*="/search/jump"]', '.l-card-title a', '.l-card-title'],
+      snippets: ['.cs-card-content .text-regular', '.cs-source', '.l-paragraph', '.l-source'],
+      links: ['.cs-header a[href]', 'a[href*="/search/jump"]', 'a.l-card-title[href]', 'a[href]:not([href*="/search?"])'],
       categories: {
-        images: { match: /[?&]pd=atlas(?:&|#|$)/i },
+        images: {
+          match: /[?&]pd=atlas(?:&|#|$)/i,
+          containers: '.l-waterfallY-item',
+          titles: ['img[alt]@attr:alt'],
+          links: ['a[href*="/search/jump"]', 'a[href]'],
+        },
         news: { match: /[?&]pd=information(?:&|#|$)/i },
         videos: { match: /[?&]pd=[a-z_]*video/i },
       },
     },
     quark: {
-      match: /^(?:(?:quark|yz)\.)?(?:(?:www|m)\.)?sm\.cn$/i,
+      match: /^(?:(?:www|m|so)\.)?quark\.cn$|^(?:(?:quark|yz)\.)?(?:(?:www|m)\.)?sm\.cn$/i,
       containers: 'div.qk-card',
       titles: ['.qk-title-text', '.qk-title', 'a.qk-link-wrapper'],
       snippets: ['.qk-paragraph-text', '.qk-paragraph'],
@@ -369,7 +380,7 @@
       try {
         if (typeof def.match === 'string' && def.match) {
           const m = def.match.match(/^\/(.*)\/([a-z]*)$/i);
-          match = m ? new RegExp(m[1], m[2].toLowerCase().replace(/[^imsu]/g, '')) : new RegExp(def.match);
+          match = m ? new RegExp(m[1], m[2].toLowerCase().replace(/[^imsu]/g, '')) : new RegExp(def.match, 'i');
         } else if (def.match && typeof def.match === 'object' && typeof def.match.source === 'string' && def.match.source) {
           match = new RegExp(def.match.source, String(def.match.flags || '').toLowerCase().replace(/[^imsu]/g, ''));
         }
@@ -455,7 +466,7 @@
     google_scholar: /(?:^|\.)scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i,
     duckduckgo: /(?:^|\.)(?:duckduckgo\.com|ddg\.gg)$/i,
     yahoo: /(?:^|\.)(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i,
-    yahoo_japan: /(?:^|\.)(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i,
+    yahoo_japan: /(?:^|\.)(?:(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp|news\.yahoo\.co\.jp)$/i,
     so360: /(?:^|\.)so\.com$/i,
     sogou: /(?:^|\.)sogou\.com$/i,
     toutiao: /(?:^|\.)toutiao\.com$/i
@@ -529,7 +540,7 @@
       hlColorTitle: '高亮颜色', hlColorReset: '重置', resetPending: '已重置，保存后生效', hlColorHint: '点击色块快速保存',
       errorWord: '错误',
       duplicateRules: '重复规则', invalidRule: '规则无效',
-      hlColorError: '高亮级别需在 1-5 之间',
+      hlColorError: '高亮序号需＞0',
       ifParenError: '@if(...) 括号未闭合',
       condRegexError: '条件正则无效: {part}',
       regexError: '正则表达式无效', urlError: 'URL规则无效',
@@ -584,7 +595,7 @@
       hlColorTitle: 'Highlight Colors', hlColorReset: 'Reset', resetPending: 'Reset, takes effect after saving', hlColorHint: 'Click a swatch to apply it quickly.',
       errorWord: 'Error',
       duplicateRules: 'Duplicate Rules', invalidRule: 'Invalid rule',
-      hlColorError: 'Highlight level must be 1-5',
+      hlColorError: 'Highlight index must be > 0',
       ifParenError: 'Unbalanced @if(...) parentheses',
       condRegexError: 'Invalid condition regex: {part}',
       regexError: 'Invalid regex', urlError: 'Invalid URL rule',
@@ -1241,10 +1252,10 @@
     return s;
   }
 
-  function toASCIIHostname(host) {
-    const raw = String(host || '').replace(/\.$/, '').trim().toLowerCase(); if (!raw) return ''; const colonIdx = raw.indexOf(':');
+  function toASCIIHostname(host, keepTrailingDot = false) {
+    let raw = String(host || '').trim().toLowerCase(); if (!keepTrailingDot) raw = raw.replace(/\.$/, ''); if (!raw) return ''; const colonIdx = raw.indexOf(':');
     if (colonIdx !== -1) {
-      const h = raw.slice(0, colonIdx); const p = raw.slice(colonIdx); return (h ? toASCIIHostname(h) : '') + p;
+      const h = raw.slice(0, colonIdx); const p = raw.slice(colonIdx); return (h ? toASCIIHostname(h, keepTrailingDot) : '') + p;
     }
     if (/^[\x00-\x7F]*$/.test(raw)) return raw; return raw.split('.').map(label => label ? hostLabelToASCII(label) : label).join('.');
   }
@@ -1530,7 +1541,7 @@
         out = encodeNonAscii(out); return out.toLowerCase();
       };
       const cmpUrl = foldUrl(cond.op === '=~' ? '' : cond.val); const urlHit = (pred) => pred(lowerUrl) || pred(foldUrl(url));
-      if (cond.op === '=') return urlHit(v => v === cmpUrl); if (cond.op === '^=') return urlHit(v => v.startsWith(cmpUrl));
+      if (cond.op === '=') return urlHit(v => v === cmpUrl); if (cond.op === '^=') return urlHit(v => v.startsWith(cmpUrl)) || (!/:\/\//.test(cmpUrl) && urlHit(v => v.replace(/^[a-z][a-z0-9+.-]*:\/\//, '').startsWith(cmpUrl)));
       if (cond.op === '$=') return urlHit(v => v.endsWith(cmpUrl)); if (cond.op === '*=') return urlHit(v => v.includes(cmpUrl));
       if (cond.op === '=~') {
         if (safeRegexTest(cond.regex, url)) return true;
@@ -1554,7 +1565,7 @@
       } catch (e) {
         return false;
       }
-      const cmpVal = cond.type === 'host' ? toASCIIHostname(cond.val) : cond.val; if (cond.op !== '=~' && !cmpVal) return false; const hasPortInCond = cond.type === 'host' && cmpVal.includes(':');
+      const cmpVal = cond.type === 'host' ? toASCIIHostname(cond.val, cond.op === '^=' || cond.op === '*=') : cond.val; if (cond.op !== '=~' && !cmpVal) return false; const hasPortInCond = cond.type === 'host' && cmpVal.includes(':');
       const raw = cond.type === 'host' ? (hasPortInCond ? toASCIIHostname(u.host || u.hostname) : toASCIIHostname(u.hostname))
         : cond.type === 'path' ? (u.pathname + u.search)
         : u.protocol.slice(0, -1); const value = raw.toLowerCase(); let altValue = value; let altCmpVal = cmpVal;
@@ -1613,7 +1624,7 @@
 
     const categoryMatch = trimmed.match(/^(?:\$category|category)\s*[=:]\s*(?:['"](.*?)['"]|([^\s\)]+))\s*i?\s*$/i);
     if (categoryMatch) {
-      const target = (categoryMatch[1] !== undefined ? categoryMatch[1] : categoryMatch[2]).trim().toLowerCase(); return { matched: true, static: (currentCategory || 'web') === target };
+      const target = (categoryMatch[1] !== undefined ? categoryMatch[1] : categoryMatch[2]).trim().toLowerCase(); return { matched: true, static: String(currentCategory || 'web').toLowerCase() === target };
     }
 
     let siteMatch = trimmed.match(/^site\s*[=:]\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s\)]+))\s*i?\s*$/i);
@@ -1645,7 +1656,7 @@
       if (bareEq && (!bareEq[2] || isUniqueFlagsStr(bareEq[2]) || isFlagsCandidateError(bareEq[2]))) return { matched: false };
       const op = strMatch[2] === ':' ? '=' : strMatch[2];
       const rawVal = (strMatch[3] !== undefined ? strMatch[3] : (strMatch[4] !== undefined ? strMatch[4] : strMatch[5])); let val = rawVal.replace(/\\(["'])/g, '$1').toLowerCase();
-      const condType = (s => s === 'u' ? 'url' : s === 't' ? 'title' : s)(strMatch[1].toLowerCase()); if (condType === 'host') val = val.startsWith('/') ? val : toASCIIHostname(val); return { matched: true, dynamic: { type: condType, op, val } };
+      const condType = (s => s === 'u' ? 'url' : s === 't' ? 'title' : s)(strMatch[1].toLowerCase()); if (condType === 'host') val = val.startsWith('/') ? val : toASCIIHostname(val, op === '^=' || op === '*='); return { matched: true, dynamic: { type: condType, op, val } };
     }
 
     const reMatch = trimmed.match(/^(title|text|url|host|path|scheme|u|t)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
@@ -2471,7 +2482,7 @@
       attr = link.getAttribute('data-mdurl') || link.getAttribute('data-url') || link.getAttribute('linkurl') || '';
       if (!attr) {
         try {
-          const box = typeof link.closest === 'function' ? link.closest('.res-list, .vrwrap') : null;
+          const box = typeof link.closest === 'function' ? link.closest('.res-list, .vrwrap, .reactResult') : null;
           const el = box && typeof box.querySelector === 'function' ? box.querySelector('[data-mdurl], [data-url]') : null;
           if (el && typeof el.getAttribute === 'function') attr = el.getAttribute('data-mdurl') || el.getAttribute('data-url') || '';
         } catch (_) {}
@@ -2805,7 +2816,7 @@
         const spec = parseTitleSpec(selector);
         if (spec) {
           const text = getResultTextFromSpec(result, spec);
-          if (text) return text.slice(0, 200);
+          if (text) return text;
           continue;
         }
         const text = getResultText(result, [selector]);
@@ -2897,7 +2908,7 @@
               ]);
     const firstEnabledIdx = options.findIndex(o => !o.disabled);
 
-    const panel = document.createElement('div'); panel.id = 'serhl-block-confirm-dialog';
+    const panel = document.createElement('div'); panel.id = 'serhl-block-confirm-dialog'; const scale = currentUiScale(); if (scale !== 1) panel.style.zoom = String(scale);
     panel.innerHTML = `
       <div class="sfb-confirm-domain">${escHtml(domain)}</div>
       ${options.map((o, i) => `
@@ -2912,8 +2923,8 @@
       </div>`;
     document.body.appendChild(panel);
 
-    const rect = anchor.getBoundingClientRect(); const pw = panel.offsetWidth; const ph = panel.offsetHeight; let left = Math.min(Math.max(8, rect.right - pw), window.innerWidth - pw - 8);
-    if (left < 8) left = 8; let top = rect.bottom + 6; if (top + ph > window.innerHeight - 8) top = Math.max(8, rect.top - ph - 6); panel.style.left = left + 'px'; panel.style.top = top + 'px';
+    const rect = anchor.getBoundingClientRect(); const pw = panel.offsetWidth; const ph = panel.offsetHeight; const vw = window.innerWidth / scale, vh = window.innerHeight / scale;
+    let left = Math.min(Math.max(8, rect.right / scale - pw), vw - pw - 8); if (left < 8) left = 8; let top = rect.bottom / scale + 6; if (top + ph > vh - 8) top = Math.max(8, rect.top / scale - ph - 6); panel.style.left = left + 'px'; panel.style.top = top + 'px';
     const close = () => {
       if (_blockConfirmOutsideHandler) {
         document.removeEventListener('click', _blockConfirmOutsideHandler, true); _blockConfirmOutsideHandler = null;
@@ -2983,7 +2994,7 @@
 
   function isBlockButtonEnabledForEngine(engine) {
     try {
-      const def = getSelectors()[engine] || SELECTORS.other;
+      const def = resolveCategoryDef(engine);
       return !def || def.button !== false;
     } catch (e) { return true; }
   }
@@ -3954,8 +3965,9 @@
     if (document.body) document.body.classList.toggle('serhl-dark-on', dark);
   }
   const UI_SCALE_VALUE = { s: 0.75, l: 1, xl: 1.25, xxl: 1.5 };
+  function currentUiScale() { return UI_SCALE_VALUE[currentConfig.uiScale === 's' ? 's' : currentConfig.uiScale === 'xl' ? 'xl' : currentConfig.uiScale === 'xxl' ? 'xxl' : 'l'] || 1; }
   function applyUiScale() {
-    const scale = UI_SCALE_VALUE[currentConfig.uiScale === 's' ? 's' : currentConfig.uiScale === 'xl' ? 'xl' : currentConfig.uiScale === 'xxl' ? 'xxl' : 'l'] || 1;
+    const scale = currentUiScale();
     document.querySelectorAll('.serhl-window').forEach(el => { el.style.zoom = scale === 1 ? '' : String(scale); });
   }
 
@@ -5493,6 +5505,7 @@
             if (!settings) settings = parsed; continue;
           }
           if (payload.startsWith('\x7B') && !settings) continue;
+          if (!parsed && !/^[\x7B\x5B]/.test(payload)) continue;
         }
         if (s.startsWith('# Selectors:')) {
           if (!selectors) {
@@ -5513,7 +5526,7 @@
     if (Array.isArray(v)) return true;
     if (!v || typeof v !== 'object') return false;
     const flagsOk = (f) => { f = String(f || '').toLowerCase(); return /^[imsu]*$/.test(f) && new Set(f).size === f.length; };
-    const cssOk = (val, allowEmpty = false) => { const list = typeof val === 'string' ? [val] : val; return Array.isArray(list) && list.every(s => typeof s === 'string' && ((allowEmpty && !s.trim()) || (!!s.trim() && !hasPseudoElement(s) && isValidCssSelector(s)))); };
+    const cssOk = (val, allowEmpty = false, parser = null) => { const list = typeof val === 'string' ? [val] : val; return Array.isArray(list) && list.every(s => { if (typeof s !== 'string') return false; if (allowEmpty && !s.trim()) return true; if (!s.trim()) return false; const spec = parser ? parser(s) : null; return spec ? (!spec.css || (!hasPseudoElement(spec.css) && isValidCssSelector(spec.css))) : (!hasPseudoElement(s) && isValidCssSelector(s)); }); };
     const reOk = (val) => {
       if (typeof val === 'string') { const lit = val.match(/^\/(.*)\/([a-z]*)$/i); if (lit && !flagsOk(lit[2])) return false; try { new RegExp(lit ? lit[1] : val, lit ? lit[2] : ''); return true; } catch (e) { return false; } }
       if (val && typeof val === 'object' && typeof val.source === 'string' && flagsOk(val.flags)) { try { new RegExp(val.source, String(val.flags || '').toLowerCase()); return true; } catch (e) { return false; } }
@@ -5526,7 +5539,7 @@
       if ((def.disabled !== undefined && def.disabled !== null && typeof def.disabled !== 'boolean') || (def.disable !== undefined && def.disable !== null && typeof def.disable !== 'boolean')) return false;
       if (def.extraElements !== undefined && def.extraElements !== null && (!Array.isArray(def.extraElements) || !def.extraElements.every(s => typeof s === 'string' && !!s.trim() && !hasTopLevelComma(s) && isValidCssSelector(':scope > :nth-child(1) ' + s)))) return false;
       if (def.match !== undefined && def.match !== null && !reOk(def.match)) return false;
-      for (const f of ['containers', 'titles', 'snippets', 'links']) if (def[f] !== undefined && def[f] !== null && !cssOk(def[f], f !== 'containers')) return false;
+      for (const f of ['containers', 'titles', 'snippets', 'links']) if (def[f] !== undefined && def[f] !== null && !cssOk(def[f], f !== 'containers', f === 'titles' ? parseTitleSpec : f === 'links' ? parseLinkSpec : null)) return false;
     }
     return true;
   }
@@ -5583,13 +5596,13 @@
 
   function showExportMenu(anchor) {
     closeExportMenu(); _exportPick = loadExportPick();
-    const menu = document.createElement('div'); menu.id = 'serhl-export-menu'; menu.style.visibility = 'hidden';
+    const menu = document.createElement('div'); menu.id = 'serhl-export-menu'; menu.style.visibility = 'hidden'; const scale = currentUiScale(); if (scale !== 1) menu.style.zoom = String(scale);
     const opt = (key, labelKey) => `<label><span class="serhl-switch"><input type="checkbox" data-export="${key}" ${_exportPick[key] ? 'checked' : ''}><span class="serhl-slider"></span></span><span>${t(labelKey)}</span></label>`;
     menu.innerHTML = `<div class="serhl-export-grid">${opt('rules', 'exportOptRules')}${opt('settings', 'exportOptSettings')}${opt('engine', 'exportOptEngine')}</div><div class="serhl-export-btns"><button id="serhl-export-ok" class="serhl-button serhl-button-primary">${t('bcConfirm')}</button><button id="serhl-export-cancel" class="serhl-button serhl-button-secondary">${t('cancel')}</button></div>`;
     document.body.appendChild(menu);
     const rect = anchor.getBoundingClientRect(), mw = menu.offsetWidth, mh = menu.offsetHeight;
-    let top = rect.bottom + 6; if (top + mh > innerHeight - 4) top = Math.max(4, rect.top - mh - 6);
-    menu.style.left = Math.max(4, Math.min(rect.left, innerWidth - mw - 4)) + 'px'; menu.style.top = top + 'px';
+    let top = rect.bottom / scale + 6; if (top + mh > innerHeight / scale - 4) top = Math.max(4, rect.top / scale - mh - 6);
+    menu.style.left = Math.max(4, Math.min(rect.left / scale, innerWidth / scale - mw - 4)) + 'px'; menu.style.top = top + 'px';
     menu.style.visibility = '';
     menu.querySelectorAll('input[data-export]').forEach(input => input.addEventListener('change', () => { _exportPick[input.dataset.export] = input.checked; saveExportPick(); }));
     menu.querySelector('#serhl-export-cancel').onclick = closeExportMenu;

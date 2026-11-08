@@ -134,11 +134,11 @@
       },
     },
     yahoo_japan: {
-      match: /^(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.co\.jp$/i,
+      match: /^(?:(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.co\.jp|https?:\/\/news\.yahoo\.co\.jp\/search(?:[\/?#].*)?)$/i,
       containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo, #contents section:has(a h3)',
       titles: ['h3', '.s-title', 'h2 a', 'a h2', '.b_title', '.title'],
       snippets: ['.sw-Card__description', '.sw-Card__snippet', '.sw-Text__body', 'p', '.b_caption p', '.b_snippet', '.b_paractl p'],
-      links: ['a:has(> h3)', 'a.sw-Card__space', 'h3 a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
+      links: ['a:has(> h3)', 'a.sw-Card__titleInner[href]', 'a.sw-Card__space', 'h3 a', '.s-title a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
       categories: {
         images: {
           match: /^https?:\/\/images\.|\/image\/search(?:[\/?#]|$)/i,
@@ -147,8 +147,14 @@
           snippets: ['.sw-ThumbnailGrid__domain'],
           links: ['a.sw-Thumbnail@clparams:targurl', 'a@clparams:targurl', 'a[href]'],
         },
-        videos: { match: /^https?:\/\/videos?\./i },
-        news: { match: /^https?:\/\/news\./i },
+        videos: { match: /^https?:\/\/videos?\.|\/video\/search(?:[\/?#]|$)/i },
+        news: {
+          match: /^https?:\/\/news\./i,
+          containers: 'li:has(a[href*="/articles/"])',
+          titles: ['p', '.newsFeed_item_body div a[href*="/articles/"]', '.newsFeed_item_body a[href*="/articles/"]', 'a[href*="/articles/"]'],
+          snippets: ['p'],
+          links: ['a[href*="/articles/"]'],
+        },
       },
     },
     yahoo: {
@@ -156,7 +162,7 @@
       containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo, #web ol > li > div',
       titles: ['h3', '.s-title', 'h2 a', 'a h2', '.b_title', '.title'],
       snippets: ['.sw-Card__description', '.sw-Card__snippet', '.sw-Text__body', 'p', '.b_caption p', '.b_snippet', '.b_paractl p'],
-      links: ['a:has(> h3)', 'a.sw-Card__space', 'h3 a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
+      links: ['a:has(> h3)', 'a.sw-Card__titleInner[href]', 'a.sw-Card__space', 'h3 a', '.s-title a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
       categories: {
         images: {
           match: /^https?:\/\/images\.|\/search\/images(?:[\/?#]|$)/i,
@@ -165,7 +171,7 @@
           snippets: ['.sw-ThumbnailGrid__domain'],
           links: ['a.sw-Thumbnail@clparams:targurl', 'a@clparams:targurl', 'a[href]'],
         },
-        videos: { match: /^https?:\/\/videos?\./i },
+        videos: { match: /^https?:\/\/videos?\.|\/video\/search(?:[\/?#]|$)/i },
         news: { match: /^https?:\/\/news\./i },
       },
     },
@@ -173,12 +179,12 @@
       match: /^(?:www\.|m\.)?so\.com$/i,
       containers: 'li.res-list, div.res-list',
       titles: ['h3.res-title a', 'h3 a', '.res-title', '.g-title a', '.g-title'],
-      snippets: ['.res-desc', '.mh-desc', '.summary'],
+      snippets: ['.res-desc', '.res-list-summary', '.mh-desc', '.summary'],
       links: ['h3 a[href]', 'a.alink[href]', '.g-linkinfo a[href]', 'a[href]'],
     },
     sogou: {
       match: /^(?:www\.|m\.|wap\.)?sogou\.com$/i,
-      containers: 'div.vrwrap:has(h3), .reactResult, div.vrResult',
+      containers: 'div.vrwrap:has(h3), div.reactResult:has(h3), div.reactResult:has(.vr-title), div.vrResult',
       titles: ['h3.vr-title a', '.vr-title a', 'a[class*="saTitle"]', '.vr-title', 'h3.vr-tit', 'h3 a', 'h3'],
       snippets: ['.space-txt', '.star-wiki', '.str_info', 'p.sa-text-clamp3', '[class*="saText"]'],
       links: ['h3.vr-title a[href]', '.vr-title a[href]', 'a[class*="saTitle"][href]', 'h3 a[href]', 'a.citeLinkClass[href]', 'a[href]'],
@@ -186,17 +192,22 @@
     toutiao: {
       match: /^(?:so|m)\.toutiao\.com$/i,
       containers: '.result-content',
-      titles: ['.l-card-title a', '.l-card-title', '.cs-header a', 'a[href*="/search/jump"]'],
-      snippets: ['.l-paragraph', '.cs-card-content .text-regular', '.l-source', '.cs-source'],
-      links: ['a.l-card-title[href]', '.cs-header a[href]', 'a[href*="/search/jump"]', 'a[href]:not([href*="/search?"])'],
+      titles: ['.cs-header a', 'a[href*="/search/jump"]', '.l-card-title a', '.l-card-title'],
+      snippets: ['.cs-card-content .text-regular', '.cs-source', '.l-paragraph', '.l-source'],
+      links: ['.cs-header a[href]', 'a[href*="/search/jump"]', 'a.l-card-title[href]', 'a[href]:not([href*="/search?"])'],
       categories: {
-        images: { match: /[?&]pd=atlas(?:&|#|$)/i },
+        images: {
+          match: /[?&]pd=atlas(?:&|#|$)/i,
+          containers: '.l-waterfallY-item',
+          titles: ['img[alt]@attr:alt'],
+          links: ['a[href*="/search/jump"]', 'a[href]'],
+        },
         news: { match: /[?&]pd=information(?:&|#|$)/i },
         videos: { match: /[?&]pd=[a-z_]*video/i },
       },
     },
     quark: {
-      match: /^(?:(?:quark|yz)\.)?(?:(?:www|m)\.)?sm\.cn$/i,
+      match: /^(?:(?:www|m|so)\.)?quark\.cn$|^(?:(?:quark|yz)\.)?(?:(?:www|m)\.)?sm\.cn$/i,
       containers: 'div.qk-card',
       titles: ['.qk-title-text', '.qk-title', 'a.qk-link-wrapper'],
       snippets: ['.qk-paragraph-text', '.qk-paragraph'],
