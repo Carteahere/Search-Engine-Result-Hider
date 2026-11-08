@@ -45,7 +45,7 @@ Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、S
 ### 1.4 关于订阅：
 
 1. 规则订阅更新同样后台运行，每12h拉取一次，支持 `UTF-8` 纯文本远程链接如 [rules.txt](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt) ，订阅规则在本地规则后追加应用
-2. 兼容 `.yaml` uBlacklist 订阅格式，不支持 `##` / `#@#` 等uBO规则，通过订阅导入会自动过滤
+2. 兼容 uBlacklist 订阅 `.yaml` / `.txt`，不支持 `##` / `#@#` 等uBO规则，通过订阅导入会自动过滤
 3. 搜索引擎订阅支持`.js` / `.json`，默认内置 [Selectors.js](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js) 并自动更新引擎列表
 4. 订阅/同步需要跨域请求权限，若有权限申请弹窗选`总是允许全部`
 
