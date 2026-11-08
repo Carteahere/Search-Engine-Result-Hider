@@ -44,7 +44,7 @@ Partial setting instructions:
 ### 1.4 About Subscriptions:
 
 1. Rule subscription updates also run in the background, fetching once every 12h. It supports `UTF-8` plain text remote links such as [rules.txt](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt), and subscription rules are appended after local rules.
-2. Compatible with `.yaml` uBlacklist subscription format, do not support `##` / `#@#` uBO rules, they are filtered out automatically on subscription import.
+2. Compatible uBlacklist subscription `.yaml` / `.txt`, do not support `##` / `#@#` uBO rules, they are filtered out automatically on subscription import.
 3. The search engine subscription supports `.js` / `.json`, with [Selectors.js](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js) being built-in by default and the engines list being automatically updated.
 4. Subscription/synchronization requires cross-origin request permissions; if a permission prompt appears, select `Always allow all`.
 
