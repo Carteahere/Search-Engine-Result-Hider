@@ -191,6 +191,10 @@ assert('条件-065: @if正则内括号配平', m.stripRuleComment('*://x.com/* @
 // ---- host / path / scheme ----
 r = condExpr('host $= ".example.com"', 'google');
 assert('条件-070: host后缀-子域与裸域', ev(r, 't', 'https://www.example.com/') === true && ev(r, 't', 'https://example.com/') === true);
+r = condExpr('host ^= "www."', 'google');
+assert('条件-070b: host前缀保留尾点不误命中wwwfoo', ev(r, 't', 'https://www.example.com/') === true && ev(r, 't', 'https://wwwfoo.com/') === false);
+r = condExpr('host *= "www."', 'google');
+assert('条件-070c: host包含保留尾点不误命中wwwhost', ev(r, 't', 'https://www.example.com/') === true && ev(r, 't', 'https://wwwhost.com/') === false);
 r = condExpr('host = "www.example.com"', 'google');
 r = condExpr('host =~ /(^|\\.)example\\.com$/i', 'google');
 assert('条件-073: host正则', !r.errors && ev(r, 't', 'https://example.com/') === true && ev(r, 't', 'https://badexample.com/') === false);
@@ -215,6 +219,8 @@ r = condExpr('title *= "a" ix', 'google');
 r = condExpr('$category = "images"', 'google', 'www.google.com', 'web');
 r = condExpr('$site = "google" & $category = "images"', 'google', 'www.google.com', 'web');
 assert('条件-084: $site命中但category不命中', r.const === false);
+r = condExpr('$category = "Images"', 'google', 'www.google.com', 'Images');
+assert('条件-084b: $category大写自定义分类命中', r.const === true);
 
 // ---- 条件表达式识别(行级判定) ----
 const condTrueCases = [
@@ -414,6 +420,19 @@ assert('条件-197: =/foo/g与=/foo/ii判定flag错误, ="/foo/ii"仍按字面�
 {
   const frag = m.parseRuleWithConditions('url =~ /example\\.com\\/admin/').dynamicConditions[0];
   assert('条件-201: url =~不解码fragment中的编码URL, 仍按解码pathname匹配', m.evalCondAST(frag, 't', 'https://evil.com/#https%3A%2F%2Fexample.com%2Fadmin') === false && m.evalCondAST(frag, 't', 'https://evil.com/path/https%3A%2F%2Fexample.com%2Fadmin') === true);
+}
+{
+  // ---- 条件-202: url ^= 无scheme主机形值按剥离scheme后前缀命中(修复留档, 主/Lite) ----
+  const liteSrc = fs.readFileSync(path.join(scriptDir, 'Lite.user.js'), 'utf8');
+  const hit = (rule, u) => m.evalCondAST(m.parseRuleWithConditions(rule).dynamicConditions[0], 't', u);
+  assert('条件-202: url ^= 无scheme主机形值与IDN相对值命中, 带scheme写法不变, 前缀不误命中, =仍要求全等, 主/Lite提取一致',
+    hit('*://x.com/* @if(url ^= "example.com/p")', 'https://example.com/p/file') === true
+    && hit('*://x.com/* @if(url ^= "example.com")', 'https://example.com/page') === true
+    && hit('*://x.com/* @if(url ^= "例子.com/p")', 'https://xn--fsqu00a.com/p/file') === true
+    && hit('*://x.com/* @if(url ^= "https://example.com/p")', 'https://example.com/p/file') === true
+    && hit('*://x.com/* @if(url ^= "example.com/p")', 'https://notexample.com/p') === false
+    && hit('*://x.com/* @if(url = "example.com/p/file")', 'https://example.com/p/file') === false
+    && SERH_RAW_EXTRACT(src, 'evalDynamicLeaf') === SERH_RAW_EXTRACT(liteSrc, 'evalDynamicLeaf'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

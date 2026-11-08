@@ -33,10 +33,12 @@ const SERH_FN_DEPS = ((text) => {
 })(src);
 const SERH_FLAG_HELPERS = ['isUniqueFlagsStr', 'isFlagsCandidateError'].map((n) => SERH_RAW_EXTRACT(src, n)).join('\n');
 const SERH_EL_HELPERS = ['isCondExprCore', 'looksLikeCondExpr', 'isScriptRuleLine', 'isElementRuleLine'].map((n) => SERH_RAW_EXTRACT(src, n)).join('\n');
+const SERH_SPEC_HELPERS = ['parseTopLevelAt', 'parseLinkSpec', 'parseTitleSpec'].map((n) => SERH_RAW_EXTRACT(src, n)).join('\n');
 const SERH_DEPS_RE = /scanRuleString\(|RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_[A-D]\b|encodeNonAscii\(|isUniqueFlagsStr\(|isFlagsCandidateError\(|isElementRuleLine\(/;
 function extractFn(text, fnName) {
   const body = SERH_RAW_EXTRACT(text, fnName);
-  return SERH_DEPS_RE.test(body) ? SERH_FN_DEPS + '\n' + SERH_FLAG_HELPERS + '\n' + SERH_EL_HELPERS + '\n' + body : body;
+  const specDeps = !['parseTitleSpec', 'parseLinkSpec'].includes(fnName) && /\bparseTitleSpec\b|\bparseLinkSpec\b/.test(body) ? SERH_SPEC_HELPERS + '\n' : '';
+  return (SERH_DEPS_RE.test(body) ? SERH_FN_DEPS + '\n' + SERH_FLAG_HELPERS + '\n' + SERH_EL_HELPERS + '\n' : '') + specDeps + body;
 }
 
 const SERH_CONSTS = {
@@ -755,6 +757,9 @@ function createEnv(initRules) {
     function getSyncSettings() { return { showBubble: true }; }
     function exportSubscriptionList() { return []; }
     function getUserSelectors() { return {}; }
+    function getEngineSubscriptions() { return []; }
+    const BUILTIN_ENGINE_SUB_URL = 'https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js';
+    const isBuiltinEngineSub = (s) => !!s && (!!s.builtin || s.url === BUILTIN_ENGINE_SUB_URL);
     function timestampFilename() { return 'x.txt'; }
     ${extractFn(src, 'exportRulesToFile')}
     return { exportRulesToFile };
@@ -765,6 +770,31 @@ function createEnv(initRules) {
   makeExport({ rules: true, subscription: false, engine: false, settings: false }).exportRulesToFile();
   assert('规则-295: 空规则勾选时跳过内容, 仅勾规则仍报空', ok && calls.download.length === 0 && calls.toast.length === 1 && calls.toast[0][1] === 'error');
 }
+
+// 修复留档: Engines导出项附带engineSubscriptions但过滤内置条目, 内置订阅开关状态随设置导出为builtinEngineSubEnabled, 导入侧按URL合并并回写开关(主版)
+{
+  const calls = { download: [], toast: [] };
+  const makeExport2 = (pick, engineSubs) => new Function('document', 'showToast', 'downloadTextFile', `
+    let preventPanelClose = false;
+    const _exportPick = ${JSON.stringify(pick)};
+    const currentConfig = { rules: [] };
+    function t(key) { return key; }
+    function getSyncSettings() { return {}; }
+    function exportSubscriptionList() { return []; }
+    function getUserSelectors() { return {}; }
+    function getEngineSubscriptions() { return ${JSON.stringify(engineSubs)}; }
+    const BUILTIN_ENGINE_SUB_URL = 'https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js';
+    const isBuiltinEngineSub = (s) => !!s && (!!s.builtin || s.url === BUILTIN_ENGINE_SUB_URL);
+    function timestampFilename() { return 'x.txt'; }
+    ${extractFn(src, 'exportRulesToFile')}
+    return { exportRulesToFile };
+  `)({ getElementById: () => ({ value: '' }) }, (m, type) => calls.toast.push([m, type]), (name, content) => calls.download.push([name, content]));
+  makeExport2({ rules: true, subscription: false, engine: true, settings: true }, [{ url: 'https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js', builtin: true, name: 'B', enabled: false, lastUpdate: 9 }, { url: 'https://a/s.js', name: 'A', enabled: true, lastUpdate: 5 }]).exportRulesToFile();
+  const out2 = calls.download.length === 1 ? calls.download[0][1] : '';
+  assert('规则-296: Engines导出过滤内置订阅仅含url/name/enabled, 开关状态随设置导出', out2.includes('"engineSubscriptions":[{"url":"https://a/s.js","name":"A","enabled":true}]') && !out2.includes('"builtin":') && out2.includes('"builtinEngineSubEnabled":false'));
+}
+// 修复留档: 导入回写内置订阅开关且getSyncSettings剥离builtinEngineSubEnabled防泄漏进设置(主版)
+assert('规则-300: 导入应用builtinEngineSubEnabled且getSyncSettings剥离该键', /headerConfig\.builtinEngineSubEnabled !== undefined/.test(src) && /saveEngineSubscriptions\(subs\); refreshEngineSite\(\)/.test(src) && /engineSubscriptions, builtinEngineSubEnabled, syncedAt/.test(src));
 
 // 同步头解析(仅剥离头行, 其余#注释保留)
 {
@@ -781,6 +811,16 @@ function createEnv(initRules) {
   r = run('# Selectors:{"bing":{"containers":""}}\nrule1');
   assert('规则-289: 无效选择器头标记invalidSelectors且不丢正文', r.invalidSelectors === true && r.rawSelectors === null && r.restLines.join('\n') === 'rule1');
   r = run('\uFEFF# title: my rules\n# author: me\n*://bad.example.com/*');
+}
+// 修复留档: 同步/导入选择器头对titles/links先剥离@attr/@json等提取语法再验CSS, 含提取语法的补丁不再静默丢弃(主/Lite)
+{
+  const badCss = (s) => { const n = (ch) => s.split(ch).length - 1; return n('[') !== n(']') || n('(') !== n(')') || n('{') !== n('}'); };
+  const doc = { querySelector: (s) => { if (badCss(String(s).replace(/(["'])(?:\\.|(?!\1).)*\1/g, ''))) throw new SyntaxError('bad css'); return null; } };
+  const specRun = (content) => new Function('currentConfig', 'console', 'document', `${parseSyncHeaderFn}\nreturn parseSyncHeader;`)({ debug: false }, { warn: () => {} }, doc)(content);
+  const rOk = specRun('# Selectors:' + JSON.stringify({ bing: { match: '/^www\\.bing\\.com$/i', containers: 'li.b_algo', titles: ['img@attr:alt'], links: ['a[href*="/imgres"]@query:href.imgurl'] } }) + '\nrule1');
+  assert('规则-297: 含@提取语法的titles/links选择器头合法且被采纳', !!(rOk.rawSelectors && rOk.config && rOk.config.selectors && rOk.config.selectors.bing.titles[0] === 'img@attr:alt') && rOk.invalidSelectors === false);
+  const rBad = specRun('# Selectors:' + JSON.stringify({ bing: { containers: 'li[' } }) + '\nrule1');
+  assert('规则-298: 同步头中非法CSS仍标记invalidSelectors', rBad.rawSelectors === null && rBad.config === null && rBad.invalidSelectors === true && rBad.restLines.join('\n') === 'rule1');
 }
 })();
 
@@ -870,6 +910,9 @@ assert('规则-278: Lite mergeRules3Way与主版逐字节一致, 他侧删除不
     ${SERH_RAW_EXTRACT(liteSrc, 'hasTopLevelComma')}
     ${SERH_RAW_EXTRACT(liteSrc, 'hasPseudoElement')}
     ${SERH_RAW_EXTRACT(liteSrc, 'isValidCssSelector')}
+    ${SERH_RAW_EXTRACT(liteSrc, 'parseTopLevelAt')}
+    ${SERH_RAW_EXTRACT(liteSrc, 'parseLinkSpec')}
+    ${SERH_RAW_EXTRACT(liteSrc, 'parseTitleSpec')}
     ${SERH_RAW_EXTRACT(liteSrc, 'selectorPatchOk')}
     ${SERH_RAW_EXTRACT(liteSrc, 'parseConfigHeader')}
     return parseConfigHeader;`)();
@@ -883,6 +926,8 @@ assert('规则-278: Lite mergeRules3Way与主版逐字节一致, 他侧删除不
   assert('281b: Lite drops malformed ScriptConfig header', cfgBad.settings === null && JSON.stringify(cfgBad.rest) === JSON.stringify(['*://a.com/*']));
   assert('规则-281: Lite导入识别# Selectors头且不把该行当规则', !!(parsed.selectors && parsed.selectors.example && parsed.selectors.example.containers === '.result, .result2') && JSON.stringify(parsed.rest) === JSON.stringify(['*://a.com/*']) && JSON.stringify(bad.rest) === JSON.stringify(['*://a.com/*']));
   assert('规则-292: Lite空links头可解析且坏头标记invalidSelectors', !!(emptyLinks.selectors && emptyLinks.selectors.bing.links === '') && badSel.invalidSelectors === true && JSON.stringify(badSel.rest) === JSON.stringify([]));
+  const specLite = liteParse(['# Selectors:' + JSON.stringify({ bing: { containers: 'li.b_algo', titles: ['img@attr:alt'], links: ['a@query:href.u'] } }), '*://a.com/*']);
+  assert('规则-299: Lite含@提取语法的选择器头合法', !!(specLite.selectors && specLite.selectors.bing && specLite.selectors.bing.titles[0] === 'img@attr:alt') && specLite.invalidSelectors !== true);
 }
 
 // ---- 规则-279/280: URL规则解码匹配 / 通配校验撇号(修复留档) ----

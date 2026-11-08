@@ -29,6 +29,7 @@ function extractFn(text, fnName) {
     if (/encodeNonAscii\(/.test(fn)) prelude.push(rawExtract(text, 'encodeNonAscii'));
     if (/isUniqueFlagsStr\(|isFlagsCandidateError\(/.test(fn)) prelude.push(['isUniqueFlagsStr', 'isFlagsCandidateError'].map((n) => rawExtract(text, n)).join('\n'));
     if (/parseTopLevelAt\(/.test(fn)) prelude.push(rawExtract(text, 'parseTopLevelAt'));
+    if (!['parseTitleSpec', 'parseLinkSpec'].includes(fnName) && /\bparseTitleSpec\b|\bparseLinkSpec\b/.test(fn)) prelude.push(rawExtract(text, 'parseTopLevelAt'), rawExtract(text, 'parseLinkSpec'), rawExtract(text, 'parseTitleSpec'));
     if (/yandexResultBlocks\(/.test(fn)) prelude.push('function getContainerSelector() { return \'div.Organic\'; }', rawExtract(text, 'yandexResultBlocks'));
   }
   if (['scanNewResults', 'teardownEngineSite'].includes(fnName)) prelude.push('function restoreResultExtraElements() {}\nfunction reconcileHiddenParents() {}\nfunction restoreAllHiddenParents() {}');
@@ -157,7 +158,8 @@ check('选择器-020: 对象match非法flags报错且合法通过', api.validate
 check('选择器-021: 字符串match写成/re/g被拒且合法字面量通过', api.validateUserSelectors({ f1: { match: '/a/g', containers: '.x' } }).some((m) => m.includes('invalidRegexFlags')) && api.validateUserSelectors({ f2: { match: '/a/i', containers: '.x' } }).length === 0);
 const P1 = api.serializeSelectors();
 const R1 = api.parseSelectorText(P1);
-check('选择器-023: 序列化→解析往返一致', /bing:\s*\{/.test(P1) && /match: \//.test(P1) && !R1.errors.length && !!R1.config && R1.config.bing.match === api.getSelectors().bing.match.source && R1.config.google.containers === 'div.g, div.MjjYud');
+// 修复留档: parseSelectorText将带flags正则字面量归一化为{source,flags}对象, 断言取.source与026/039同口径
+check('选择器-023: 序列化→解析往返一致', /bing:\s*\{/.test(P1) && /match: \//.test(P1) && !R1.errors.length && !!R1.config && R1.config.bing.match.source === api.getSelectors().bing.match.source && R1.config.google.containers === 'div.g, div.MjjYud');
 const R3 = api.parseSelectorText('{"e9":{"match":"a","containers":".x"}}');
 const R4 = api.parseSelectorText('e8: { match: /a[/ }');
 const R5 = api.parseSelectorText('e7: { match: /a/q }');
@@ -179,9 +181,10 @@ api.setHost('scholar.google.com');
 check('选择器-031: 用户同时配置google与google_scholar时学者优先', api.getSearchEngine() === 'google_scholar');
 api.setStore({});
 const allBuiltins = {};
+// 修复留档: 内置副本fixture须保留match flags, 裸源串无隐式i与内置语义不同(218/039)
 for (const k of ['bing', 'google', 'duckduckgo', 'yandex', 'brave', 'yahoo']) {
   const m = api.getSelectors()[k];
-  allBuiltins[k] = { match: m.match.source, containers: m.containers, titles: m.titles.slice(), snippets: m.snippets.slice(), links: m.links };
+  allBuiltins[k] = { match: { source: m.match.source, flags: m.match.flags }, containers: m.containers, titles: m.titles.slice(), snippets: m.snippets.slice(), links: m.links };
 }
 const bingCopy = allBuiltins.bing;
 check('选择器-032: 未改动键丢弃/改动键保留/新增键保留', !('bing' in api.diffUserSelectors(allBuiltins)) && 'bing' in api.diffUserSelectors(Object.assign({}, allBuiltins, { bing: Object.assign({}, bingCopy, { containers: '.x' }) })) && 'myx' in api.diffUserSelectors(Object.assign({}, allBuiltins, { myx: { match: 'a', containers: '.x' } })));
@@ -202,7 +205,8 @@ api.setStore({ bing: { disable: true } });
 check('选择器-043: disable:true 引擎被停用且 disable:false 空覆盖不破坏内置', (() => { api.setHost('www.bing.com'); const r = api.getSearchEngine() === 'other'; api.setStore({ bing: { disable: false } }); return r && api.getSearchEngine() === 'bing' && api.getContainerSelector('bing') === 'li.b_algo, div.b_algo'; })());
 api.setStore({});
 const bingSnapshot = api.getSelectors().bing;
-storeRef.current = { bing: { ...bingSnapshot, match: bingSnapshot.match.source }, myse: { match: 'a', containers: '.x' } };
+// 修复留档: 旧版固化副本fixture同032保留match flags
+storeRef.current = { bing: { ...bingSnapshot, match: { source: bingSnapshot.match.source, flags: bingSnapshot.match.flags } }, myse: { match: 'a', containers: '.x' } };
 api.resetSelectorCache();
 api.pruneUserSelectors();
 check('选择器-044: 旧版固化的内置副本被清理', storeRef.current && !('bing' in storeRef.current) && !!storeRef.current.myse);
@@ -211,10 +215,30 @@ api.setStore({});
 const Pfull = api.serializeSelectors();
 const Rfull = api.parseSelectorText(Pfull);
 check('选择器-191: 内置serialize→parse零diff且类内/?#不再被转义', Pfull.includes('[/?#]') && !Pfull.includes('[\\\\/?#]') && !Rfull.errors.length && !!Rfull.config && Object.keys(api.diffUserSelectors(Rfull.config)).length === 0);
+// 修复留档: so360摘要补.res-list-summary, sogou容器.reactResult加:has约束(主/Lite/Selectors.js三处同源)
+const liteSrcSel = readRepoFile('Lite.user.js'); const repoSelSrc = readRepoFile('Selectors.js');
+check('选择器-219: so360摘要含.res-list-summary且sogou容器reactResult带:has约束(主版内置)', selectors.so360.snippets.includes('.res-list-summary') && selectors.sogou.containers.includes('div.reactResult:has(h3)') && selectors.sogou.containers.includes('div.reactResult:has(.vr-title)') && !/(?:^|,)\s*\.reactResult\s*,/.test(selectors.sogou.containers));
+check('选择器-220: 订阅源Selectors.js同步so360摘要与sogou容器约束', repoSelSrc.includes('.res-list-summary') && repoSelSrc.includes('div.reactResult:has(h3), div.reactResult:has(.vr-title)'));
+check('选择器-221: Lite isBlockButtonEnabledForEngine与主版一致(分类级button生效)', extractFn(src, 'isBlockButtonEnabledForEngine') === extractFn(liteSrcSel, 'isBlockButtonEnabledForEngine'));
+// 修复留档: 确认对话框与导出菜单创建时按currentUiScale设zoom并按scale换算锚点定位(主/Lite)
+check('选择器-222: 弹层创建即应用uiScale', /serh-block-confirm-dialog'; const scale = currentUiScale\(\)/.test(src) && /serh-export-menu'; menu\.style\.visibility = 'hidden'; const scale = currentUiScale\(\)/.test(src) && /serhl-block-confirm-dialog'; const scale = currentUiScale\(\)/.test(liteSrcSel) && /serhl-export-menu'; menu\.style\.visibility = 'hidden'; const scale = currentUiScale\(\)/.test(liteSrcSel));
+// 修复留档: getCleanUrl兜底容器补.reactResult(主/Lite), getResultTitle匹配用完整标题不截断(主/Lite)
+check('选择器-223: getCleanUrl兜底含reactResult且getResultTitle无200截断(主/Lite)', /\.res-list, \.vrwrap, \.reactResult/.test(extractFn(src, 'getCleanUrl')) && /\.res-list, \.vrwrap, \.reactResult/.test(extractFn(liteSrcSel, 'getCleanUrl')) && !/slice\(0, 200\)/.test(extractFn(src, 'getResultTitle')) && !/slice\(0, 200\)/.test(extractFn(liteSrcSel, 'getResultTitle')));
+// 修复留档: 夸克补quark.cn, Yahoo新闻补标题链接, Yahoo日本新闻/视频补分类选择器, 头条图集逐图容器(主/Lite/Selectors.js)
+check('选择器-224: 夸克/Yahoo/头条选择器修复生效', selectors.quark.match.source.includes('quark\\.cn') && selectors.yahoo.links.includes('.s-title a') && selectors.yahoo_japan.links.includes('a.sw-Card__titleInner[href]') && selectors.yahoo_japan.categories.news.containers.includes('li:has(a[href*="/articles/"])') && selectors.yahoo_japan.categories.videos.match.test('https://search.yahoo.co.jp/video/search?p=x') && selectors.toutiao.categories.images.containers === '.l-waterfallY-item' && selectors.toutiao.categories.images.links.includes('a[href*="/search/jump"]'));
+check('选择器-225: 上述选择器在主版/Lite/Selectors.js三处同步', [src, liteSrcSel, repoSelSrc].every((t) => t.includes('quark\\.cn') && t.includes('a.sw-Card__titleInner[href]') && t.includes('.s-title a') && t.includes('.l-waterfallY-item') && t.includes('li:has(a[href*="/articles/"])')));
+api.setStore({}); api.setHost('www.quark.cn'); api.setHref('https://www.quark.cn/s?q=x'); const qPc = api.getSearchEngine() === 'quark';
+api.setHost('news.yahoo.co.jp'); api.setHref('https://news.yahoo.co.jp/search/?p=x'); const yNews = api.getSearchEngine() === 'yahoo_japan';
+const yNewsCat = api.getSearchCategory() === 'news' && api.getContainerSelector('yahoo_japan').includes('articles');
+api.setHref('https://news.yahoo.co.jp/articles/x'); const yArticle = api.getSearchEngine() === 'other';
+api.setHost('search.yahoo.co.jp'); api.setHref('https://search.yahoo.co.jp/video/search?p=x'); const yVideo = api.getSearchCategory() === 'videos';
+api.setStore({}); api.setHost('www.google.com'); api.setHref('https://www.google.com/search?q=x');
+check('选择器-226: 夸克PC与Yahoo日本新闻/视频入口识别', qPc && yNews && yNewsCat && yArticle && yVideo);
 const extraDef = { ...CUSTOM.mysearx, extraElements: ['+ .summary', '~ .metadata'] };
 api.setStore({ customExtra: extraDef });
 const extraRoundTrip = api.parseSelectorText(api.serializeSelectors());
-check('选择器-045: 关联选择器合并保留且往返一致且校验通过', JSON.stringify(api.getSelectors().customExtra.extraElements) === JSON.stringify(extraDef.extraElements) && !extraRoundTrip.errors.length && api.sameSelectorDef(extraRoundTrip.config.customExtra, extraDef) && api.validateUserSelectors({ customExtra: extraDef }).length === 0);
+// 修复留档: 裸字符串match默认补i后往返规范化为/source/i, 对照采用规范化形态(主/Lite)
+check('选择器-045: 关联选择器合并保留且往返一致且校验通过', JSON.stringify(api.getSelectors().customExtra.extraElements) === JSON.stringify(extraDef.extraElements) && !extraRoundTrip.errors.length && api.sameSelectorDef(extraRoundTrip.config.customExtra, { ...extraDef, match: { source: extraDef.match, flags: 'i' } }) && api.validateUserSelectors({ customExtra: extraDef }).length === 0);
 for (const value of ['+ tr', ['+ tr, body'], ['+ tr::after']]) check(`选择器-046: 非法关联配置被拒 ${JSON.stringify(value)}`, api.validateUserSelectors({ customExtra: { ...extraDef, extraElements: value } }).some((e) => e.includes('extraElements')));
 const catNameCases = [['my-shop', true], ['Cat_2-x', true], ['ca t', false], ['cat!', false]];
 for (const [name, ok] of catNameCases) check(`选择器-047: 自定义分类名 ${name} ${ok ? '通过' : '被拒'}`, (api.validateUserSelectors({ c1: { match: 'a', containers: '.x', categories: { [name]: { match: 'b', containers: '.y' } } } }).length === 0) === ok);
@@ -1428,12 +1452,11 @@ assert('选择器-205: 装配异常回滚_engineSiteSetup与_observedBody可重�
   }
 }
 {
-  // 修复留档: 引擎match按i处理由Selectors.js内置正则显式带i承担, 脚本匹配点保持原样(主/Lite)
+  // 修复留档: 引擎级裸字符串match默认补i与分类级同口径(主/Lite), 显式/.../flags形态仍不强制追加i
   const liteSrc = fs.readFileSync(path.join(scriptDir, 'Lite.user.js'), 'utf8');
-  // 脚本匹配点无补i逻辑
   const gseSrc = extractFn(src, 'getSearchEngine');
-  check('选择器-218: 匹配点无补i逻辑且内置match形态保持(主版)', !/def\.match\.flags \+ 'i'/.test(gseSrc) && (() => { const pm = new Function(extractFn(src, 'parseSelectorMatch') + '\nreturn parseSelectorMatch;')(); const plain = pm({ match: 'WWW\\.Example\\.Com' }, null); return plain instanceof RegExp && plain.ignoreCase === false; })());
-  check('选择器-218b: 匹配点无补i逻辑(Lite)', !/def\.match\.flags \+ 'i'/.test(extractFn(liteSrc, 'getSearchEngine')));
+  check('选择器-218: 匹配点不强制追加i且裸字符串默认忽略大小写(主版)', !/def\.match\.flags \+ 'i'/.test(gseSrc) && !/def\.match\.flags \+ 'i'/.test(extractFn(src, 'parseSelectorMatch')) && (() => { const pm = new Function(extractFn(src, 'parseSelectorMatch') + '\nreturn parseSelectorMatch;')(); const plain = pm({ match: 'WWW\\.Example\\.Com' }, null); return plain instanceof RegExp && plain.ignoreCase === true; })());
+  check('选择器-218b: 匹配点不强制追加i且裸字符串默认补i(Lite)', !/def\.match\.flags \+ 'i'/.test(extractFn(liteSrc, 'getSearchEngine')) && /new RegExp\(def\.match, 'i'\)/.test(extractFn(liteSrc, 'getSelectors')));
   // Selectors.js内置选择器所有match显式带i
   const selSrc = fs.readFileSync(path.join(scriptDir, 'Selectors.js'), 'utf8');
   let noI = 0;
@@ -1444,6 +1467,11 @@ assert('选择器-205: 装配异常回滚_engineSiteSetup与_observedBody可重�
     if (!/i/.test(line.trimEnd().slice(lastSlash + 1))) noI++;
   }
   check('选择器-218c: Selectors.js内置match全部显式带i', noI === 0);
+}
+// 修复留档(主/Lite/Selectors.js): toutiao主选择器2026-11实测过期(.l-card-title等0命中), 有效项(.cs-header a等)提前, 旧项留作m站回退
+{
+  const m = src.match(/toutiao: \{[\s\S]*?titles: \[([\s\S]*?)\],\s*snippets:/);
+  assert('选择器-219: toutiao titles以实测有效选择器.cs-header a开头', !!m && m[1].includes("'.cs-header a'") && m[1].indexOf("'.cs-header a'") < m[1].indexOf("'.l-card-title a'"));
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

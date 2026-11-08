@@ -2,7 +2,7 @@
 // 规则订阅 / WebDAV同步 / 联网授时
 // 命名：同步-序号: 描述; 授时-序号
 // 备注：同步不考虑墓碑机制
-// 忽略：防抖推迟同步、PUT期间改设置不同步、多标签页同时打开面板修改规则/设置数据冲突、三方合并错槽、规则尾接注释（分块判断麻烦不再维护）、ublacklist极少使用的订阅项（如<all_urls>）、引擎订阅字段不含必选项时合并问题、YAML多行flow列表识别
+// 忽略：防抖推迟同步、PUT期间改设置不同步、多标签页同时打开面板修改规则/设置数据冲突、三方合并错槽、规则尾接注释（分块判断麻烦不再维护）、ublacklist极少使用的订阅项（如<all_urls>）、引擎订阅字段不含必选项时合并问题、YAML多行flow列表识别、订阅面板取消不回滚启用开关
 
 (async () => {
 const fs = require('fs');
@@ -37,10 +37,10 @@ function extractFn(text, fnName) {
   }
   const rawExtract = (t, name) => { const ridx = t.indexOf('function ' + name + '('); const ropen = t.indexOf('{', t.indexOf(') {', ridx)); let rdepth = 0; let ri = ropen; for (; ri < t.length; ri++) { if (t[ri] === '{') rdepth++; else if (t[ri] === '}') { rdepth--; if (rdepth === 0) break; } } return t.slice(ridx, ri + 1); };
   const body = text.slice(idx, i + 1);
-  const dependencies = { stripRuleComment: ['scanRuleString'], findIfOccurrences: ['scanRuleString'], extractBalancedParens: ['findBalancedParenEnd'], scanRuleString: ['findBalancedParenEnd', 'isBadRegexTail'], buildSyncPayload: ['getSyncSettings'] };
+  const dependencies = { stripRuleComment: ['scanRuleString'], findIfOccurrences: ['scanRuleString'], extractBalancedParens: ['findBalancedParenEnd'], scanRuleString: ['findBalancedParenEnd', 'isBadRegexTail'], buildSyncPayload: ['getSyncSettings', 'getEngineSubscriptions'] };
   const scanDeps = !['findBalancedParenEnd', 'scanRuleString'].includes(fnName) && /scanRuleString\(|RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_[A-D]\b/.test(body);
   const consts = text.split('\n').filter(line => /^\s*const (?:RULE_\w+|REGEX_CTX_[A-D]) =/.test(line)).map(line => line.replace('const ', 'var ')).join('\n') + '\n';
-  const prelude = (scanDeps ? consts + rawExtract(text, 'findBalancedParenEnd') + '\n' + rawExtract(text, 'scanRuleString') + '\n' + rawExtract(text, 'isBadRegexTail') + '\n' + rawExtract(text, 'regexCloseAhead') + '\n' + rawExtract(text, 'regexStartAhead') + '\n' : '') + (fnName !== 'encodeNonAscii' && /encodeNonAscii\(/.test(body) ? rawExtract(text, 'encodeNonAscii') + '\n' : '') + (!['isUniqueFlagsStr', 'isFlagsCandidateError'].includes(fnName) && /isUniqueFlagsStr\(|isFlagsCandidateError\(/.test(body) ? ['isUniqueFlagsStr', 'isFlagsCandidateError'].map(n => rawExtract(text, n)).join('\n') + '\n' : '');
+  const prelude = (scanDeps ? consts + rawExtract(text, 'findBalancedParenEnd') + '\n' + rawExtract(text, 'scanRuleString') + '\n' + rawExtract(text, 'isBadRegexTail') + '\n' + rawExtract(text, 'regexCloseAhead') + '\n' + rawExtract(text, 'regexStartAhead') + '\n' : '') + (fnName !== 'encodeNonAscii' && /encodeNonAscii\(/.test(body) ? rawExtract(text, 'encodeNonAscii') + '\n' : '') + (!['isUniqueFlagsStr', 'isFlagsCandidateError'].includes(fnName) && /isUniqueFlagsStr\(|isFlagsCandidateError\(/.test(body) ? ['isUniqueFlagsStr', 'isFlagsCandidateError'].map(n => rawExtract(text, n)).join('\n') + '\n' : '') + (!['parseTitleSpec', 'parseLinkSpec'].includes(fnName) && /\bparseTitleSpec\b|\bparseLinkSpec\b/.test(body) ? rawExtract(text, 'parseTopLevelAt') + '\n' + rawExtract(text, 'parseLinkSpec') + '\n' + rawExtract(text, 'parseTitleSpec') + '\n' : '');
   return prelude + (dependencies[fnName] || []).map(n => extractFn(text, n)).join('\n') + '\n' + body;
 }
 
@@ -70,6 +70,7 @@ const baseSyncFns = [
   'firstSuccess', 'parseHttpDateHeader', 'queryNetworkTimeEndpoint', 'getNetworkTimeOffset', 'getTrustedNow',
   'extractValidCloudTimes', 'applyConfigToMainPanel',
   'buildSyncPayload', 'applyCloudSubscriptions', 'adoptStoredConfigIfNewer', 'getDefaultConfig', 'normalizeConfig',
+  'getEngineSubscriptions', 'saveEngineSubscriptions', 'applyCloudEngineSubscriptions', 'getEngineSubSyncSnapshot', 'setEngineSubSyncSnapshot',
   'checkExternalConfigChange', 'triggerWebDAVSyncDelayed', 'performAutoWebDAVSync', 'performWebDAVDownload', 'markWebDAVSyncFailure',
 ];
 const ruleValidateFns = [
@@ -127,6 +128,10 @@ function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], local
     const WEBDAV_PENDING_KEY = ${JSON.stringify(KEYS.WEBDAV_PENDING_KEY)};
     const WEBDAV_SYNC_SNAPSHOT_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_SNAPSHOT_KEY)};
     const SUBSCRIPTION_SYNC_SNAPSHOT_KEY = ${JSON.stringify(KEYS.SUBSCRIPTION_SYNC_SNAPSHOT_KEY)};
+    const ENGINE_SUBSCRIPTIONS_KEY = 'searchfilter_engine_subscriptions';
+    const ENGINE_SUBS_SYNC_SNAPSHOT_KEY = 'searchfilter_engine_subs_sync_snapshot';
+    const BUILTIN_ENGINE_SUB_URL = 'https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js';
+    const isBuiltinEngineSub = (s) => !!s && (!!s.builtin || s.url === BUILTIN_ENGINE_SUB_URL);
     const MAX_SUBSCRIPTIONS = 100;
     const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d);
     const GM_setValue = (k, v) => { store.set(k, v); };
@@ -145,6 +150,7 @@ function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], local
     function getSubscriptions() { return store.get('subs') || []; }
     function saveSubscriptions(subs) { store.set('subs', subs); }
     function checkAutoSubscription() {}
+    function checkAutoEngineSubscription() {}
     function getUserSelectors() { return GM_getValue(SELECTORS_KEY, {}) || {}; }
     function getSelectorStoreSignature() { return null; }
     function resetSelectorCache() {}
@@ -166,6 +172,7 @@ function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], local
     ${netTimePrelude}
     ${syncEnvPrelude}
     ${syncFns.join('\n')}
+    ${extractFn(src, 'applyBuiltinEngineSubEnabled')}
     ${langTextsSrc}
     return {
       run: (cfg) => performAutoWebDAVSync(cfg),
@@ -746,6 +753,67 @@ assert('同步-096: 订阅/引擎订阅后台回调复查面板且放行force手
   const trigger = extractFn(src, 'triggerWebDAVSyncDelayed');
   const checkAuto = extractFn(src, 'checkAutoWebDAV');
   assert('同步-103: 面板待同步标志持久化并在检查时绕过1小时门限', /WEBDAV_PENDING_KEY, true/.test(trigger) && /const pending = GM_getValue\(WEBDAV_PENDING_KEY, false\)/.test(checkAuto) && /!pending/.test(checkAuto));
+}
+// 修复留档: 面板关闭时待同步标志与常规检查二选一, 避免一次修改触发两次同步(主版)
+{
+  const finish = extractFn(src, 'fadeOutAndRemovePanel');
+  assert('同步-103b: 面板关闭待同步时不再叠加常规检查', /if \(_webdavSyncPendingWhenPanelOpen\)[\s\S]*?else \{\s*checkAutoWebDAV\(\);/.test(finish));
+}
+// 修复留档: shouldUpload去除(syncSelectors&&localNewer)冗余上传项, 内容与云端一致时由else分支对齐时间戳(主版)
+{
+  assert('同步-104: shouldUpload不含时间戳单项冗余上传', !/\(syncSelectors && localNewer\)/.test(src));
+}
+// 修复留档: migrateSubscriptions迁移完成后清理三个旧订阅键(主版)
+{
+  const store = {};
+  const runMigrate = new Function('GM_getValue', 'GM_setValue', 'GM_deleteValue', 'SUBSCRIPTIONS_KEY', 'SUBSCRIPTION_URL_KEY', 'SUBSCRIPTION_RULES_KEY', 'SUBSCRIPTION_LAST_UPDATE_KEY', extractFn(src, 'migrateSubscriptions') + '\nreturn migrateSubscriptions;')((k, d) => (k in store ? store[k] : d), (k, v) => { store[k] = v; }, (k) => { delete store[k]; }, 'searchfilter_subscriptions', 'searchfilter_subscription_url', 'searchfilter_subscription_rules', 'searchfilter_subscription_last_update');
+  store['searchfilter_subscription_url'] = 'https://dav.example.com/dav/rules.txt'; store['searchfilter_subscription_rules'] = ['*://a.com/*']; store['searchfilter_subscription_last_update'] = 123;
+  runMigrate();
+  assert('同步-105: 订阅迁移后旧订阅键被清理', !!store['searchfilter_subscriptions'] && store['searchfilter_subscriptions'].length === 1 && !('searchfilter_subscription_url' in store) && !('searchfilter_subscription_rules' in store) && !('searchfilter_subscription_last_update' in store));
+}
+// 修复留档(主/Lite): 坏ScriptConfig头行(解析失败且非JSON形态)剔除出正文, 重复伪头保留正文的语义不变
+{
+  const parse = new Function(
+    extractFn(src, 'hasTopLevelComma') + '\n' + extractFn(src, 'parseSyncHeader') + '\nreturn parseSyncHeader;'
+  )();
+  const garbage = parse('# ScriptConfig:损坏数据\n*://a.com/*');
+  assert('同步-106: 坏ScriptConfig行(非{开头)也从正文剔除', garbage.restLines.join('|') === '*://a.com/*' && garbage.config === null);
+  const liteSrc = fs.readFileSync(path.join(scriptDir, 'Lite.user.js'), 'utf8');
+  const parseLite = new Function(extractFn(liteSrc, 'parseConfigHeader') + '\nreturn parseConfigHeader;')();
+  const liteGarbage = parseLite(['# ScriptConfig:损坏数据', '*://a.com/*']);
+  const liteGood = parseLite(['# ScriptConfig: {"syncedAt":1}', '*://a.com/*']);
+  assert('同步-107: Lite坏ScriptConfig行剔除且好头不受影响', liteGarbage.rest.join('|') === '*://a.com/*' && liteGarbage.settings === null && liteGood.settings.syncedAt === 1 && liteGood.rest.join('|') === '*://a.com/*');
+}
+// 修复留档: 引擎订阅同步过滤builtin(仅url/name/enabled), 开关经builtinEngineSubEnabled随设置同步, 下载/合并/上传判定对称
+{
+  assert('同步-108: 上传payload过滤builtin含开关且下载/合并/上传判定对称', /engineSubscriptions: engineSubs\.filter\(\(s\) => !isBuiltinEngineSub/.test(src) && /builtinEngineSubEnabled: \(engineSubs\.find\(isBuiltinEngineSub\)/.test(src) && /applyCloudEngineSubscriptions\(cloudConfig\.engineSubscriptions/.test(src) && /engineSubs: ctx\.engineSubs/.test(src) && /engineSubsChanged \|\| selectorsChanged/.test(src));
+}
+{
+  const store = new Map(); const saved = [];
+  const run = new Function('GM_getValue', 'GM_setValue', 'getEngineSubscriptions', 'saveEngineSubscriptions', 'getEngineSubSyncSnapshot', 'setEngineSubSyncSnapshot', 'checkAutoEngineSubscription', 'loadWebDAVConfig', 'webdavTargetId', 'isBuiltinEngineSub', extractFn(src, 'applyCloudEngineSubscriptions') + '\nreturn applyCloudEngineSubscriptions;')((k, d) => (store.has(k) ? store.get(k) : d), (k, v) => store.set(k, v), () => [{ url: 'https://a/s.js', enabled: true, lastUpdate: 0, lastAttempt: 0, selectors: null }], (subs) => saved.push(subs), () => null, () => {}, () => {}, () => ({ url: 'https://dav/' }), () => 't1', (s) => !!s && (!!s.builtin || s.url === 'https://builtin/x.js'));
+  const out = run([{ url: 'https://a/s.js', name: 'A', enabled: false }, { url: 'https://b/x.js', name: 'B', enabled: true }]);
+  assert('同步-109: 引擎订阅无快照合并=并集, 保留本地运行时字段并采纳云端状态', out.length === 2 && out[0].enabled === false && out[0].selectors === null && 'lastUpdate' in out[0] && out[1].url === 'https://b/x.js' && saved.length === 1);
+}
+// 修复留档: 文件导入按URL合并engineSubscriptions, 保留本地运行时字段并采纳导入状态(主版)
+{
+  const store = new Map(); const saved = [];
+  const run = new Function('GM_getValue', 'GM_setValue', 'getEngineSubscriptions', 'saveEngineSubscriptions', extractFn(src, 'applyImportedEngineSubscriptions') + '\nreturn applyImportedEngineSubscriptions;')((k, d) => (store.has(k) ? store.get(k) : d), (k, v) => store.set(k, v), () => [{ url: 'https://a/s.js', name: 'A', enabled: true, lastUpdate: 5, lastAttempt: 5, selectors: {} }], (subs) => saved.push(subs));
+  const n = run([{ url: 'https://b/x.js', name: 'B', enabled: true }, { url: 'https://a/s.js', enabled: false }]);
+  assert('同步-110: 导入按URL合并引擎订阅, 保留本地运行时字段并采纳导入状态', n === 1 && saved.length === 1 && saved[0].length === 2 && saved[0][0].lastUpdate === 5 && saved[0][0].enabled === false && saved[0][1].url === 'https://b/x.js' && saved[0][1].selectors === null);
+}
+// 修复留档: 三方仲裁剔除builtin, 旧快照含builtin/云端不含时本地builtin不再被误删(主版)
+{
+  const BUILTIN = 'https://builtin/x.js'; const saved = [];
+  const run = new Function('GM_getValue', 'GM_setValue', 'getEngineSubscriptions', 'saveEngineSubscriptions', 'getEngineSubSyncSnapshot', 'setEngineSubSyncSnapshot', 'checkAutoEngineSubscription', 'loadWebDAVConfig', 'webdavTargetId', 'isBuiltinEngineSub', extractFn(src, 'applyCloudEngineSubscriptions') + '\nreturn applyCloudEngineSubscriptions;')((k, d) => d, () => {}, () => [{ url: BUILTIN, builtin: true, name: 'B', enabled: false, lastUpdate: 9, lastAttempt: 9, selectors: {} }, { url: 'https://a/s.js', name: 'A', enabled: true, lastUpdate: 0, lastAttempt: 0, selectors: null }], (subs) => saved.push(subs), () => [{ url: BUILTIN, name: 'B', enabled: false }, { url: 'https://a/s.js', name: 'A', enabled: true }], () => {}, () => {}, () => ({ url: 'https://dav/' }), () => 't1', (s) => !!s && (!!s.builtin || s.url === BUILTIN));
+  run([{ url: 'https://a/s.js', name: 'A', enabled: true }]);
+  assert('同步-111: 云端不含builtin时仲裁保留本地builtin及开关', saved.length === 1 && saved[0][0].url === BUILTIN && saved[0][0].enabled === false && saved[0][0].lastUpdate === 9 && saved[0].length === 2 && saved[0][1].url === 'https://a/s.js');
+}
+// 修复留档: applyBuiltinEngineSubEnabled仅在开关实际变化时写存储并刷新引擎站点(主版)
+{
+  const BUILTIN = 'https://builtin/x.js'; const saved = []; let refreshed = 0;
+  const run = new Function('getEngineSubscriptions', 'saveEngineSubscriptions', 'refreshEngineSite', 'isBuiltinEngineSub', extractFn(src, 'applyBuiltinEngineSubEnabled') + '\nreturn applyBuiltinEngineSubEnabled;')(() => [{ url: BUILTIN, builtin: true, enabled: true }], (subs) => saved.push(subs), () => refreshed++, (s) => !!s && (!!s.builtin || s.url === BUILTIN));
+  const changed = run(false); const unchanged = run(true);
+  assert('同步-112: builtin开关变化才写存储刷新, 未变化no-op', changed === true && unchanged === false && saved.length === 1 && saved[0][0].enabled === false && refreshed === 1);
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
