@@ -154,7 +154,7 @@ In `@if($site = "engine")`, `yahoo-japan` = `yahoo_japan`, `ddg` = `duckduckgo` 
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `match` | regex | Required, hostname matching regex literal |
+| `match` | regex | Required, hostname matching regex literal, case ignored by default |
 | `containers` | string | Required, CSS selector for result containers; the **One-click Block** button relies on it for positioning |
 | `links` | string \| string\[\] | Optional, link selector, defaults to `a[href]` |
 | `titles` | string \| string\[\] | Optional, title selector list |
@@ -220,6 +220,6 @@ bing: {disabled: true},
 
 **Auto-analysis:**
 
-1. Conversion script: Download [auto_convert_mht.cmd](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/auto_convert_mht.cmd) and run it in the same directory as the `.mht` offline file of the target webpage. This conversion script can perform basic container structure analysis and generate the corresponding `.js` selector file.
-2. AI generation: If the conversion script cannot recognize or knows how to grab selectors, it is recommended to send the custom engine description and `.mht` / `.html` offline files to AI for analyzing the structure and generating corresponding selectors.
+1. Conversion script: Download [auto_convert.cmd](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/auto_convert.cmd) and run it in the same directory as the `.mht` / `.mhtml` offline file of the target webpage. This conversion script can perform basic container structure analysis and generate the corresponding `.js` selector file.
+2. AI generation: If the conversion script cannot recognize or knows how to grab selectors, it is recommended to send the custom engine description and `.mht` / `.mhtml` / `.html` offline files to AI for analyzing the structure and generating corresponding selectors.
 3. The naming of containers for mobile/desktop/regional sites of the same website may vary, requiring separate offline file analysis and filling in multiple selectors.

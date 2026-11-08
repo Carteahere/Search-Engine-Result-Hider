@@ -154,7 +154,7 @@ URL通配规则按匹配模式语义从URL开头匹配，主机通配`*`不跨�
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `match` | regex | 必填，hostname 匹配正则字面量 |
+| `match` | regex | 必填，hostname 匹配正则字面量，默认忽略大小写 |
 | `containers` | string | 必填，结果容器的 CSS 选择器，**一键屏蔽**按钮依赖容器选择器定位 |
 | `links` | string \| string\[\] | 可选，链接选择器，默认 `a[href]` |
 | `titles` | string \| string\[\] | 可选，标题选择器列表 |
@@ -220,6 +220,6 @@ bing: {disabled: true},
 
 **自动分析：**
 
-1. 转换脚本：下载 [auto_convert_mht.cmd](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/auto_convert_mht.cmd) 并放在目标网页 `.mht` 离线文件同一目录下运行，该转换脚本能进行基础的容器结构分析并生成对应 `.js` 选择器文件
-2. AI生成：如果转换脚本无法识别也不知道怎么抓取选择器，建议把自定义引擎说明和 `.mht` / `.html` 离线文件发给AI分析结构并生成对应选择器
+1. 转换脚本：下载 [auto_convert.cmd](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/auto_convert.cmd) 并放在目标网页 `.mht` / `.mhtml` 离线文件同一目录下运行，该转换脚本能进行基础的容器结构分析并生成对应 `.js` 选择器文件
+2. AI生成：如果转换脚本无法识别也不知道怎么抓取选择器，建议把自定义引擎说明和 `.mht` / `.mhtml` / `.html` 离线文件发给AI分析结构并生成对应选择器
 3. 同一网站的移动端/桌面端/地区站点的容器命名可能不同，需要分别保存离线文件分析并填写多个选择器
