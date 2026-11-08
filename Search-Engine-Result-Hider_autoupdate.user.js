@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.8.1
+// @version      8.8.2
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -44,7 +44,7 @@
   const WEBDAV_AUTO_SYNC_KEY = 'searchfilter_webdav_auto_sync', WEBDAV_SYNC_CONFIG_KEY = 'searchfilter_webdav_sync_config';
   const WEBDAV_SYNC_SNAPSHOT_KEY = 'searchfilter_webdav_sync_snapshot', ENGINE_SUBSCRIPTIONS_KEY = 'searchfilter_engine_subscriptions';
   const BUILTIN_ENGINE_SUB_URL = 'https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js';
-  const SUBSCRIPTION_SYNC_SNAPSHOT_KEY = 'searchfilter_subscription_sync_snapshot'; const WEBDAV_LAST_SYNC_SELECTORS_KEY = 'searchfilter_webdav_last_sync_selectors'; const HL_STATS_REGEX = /^@\d+/;
+  const SUBSCRIPTION_SYNC_SNAPSHOT_KEY = 'searchfilter_subscription_sync_snapshot'; const ENGINE_SUBS_SYNC_SNAPSHOT_KEY = 'searchfilter_engine_subs_sync_snapshot'; const WEBDAV_LAST_SYNC_SELECTORS_KEY = 'searchfilter_webdav_last_sync_selectors'; const HL_STATS_REGEX = /^@\d+/;
   const AUTO_UPDATE_INTERVAL = 12 * 60 * 60 * 1000, WEBDAV_AUTO_SYNC_INTERVAL = 1 * 60 * 60 * 1000, AUTO_SYNC_TOLERANCE = 60 * 1000;
   const WEBDAV_SYNC_MAX_RETRIES = 3, WEBDAV_SYNC_RETRY_DELAY = 2000, WEBDAV_TIME_TOLERANCE = 5 * 60 * 1000; const NET_TIME_CACHE_TTL = 30 * 60 * 1000, NET_TIME_FAIL_TTL = 10 * 60 * 1000;
   const RESULT_RETRY_LIMIT = 3, RESULT_RETRY_DELAY = 200;
@@ -227,11 +227,11 @@
       },
     },
     yahoo_japan: {
-      match: /^(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.co\.jp$/i,
+      match: /^(?:(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.co\.jp|https?:\/\/news\.yahoo\.co\.jp\/search(?:[\/?#].*)?)$/i,
       containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo, #contents section:has(a h3)',
       titles: ['h3', '.s-title', 'h2 a', 'a h2', '.b_title', '.title'],
       snippets: ['.sw-Card__description', '.sw-Card__snippet', '.sw-Text__body', 'p', '.b_caption p', '.b_snippet', '.b_paractl p'],
-      links: ['a:has(> h3)', 'a.sw-Card__space', 'h3 a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
+      links: ['a:has(> h3)', 'a.sw-Card__titleInner[href]', 'a.sw-Card__space', 'h3 a', '.s-title a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
       categories: {
         images: {
           match: /^https?:\/\/images\.|\/image\/search(?:[\/?#]|$)/i,
@@ -240,8 +240,14 @@
           snippets: ['.sw-ThumbnailGrid__domain'],
           links: ['a.sw-Thumbnail@clparams:targurl', 'a@clparams:targurl', 'a[href]'],
         },
-        videos: { match: /^https?:\/\/videos?\./i },
-        news: { match: /^https?:\/\/news\./i },
+        videos: { match: /^https?:\/\/videos?\.|\/video\/search(?:[\/?#]|$)/i },
+        news: {
+          match: /^https?:\/\/news\./i,
+          containers: 'li:has(a[href*="/articles/"])',
+          titles: ['p', '.newsFeed_item_body div a[href*="/articles/"]', '.newsFeed_item_body a[href*="/articles/"]', 'a[href*="/articles/"]'],
+          snippets: ['p'],
+          links: ['a[href*="/articles/"]'],
+        },
       },
     },
     yahoo: {
@@ -249,7 +255,7 @@
       containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo, #web ol > li > div',
       titles: ['h3', '.s-title', 'h2 a', 'a h2', '.b_title', '.title'],
       snippets: ['.sw-Card__description', '.sw-Card__snippet', '.sw-Text__body', 'p', '.b_caption p', '.b_snippet', '.b_paractl p'],
-      links: ['a:has(> h3)', 'a.sw-Card__space', 'h3 a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
+      links: ['a:has(> h3)', 'a.sw-Card__titleInner[href]', 'a.sw-Card__space', 'h3 a', '.s-title a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
       categories: {
         images: {
           match: /^https?:\/\/images\.|\/search\/images(?:[\/?#]|$)/i,
@@ -258,7 +264,7 @@
           snippets: ['.sw-ThumbnailGrid__domain'],
           links: ['a.sw-Thumbnail@clparams:targurl', 'a@clparams:targurl', 'a[href]'],
         },
-        videos: { match: /^https?:\/\/videos?\./i },
+        videos: { match: /^https?:\/\/videos?\.|\/video\/search(?:[\/?#]|$)/i },
         news: { match: /^https?:\/\/news\./i },
       },
     },
@@ -266,12 +272,12 @@
       match: /^(?:www\.|m\.)?so\.com$/i,
       containers: 'li.res-list, div.res-list',
       titles: ['h3.res-title a', 'h3 a', '.res-title', '.g-title a', '.g-title'],
-      snippets: ['.res-desc', '.mh-desc', '.summary'],
+      snippets: ['.res-desc', '.res-list-summary', '.mh-desc', '.summary'],
       links: ['h3 a[href]', 'a.alink[href]', '.g-linkinfo a[href]', 'a[href]'],
     },
     sogou: {
       match: /^(?:www\.|m\.|wap\.)?sogou\.com$/i,
-      containers: 'div.vrwrap:has(h3), .reactResult, div.vrResult',
+      containers: 'div.vrwrap:has(h3), div.reactResult:has(h3), div.reactResult:has(.vr-title), div.vrResult',
       titles: ['h3.vr-title a', '.vr-title a', 'a[class*="saTitle"]', '.vr-title', 'h3.vr-tit', 'h3 a', 'h3'],
       snippets: ['.space-txt', '.star-wiki', '.str_info', 'p.sa-text-clamp3', '[class*="saText"]'],
       links: ['h3.vr-title a[href]', '.vr-title a[href]', 'a[class*="saTitle"][href]', 'h3 a[href]', 'a.citeLinkClass[href]', 'a[href]'],
@@ -279,17 +285,22 @@
     toutiao: {
       match: /^(?:so|m)\.toutiao\.com$/i,
       containers: '.result-content',
-      titles: ['.l-card-title a', '.l-card-title', '.cs-header a', 'a[href*="/search/jump"]'],
-      snippets: ['.l-paragraph', '.cs-card-content .text-regular', '.l-source', '.cs-source'],
-      links: ['a.l-card-title[href]', '.cs-header a[href]', 'a[href*="/search/jump"]', 'a[href]:not([href*="/search?"])'],
+      titles: ['.cs-header a', 'a[href*="/search/jump"]', '.l-card-title a', '.l-card-title'],
+      snippets: ['.cs-card-content .text-regular', '.cs-source', '.l-paragraph', '.l-source'],
+      links: ['.cs-header a[href]', 'a[href*="/search/jump"]', 'a.l-card-title[href]', 'a[href]:not([href*="/search?"])'],
       categories: {
-        images: { match: /[?&]pd=atlas(?:&|#|$)/i },
+        images: {
+          match: /[?&]pd=atlas(?:&|#|$)/i,
+          containers: '.l-waterfallY-item',
+          titles: ['img[alt]@attr:alt'],
+          links: ['a[href*="/search/jump"]', 'a[href]'],
+        },
         news: { match: /[?&]pd=information(?:&|#|$)/i },
         videos: { match: /[?&]pd=[a-z_]*video/i },
       },
     },
     quark: {
-      match: /^(?:(?:quark|yz)\.)?(?:(?:www|m)\.)?sm\.cn$/i,
+      match: /^(?:(?:www|m|so)\.)?quark\.cn$|^(?:(?:quark|yz)\.)?(?:(?:www|m)\.)?sm\.cn$/i,
       containers: 'div.qk-card',
       titles: ['.qk-title-text', '.qk-title', 'a.qk-link-wrapper'],
       snippets: ['.qk-paragraph-text', '.qk-paragraph'],
@@ -389,13 +400,19 @@
   function saveEngineSubscriptions(subs) {
     if (!Array.isArray(subs)) return; GM_setValue(ENGINE_SUBSCRIPTIONS_KEY, subs); resetSelectorCache();
   }
+  const isBuiltinEngineSub = (s) => !!s && (!!s.builtin || s.url === BUILTIN_ENGINE_SUB_URL);
+  function applyBuiltinEngineSubEnabled(enabled) {
+    const subs = getEngineSubscriptions(); const b = subs.find(isBuiltinEngineSub);
+    if (!b || (b.enabled !== false) === (enabled !== false)) return false;
+    b.enabled = enabled !== false; saveEngineSubscriptions(subs); refreshEngineSite(); return true;
+  }
 
   function parseSelectorMatch(def, base) {
     let match = (base && base.match) || null;
     try {
       if (typeof def.match === 'string' && def.match) {
         const m = def.match.match(/^\/(.*)\/([a-z]*)$/i);
-        match = m ? new RegExp(m[1], m[2].toLowerCase().replace(/[^imsu]/g, '')) : new RegExp(def.match);
+        match = m ? new RegExp(m[1], m[2].toLowerCase().replace(/[^imsu]/g, '')) : new RegExp(def.match, 'i');
       } else if (def.match && typeof def.match === 'object' && typeof def.match.source === 'string' && def.match.source) {
         match = new RegExp(def.match.source, String(def.match.flags || '').toLowerCase().replace(/[^imsu]/g, ''));
       }
@@ -543,7 +560,7 @@
     google_scholar: /(?:^|\.)scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i,
     duckduckgo: /(?:^|\.)(?:duckduckgo\.com|ddg\.gg)$/i,
     yahoo: /(?:^|\.)(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i,
-    yahoo_japan: /(?:^|\.)(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp$/i,
+    yahoo_japan: /(?:^|\.)(?:(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp|news\.yahoo\.co\.jp)$/i,
     so360: /(?:^|\.)so\.com$/i,
     sogou: /(?:^|\.)sogou\.com$/i,
     toutiao: /(?:^|\.)toutiao\.com$/i
@@ -632,7 +649,7 @@
       hlColorTitle: '高亮颜色', hlColorReset: '重置', resetPending: '已重置，保存后生效', hlColorHint: '点击色块快速保存',
       autoUpdate: '自动更新', errorWord: '错误',
       duplicateRules: '重复规则', invalidRule: '规则无效',
-      hlColorError: '高亮级别需在 1-5 之间',
+      hlColorError: '高亮序号需＞0',
       ifParenError: '@if(...) 括号未闭合',
       condRegexError: '条件正则无效: {part}',
       regexError: '正则表达式无效', urlError: 'URL规则无效',
@@ -703,7 +720,7 @@
       hlColorTitle: 'Highlight Colors', hlColorReset: 'Reset', resetPending: 'Reset, takes effect after saving', hlColorHint: 'Click a swatch to apply it quickly.',
       autoUpdate: 'Auto Update', errorWord: 'Error',
       duplicateRules: 'Duplicate Rules', invalidRule: 'Invalid rule',
-      hlColorError: 'Highlight level must be 1-5',
+      hlColorError: 'Highlight index must be > 0',
       ifParenError: 'Unbalanced @if(...) parentheses',
       condRegexError: 'Invalid condition regex: {part}',
       regexError: 'Invalid regex', urlError: 'Invalid URL rule',
@@ -1288,10 +1305,12 @@
     const finish = () => {
       if (done) return; done = true; panel.remove(); if (onClosed) onClosed();
       if (!isSerhPanelOpen()) {
-        checkAutoSubscription(); checkAutoWebDAV();
+        checkAutoSubscription();
         if (_webdavSyncPendingWhenPanelOpen) {
           _webdavSyncPendingWhenPanelOpen = false;
           triggerWebDAVSyncDelayed(1000);
+        } else {
+          checkAutoWebDAV();
         }
       }
     };
@@ -1388,11 +1407,12 @@
     return putHeaders;
   }
 
-  function persistSyncSnapshots(rules, { modifiedTime = null, settingsModifiedAt = null, subs = null, selectors = null, config = null } = {}) {
+  function persistSyncSnapshots(rules, { modifiedTime = null, settingsModifiedAt = null, subs = null, engineSubs = null, selectors = null, config = null } = {}) {
     if (settingsModifiedAt !== null && GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) GM_setValue(SETTINGS_LAST_MODIFIED_KEY, settingsModifiedAt);
     if (modifiedTime !== null) GM_setValue(LOCAL_LAST_MODIFIED_KEY, modifiedTime);
     setRuleSyncSnapshot(rules, config);
     if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) setSubscriptionSyncSnapshot(subs || getSubscriptions(), config);
+    if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) setEngineSubSyncSnapshot(engineSubs || getEngineSubscriptions(), config);
     if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) && selectors !== null) setSelectorSyncSnapshot(selectors, config);
   }
 
@@ -1401,7 +1421,7 @@
     const rulesModifiedAt = ctx.rulesModifiedAt ?? uploadedTime; const selectors = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) ? getUserSelectors() : null;
     const rulesSnapshot = Array.isArray(ctx.rules) ? ctx.rules.slice() : ctx.rules; const uploadData = buildUploadContent(content, rulesModifiedAt, { ...remotePreserved, settingsModifiedAt });
     await gmPutWebDAV(ctx.fullUrl, { headers: putHeaders, data: uploadData }, ctx.folderUrl, ctx.headers);
-    persistSyncSnapshots(rulesSnapshot, { modifiedTime: rulesModifiedAt, settingsModifiedAt, subs: ctx.subs, selectors, config: ctx.config || null });
+    persistSyncSnapshots(rulesSnapshot, { modifiedTime: rulesModifiedAt, settingsModifiedAt, subs: ctx.subs, engineSubs: ctx.engineSubs, selectors, config: ctx.config || null });
   }
   // 统一调用结束
 
@@ -1413,10 +1433,10 @@
     return s;
   }
 
-  function toASCIIHostname(host) {
-    const raw = String(host || '').replace(/\.$/, '').trim().toLowerCase(); if (!raw) return ''; const colonIdx = raw.indexOf(':');
+  function toASCIIHostname(host, keepTrailingDot = false) {
+    let raw = String(host || '').trim().toLowerCase(); if (!keepTrailingDot) raw = raw.replace(/\.$/, ''); if (!raw) return ''; const colonIdx = raw.indexOf(':');
     if (colonIdx !== -1) {
-      const h = raw.slice(0, colonIdx); const p = raw.slice(colonIdx); return (h ? toASCIIHostname(h) : '') + p;
+      const h = raw.slice(0, colonIdx); const p = raw.slice(colonIdx); return (h ? toASCIIHostname(h, keepTrailingDot) : '') + p;
     }
     if (/^[\x00-\x7F]*$/.test(raw)) return raw; return raw.split('.').map(label => label ? hostLabelToASCII(label) : label).join('.');
   }
@@ -1694,7 +1714,7 @@
         out = encodeNonAscii(out); return out.toLowerCase();
       };
       const cmpUrl = foldUrl(cond.op === '=~' ? '' : cond.val); const urlHit = (pred) => pred(lowerUrl) || pred(foldUrl(url));
-      if (cond.op === '=') return urlHit(v => v === cmpUrl); if (cond.op === '^=') return urlHit(v => v.startsWith(cmpUrl));
+      if (cond.op === '=') return urlHit(v => v === cmpUrl); if (cond.op === '^=') return urlHit(v => v.startsWith(cmpUrl)) || (!/:\/\//.test(cmpUrl) && urlHit(v => v.replace(/^[a-z][a-z0-9+.-]*:\/\//, '').startsWith(cmpUrl)));
       if (cond.op === '$=') return urlHit(v => v.endsWith(cmpUrl)); if (cond.op === '*=') return urlHit(v => v.includes(cmpUrl));
       if (cond.op === '=~') {
         if (safeRegexTest(cond.regex, url)) return true;
@@ -1718,7 +1738,7 @@
       } catch (e) {
         return false;
       }
-      const cmpVal = cond.type === 'host' ? toASCIIHostname(cond.val) : cond.val; if (cond.op !== '=~' && !cmpVal) return false; const hasPortInCond = cond.type === 'host' && cmpVal.includes(':');
+      const cmpVal = cond.type === 'host' ? toASCIIHostname(cond.val, cond.op === '^=' || cond.op === '*=') : cond.val; if (cond.op !== '=~' && !cmpVal) return false; const hasPortInCond = cond.type === 'host' && cmpVal.includes(':');
       const raw = cond.type === 'host' ? (hasPortInCond ? toASCIIHostname(u.host || u.hostname) : toASCIIHostname(u.hostname))
         : cond.type === 'path' ? (u.pathname + u.search)
         : u.protocol.slice(0, -1); const value = raw.toLowerCase(); let altValue = value; let altCmpVal = cmpVal;
@@ -1777,7 +1797,7 @@
 
     const categoryMatch = trimmed.match(/^(?:\$category|category)\s*[=:]\s*(?:['"](.*?)['"]|([^\s\)]+))\s*i?\s*$/i);
     if (categoryMatch) {
-      const target = (categoryMatch[1] !== undefined ? categoryMatch[1] : categoryMatch[2]).trim().toLowerCase(); return { matched: true, static: (currentCategory || 'web') === target };
+      const target = (categoryMatch[1] !== undefined ? categoryMatch[1] : categoryMatch[2]).trim().toLowerCase(); return { matched: true, static: String(currentCategory || 'web').toLowerCase() === target };
     }
 
     let siteMatch = trimmed.match(/^site\s*[=:]\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s\)]+))\s*i?\s*$/i);
@@ -1809,7 +1829,7 @@
       if (bareEq && (!bareEq[2] || isUniqueFlagsStr(bareEq[2]) || isFlagsCandidateError(bareEq[2]))) return { matched: false };
       const op = strMatch[2] === ':' ? '=' : strMatch[2];
       const rawVal = (strMatch[3] !== undefined ? strMatch[3] : (strMatch[4] !== undefined ? strMatch[4] : strMatch[5])); let val = rawVal.replace(/\\(["'])/g, '$1').toLowerCase();
-      const condType = (s => s === 'u' ? 'url' : s === 't' ? 'title' : s)(strMatch[1].toLowerCase()); if (condType === 'host') val = val.startsWith('/') ? val : toASCIIHostname(val); return { matched: true, dynamic: { type: condType, op, val } };
+      const condType = (s => s === 'u' ? 'url' : s === 't' ? 'title' : s)(strMatch[1].toLowerCase()); if (condType === 'host') val = val.startsWith('/') ? val : toASCIIHostname(val, op === '^=' || op === '*='); return { matched: true, dynamic: { type: condType, op, val } };
     }
 
     const reMatch = trimmed.match(/^(title|text|url|host|path|scheme|u|t)\s*(?:=\~\s*|=\s*)?\/((?:[^/\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*)\/([a-z]*)$/i);
@@ -2660,7 +2680,7 @@
       attr = link.getAttribute('data-mdurl') || link.getAttribute('data-url') || link.getAttribute('linkurl') || '';
       if (!attr) {
         try {
-          const box = typeof link.closest === 'function' ? link.closest('.res-list, .vrwrap') : null;
+          const box = typeof link.closest === 'function' ? link.closest('.res-list, .vrwrap, .reactResult') : null;
           const el = box && typeof box.querySelector === 'function' ? box.querySelector('[data-mdurl], [data-url]') : null;
           if (el && typeof el.getAttribute === 'function') attr = el.getAttribute('data-mdurl') || el.getAttribute('data-url') || '';
         } catch (_) {}
@@ -2994,7 +3014,7 @@
         const spec = parseTitleSpec(selector);
         if (spec) {
           const text = getResultTextFromSpec(result, spec);
-          if (text) return text.slice(0, 200);
+          if (text) return text;
           continue;
         }
         const text = getResultText(result, [selector]);
@@ -3086,7 +3106,7 @@
               ]);
     const firstEnabledIdx = options.findIndex(o => !o.disabled);
 
-    const panel = document.createElement('div'); panel.id = 'serh-block-confirm-dialog';
+    const panel = document.createElement('div'); panel.id = 'serh-block-confirm-dialog'; const scale = currentUiScale(); if (scale !== 1) panel.style.zoom = String(scale);
     panel.innerHTML = `
       <div class="sfb-confirm-domain">${escHtml(domain)}</div>
       ${options.map((o, i) => `
@@ -3101,8 +3121,8 @@
       </div>`;
     document.body.appendChild(panel);
 
-    const rect = anchor.getBoundingClientRect(); const pw = panel.offsetWidth; const ph = panel.offsetHeight; let left = Math.min(Math.max(8, rect.right - pw), window.innerWidth - pw - 8);
-    if (left < 8) left = 8; let top = rect.bottom + 6; if (top + ph > window.innerHeight - 8) top = Math.max(8, rect.top - ph - 6); panel.style.left = left + 'px'; panel.style.top = top + 'px';
+    const rect = anchor.getBoundingClientRect(); const pw = panel.offsetWidth; const ph = panel.offsetHeight; const vw = window.innerWidth / scale, vh = window.innerHeight / scale;
+    let left = Math.min(Math.max(8, rect.right / scale - pw), vw - pw - 8); if (left < 8) left = 8; let top = rect.bottom / scale + 6; if (top + ph > vh - 8) top = Math.max(8, rect.top / scale - ph - 6); panel.style.left = left + 'px'; panel.style.top = top + 'px';
     const close = () => {
       if (_blockConfirmOutsideHandler) {
         document.removeEventListener('click', _blockConfirmOutsideHandler, true); _blockConfirmOutsideHandler = null;
@@ -4155,7 +4175,7 @@
   }
 
   function getSyncSettings(config) {
-    const { rules, bubbleState, bubbleSize, selectors, subscriptions, syncedAt, rulesSyncedAt, settingsModifiedAt, selectorsSyncedAt, tombstones, ruleAddedTimes, subscriptionTombstones, exportConfig, ...settings } = config || {};
+    const { rules, bubbleState, bubbleSize, selectors, subscriptions, engineSubscriptions, builtinEngineSubEnabled, syncedAt, rulesSyncedAt, settingsModifiedAt, selectorsSyncedAt, tombstones, ruleAddedTimes, subscriptionTombstones, exportConfig, ...settings } = config || {};
     const unsafeKey = (k) => k === '__proto__' || k === 'constructor' || k === 'prototype';
     const cleanVal = (v) => {
       if (!v || typeof v !== 'object' || Array.isArray(v)) return v;
@@ -4223,8 +4243,9 @@
     if (document.body) document.body.classList.toggle('serh-dark-on', dark);
   }
   const UI_SCALE_VALUE = { s: 0.75, l: 1, xl: 1.25, xxl: 1.5 };
+  function currentUiScale() { return UI_SCALE_VALUE[currentConfig.uiScale === 's' ? 's' : currentConfig.uiScale === 'xl' ? 'xl' : currentConfig.uiScale === 'xxl' ? 'xxl' : 'l'] || 1; }
   function applyUiScale() {
-    const scale = UI_SCALE_VALUE[currentConfig.uiScale === 's' ? 's' : currentConfig.uiScale === 'xl' ? 'xl' : currentConfig.uiScale === 'xxl' ? 'xxl' : 'l'] || 1;
+    const scale = currentUiScale();
     document.querySelectorAll('.serh-window').forEach(el => { el.style.zoom = scale === 1 ? '' : String(scale); });
   }
 
@@ -5637,6 +5658,7 @@
     const oldLastUpdate = GM_getValue(SUBSCRIPTION_LAST_UPDATE_KEY, 0); const subscriptions = [];
     if (oldUrl) subscriptions.push({ url: oldUrl, enabled: true, lastUpdate: oldLastUpdate, rules: oldRules });
     GM_setValue(SUBSCRIPTIONS_KEY, subscriptions);
+    if (typeof GM_deleteValue === 'function') { GM_deleteValue(SUBSCRIPTION_URL_KEY); GM_deleteValue(SUBSCRIPTION_RULES_KEY); GM_deleteValue(SUBSCRIPTION_LAST_UPDATE_KEY); }
   }
 
   function getSubscriptions() {
@@ -5674,6 +5696,71 @@
   function setSubscriptionSyncSnapshot(subs, config = null) {
     if (!Array.isArray(subs)) return;
     GM_setValue(SUBSCRIPTION_SYNC_SNAPSHOT_KEY, { target: webdavTargetId(config || loadWebDAVConfig()), subs: subs.map(s => ({ url: s.url, name: s.name, enabled: s.enabled !== false })) });
+  }
+
+  function getEngineSubSyncSnapshot() {
+    const raw = GM_getValue(ENGINE_SUBS_SYNC_SNAPSHOT_KEY, null);
+    return raw && !Array.isArray(raw) && raw.target === webdavTargetId(loadWebDAVConfig()) && Array.isArray(raw.subs) ? raw.subs : null;
+  }
+
+  function setEngineSubSyncSnapshot(subs, config = null) {
+    if (!Array.isArray(subs)) return;
+    GM_setValue(ENGINE_SUBS_SYNC_SNAPSHOT_KEY, { target: webdavTargetId(config || loadWebDAVConfig()), subs: subs.filter((s) => s && s.url && !isBuiltinEngineSub(s)).map(s => ({ url: s.url, name: s.name, enabled: s.enabled !== false })) });
+  }
+
+  function applyCloudEngineSubscriptions(cloudSubs, preferLocal = false) {
+    if (!Array.isArray(cloudSubs)) return null;
+    const builtinSub = getEngineSubscriptions().find(isBuiltinEngineSub) || null; const existing = getEngineSubscriptions().filter((s) => !isBuiltinEngineSub(s)); let hasNewSub = false;
+    const baseRaw = getEngineSubSyncSnapshot(); const baseSubs = baseRaw ? baseRaw.filter((s) => s && s.url && !isBuiltinEngineSub(s)) : null; cloudSubs = cloudSubs.filter((s) => !isBuiltinEngineSub(s)); let finalSubs = [];
+    if (!baseSubs) {
+      const seen = new Set(); const merged = [];
+      cloudSubs.forEach(s => {
+        if (!s || !s.url || seen.has(s.url)) return; seen.add(s.url); const local = existing.find(e => e && e.url === s.url);
+        if (!local) hasNewSub = true;
+        merged.push(local ? { ...local, name: (preferLocal && local.name) ? local.name : (s.name || local.name), enabled: preferLocal ? local.enabled !== false : s.enabled !== false } : { url: s.url, name: s.name || '', enabled: s.enabled !== false, lastUpdate: 0, lastAttempt: 0, selectors: null });
+      });
+      existing.forEach(localSub => {
+        if (localSub && localSub.url && !seen.has(localSub.url)) { seen.add(localSub.url); merged.push(localSub); }
+      });
+      finalSubs = merged;
+    } else {
+      const baseMap = new Map(); baseSubs.forEach(s => { if (s && s.url) baseMap.set(s.url, s); }); const localMap = new Map(); existing.forEach(s => { if (s && s.url) localMap.set(s.url, s); });
+      const cloudMap = new Map(); cloudSubs.forEach(s => { if (s && s.url) cloudMap.set(s.url, s); });
+      const localDeleted = new Set([...baseMap.keys()].filter(u => !localMap.has(u))); const cloudDeleted = new Set([...baseMap.keys()].filter(u => !cloudMap.has(u)));
+      const subChangedFrom = (sub, base) => {
+        if (!sub || !base) return true;
+        if ((sub.enabled !== false) !== (base.enabled !== false)) return true;
+        return !!sub.name && (sub.name || '') !== (base.name || '');
+      };
+      const allUrls = new Set([...baseMap.keys(), ...localMap.keys(), ...cloudMap.keys()]); const merged = [];
+      for (const url of allUrls) {
+        if (!url) continue;
+        if (localDeleted.has(url) || cloudDeleted.has(url)) {
+          const survivor = localDeleted.has(url) ? cloudMap.get(url) : localMap.get(url);
+          if (!survivor || !subChangedFrom(survivor, baseMap.get(url))) continue;
+        }
+        const local = localMap.get(url); const cloud = cloudMap.get(url); const item = cloud || local; if (!item) continue;
+        const base = baseMap.get(url); const enabledOf = (sub) => sub ? sub.enabled !== false : true; const nameOf = (sub) => (sub && sub.name) || '';
+        let enabled = enabledOf(item), name = cloud ? cloud.name : (local && local.name);
+        if (base && local && cloud) {
+          const localChanged = enabledOf(local) !== enabledOf(base); const cloudChanged = enabledOf(cloud) !== enabledOf(base);
+          if (localChanged !== cloudChanged) enabled = localChanged ? enabledOf(local) : enabledOf(cloud);
+          else if (localChanged && cloudChanged && enabledOf(local) !== enabledOf(cloud)) enabled = preferLocal ? enabledOf(local) : enabledOf(cloud);
+          else enabled = enabledOf(cloud);
+          const baseName = nameOf(base); const localNameChanged = nameOf(local) !== baseName; const cloudNameChanged = nameOf(cloud) !== baseName;
+          if (localNameChanged !== cloudNameChanged) name = localNameChanged ? local.name : cloud.name;
+          else if (localNameChanged && cloudNameChanged && nameOf(local) !== nameOf(cloud)) name = preferLocal ? local.name : cloud.name; else name = cloud.name;
+        } else if (preferLocal && local) {
+          enabled = enabledOf(local); if (local.name) name = local.name;
+        }
+        if (!local) hasNewSub = true;
+        merged.push(local ? { ...local, name, enabled } : { url, name, enabled, lastUpdate: 0, lastAttempt: 0, selectors: null });
+      }
+      finalSubs = merged;
+    }
+    saveEngineSubscriptions(builtinSub ? [builtinSub, ...finalSubs] : finalSubs);
+    if (hasNewSub) setTimeout(() => { checkAutoEngineSubscription(true); }, 1000);
+    return finalSubs;
   }
 
   function applyCloudSubscriptions(cloudSubs, preferLocal = false) {
@@ -6078,6 +6165,7 @@
 
   function buildSyncPayload(settingsModifiedAt = getSettingsModifiedTime()) {
     const stored = GM_getValue(CONFIG_KEY); const base = (stored && typeof stored === 'object' && !Array.isArray(stored)) ? stored : currentConfig;
+    const engineSubs = getEngineSubscriptions();
     const payload = {
       ...getSyncSettings(base),
       subscriptions: getSubscriptions().map(s => ({
@@ -6085,6 +6173,12 @@
         name: s.name,
         enabled: s.enabled
       })),
+      engineSubscriptions: engineSubs.filter((s) => !isBuiltinEngineSub(s)).map(s => ({
+        url: s.url,
+        name: s.name,
+        enabled: s.enabled !== false
+      })),
+      builtinEngineSubEnabled: (engineSubs.find(isBuiltinEngineSub) || { enabled: true }).enabled !== false,
       syncedAt: settingsModifiedAt, settingsModifiedAt
     };
     return payload;
@@ -6113,7 +6207,7 @@
       if (Array.isArray(v)) return true; if (!v || typeof v !== 'object') return false;
       const flagsOk = (f) => { f = String(f || '').toLowerCase(); return /^[imsu]*$/.test(f) && new Set(f).size === f.length; };
       const probe = (s) => { if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return true; try { document.querySelector(s); return true; } catch (e) { return false; } };
-      const cssOk = (val, allowEmpty = false) => { const list = typeof val === 'string' ? [val] : val; return Array.isArray(list) && list.every((s) => typeof s === 'string' && ((allowEmpty && !s.trim()) || (!!s.trim() && probe(s)))); };
+      const cssOk = (val, allowEmpty = false, parser = null) => { const list = typeof val === 'string' ? [val] : val; return Array.isArray(list) && list.every((s) => { if (typeof s !== 'string') return false; if (allowEmpty && !s.trim()) return true; if (!s.trim()) return false; const spec = parser ? parser(s) : null; return spec ? (!spec.css || probe(spec.css)) : probe(s); }); };
       const reOk = (val) => {
         if (typeof val === 'string') { const lit = val.match(/^\/(.*)\/([a-z]*)$/i); if (lit && !flagsOk(lit[2])) return false; try { new RegExp(val); return true; } catch (e) { return false; } }
         if (val && typeof val === 'object' && typeof val.source === 'string' && flagsOk(val.flags)) { try { new RegExp(val.source, String(val.flags || '').toLowerCase()); return true; } catch (e) { return false; } }
@@ -6126,7 +6220,7 @@
         if ((def.disabled !== undefined && def.disabled !== null && typeof def.disabled !== 'boolean') || (def.disable !== undefined && def.disable !== null && typeof def.disable !== 'boolean')) return false;
         if (def.extraElements !== undefined && def.extraElements !== null && (!Array.isArray(def.extraElements) || !def.extraElements.every((s) => typeof s === 'string' && !!s.trim() && !hasTopLevelComma(s) && probe(':scope > :nth-child(1) ' + s)))) return false;
         if (def.match !== undefined && def.match !== null && !reOk(def.match)) return false;
-        for (const f of ['containers', 'titles', 'snippets', 'links']) if (def[f] !== undefined && def[f] !== null && !cssOk(def[f], f !== 'containers')) return false;
+        for (const f of ['containers', 'titles', 'snippets', 'links']) if (def[f] !== undefined && def[f] !== null && !cssOk(def[f], f !== 'containers', f === 'titles' ? parseTitleSpec : f === 'links' ? parseLinkSpec : null)) return false;
       }
       return true;
     };
@@ -6140,6 +6234,7 @@
           try { parsed = JSON.parse(payload); } catch (e) { if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[WebDAV] 配置头解析失败:', e); }
         }
         if (parsed && !Array.isArray(parsed) && !config) { config = parsed; rawScriptConfig = line; headerLineIndexes.add(i); } else if (payload.startsWith('\x7B') && !config) headerLineIndexes.add(i);
+        else if (!parsed && !/^[\x7B\x5B]/.test(payload)) headerLineIndexes.add(i);
       } else if (line.startsWith('# Selectors:')) {
         if (!selectors) {
           const payload = line.substring('# Selectors:'.length).trim(); let parsed = null;
@@ -6506,7 +6601,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       countOf: sub => (sub && sub.selectors && typeof sub.selectors === 'object' ? Object.keys(sub.selectors).length : 0),
       rowLabel: (sub, index) => (sub && sub.builtin ? t('builtinEngineSub') : ((sub && sub.name) || `${t('subscription')}${index + 1}`)),
       importOne: performEngineSubscriptionForUrl,
-      afterChange: () => { refreshEngineSite(); forceReprocessAll(); }
+      afterChange: () => { markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY); refreshEngineSite(); forceReprocessAll(); triggerWebDAVSyncDelayed(5000); }
     }
   };
 
@@ -6985,7 +7080,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     if (isNonRuleTextResponse(parsedHeader.restLines, !!(parsedHeader.rawScriptConfig || parsedHeader.rawSelectors))) throw new Error(t('subImportFailed')); const newRules = filterValidRuleLines(parsedHeader.restLines);
     if (!hasEffectiveRules(newRules) && hasEffectiveRules(currentConfig.rules) && !confirm(t('webdavClearConfirm'))) return 'cancelled';
     if (parsedHeader.config) {
-      const { subscriptions, selectors } = parsedHeader.config; const settings = getSyncSettings(parsedHeader.config);
+      const { subscriptions, selectors, engineSubscriptions } = parsedHeader.config; const settings = getSyncSettings(parsedHeader.config);
 
       if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
         if (Object.keys(settings).length > 0) {
@@ -7014,6 +7109,16 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
             };
           }));
           setSubscriptionSyncSnapshot(subscriptions, config); _pendingSubRefresh = true;
+        }
+        if (parsedHeader.config.builtinEngineSubEnabled !== undefined) applyBuiltinEngineSubEnabled(parsedHeader.config.builtinEngineSubEnabled);
+        if (Array.isArray(engineSubscriptions)) {
+          const existingEngineSubs = getEngineSubscriptions(); const localBuiltinSub = existingEngineSubs.find(isBuiltinEngineSub) || null; const existingEngineMap = new Map(existingEngineSubs.map(s => [s.url, s])); let hasNewEngineSub = false;
+          saveEngineSubscriptions([...(localBuiltinSub ? [localBuiltinSub] : []), ...engineSubscriptions.filter((s) => !isBuiltinEngineSub(s)).map(s => {
+            const existing = existingEngineMap.get(s.url); if (!existing) hasNewEngineSub = true;
+            return existing ? { ...existing, name: s.name || existing.name || '', enabled: s.enabled !== false } : { url: s.url, name: s.name || '', enabled: s.enabled !== false, lastUpdate: 0, lastAttempt: 0, selectors: null };
+          })]);
+          setEngineSubSyncSnapshot(engineSubscriptions, config);
+          if (hasNewEngineSub) setTimeout(() => { checkAutoEngineSubscription(true); }, 1000);
         }
       }
       if (selectors && typeof selectors === 'object' && !Array.isArray(selectors) && GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
@@ -7136,11 +7241,16 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       if (cloudConfig && Array.isArray(cloudConfig.subscriptions) && GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
         mergedSubs = applyCloudSubscriptions(cloudConfig.subscriptions, localSettingsTime >= cloudSettingsTime);
       }
+      let mergedEngineSubs = null;
+      if (cloudConfig && Array.isArray(cloudConfig.engineSubscriptions) && GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false)) {
+        mergedEngineSubs = applyCloudEngineSubscriptions(cloudConfig.engineSubscriptions, localSettingsTime >= cloudSettingsTime);
+      }
 
       if (GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false) && cloudSettingsTime > localSettingsTime && cloudConfig) {
         const cloudSettings = getSyncSettings(cloudConfig); const colors = cloudSettings.highlightColors;
         if (colors && typeof colors === 'object' && !Array.isArray(colors)) cloudSettings.highlightColors = Object.assign({}, currentConfig.highlightColors, colors);
         Object.assign(currentConfig, cloudSettings); localSettingsTime = cloudSettingsTime; GM_setValue(SETTINGS_LAST_MODIFIED_KEY, localSettingsTime); if (cloudSettings.language !== undefined) registerMenu();
+        if (cloudConfig.builtinEngineSubEnabled !== undefined) applyBuiltinEngineSubEnabled(cloudConfig.builtinEngineSubEnabled);
       }
 
       currentConfig.rules = mergedRules; persistConfig(false);
@@ -7156,16 +7266,18 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         }
       }
       const selectorsChanged = syncSelectors && (cloudSelectors === null ? Object.keys(getUserSelectors()).length > 0 : !selectorsEqual(mergedSelectors, cloudSelectors)); const contentChanged = mergedRules.join('\n') !== cloudRules.join('\n');
-      const localNewer = localTime > cloudTime; const localSettingsNewer = localSettingsTime > cloudSettingsTime;
+      const localSettingsNewer = localSettingsTime > cloudSettingsTime;
       const subscriptionsChanged = syncConfig && (
         subscriptionsSignature(mergedSubs || getSubscriptions()) !== subscriptionsSignature(cloudConfig && cloudConfig.subscriptions));
-      const shouldUpload = contentChanged || subscriptionsChanged || selectorsChanged || (syncConfig && localSettingsNewer) || (syncSelectors && localNewer);
+      const engineSubsChanged = syncConfig && Array.isArray(cloudConfig && cloudConfig.engineSubscriptions) && (
+        subscriptionsSignature(mergedEngineSubs || getEngineSubscriptions()) !== subscriptionsSignature(cloudConfig && cloudConfig.engineSubscriptions));
+      const shouldUpload = contentChanged || subscriptionsChanged || engineSubsChanged || selectorsChanged || (syncConfig && localSettingsNewer);
 
       if (shouldUpload) {
         console.log('[WebDAV] 规则合并或配置更新完成，上传至云端...'); const uploadedTime = Math.max(cloudTime + 1000, localTime + 1, trustedNow);
         if (cloudRules.length > 0 && resp.status !== 404 && String(resp.responseText || '').trim() !== '') { try { await putWebDAVBackup(fullUrl, headers, String(resp.responseText || '')); } catch (err) { console.warn('[WebDAV] 备份失败:', err && err.message); } }
         try {
-          await putWebDAVRules({ fullUrl, folderUrl, headers, rules: mergedRules, subs: mergedSubs, selectors: mergedSelectors, config, rulesModifiedAt: (contentChanged || selectorsChanged) ? uploadedTime : (cloudTime || uploadedTime), settingsModifiedAt: subscriptionsChanged ? Math.max(uploadedTime, localSettingsTime) : localSettingsTime }, mergedContent, uploadedTime, {
+          await putWebDAVRules({ fullUrl, folderUrl, headers, rules: mergedRules, subs: mergedSubs, engineSubs: mergedEngineSubs, selectors: mergedSelectors, config, rulesModifiedAt: (contentChanged || selectorsChanged) ? uploadedTime : (cloudTime || uploadedTime), settingsModifiedAt: (subscriptionsChanged || engineSubsChanged) ? Math.max(uploadedTime, localSettingsTime) : localSettingsTime }, mergedContent, uploadedTime, {
             rawScriptConfig: parsedHeader ? parsedHeader.rawScriptConfig : null,
             rawSelectors: parsedHeader ? parsedHeader.rawSelectors : null
           }, buildDavPutHeaders(headers, uploadedTime, { etag: cloudETag, lastMod: cloudLastMod }));
@@ -7181,7 +7293,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           console.warn('[WebDAV] 上传失败:', err.message); markWebDAVSyncFailure(trustedNow); return;
         }
       } else {
-        persistSyncSnapshots(mergedRules, { subs: mergedSubs, selectors: mergedSelectors, config });
+        persistSyncSnapshots(mergedRules, { subs: mergedSubs, engineSubs: mergedEngineSubs, selectors: mergedSelectors, config });
         if (cloudTime > 0) {
           GM_setValue(LOCAL_LAST_MODIFIED_KEY, cloudTime);
         }
@@ -7252,6 +7364,17 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     });
     const merged = [...map.values()]; saveSubscriptions(merged); return added;
   }
+  function applyImportedEngineSubscriptions(subs) {
+    if (!Array.isArray(subs) || subs.length === 0) return 0;
+    const before = getEngineSubscriptions();
+    const map = new Map(before.filter((s) => s && s.url).map((s) => [s.url, s]));
+    let added = 0;
+    subs.forEach((s) => {
+      if (!s || typeof s.url !== 'string' || !s.url) return; const local = map.get(s.url); if (!local) added++;
+      map.set(s.url, Object.assign({}, local || { lastUpdate: 0, lastAttempt: 0, selectors: null }, { url: s.url, name: s.name !== undefined ? s.name : (local ? local.name : ''), enabled: s.enabled !== false }));
+    });
+    const merged = [...map.values()]; saveEngineSubscriptions(merged); return added;
+  }
 
   function importRulesFromFile() {
     pickTextFile('.txt,text/plain', (content) => {
@@ -7278,8 +7401,10 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           Object.assign(next, settings); next.rules = currentConfig.rules || []; next.bubbleState = currentConfig.bubbleState; next.bubbleSize = currentConfig.bubbleSize;
           currentConfig = normalizeConfig(next); if (settings.language !== undefined) registerMenu();
         }
+        if (headerConfig.builtinEngineSubEnabled !== undefined) applyBuiltinEngineSubEnabled(headerConfig.builtinEngineSubEnabled);
       }
       if (headerConfig) { const importedSubs = Array.isArray(headerConfig.subscriptions) ? headerConfig.subscriptions : null; if (importedSubs && applyImportedSubscriptions(importedSubs) > 0) setTimeout(() => checkAutoSubscription(true), 1000); }
+      if (headerConfig) { const importedEngineSubs = Array.isArray(headerConfig.engineSubscriptions) ? headerConfig.engineSubscriptions : null; if (importedEngineSubs && applyImportedEngineSubscriptions(importedEngineSubs) > 0) setTimeout(() => checkAutoEngineSubscription(true), 1000); }
       if (!replaceRules && !hasHeader) return;
       if (replaceRules) {
         const textarea = document.getElementById('serh-rules');
@@ -7303,13 +7428,13 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   function showExportMenu(anchor) {
     closeExportMenu(); _exportPick = loadExportPick();
-    const menu = document.createElement('div'); menu.id = 'serh-export-menu'; menu.style.visibility = 'hidden';
+    const menu = document.createElement('div'); menu.id = 'serh-export-menu'; menu.style.visibility = 'hidden'; const scale = currentUiScale(); if (scale !== 1) menu.style.zoom = String(scale);
     const opt = (key, labelKey) => `<label><span class="serh-switch"><input type="checkbox" data-export="${key}" ${_exportPick[key] ? 'checked' : ''}><span class="serh-slider"></span></span><span>${t(labelKey)}</span></label>`;
     menu.innerHTML = `<div class="serh-export-grid">${opt('rules', 'exportOptRules')}${opt('settings', 'exportOptSettings')}${opt('engine', 'exportOptEngine')}${opt('subscription', 'exportOptSubscription')}</div><div class="serh-export-btns"><button id="serh-export-ok" class="serh-button serh-button-primary">${t('bcConfirm')}</button><button id="serh-export-cancel" class="serh-button serh-button-secondary">${t('cancel')}</button></div>`;
     document.body.appendChild(menu);
     const rect = anchor.getBoundingClientRect(), mw = menu.offsetWidth, mh = menu.offsetHeight;
-    let top = rect.bottom + 6; if (top + mh > innerHeight - 4) top = Math.max(4, rect.top - mh - 6);
-    menu.style.left = Math.max(4, Math.min(rect.left, innerWidth - mw - 4)) + 'px'; menu.style.top = top + 'px';
+    let top = rect.bottom / scale + 6; if (top + mh > innerHeight / scale - 4) top = Math.max(4, rect.top / scale - mh - 6);
+    menu.style.left = Math.max(4, Math.min(rect.left / scale, innerWidth / scale - mw - 4)) + 'px'; menu.style.top = top + 'px';
     menu.style.visibility = '';
     menu.querySelectorAll('input[data-export]').forEach(input => input.addEventListener('change', () => { _exportPick[input.dataset.export] = input.checked; saveExportPick(); }));
     menu.querySelector('#serh-export-cancel').onclick = closeExportMenu;
@@ -7324,6 +7449,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     if (!pick.rules && !pick.subscription && !pick.engine && !pick.settings) { showToast(t('exportEmpty'), 'error'); preventPanelClose = false; return; }
     const header = pick.settings ? getSyncSettings(currentConfig) : {};
     if (pick.subscription) header.subscriptions = exportSubscriptionList();
+    if (pick.engine) header.engineSubscriptions = getEngineSubscriptions().filter((s) => !isBuiltinEngineSub(s)).map((s) => ({ url: s.url, name: s.name, enabled: s.enabled !== false }));
+    if (pick.settings) { const b = getEngineSubscriptions().find(isBuiltinEngineSub); if (b) header.builtinEngineSubEnabled = b.enabled !== false; }
     let out = Object.keys(header).length ? '# ScriptConfig:' + JSON.stringify(header) + '\n' : '';
     if (pick.engine) { const selectors = getUserSelectors(); if (Object.keys(selectors).length) out += '# Selectors:' + JSON.stringify(selectors) + '\n'; }
     if (pick.rules && content.trim()) out += content;
