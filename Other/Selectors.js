@@ -151,7 +151,7 @@
         news: {
           match: /^https?:\/\/news\./i,
           containers: 'li:has(a[href*="/articles/"])',
-          titles: ['p', '.newsFeed_item_body div a[href*="/articles/"]', '.newsFeed_item_body a[href*="/articles/"]', 'a[href*="/articles/"]'],
+          titles: ['div.newsFeed_item_body > div:nth-child(2) > div:nth-child(1)', 'p', 'a[href*="/articles/"]'],
           snippets: ['p'],
           links: ['a[href*="/articles/"]'],
         },
@@ -192,9 +192,9 @@
     toutiao: {
       match: /^(?:so|m)\.toutiao\.com$/i,
       containers: '.result-content',
-      titles: ['.cs-header a', 'a[href*="/search/jump"]', '.l-card-title a', '.l-card-title'],
+      titles: ['a[href*="/search/jump"]', '.l-card-title a', '.l-card-title', '.cs-header a'],
       snippets: ['.cs-card-content .text-regular', '.cs-source', '.l-paragraph', '.l-source'],
-      links: ['.cs-header a[href]', 'a[href*="/search/jump"]', 'a.l-card-title[href]', 'a[href]:not([href*="/search?"])'],
+      links: ['a[href*="/search/jump"]', 'a.l-card-title[href]', 'a[href]:not([href*="/search?"])', '.cs-header a[href]'],
       categories: {
         images: {
           match: /[?&]pd=atlas(?:&|#|$)/i,

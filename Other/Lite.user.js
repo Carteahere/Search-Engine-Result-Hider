@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.8.2
+// @version      8.8.3
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version removes networking features including WebDAV Sync / Rule Subscription / Engine Subscription.
@@ -224,7 +224,7 @@
         news: {
           match: /^https?:\/\/news\./i,
           containers: 'li:has(a[href*="/articles/"])',
-          titles: ['p', '.newsFeed_item_body div a[href*="/articles/"]', '.newsFeed_item_body a[href*="/articles/"]', 'a[href*="/articles/"]'],
+          titles: ['div.newsFeed_item_body > div:nth-child(2) > div:nth-child(1)', 'p', 'a[href*="/articles/"]'],
           snippets: ['p'],
           links: ['a[href*="/articles/"]'],
         },
@@ -265,9 +265,9 @@
     toutiao: {
       match: /^(?:so|m)\.toutiao\.com$/i,
       containers: '.result-content',
-      titles: ['.cs-header a', 'a[href*="/search/jump"]', '.l-card-title a', '.l-card-title'],
+      titles: ['a[href*="/search/jump"]', '.l-card-title a', '.l-card-title', '.cs-header a'],
       snippets: ['.cs-card-content .text-regular', '.cs-source', '.l-paragraph', '.l-source'],
-      links: ['.cs-header a[href]', 'a[href*="/search/jump"]', 'a.l-card-title[href]', 'a[href]:not([href*="/search?"])'],
+      links: ['a[href*="/search/jump"]', 'a.l-card-title[href]', 'a[href]:not([href*="/search?"])', '.cs-header a[href]'],
       categories: {
         images: {
           match: /[?&]pd=atlas(?:&|#|$)/i,
@@ -1139,7 +1139,7 @@
   function getPanelPositionStyles() {
     const statusBtn = document.getElementById('serhl-status');
     if (currentConfig.panelCentered) {
-      return `top: 60%; left: 50%; transform: translate(-50%, -50%);`;
+      return `top: 60%; left: 50%; --serhl-panel-tf: translate(-50%, -50%);`;
     }
 
     let rect;
@@ -1150,8 +1150,8 @@
     }
     const centerX = rect.left + rect.width / 2; const centerY = rect.top + rect.height / 2; const isLeft = centerX < window.innerWidth / 2; const isTop = centerY < window.innerHeight / 2;
 
-    if (isLeft && isTop) return 'top: 10px; left: 10px; transform: none;'; if (!isLeft && isTop) return 'top: 10px; right: 10px; transform: none;';
-    if (isLeft && !isTop) return 'bottom: 10px; left: 10px; transform: none;'; return 'bottom: 10px; right: 10px; transform: none;';
+    if (isLeft && isTop) return 'top: 10px; left: 10px; --serhl-panel-tf: translate(0, 0);'; if (!isLeft && isTop) return 'top: 10px; right: 10px; --serhl-panel-tf: translate(0, 0);';
+    if (isLeft && !isTop) return 'bottom: 10px; left: 10px; --serhl-panel-tf: translate(0, 0);'; return 'bottom: 10px; right: 10px; --serhl-panel-tf: translate(0, 0);';
   }
 
   function createPanel(id, width = '320px', padding = '15px') {
@@ -3669,8 +3669,8 @@
         body.serhl-dark-on #serhl-settings-panel label { color: #9ca3af !important; }
         body.serhl-dark-on #serhl-settings-panel select { background: #374151 !important; border-color: #4b5563 !important; color: #f3f4f6 !important; }
         /* 渐变动画 */
-        .serhl-panel-fade { opacity: 0; transform: translate(-50%, -48%); transition: all 0.15s ease; pointer-events: none; }
-        .serhl-panel-fade.show { opacity: 1; transform: translate(-50%, -50%); pointer-events: auto; }
+        .serhl-panel-fade { opacity: 0; transform: var(--serhl-panel-tf, translate(0, 0)) translateY(2%); transition: all 0.15s ease; pointer-events: none; }
+        .serhl-panel-fade.show { opacity: 1; transform: var(--serhl-panel-tf, translate(0, 0)); pointer-events: auto; }
         .serhl-window:not(.serhl-panel-fade) { transition: opacity 0.1s ease; }
         /* 屏蔽灰底 */
         .serhl-blocked-visible, .g.serhl-blocked-visible, .MjjYud.serhl-blocked-visible { background-color: var(--serhl-blocked-bg) !important; border-radius: 8px !important; padding: 8px !important; transition: background 0.2s; }
