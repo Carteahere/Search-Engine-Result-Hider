@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.8.2
+// @version      8.8.3
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -46,7 +46,7 @@
   const BUILTIN_ENGINE_SUB_URL = 'https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js';
   const SUBSCRIPTION_SYNC_SNAPSHOT_KEY = 'searchfilter_subscription_sync_snapshot'; const ENGINE_SUBS_SYNC_SNAPSHOT_KEY = 'searchfilter_engine_subs_sync_snapshot'; const WEBDAV_LAST_SYNC_SELECTORS_KEY = 'searchfilter_webdav_last_sync_selectors'; const HL_STATS_REGEX = /^@\d+/;
   const AUTO_UPDATE_INTERVAL = 12 * 60 * 60 * 1000, WEBDAV_AUTO_SYNC_INTERVAL = 1 * 60 * 60 * 1000, AUTO_SYNC_TOLERANCE = 60 * 1000;
-  const WEBDAV_SYNC_MAX_RETRIES = 3, WEBDAV_SYNC_RETRY_DELAY = 2000, WEBDAV_TIME_TOLERANCE = 5 * 60 * 1000; const NET_TIME_CACHE_TTL = 30 * 60 * 1000, NET_TIME_FAIL_TTL = 10 * 60 * 1000;
+  const WEBDAV_SYNC_MAX_RETRIES = 3, WEBDAV_SYNC_RETRY_DELAY = 2000, WEBDAV_TIME_TOLERANCE = 5 * 60 * 1000; const NET_TIME_CACHE_TTL = 30 * 60 * 1000, NET_TIME_FAIL_TTL = 10 * 60 * 1000, WEBDAV_CLOCK_CACHE_TTL = 24 * 60 * 60 * 1000;
   const RESULT_RETRY_LIMIT = 3, RESULT_RETRY_DELAY = 200;
 
   // 默认配置
@@ -244,7 +244,7 @@
         news: {
           match: /^https?:\/\/news\./i,
           containers: 'li:has(a[href*="/articles/"])',
-          titles: ['p', '.newsFeed_item_body div a[href*="/articles/"]', '.newsFeed_item_body a[href*="/articles/"]', 'a[href*="/articles/"]'],
+          titles: ['div.newsFeed_item_body > div:nth-child(2) > div:nth-child(1)', 'p', 'a[href*="/articles/"]'],
           snippets: ['p'],
           links: ['a[href*="/articles/"]'],
         },
@@ -285,9 +285,9 @@
     toutiao: {
       match: /^(?:so|m)\.toutiao\.com$/i,
       containers: '.result-content',
-      titles: ['.cs-header a', 'a[href*="/search/jump"]', '.l-card-title a', '.l-card-title'],
+      titles: ['a[href*="/search/jump"]', '.l-card-title a', '.l-card-title', '.cs-header a'],
       snippets: ['.cs-card-content .text-regular', '.cs-source', '.l-paragraph', '.l-source'],
-      links: ['.cs-header a[href]', 'a[href*="/search/jump"]', 'a.l-card-title[href]', 'a[href]:not([href*="/search?"])'],
+      links: ['a[href*="/search/jump"]', 'a.l-card-title[href]', 'a[href]:not([href*="/search?"])', '.cs-header a[href]'],
       categories: {
         images: {
           match: /[?&]pd=atlas(?:&|#|$)/i,
@@ -1270,7 +1270,7 @@
   function getPanelPositionStyles() {
     const statusBtn = document.getElementById('serh-status');
     if (currentConfig.panelCentered) {
-      return `top: 60%; left: 50%; transform: translate(-50%, -50%);`;
+      return `top: 60%; left: 50%; --serh-panel-tf: translate(-50%, -50%);`;
     }
 
     let rect;
@@ -1281,8 +1281,8 @@
     }
     const centerX = rect.left + rect.width / 2; const centerY = rect.top + rect.height / 2; const isLeft = centerX < window.innerWidth / 2; const isTop = centerY < window.innerHeight / 2;
 
-    if (isLeft && isTop) return 'top: 10px; left: 10px; transform: none;'; if (!isLeft && isTop) return 'top: 10px; right: 10px; transform: none;';
-    if (isLeft && !isTop) return 'bottom: 10px; left: 10px; transform: none;'; return 'bottom: 10px; right: 10px; transform: none;';
+    if (isLeft && isTop) return 'top: 10px; left: 10px; --serh-panel-tf: translate(0, 0);'; if (!isLeft && isTop) return 'top: 10px; right: 10px; --serh-panel-tf: translate(0, 0);';
+    if (isLeft && !isTop) return 'bottom: 10px; left: 10px; --serh-panel-tf: translate(0, 0);'; return 'bottom: 10px; right: 10px; --serh-panel-tf: translate(0, 0);';
   }
 
   function createPanel(id, width = '320px', padding = '15px') {
@@ -3881,8 +3881,8 @@
         body.serh-dark-on #serh-settings-panel label { color: #9ca3af !important; }
         body.serh-dark-on #serh-settings-panel select { background: #374151 !important; border-color: #4b5563 !important; color: #f3f4f6 !important; }
         /* 渐变动画 */
-        .serh-panel-fade { opacity: 0; transform: translate(-50%, -48%); transition: all 0.15s ease; pointer-events: none; }
-        .serh-panel-fade.show { opacity: 1; transform: translate(-50%, -50%); pointer-events: auto; }
+        .serh-panel-fade { opacity: 0; transform: var(--serh-panel-tf, translate(0, 0)) translateY(2%); transition: all 0.15s ease; pointer-events: none; }
+        .serh-panel-fade.show { opacity: 1; transform: var(--serh-panel-tf, translate(0, 0)); pointer-events: auto; }
         .serh-window:not(.serh-panel-fade) { transition: opacity 0.1s ease; }
         .serh-subscription-panel-header { flex-shrink: 0; }
         .serh-subscription-panel-header h3 { margin: 0 !important; }
@@ -4219,9 +4219,7 @@
     const prev = GM_getValue(key, 0) || 0; const now = Math.max(Date.now(), prev + 1); GM_setValue(key, now);
     const webdav = loadWebDAVConfig(); if (!webdav || !webdav.url || !isHttpsUrl(webdav.url)) return;
     Promise.resolve(getTrustedNow()).then(trusted => {
-      if (GM_getValue(key, 0) === now && trusted > now) {
-        GM_setValue(key, trusted);
-      }
+      if (trusted > 0 && GM_getValue(key, 0) === now) GM_setValue(key, trusted);
     }).catch(() => {});
   }
 
@@ -5866,7 +5864,7 @@
     });
   }
 
-  let _netTimeOffset = null; let _netTimeCheckedAt = 0; let _netTimeQuerying = null;
+  let _netTimeOffset = null; let _netTimeCheckedAt = 0; let _netTimeQuerying = null; let _davClockOffset = null; let _davClockCheckedAt = 0;
   function firstSuccess(promises) {
     return new Promise((resolve, reject) => {
       let pending = promises.length; let settled = false;
@@ -5942,8 +5940,20 @@
     return _netTimeQuerying;
   }
 
+  function loadDavClockCache() {
+    if (_davClockOffset !== null && Date.now() - _davClockCheckedAt < WEBDAV_CLOCK_CACHE_TTL) return _davClockOffset;
+    if (typeof GM_getValue === 'function') { try { const c = GM_getValue('searchfilter_dav_time_cache', null); if (c && typeof c === 'object' && Number.isFinite(c.offset) && Number.isFinite(c.checkedAt) && Date.now() - c.checkedAt < WEBDAV_CLOCK_CACHE_TTL) { _davClockOffset = c.offset; _davClockCheckedAt = c.checkedAt; } } catch (e) {} }
+    return _davClockOffset;
+  }
+  function noteDavClock(serverTime) {
+    if (!(serverTime > 0)) return;
+    _davClockOffset = serverTime - Date.now(); _davClockCheckedAt = Date.now();
+    if (typeof GM_setValue === 'function') { try { GM_setValue('searchfilter_dav_time_cache', { offset: _davClockOffset, checkedAt: _davClockCheckedAt }); } catch (e) {} }
+  }
   async function getTrustedNow(serverTime = 0) {
-    const offset = await getNetworkTimeOffset(); if (offset !== null) return Date.now() + offset; if (serverTime > 0) return serverTime; return Date.now();
+    const offset = await getNetworkTimeOffset(); if (offset !== null) return Date.now() + offset;
+    if (serverTime > 0) { noteDavClock(serverTime); return serverTime; }
+    const davOffset = loadDavClockCache(); return davOffset !== null ? Date.now() + davOffset : Date.now();
   }
 
   function webdavTargetId(config) { try { return getWebDAVRequest(config).fullUrl; } catch (e) { return ''; } }
