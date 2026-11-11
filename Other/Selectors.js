@@ -40,13 +40,13 @@
       links: 'a[href]',
       categories: {
         images: {
-          match: /^https?:\/\/images\.|\/(?:imghp|imgres)|[?&](?:tbm=(?:isch|imgs)|udm=(?:2|imgs))(?:&|#|$)/i,
+          match: /^https?:\/\/(?:images\.google\.|(?:www\.)?google\.[^/]+\/(?:imghp|imgres)(?:[\/?#]|$))|[?&](?:tbm=(?:isch|imgs)|udm=(?:2|imgs))(?:&|#|$)/i,
           containers: 'div.ivg-i, div[data-attrid="images universal"], div.isv-r',
           titles: ['img[alt]@attr:alt', 'img@attr:alt'],
           links: ['[data-lpage]@attr:data-lpage', 'a[href*="/imgres"]@query:href.imgurl', 'a[href]'],
         },
         videos: {
-          match: /^https?:\/\/videos?\.|\/videohp|[?&](?:tbm=(?:vid|vids)|udm=(?:7|vids))(?:&|#|$)/i,
+          match: /^https?:\/\/(?:videos?\.google\.|(?:www\.)?google\.[^/]+\/videohp(?:[\/?#]|$))|[?&](?:tbm=(?:vid|vids)|udm=(?:7|vids))(?:&|#|$)/i,
           containers: 'div.PmEWq',
           titles: ['h3'],
           links: ['[data-curl]@attr:data-curl', 'a[href]'],
@@ -141,13 +141,13 @@
       links: ['a:has(> h3)', 'a.sw-Card__titleInner[href]', 'a.sw-Card__space', 'h3 a', '.s-title a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
       categories: {
         images: {
-          match: /^https?:\/\/images\.|\/image\/search(?:[\/?#]|$)/i,
+          match: /^https?:\/\/(?:images\.[^/]*yahoo\.co\.jp|(?:[a-z0-9-]+\.)*search\.yahoo\.co\.jp\/image\/search(?:[\/?#]|$))/i,
           containers: '.sw-ThumbnailGrid__columnItem, #isr div:has(> a[data-cl-params]), a.sw-Thumbnail',
           titles: ['.sw-ThumbnailGrid__title', 'img[alt]@attr:alt', 'img@attr:alt'],
           snippets: ['.sw-ThumbnailGrid__domain'],
           links: ['a.sw-Thumbnail@clparams:targurl', 'a@clparams:targurl', 'a[href]'],
         },
-        videos: { match: /^https?:\/\/videos?\.|\/video\/search(?:[\/?#]|$)/i },
+        videos: { match: /^https?:\/\/(?:videos?\.[^/]*yahoo\.co\.jp|(?:[a-z0-9-]+\.)*search\.yahoo\.co\.jp\/video\/search(?:[\/?#]|$))/i },
         news: {
           match: /^https?:\/\/news\./i,
           containers: 'li:has(a[href*="/articles/"])',
@@ -165,25 +165,25 @@
       links: ['a:has(> h3)', 'a.sw-Card__titleInner[href]', 'a.sw-Card__space', 'h3 a', '.s-title a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
       categories: {
         images: {
-          match: /^https?:\/\/images\.|\/search\/images(?:[\/?#]|$)/i,
+          match: /^https?:\/\/(?:images\.[^/]*yahoo\.[^/]+|(?:[a-z0-9-]+\.)*search\.yahoo\.[^/]+\/search\/images(?:[\/?#]|$))/i,
           containers: '.sw-ThumbnailGrid__columnItem, #isr div:has(> a[data-cl-params]), a.sw-Thumbnail',
           titles: ['.sw-ThumbnailGrid__title', 'img[alt]@attr:alt', 'img@attr:alt'],
           snippets: ['.sw-ThumbnailGrid__domain'],
           links: ['a.sw-Thumbnail@clparams:targurl', 'a@clparams:targurl', 'a[href]'],
         },
-        videos: { match: /^https?:\/\/videos?\.|\/video\/search(?:[\/?#]|$)/i },
+        videos: { match: /^https?:\/\/(?:videos?\.[^/]*yahoo\.[^/]+|(?:[a-z0-9-]+\.)*search\.yahoo\.[^/]+\/video\/search(?:[\/?#]|$))/i },
         news: { match: /^https?:\/\/news\./i },
       },
     },
     so360: {
-      match: /^(?:www\.|m\.)?so\.com$/i,
+      match: /^(?:(?:www|m|news)\.)?so\.com$/i,
       containers: 'li.res-list, div.res-list',
       titles: ['h3.res-title a', 'h3 a', '.res-title', '.g-title a', '.g-title'],
       snippets: ['.res-desc', '.res-list-summary', '.mh-desc', '.summary'],
       links: ['h3 a[href]', 'a.alink[href]', '.g-linkinfo a[href]', 'a[href]'],
     },
     sogou: {
-      match: /^(?:www\.|m\.|wap\.)?sogou\.com$/i,
+      match: /^(?:(?:www|m|wap|news)\.)?sogou\.com$/i,
       containers: 'div.vrwrap:has(h3), div.reactResult:has(h3), div.reactResult:has(.vr-title), div.vrResult',
       titles: ['h3.vr-title a', '.vr-title a', 'a[class*="saTitle"]', '.vr-title', 'h3.vr-tit', 'h3 a', 'h3'],
       snippets: ['.space-txt', '.star-wiki', '.str_info', 'p.sa-text-clamp3', '[class*="saText"]'],
@@ -216,9 +216,9 @@
     github: {
       match: /^https?:\/\/(?:www\.)?github\.com\/search\/?(?:[?#]|$)/i,
       containers: "[data-testid='results-list'] > div",
-      titles: ["h3 a[data-component='Link']", 'h3 a', 'h3'],
+      titles: ['.search-title a', "h3 a[data-component='Link']", 'h3 a', 'h3'],
       snippets: ['h3 ~ div', 'h3 + div', 'article .description'],
-      links: ["h3 a[href]"],
+      links: ['.search-title a[href]', "h3 a[href]"],
       button: false,
     },
     greasyfork: {
