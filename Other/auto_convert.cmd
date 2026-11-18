@@ -284,13 +284,16 @@ function analyzeEngine(html, loc) {
   }
   if (host) host = host.replace(/^www\./, '');
   const matchRe = host ? ('^https?:\\/\\/(?:www\\.)?' + host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:[\\/?#:]|$)') : '^$';
-  return { containers: cont.key, contCount: cont.nodes.length, titles, snippets, links, matchRe, hostKnown: !!host, imageMode };
+  return { root: cont.key, contCount: cont.nodes.length, titles, snippets, links, matchRe, hostKnown: !!host, imageMode };
 }
 const BUILTIN = new Set(['google','google_scholar','bing','duckduckgo','duckduckgo_lite','yandex','brave','ecosia','startpage','yahoo','yahoo_japan','so360','sogou','toutiao','quark','github','greasyfork']);
 const hash36 = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); };
 const q = s => "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
 const idOk = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const arr = a => '[' + a.map(q).join(', ') + ']';
+const valueArr = a => a.some(s => /@attr:/.test(s))
+  ? "['or', [" + a.map(s => { const m = String(s).match(/^(.*?)@attr:([A-Za-z0-9_-]+)$/); return m ? "['attribute', " + q(m[2]) + ", " + q(m[1]) + "]" : "['text', " + q(s) + "]"; }).join(', ') + "]]"
+  : arr(a);
 const used = new Set();
 for (const f of files) {
   const raw = path.basename(f);
@@ -309,17 +312,19 @@ for (const f of files) {
   if (!html) { console.log('[WARN]', raw, '未找到 text/html 部分'); continue; }
   const eng = analyzeEngine(html.html, html.loc);
   if (!eng) { console.log('[WARN]', raw, '未发现重复结果容器(≥3个同类且含链接)'); continue; }
+  const props = [];
+  if (eng.titles.length) props.push('  title: ' + valueArr(eng.titles) + ',');
+  if (eng.snippets.length) props.push('  snippet: ' + valueArr(eng.snippets) + ',');
   const body = [
-    '  ' + (idOk.test(name) ? name : q(name)) + ': {',
-    '    match: /' + eng.matchRe + '/i,',
-    '    containers: ' + q(eng.containers) + ',',
-    '    titles: ' + arr(eng.titles) + ',',
-    '    snippets: ' + arr(eng.snippets) + ',',
-    '    links: ' + arr(eng.links) + ',',
-    '  },'
+    (idOk.test(name) ? name : q(name)) + ': {',
+    '  match: /' + eng.matchRe + '/i,',
+    '  root: ' + q(eng.root) + ',',
+    ...props,
+    '  url: ' + arr(eng.links) + ',',
+    '},'
   ].join('\n');
   fs.writeFileSync(out, body + '\n');
-  console.log('[OK]', raw, '->', path.basename(out), '| containers:', eng.containers + '(x' + eng.contCount + ')', '| titles:', eng.titles.join(','), '| snippets:', eng.snippets.join(',') || '-', '| links:', eng.links.join(','), '| match:', eng.hostKnown ? eng.matchRe : '/^$(占位)');
+  console.log('已生成' + path.basename(out));
   if (!eng.hostKnown) console.log('[WARN]', raw, '未识别出站点主机,match 已写为惰性正则 /^$,请手动修改后再导入');
-  if (eng.imageMode) console.log('[WARN]', raw, '识别为图片类结果页,建议将该块改写为 categories.images 结构');
+  if (eng.imageMode) console.log('[WARN]', raw, '识别为图片类结果页,建议将该块改写为 pages.images 结构');
 }
