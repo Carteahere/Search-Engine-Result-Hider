@@ -5,7 +5,7 @@
 [中文](README.md) | [English](README.en.md)
 
 在仅支持安装脚本的浏览器上实现复杂规则屏蔽搜索结果功能  
-兼容uBlacklist基础规则，支持URL匹配、正则匹配、标题匹配、结果摘要(snippet)匹配、高亮目标结果、白名单匹配、`@if` 附加判断条件、图片/视频/新闻等搜索页面屏蔽，以及添加**自定义引擎站点**
+兼容uBlacklist基础规则和订阅，支持URL匹配、正则匹配、标题匹配、结果摘要(snippet)匹配、高亮目标结果、白名单匹配、`@if` 附加判断条件、图片/视频等搜索页屏蔽，以及添加**自定义引擎**
 
 当前适配搜索引擎：  
 Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、Startpage、Yahoo(&Japan)、360搜索、搜狗、头条搜索、夸克(&神马)、GitHub搜索、GreasyFork搜索
@@ -58,7 +58,9 @@ Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、S
 
 ## 文档
 
-具体规则语法、添加自定义引擎见 [规则说明](Rule-Explanation.md)
+具体规则语法见 [规则说明](Rule-Explanation.md)
+
+添加自定义引擎教程见 [自定义引擎](Custom-Engine.md)
 
 调试模式、规则自检报错说明见 [测试说明](Debug.md)
 
@@ -78,5 +80,6 @@ Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、S
 
 ## 截图
 
-![01](https://github.com/user-attachments/assets/a8297817-1856-434e-a329-b98adbfbad91)  
-![02](https://github.com/user-attachments/assets/b5eb4eac-9bc5-44a4-a0eb-a38076c35e4d)
+<img width="400" height="250" alt="01" src="https://github.com/user-attachments/assets/a8297817-1856-434e-a329-b98adbfbad91" />
+<br/>
+<img width="250" height="85" alt="02" src="https://github.com/user-attachments/assets/b5eb4eac-9bc5-44a4-a0eb-a38076c35e4d" />

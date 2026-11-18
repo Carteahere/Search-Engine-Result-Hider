@@ -5,7 +5,7 @@
 [中文](README.md) | [English](README.en.md)
 
 Implements complex-rule search result blocking on browsers that only support scripts installation.  
-Compatible with uBlacklist basic rules, supports URL matching, regular expression matching, title matching, result snippet matching, highlighting target results, whitelist matching, `@if` additional judgment conditions, blocking on image/video/news search pages, and adding **custom engine sites**.
+Compatible with uBlacklist basic rules and subscription, supports URL matching, regular expression matching, title matching, result snippet matching, highlighting target results, whitelist matching, `@if` additional judgment conditions, blocking on images/videos search pages, and adding **custom engines**.
 
 Currently supported search engines:  
 Bing, Google, Google Scholar, DuckDuckGo(&lite), Yandex, Brave, Ecosia, Startpage, Yahoo(&Japan), 360 Search, Sogou, Toutiao, Quark(&Shenma), GitHub Search, GreasyFork Search
@@ -57,7 +57,9 @@ Partial setting instructions:
 
 ## Docs
 
-For detailed rule syntax and custom engine setup, see [Rule-Explanation](Rule-Explanation.en.md)
+For detailed rule syntax, see [Rule-Explanation](Rule-Explanation.en.md)
+
+For tutorials on custom engines , see [Custom-Engine](Custom-Engine.en.md)
 
 For debug mode and rule self-check error instructions, see [Debug](Debug.en.md)
 
@@ -77,5 +79,6 @@ Simple rule examples:
 
 ## Screenshots
 
-![01](https://github.com/user-attachments/assets/a8297817-1856-434e-a329-b98adbfbad91)  
-![02](https://github.com/user-attachments/assets/b5eb4eac-9bc5-44a4-a0eb-a38076c35e4d)
+<img width="400" height="250" alt="01" src="https://github.com/user-attachments/assets/a8297817-1856-434e-a329-b98adbfbad91" />
+<br/>
+<img width="250" height="85" alt="02" src="https://github.com/user-attachments/assets/b5eb4eac-9bc5-44a4-a0eb-a38076c35e4d" />

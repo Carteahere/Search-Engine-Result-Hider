@@ -76,7 +76,7 @@ d.checkRuleMatchOptimized(
 | compiledRules | getter | 编译后的规则索引：domains(Map)、urls/titles/texts、highlight*、whitelist*、conditional* 等分类数组 |
 | getSearchEngine() | () | 当前引擎 ID（google/bing/…），非引擎站点返回 other |
 | getSearchCategory(loc?) | (location?) | 当前搜索类型（默认 web/images/videos/news） |
-| getContainerSelector(engine) | (engineId) | 该引擎的结果容器 CSS 选择器字符串 |
+| getRootSelector(engine) | (engineId) | 该引擎的结果容器 CSS 选择器字符串 |
 | getSubdomainLevels(domain) | (hostname) | 域名层级数组，如 'a.b.example.com' → ['a.b.example.com', 'b.example.com', 'example.com', 'com'] |
 | checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels?) | 第 5 参可省略 | false 或 {highlight: N} / {blocked: true, rule, source} / {highlight: N, blocked: true, rule, source} |
 | forceReprocessAll() | () | 重建规则索引并强制重新处理当前页所有结果（每帧 30 个分批），用于改规则后手动刷新 |

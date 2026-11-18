@@ -77,7 +77,7 @@ Error output
 | compiledRules | getter | Compiled rule index: `domains`(Map), `urls`/`titles`/`texts`, `highlight*`, `whitelist*`, `conditional*` category arrays |
 | getSearchEngine() | () | Current engine ID (`google`/`bing`/…); returns `other` on non-engine sites |
 | getSearchCategory(loc?) | (location?) | Current search type (defaults `web`/`images`/`videos`/`news`) |
-| getContainerSelector(engine) | (engineId) | CSS selector string of the engine's result containers |
+| getRootSelector(engine) | (engineId) | CSS selector string of the engine's result containers |
 | getSubdomainLevels(domain) | (hostname) | Domain level array, e.g. `'a.b.example.com'` → `['a.b.example.com', 'b.example.com', 'example.com', 'com']` |
 | checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels?) | 5th param optional | `false`, or `{highlight: N}` / `{blocked: true, rule, source}` / `{highlight: N, blocked: true, rule, source}` |
 | forceReprocessAll() | () | Rebuilds the rule index and forces reprocessing of all results on the current page (batched 30 per frame); for manual refresh after changing rules |

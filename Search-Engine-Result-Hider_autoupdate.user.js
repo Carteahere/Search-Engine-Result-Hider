@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.8.3
+// @version      8.9.0
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -31,15 +31,17 @@
   'use strict';
 
   if (window.top !== window.self) return; let preventPanelClose = false, _engineSiteSetup = false, _domObserver = null, _observedBody = null, _observedSelector = '';
-  let _searchForm = null, _searchFormHandler = null, _urlChangeHandler = null, _panelCloseHandler = null, _panelPressHandler = null, _panelCloseTimer = null; let _syncIntervalIds = [];
-  let _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap(), _peekUrlCache = new WeakMap(); const _hrefChangedContainers = new Set(), _contentChangedContainers = new Set(); let _pendingSubRefresh = false;
+  let _searchForm = null, _searchFormHandler = null, _urlChangeHandler = null, _panelCloseHandler = null, _panelPressHandler = null, _panelCloseTimer = null, _syncIntervalIds = [];
+  let _hrefUrlCache = new WeakMap(), _resultContentCache = new WeakMap(), _resultRetryCounts = new WeakMap(), _peekUrlCache = new WeakMap();
+  const _hrefChangedContainers = new Set(), _contentChangedContainers = new Set();
+  let _pendingSubRefresh = false;
   let _exportPick = { rules: true, subscription: false, engine: false, settings: false }, _exportMenuHandler = null;
 
   // 存储配置
   const CONFIG_KEY = 'searchfilter_blocker', WEBDAV_KEY = 'searchfilter_webdav', SELECTORS_KEY = 'searchfilter_selectors', EXPORT_PICK_KEY = 'searchfilter_export_pick';
   const SUBSCRIPTION_URL_KEY = 'searchfilter_subscription_url', SUBSCRIPTION_LAST_UPDATE_KEY = 'searchfilter_subscription_last_update';
   const SUBSCRIPTION_RULES_KEY = 'searchfilter_subscription_rules', SUBSCRIPTIONS_KEY = 'searchfilter_subscriptions';
-  const WEBDAV_LAST_SYNC_KEY = 'searchfilter_webdav_last_sync', LOCAL_LAST_MODIFIED_KEY = 'searchfilter_local_last_modified', WEBDAV_PENDING_KEY = 'searchfilter_webdav_pending';
+  const WEBDAV_LAST_SYNC_KEY = 'searchfilter_webdav_last_sync', LOCAL_LAST_MODIFIED_KEY = 'searchfilter_local_last_modified', WEBDAV_PENDING_KEY = 'searchfilter_webdav_pending', WEBDAV_DIRTY_KEY = 'searchfilter_webdav_dirty', WEBDAV_RETRY_COUNT_KEY = 'searchfilter_webdav_retry_count';
   const SETTINGS_LAST_MODIFIED_KEY = 'searchfilter_settings_last_modified', SELECTORS_LAST_MODIFIED_KEY = 'searchfilter_selectors_last_modified', SETTINGS_TIME_MIGRATED_KEY = 'searchfilter_settings_time_migrated';
   const WEBDAV_AUTO_SYNC_KEY = 'searchfilter_webdav_auto_sync', WEBDAV_SYNC_CONFIG_KEY = 'searchfilter_webdav_sync_config';
   const WEBDAV_SYNC_SNAPSHOT_KEY = 'searchfilter_webdav_sync_snapshot', ENGINE_SUBSCRIPTIONS_KEY = 'searchfilter_engine_subscriptions';
@@ -48,6 +50,8 @@
   const AUTO_UPDATE_INTERVAL = 12 * 60 * 60 * 1000, WEBDAV_AUTO_SYNC_INTERVAL = 1 * 60 * 60 * 1000, AUTO_SYNC_TOLERANCE = 60 * 1000;
   const WEBDAV_SYNC_MAX_RETRIES = 3, WEBDAV_SYNC_RETRY_DELAY = 2000, WEBDAV_TIME_TOLERANCE = 5 * 60 * 1000; const NET_TIME_CACHE_TTL = 30 * 60 * 1000, NET_TIME_FAIL_TTL = 10 * 60 * 1000, WEBDAV_CLOCK_CACHE_TTL = 24 * 60 * 60 * 1000;
   const RESULT_RETRY_LIMIT = 3, RESULT_RETRY_DELAY = 200;
+  const GRID_HIDE_ATTR = 'data-serh-grid-item-hidden', GROUP_HIDE_ATTR = 'data-serh-group-hidden';
+  let _hideNamesCache = null;
 
   // 默认配置
   const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', uiScale: 'l', darkMode: 'system', collapseMode: false, highlightWhitelist: false, removeRedirects: true, showSubBtn: true, showSyncBtn: true, bracketHighlight: true, timeCalibration: true, language: 'zh-CN', subscriptionAutoUpdate: true, engineSubAutoUpdate: true };
@@ -91,252 +95,353 @@
 
   // 选择器
   const SELECTORS = {
-     bing: {
-      match: /^(?:(?:www[2-4]?|cn|global|m)\.)?bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i,
-      containers: 'li.b_algo, div.b_algo',
-      titles: ['h2 a', 'a h2', '.b_title', '.mc_vtvc_title', 'a.title'],
-      snippets: ['.b_caption p', '.b_snippet', '.b_paractl p', '.b_lineclamp2', '.mc_vtvc_meta', '.snippet'],
-      links: ['h2 a[href]', '.b_title a[href]', '.b_algoheader a[href]', 'h3 a[href]', 'div[role="heading"] a[href]', 'a.title[href]', 'a[href]'],
-      categories: {
+    bing: {
+      includeRegex: /^https?:\/\/(?:(?:www[2-4]?|cn|global|m)\.)?bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)(?::\d+)?(?:[/?#]|$)/i,
+      root: 'li.b_algo, div.b_algo',
+      url: ['or', [['rejectOpaqueRedirect', ['attribute', 'href', 'a:has(> h2)[href], .b_algoheader a[href], h2 a[href]']], ['normalizeUrl', ['rejectEngineHost', ['domainToUrl', ['text', '.b_attribution, .b_algoheader cite, cite']]]], ['attribute', 'href', 'a:has(> h2)[href], .b_algoheader a[href], h2 a[href]']]],
+      title: ['or', [['text', 'h2 a'], ['text', 'a h2'], ['text', '.b_title'], ['text', '.mc_vtvc_title'], ['text', 'a.title']]],
+      snippet: ['or', [['text', '.b_caption p'], ['text', '.b_snippet'], ['text', '.b_paractl p'], ['text', '.b_lineclamp2'], ['text', '.mc_vtvc_meta'], ['text', '.snippet']]],
+      button: { inset: { top: '10px', right: '5px' } },
+      command: { link: { redirects: [{ path: /^\/ck\/a/, params: ['u'], codec: 'base64url', stripPrefix: /^a[01]/i }] } },
+      pages: {
         images: {
-          match: /^https?:\/\/images\.|^https?:\/\/[^/?#]+\/images(?:[\/?#]|$)/i,
-          containers: 'li:has(div.iuscp), div.iuscp, div.imgpt',
-          titles: ['a.iusc@json:m.t', 'img[alt]@attr:alt'],
-          links: ['a.iusc@json:m.purl', 'a.iusc@json:m.murl'],
+          includeRegex: /^https?:\/\/images\.|^https?:\/\/[^/?#]+\/images(?:[/?#]|$)/i,
+          button: false,
+          root: 'li:has(div.iuscp), div.iuscp, div.imgpt',
+          url: ['or', [['json', 'm', 'purl', 'a.iusc'], ['json', 'm', 'murl', 'a.iusc'], ['attribute', 'href', 'a[href]']]],
+          title: ['or', [['json', 'm', 't', 'a.iusc'], ['attribute', 'alt', 'img[alt]']]],
+          command: { grid: { cell: 'li', items: ['div.iuscp, div.imgpt'], has: 'a.iusc', deepest: true }, dedupeBy: 'a.iusc' }
         },
         videos: {
-          match: /^https?:\/\/[^/?#]+\/videos?(?:[\/?#]|$)/i,
-          containers: 'div.mc_vtvc',
-          titles: ['.mc_vtvc_title'],
-          links: ['[ourl]@attr:ourl', 'a.mc_vtvc_link[href]', 'a[href]'],
+          includeRegex: /^https?:\/\/[^/?#]+\/videos?(?:[/?#]|$)/i,
+          root: 'div.mc_vtvc',
+          url: ['or', [['attribute', 'ourl', '[ourl]'], ['attribute', 'href', 'a.mc_vtvc_link[href]'], ['attribute', 'href', 'a[href]']]],
+          title: ['text', '.mc_vtvc_title'],
         },
         news: {
-          match: /^https?:\/\/[^/?#]+\/news(?:[\/?#]|$)/i,
-          containers: 'div.news-card, .newscard',
-          titles: ['a.title'],
-          links: ['a.title[href]', '[data-url]@attr:data-url', '[url]@attr:url', 'a[href]'],
-        },
+          includeRegex: /^https?:\/\/[^/?#]+\/news(?:[/?#]|$)/i,
+          root: 'div.news-card, .newscard',
+          url: ['or', [['attribute', 'href', 'a.title[href]'], ['attribute', 'data-url', '[data-url]'], ['attribute', 'url', '[url]'], ['attribute', 'href', 'a[href]']]],
+          title: ['text', 'a.title'],
+        }
       },
     },
     google_scholar: {
-      match: /^(?:www\.)?scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i,
-      containers: 'div.gs_r.gs_or.gs_scl',
-      titles: ['h3.gs_rt a', 'h3.gs_rt', '.gs_rt'],
-      snippets: ['.gs_rs'],
-      links: ['h3.gs_rt a[href]', 'a[href]'],
+      includeRegex: /^https?:\/\/(?:www\.)?scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})(?::\d+)?(?:[/?#]|$)/i,
+      priority: 10,
+      root: 'div.gs_r.gs_or.gs_scl',
+      url: ['or', [['attribute', 'href', 'h3.gs_rt a[href]'], ['attribute', 'href', 'a[href]']]],
+      title: ['or', [['text', 'h3.gs_rt a'], ['text', 'h3.gs_rt'], ['text', '.gs_rt']]],
+      snippet: ['text', '.gs_rs'],
+      command: { link: { redirects: [{ path: /\/scholar_url\/?$/, params: ['url'], codec: 'url' }] } },
     },
     google: {
-      match: /^https?:\/\/(?:(?:www|images|video|videos|search|encrypted|m)\.)?google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})(?::\d+)?\/(?:(?:search|webhp|imghp|videohp)(?:[/?#]|$)|[?#]|$)/i,
-      containers: 'div.g, div.MjjYud',
-      titles: ['h3', 'div[role="heading"]', '.LC20lb', '.DKV0Md', '.sXLaOe', '.c9DxTc', 'a h3'],
-      snippets: ['.st', '.VwiC3b', '.s3v9rd', '.IsZvec', '.lyLwlc', '.yXK7lf', '.ITZIwc'],
-      links: 'a[href]',
-      categories: {
+      includeRegex: /^https?:\/\/(?:(?:www|images|video|videos|search|encrypted|m)\.)?google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})(?::\d+)?\//i,
+      excludeRegex: /^https?:\/\/[^/]+\/(?!(?:search|webhp|imghp|videohp)(?:[/?#]|$)|[?#]|$)/i,
+      root: 'div.g, div.MjjYud:not(:has(#m-x-content)):not(:has(span.mgAbYb)):has(a[href])',
+      url: ['or', [['rejectOpaqueRedirect', ['attribute', 'href', 'a[href]']], ['rejectEngineHost', ['domainToUrl', ['text', '.lJQCTe, .XVWGNd, .R8BTeb, span.ob9lvb, .eip8Bb']]], ['rejectEngineHost', ['domainToUrl', ['text', 'cite']]], ['attribute', 'href', 'a[href]']]],
+      title: ['or', [['text', 'h3'], ['text', 'div[role="heading"]'], ['text', '.LC20lb'], ['text', '.DKV0Md'], ['text', '.sXLaOe'], ['text', '.c9DxTc'], ['text', 'a h3']]],
+      snippet: ['or', [['text', '.st'], ['text', '.VwiC3b'], ['text', '.s3v9rd'], ['text', '.IsZvec'], ['text', '.lyLwlc'], ['text', '.yXK7lf'], ['text', '.ITZIwc']]],
+      button: { scope: '#center_col', require: 'h3', requireSelf: 'g-img, .isv-r, .ivg-i', exclude: 'g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav, #extabar, .isv-r, .ivg-i, .image-section, g-img, .is-extra-container' },
+      command: {
+        skip: '.sys_algo_rs, .AlsoTry_M, [data-yga*="sugg"]',
+        group: { container: 'div.MjjYud', members: 'div.g, div.tF2Cxc, div.MjjYud' },
+        preserveSpace: { container: '#rcnt, #rso' },
+        blockedCss: ['.g.serh-blocked-visible, .MjjYud.serh-blocked-visible { background-color: var(--serh-blocked-bg) !important; border-radius: 8px !important; padding: 8px !important; transition: background 0.2s; }', '.serh-blocked-visible .yuRUbf, .serh-blocked-visible div[data-sokoban-container], .serh-blocked-visible div[data-snc] { background-color: transparent !important; background: transparent !important; background-image: none !important; }'],
+        link: {
+          redirects: [{ path: /^\/(?:url|goto)\/?$/, params: ['q', 'url', 'u'], codec: 'url' }, { path: /^(?:\/aclk|\/imgres|\/translate|\/pagead\/aclk)(?:\/|\?|$)/, params: ['adurl', 'imgurl', 'url', 'u', 'dest'], codec: 'url' }]
+        }
+      },
+      pages: {
         images: {
-          match: /^https?:\/\/images\.|\/(?:imghp|imgres)|[?&](?:tbm=(?:isch|imgs)|udm=(?:2|imgs))(?:&|#|$)/i,
-          containers: 'div.ivg-i, div[data-attrid="images universal"], div.isv-r',
-          titles: ['img[alt]@attr:alt', 'img@attr:alt'],
-          links: ['[data-lpage]@attr:data-lpage', 'a[href*="/imgres"]@query:href.imgurl', 'a[href]'],
+          includeRegex: /^https?:\/\/(?:images\.google\.|(?:www\.)?google\.[^/]+\/(?:imghp|imgres)(?:[/?#]|$))|[?&](?:tbm=(?:isch|imgs)|udm=(?:2|imgs))(?:&|#|$)/i,
+          button: false,
+          root: 'div.ivg-i, div[data-attrid="images universal"], div.isv-r',
+          url: ['or', [['attribute', 'data-lpage', '[data-lpage]'], ['queryParam', 'imgurl', ['attribute', 'href', 'a[href*="/imgres"]']], ['attribute', 'href', 'a[href]']]],
+          title: ['or', [['attribute', 'alt', 'img[alt]'], ['attribute', 'alt', 'img']]],
+          command: { grid: { anchor: 'grid', items: ['div.isv-r, div.ivg-i', 'div[data-attrid="images universal"]'] } }
         },
         videos: {
-          match: /^https?:\/\/videos?\.|\/videohp|[?&](?:tbm=(?:vid|vids)|udm=(?:7|vids))(?:&|#|$)/i,
-          containers: 'div.PmEWq',
-          titles: ['h3'],
-          links: ['[data-curl]@attr:data-curl', 'a[href]'],
+          includeRegex: /^https?:\/\/(?:videos?\.google\.|(?:www\.)?google\.[^/]+\/videohp(?:[/?#]|$))|[?&](?:tbm=(?:vid|vids)|udm=(?:7|vids))(?:&|#|$)/i,
+          root: 'div.PmEWq, div.MjjYud:has(a[href]):not(:has(div.PmEWq))',
+          url: ['or', [['attribute', 'data-curl', '[data-curl]'], ['attribute', 'href', 'a[href]']]],
         },
-        news: {
-          match: /[?&](?:tbm=nws|udm=12)(?:&|#|$)/i,
-          containers: 'a.aJWbwf, [data-news-cluster-id]',
-          links: [':scope[href]', 'a[href]'],
-        },
+        news: { includeRegex: /[?&](?:tbm=nws|udm=12)(?:&|#|$)/i, root: 'a.aJWbwf, [data-news-cluster-id]', url: ['or', [['attribute', 'href'], ['attribute', 'href', 'a[href]']]] }
       },
     },
     duckduckgo_lite: {
-      match: /^lite\.duckduckgo\.com$/i,
-      containers: 'tr:has(.result-link)',
-      titles: ['.result-link'],
-      snippets: ['.result-snippet'],
-      links: ['a.result-link[href]'],
-      extraElements: ['+ tr:not(:has(.result-link))', '+ tr:not(:has(.result-link)) + tr:not(:has(.result-link))', '+ tr:not(:has(.result-link)) + tr:not(:has(.result-link)) + tr:not(:has(.result-link))'],
+      includeRegex: /^https?:\/\/lite\.duckduckgo\.com(?::\d+)?(?:[/?#]|$)/i,
+      root: 'tr:has(.result-link)',
+      url: ['attribute', 'href', 'a.result-link[href]'],
+      title: ['text', '.result-link'],
+      snippet: ['text', '.result-snippet'],
+      extraSelector: '& + tr:not(:has(.result-link)), & + tr:not(:has(.result-link)) + tr:not(:has(.result-link)), & + tr:not(:has(.result-link)) + tr:not(:has(.result-link)) + tr:not(:has(.result-link))',
     },
     duckduckgo: {
-      match: /^(?:(?:www|html|start|m|safe|noai)\.)?(?:duckduckgo\.com|ddg\.gg)$/i,
-      containers: '[data-testid="result"], [data-testid="web-vertical"] li > article, .result, .web-result, .tile',
-      titles: ['a[data-testid="result-title-a"]', '.result__title', '.tile__title', '.tile--title__title', 'h2 a', 'a h2', 'h2'],
-      snippets: ['[data-testid="result-snippet"]', '[data-result="snippet"]', '.result__snippet'],
-      links: ['a[data-testid="result-extras-url-link"]', 'a[data-testid="result-title-a"]', 'h2 > a', '.result__url', 'a[href]'],
-      categories: {
+      includeRegex: /^https?:\/\/(?:(?:www|html|start|m|safe|noai)\.)?(?:duckduckgo\.com|ddg\.gg)(?::\d+)?(?:[/?#]|$)/i,
+      site: ['ddg', 'duckduckgo_lite'],
+      root: '[data-testid="result"], [data-testid="web-vertical"] li > article, .result, .web-result, .tile',
+      url: ['or', [['attribute', 'href'], ['attribute', 'href', 'a[data-testid="result-extras-url-link"]'], ['attribute', 'href', 'a[data-testid="result-title-a"]'], ['attribute', 'href', 'h2 > a'], ['attribute', 'href', '.result__url'], ['attribute', 'href', 'a[href]']]],
+      title: ['or', [['text', 'a[data-testid="result-title-a"]'], ['text', '.result__title'], ['text', '.tile__title'], ['text', '.tile--title__title'], ['text', 'h2 a'], ['text', 'a h2'], ['text', 'h2']]],
+      snippet: ['or', [['text', '[data-testid="result-snippet"]'], ['text', '[data-result="snippet"]'], ['text', '.result__snippet']]],
+      command: { link: { redirects: [{ path: /^\/l\/?$/, params: ['uddg'], codec: 'url' }] } },
+      pages: {
         images: {
-          match: /[?&]iax=images(?:&|#|$)/i,
-          containers: 'li:has(> figure), figure',
-          titles: ['img[alt]@attr:alt', 'img@attr:alt'],
+          includeRegex: /[?&]iax=images(?:&|#|$)/i,
+          button: false,
+          root: 'li:has(> figure), figure',
+          title: ['or', [['attribute', 'alt', 'img[alt]'], ['attribute', 'alt', 'img']]],
         },
-        videos: { match: /[?&]iax=videos?(?:&|#|$)/i },
-        news: { match: /[?&]iar=news(?:&|#|$)/i },
+        videos: { includeRegex: /[?&]iax=videos?(?:&|#|$)/i, root: '[data-testid="result"]:not(:has(article)), .result:not(:has(article)), a[href]:has(article)' },
+        news: { includeRegex: /[?&]iar=news(?:&|#|$)/i, root: '[data-testid="result"]:not(:has(article)), li > article:has(h2), article:not(:has(article)):has(h2)' }
       },
     },
     yandex: {
-      match: /^(?:(?:www|m)\.)?(?:ya\.ru|yandex\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,}))$/i,
-      containers: 'div.Organic',
-      titles: ['.OrganicTitle'],
-      snippets: ['.OrganicText'],
-      links: ['.OrganicTitle a', '.Path-Item a', 'a.Link', 'a[href]'],
-      categories: {
+      includeRegex: /^https?:\/\/(?:(?:www|m)\.)?(?:ya\.ru|yandex\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,}))(?::\d+)?(?:[/?#]|$)/i,
+      root: 'div.Organic',
+      url: ['or', [['attribute', 'href', '.OrganicTitle a'], ['attribute', 'href', '.Path-Item a'], ['attribute', 'href', 'a.Link'], ['attribute', 'href', 'a[href]']]],
+      title: ['text', '.OrganicTitle'],
+      snippet: ['text', '.OrganicText'],
+      button: { inset: { top: '10px', right: '5px' }, scope: '.main__content, .content, [class*="z6OLDwO9"]' },
+      command: { group: { container: 'parent', members: 'div.Organic' } },
+      pages: {
         images: {
-          match: /^https?:\/\/images\.|^https?:\/\/[^/?#]+\/images(?:[\/?#]|$)/i,
-          containers: '.JustifierRowLayout-Item, div.SerpItem',
-          titles: ['img[alt]@attr:alt', 'img@attr:alt'],
-          links: ['a[href*="img_url="]@query:href.img_url', 'a[href]'],
+          includeRegex: /^https?:\/\/images\.|^https?:\/\/[^/?#]+\/images(?:[/?#]|$)/i,
+          button: false,
+          root: '.JustifierRowLayout-Item, div.SerpItem',
+          url: ['or', [['queryParam', 'img_url', ['attribute', 'href', 'a[href*="img_url="]']], ['attribute', 'href', 'a[href]']]],
+          title: ['or', [['attribute', 'alt', 'img[alt]'], ['attribute', 'alt', 'img']]],
         },
-        videos: { match: /^https?:\/\/[^/?#]+\/videos?(?:[\/?#]|$)/i },
-        news: { match: /^https?:\/\/[^/?#]+\/news(?:[\/?#]|$)/i },
+        videos: { includeRegex: /^https?:\/\/[^/?#]+\/videos?(?:[/?#]|$)/i },
+        news: { includeRegex: /^https?:\/\/[^/?#]+\/news(?:[/?#]|$)/i }
       },
     },
     brave: {
-      match: /^search\.brave\.com$/i,
-      containers: '.snippet[data-type="web"], .snippet[data-type="news"], .snippet[data-type="videos"], .image-wrapper',
-      titles: ['.title', '.snippet-title', '.img-title'],
-      snippets: ['.generic-snippet .content', '.generic-snippet', '.line-clamp-dynamic', '.snippet-description', '.description'],
-      links: ['a[href]'],
-      categories: {
+      includeRegex: /^https?:\/\/(?:safe\.)?search\.brave\.com(?::\d+)?(?:[/?#]|$)/i,
+      root: '.snippet[data-type="web"], .snippet[data-type="news"], .snippet[data-type="videos"], .image-wrapper',
+      url: ['attribute', 'href', 'a[href]'],
+      title: ['or', [['text', '.title'], ['text', '.snippet-title'], ['text', '.img-title']]],
+      snippet: ['or', [['text', '.generic-snippet .content'], ['text', '.generic-snippet'], ['text', '.line-clamp-dynamic'], ['text', '.snippet-description'], ['text', '.description']]],
+      button: { inset: { top: '10px', right: '5px' } },
+      pages: {
         images: {
-          match: /search\.brave\.com\/images(?:[\/?]|$)/i,
-          containers: 'button.image-result, .image-wrapper',
-          titles: ['.image-metadata-title', '.img-title'],
-          links: ['img[src*="imgs.search.brave.com"]@b64url', 'a[href]'],
-        },
+          includeRegex: /search\.brave\.com\/images(?:[/?]|$)/i,
+          button: false,
+          root: 'button.image-result',
+          url: ['or', [['base64Url', ['src', 'data-src'], 'img[src*="imgs.search.brave.com"]'], ['attribute', 'href', 'a[href]']]],
+          title: ['or', [['text', '.image-metadata-title'], ['text', '.img-title'], ['attribute', 'alt', 'img[alt]']]],
+        }
       },
     },
     ecosia: {
-      match: /^(?:(?:www|m)\.)?ecosia\.org$/i,
-      containers: 'article[data-test-id="organic-result"], article[data-test-id="videos-result"], article[data-test-id="news-result"], article[data-test-id="images-result"]',
-      titles: ['h2[data-test-id="result-title"]', '.result-title__heading', 'h2.image-result__details-title', 'h2'],
-      snippets: ['[data-test-id="web-result-description"]', '[data-test-id="news-result-description"]', '.web-result__description', '.news-result__description', '.video-result__description', '.result__description'],
-      links: ['a[data-test-id="result-link"][href]', 'a.image-result__details-link[href]', 'a.image-result__link[href]', 'a[href]'],
+      includeRegex: /^https?:\/\/(?:(?:www|m)\.)?ecosia\.org(?::\d+)?(?:[/?#]|$)/i,
+      root: 'article[data-test-id="organic-result"], article[data-test-id="videos-result"], article[data-test-id="news-result"], article[data-test-id="images-result"], div.result, article.result',
+      url: ['or', [['attribute', 'href', 'a[data-test-id="result-link"][href]'], ['attribute', 'href', 'a.result__link[href]'], ['attribute', 'href', 'a.image-result__details-link[href]'], ['attribute', 'href', 'a.image-result__link[href]'], ['attribute', 'href', 'a[href]']]],
+      title: ['or', [['text', 'h2[data-test-id="result-title"]'], ['text', '.result-title__heading'], ['text', 'h2.image-result__details-title'], ['text', 'h2']]],
+      snippet: ['or', [['text', '[data-test-id="web-result-description"]'], ['text', '[data-test-id="news-result-description"]'], ['text', '.web-result__description'], ['text', '.news-result__description'], ['text', '.video-result__description'], ['text', '.result__description']]],
     },
     startpage: {
-      match: /^(?:(?:www|eu|m)\.)?startpage\.com$/i,
-      containers: 'div.result, .w-gl__result',
-      titles: ['a.result-link', 'h2.wgl-title', 'a.wgl-site-title', '.w-gl__result-title'],
-      snippets: ['p.description', '.result__main > p', '.w-gl__description'],
-      links: ['a.result-link[href]', 'a.wgl-site-title[href]', 'a.wgl-display-url[href]', 'a.display-url[href]', '.w-gl__result-title[href]', 'a[href]'],
-      categories: {
-        images: { match: /[?&]cat=images(?:&|#|$)/i },
-        videos: { match: /[?&]cat=video(?:&|#|$)/i },
-        news: { match: /[?&]cat=news(?:&|#|$)/i },
-      },
+      includeRegex: /^https?:\/\/(?:(?:www|eu|m)\.)?startpage\.com(?::\d+)?(?:[/?#]|$)/i,
+      root: 'div.result, .w-gl__result',
+      url: ['or', [['attribute', 'href', 'a.result-link[href]'], ['attribute', 'href', 'a.wgl-site-title[href]'], ['attribute', 'href', 'a.wgl-display-url[href]'], ['attribute', 'href', 'a.display-url[href]'], ['attribute', 'href', '.w-gl__result-title[href]'], ['attribute', 'href', 'a[href]']]],
+      title: ['or', [['text', 'a.result-link'], ['text', 'h2.wgl-title'], ['text', 'a.wgl-site-title'], ['text', '.w-gl__result-title']]],
+      snippet: ['or', [['text', 'p.description'], ['text', '.result__main > p'], ['text', '.w-gl__description']]],
+      pages: { images: { includeRegex: /[?&]cat=images(?:&|#|$)/i, button: false }, videos: { includeRegex: /[?&]cat=video(?:&|#|$)/i }, news: { includeRegex: /[?&]cat=news(?:&|#|$)/i } },
     },
     yahoo_japan: {
-      match: /^(?:(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.co\.jp|https?:\/\/news\.yahoo\.co\.jp\/search(?:[\/?#].*)?)$/i,
-      containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo, #contents section:has(a h3)',
-      titles: ['h3', '.s-title', 'h2 a', 'a h2', '.b_title', '.title'],
-      snippets: ['.sw-Card__description', '.sw-Card__snippet', '.sw-Text__body', 'p', '.b_caption p', '.b_snippet', '.b_paractl p'],
-      links: ['a:has(> h3)', 'a.sw-Card__titleInner[href]', 'a.sw-Card__space', 'h3 a', '.s-title a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
-      categories: {
+      includeRegex: /^https?:\/\/(?:(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.co\.jp(?::\d+)?(?:[/?#]|$)|news\.yahoo\.co\.jp(?::\d+)?\/search(?:[/?#].*)?)/i,
+      matches: ['*://*.search.yahoo.co.jp/*', '*://*.news.yahoo.co.jp/*'],
+      priority: 10,
+      site: ['yahoo-japan'],
+      root: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo, #contents section:has(a h3)',
+      url: ['or', [['attribute', 'href', 'a:has(> h3)'], ['attribute', 'href', 'a.sw-Card__titleInner[href]'], ['attribute', 'href', 'a.sw-Card__space'], ['attribute', 'href', 'h3 a'], ['attribute', 'href', '.s-title a'], ['attribute', 'href', '.s-title'], ['attribute', 'href', '.sw-Card__title a'], ['attribute', 'href', 'a[data-ylk*="slk:title"]'], ['attribute', 'href', 'a.ac-algo'], ['attribute', 'href', 'a[data-y-link-id]']]],
+      title: ['or', [['text', 'h3'], ['text', '.s-title'], ['text', 'h2 a'], ['text', 'a h2'], ['text', '.b_title'], ['text', '.title']]],
+      snippet: ['or', [['text', '.sw-Card__description'], ['text', '.sw-Card__snippet'], ['text', '.sw-Text__body'], ['text', 'p'], ['text', '.b_caption p'], ['text', '.b_snippet'], ['text', '.b_paractl p']]],
+      button: { inset: { top: '10px', right: '5px' } },
+      command: { skip: '.sys_algo_rs, .AlsoTry_M, [data-yga*="sugg"]', link: { redirects: [{ path: /^\/(?:r|rd)(?:\/|$)|ru=|\/\*/i, pathValue: /(?:^|\/)RU=([\s\S]*?)(?=(?:\/(?:rk|rs|rv|ro|re|rh|rt|_ylt|_ylu)=|\/$|$))/i, hrefSuffix: /\/\*+-?(https?(?::|%3A)[\s\S]*)$/i, params: ['u', 'url', 'target', 'dest', 'dst', 'r', 'ru'], codec: 'pattern' }] } },
+      pages: {
         images: {
-          match: /^https?:\/\/images\.|\/image\/search(?:[\/?#]|$)/i,
-          containers: '.sw-ThumbnailGrid__columnItem, #isr div:has(> a[data-cl-params]), a.sw-Thumbnail',
-          titles: ['.sw-ThumbnailGrid__title', 'img[alt]@attr:alt', 'img@attr:alt'],
-          snippets: ['.sw-ThumbnailGrid__domain'],
-          links: ['a.sw-Thumbnail@clparams:targurl', 'a@clparams:targurl', 'a[href]'],
+          includeRegex: /^https?:\/\/(?:images\.[^/]*yahoo\.co\.jp|(?:[a-z0-9-]+\.)*search\.yahoo\.co\.jp\/image\/search(?:[/?#]|$))/i,
+          button: false,
+          root: '.sw-ThumbnailGrid__columnItem, #isr div:has(> a[data-cl-params]), a.sw-Thumbnail',
+          url: ['or', [['regexInclude', /^https?:\/\//i, ['regexSubstitute', /^(?:[\s\S]*?;)?targurl:\s*(?:https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^;]*)?)(?:;[\s\S]*)?$/i, 'https://$1', ['attribute', 'data-cl-params', 'a.sw-Thumbnail']]], ['regexInclude', /^https?:\/\//i, ['regexSubstitute', /^(?:[\s\S]*?;)?targurl:\s*(?:https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^;]*)?)(?:;[\s\S]*)?$/i, 'https://$1', ['attribute', 'data-cl-params', 'a']]], ['attribute', 'href', 'a[href]']]],
+          title: ['or', [['text', '.sw-ThumbnailGrid__title'], ['attribute', 'alt', 'img[alt]'], ['attribute', 'alt', 'img']]],
+          snippet: ['text', '.sw-ThumbnailGrid__domain'],
         },
-        videos: { match: /^https?:\/\/videos?\.|\/video\/search(?:[\/?#]|$)/i },
+        videos: { includeRegex: /^https?:\/\/(?:videos?\.[^/]*yahoo\.co\.jp|(?:[a-z0-9-]+\.)*search\.yahoo\.co\.jp\/video\/search(?:[/?#]|$))/i, root: '.Algo, a.sw-ListItem__wrapper[href], section.sw-ListItem', url: ['or', [['regexInclude', /^https?:\/\//i, ['regexSubstitute', /^(?:[\s\S]*?;)?targurl:\s*(?:https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^;]*)?)(?:;[\s\S]*)?$/i, 'https://$1', ['attribute', 'data-cl-params', 'a']]], ['attribute', 'href', 'a[href]']]], title: ['or', [['text', '.sw-ListItem__title'], ['text', 'h3'], ['text', '.s-title']]] },
         news: {
-          match: /^https?:\/\/news\./i,
-          containers: 'li:has(a[href*="/articles/"])',
-          titles: ['div.newsFeed_item_body > div:nth-child(2) > div:nth-child(1)', 'p', 'a[href*="/articles/"]'],
-          snippets: ['p'],
-          links: ['a[href*="/articles/"]'],
-        },
+          includeRegex: /^https?:\/\/news\./i,
+          root: 'li:has(a[href*="/articles/"])',
+          url: ['attribute', 'href', 'a[href*="/articles/"]'],
+          title: ['or', [['text', 'div.newsFeed_item_body > div:nth-child(2) > div:nth-child(1)'], ['text', 'p'], ['text', 'a[href*="/articles/"]']]],
+          snippet: ['text', 'p'],
+        }
       },
     },
     yahoo: {
-      match: /^(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i,
-      containers: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo, #web ol > li > div',
-      titles: ['h3', '.s-title', 'h2 a', 'a h2', '.b_title', '.title'],
-      snippets: ['.sw-Card__description', '.sw-Card__snippet', '.sw-Text__body', 'p', '.b_caption p', '.b_snippet', '.b_paractl p'],
-      links: ['a:has(> h3)', 'a.sw-Card__titleInner[href]', 'a.sw-Card__space', 'h3 a', '.s-title a', '.s-title', '.sw-Card__title a', 'a[data-ylk*="slk:title"]', 'a.ac-algo', 'a[data-y-link-id]'],
-      categories: {
+      includeRegex: /^https?:\/\/(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)(?::\d+)?(?:[/?#]|$)/i,
+      root: '.sw-Card.Algo, li.b_algo, div.b_algo, #web .algo, .algo-sr, .richAlgo, #web ol > li > div',
+      url: ['or', [['attribute', 'href', 'a:has(> h3)'], ['attribute', 'href', 'a.sw-Card__titleInner[href]'], ['attribute', 'href', 'a.sw-Card__space'], ['attribute', 'href', 'h3 a'], ['attribute', 'href', '.s-title a'], ['attribute', 'href', '.s-title'], ['attribute', 'href', '.sw-Card__title a'], ['attribute', 'href', 'a[data-ylk*="slk:title"]'], ['attribute', 'href', 'a.ac-algo'], ['attribute', 'href', 'a[data-y-link-id]']]],
+      title: ['or', [['text', 'h3'], ['text', '.s-title'], ['text', 'h2 a'], ['text', 'a h2'], ['text', '.b_title'], ['text', '.title']]],
+      snippet: ['or', [['text', '.sw-Card__description'], ['text', '.sw-Card__snippet'], ['text', '.sw-Text__body'], ['text', 'p'], ['text', '.b_caption p'], ['text', '.b_snippet'], ['text', '.b_paractl p']]],
+      button: { inset: { top: '10px', right: '5px' } },
+      command: { skip: '.sys_algo_rs, .AlsoTry_M, [data-yga*="sugg"]', link: { redirects: [{ path: /^\/(?:r|rd)(?:\/|$)|ru=|\/\*/i, pathValue: /(?:^|\/)RU=([\s\S]*?)(?=(?:\/(?:rk|rs|rv|ro|re|rh|rt|_ylt|_ylu)=|\/$|$))/i, hrefSuffix: /\/\*+-?(https?(?::|%3A)[\s\S]*)$/i, params: ['u', 'url', 'target', 'dest', 'dst', 'r', 'ru'], codec: 'pattern' }] } },
+      pages: {
         images: {
-          match: /^https?:\/\/images\.|\/search\/images(?:[\/?#]|$)/i,
-          containers: '.sw-ThumbnailGrid__columnItem, #isr div:has(> a[data-cl-params]), a.sw-Thumbnail',
-          titles: ['.sw-ThumbnailGrid__title', 'img[alt]@attr:alt', 'img@attr:alt'],
-          snippets: ['.sw-ThumbnailGrid__domain'],
-          links: ['a.sw-Thumbnail@clparams:targurl', 'a@clparams:targurl', 'a[href]'],
+          includeRegex: /^https?:\/\/(?:images\.[^/]*yahoo\.[^/]+|(?:[a-z0-9-]+\.)*search\.yahoo\.[^/]+\/search\/images(?:[/?#]|$))/i,
+          button: false,
+          root: '.sw-ThumbnailGrid__columnItem, #isr div:has(> a[data-cl-params]), a.sw-Thumbnail',
+          url: ['or', [['regexInclude', /^https?:\/\//i, ['regexSubstitute', /^(?:[\s\S]*?;)?targurl:\s*(?:https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^;]*)?)(?:;[\s\S]*)?$/i, 'https://$1', ['attribute', 'data-cl-params', 'a.sw-Thumbnail']]], ['regexInclude', /^https?:\/\//i, ['regexSubstitute', /^(?:[\s\S]*?;)?targurl:\s*(?:https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^;]*)?)(?:;[\s\S]*)?$/i, 'https://$1', ['attribute', 'data-cl-params', 'a']]], ['attribute', 'href', 'a[href]']]],
+          title: ['or', [['text', '.sw-ThumbnailGrid__title'], ['attribute', 'alt', 'img[alt]'], ['attribute', 'alt', 'img']]],
+          snippet: ['text', '.sw-ThumbnailGrid__domain'],
         },
-        videos: { match: /^https?:\/\/videos?\.|\/video\/search(?:[\/?#]|$)/i },
-        news: { match: /^https?:\/\/news\./i },
+        videos: { includeRegex: /^https?:\/\/(?:videos?\.[^/]*yahoo\.[^/]+|(?:[a-z0-9-]+\.)*search\.yahoo\.[^/]+\/search\/video(?:[/?#]|$))/i },
+        news: { includeRegex: /^https?:\/\/news\./i }
       },
     },
     so360: {
-      match: /^(?:www\.|m\.)?so\.com$/i,
-      containers: 'li.res-list, div.res-list',
-      titles: ['h3.res-title a', 'h3 a', '.res-title', '.g-title a', '.g-title'],
-      snippets: ['.res-desc', '.res-list-summary', '.mh-desc', '.summary'],
-      links: ['h3 a[href]', 'a.alink[href]', '.g-linkinfo a[href]', 'a[href]'],
+      includeRegex: /^https?:\/\/(?:(?:www|m|news)\.)?so\.com(?::\d+)?(?:[/?#]|$)/i,
+      root: 'li.res-list:not(.mso-recommend-card):not(.guide-rel), div.res-list:not(.mso-recommend-card):not(.guide-rel)',
+      url: ['or', [['attribute', 'href', 'h3 a[href]'], ['attribute', 'href', 'a:has(> h3)[href]'], ['attribute', 'href', 'a.alink[href]'], ['attribute', 'href', '.g-linkinfo a[href]'], ['attribute', 'href', 'a[href]']]],
+      title: ['or', [['text', 'h3.res-title a'], ['text', 'h3 a'], ['text', '.res-title'], ['text', '.g-title a'], ['text', '.g-title']]],
+      snippet: ['or', [['text', '.res-desc'], ['text', '.res-list-summary'], ['text', '.mh-desc'], ['text', '.summary']]],
+      command: {
+        link: {
+          redirects: [{ path: /^\/jump\/?$/, params: ['u', 'url'], codec: 'url' }, { path: /(?:\/tc\b|\/link\b)/, params: ['url'], codec: 'url' }],
+          directAttrs: ['data-mdurl', 'data-url', 'linkurl'],
+          directScope: '.res-list, .vrwrap, .reactResult',
+          directProtocol: 'https'
+        }
+      },
     },
     sogou: {
-      match: /^(?:www\.|m\.|wap\.)?sogou\.com$/i,
-      containers: 'div.vrwrap:has(h3), div.reactResult:has(h3), div.reactResult:has(.vr-title), div.vrResult',
-      titles: ['h3.vr-title a', '.vr-title a', 'a[class*="saTitle"]', '.vr-title', 'h3.vr-tit', 'h3 a', 'h3'],
-      snippets: ['.space-txt', '.star-wiki', '.str_info', 'p.sa-text-clamp3', '[class*="saText"]'],
-      links: ['h3.vr-title a[href]', '.vr-title a[href]', 'a[class*="saTitle"][href]', 'h3 a[href]', 'a.citeLinkClass[href]', 'a[href]'],
+      includeRegex: /^https?:\/\/(?:(?:www|m|wap|news)\.)?sogou\.com(?::\d+)?(?:[/?#]|$)/i,
+      root: 'div.vrwrap:has(h3), div.reactResult:has(h3), div.reactResult:has(.vr-title), div.vrResult:has(h3)',
+      url: ['or', [['attribute', 'href', 'h3.vr-title a[href]'], ['attribute', 'href', '.vr-title a[href]'], ['attribute', 'href', 'a[class*="saTitle"][href]'], ['attribute', 'href', 'a.citeLinkClass[href]'], ['regexExclude', /^(?:javascript:|void\s*\()/i, ['attribute', 'href', 'a:has(> h3)[href]']], ['regexExclude', /^(?:javascript:|void\s*\()/i, ['attribute', 'href', 'a:has(h3)[href]']], ['regexExclude', /^(?:javascript:|void\s*\()/i, ['attribute', 'href', 'h3 a[href]']], ['regexExclude', /^(?:javascript:|void\s*\()/i, ['attribute', 'href', 'a[href]']]]],
+      title: ['or', [['text', 'h3.vr-title a'], ['text', '.vr-title a'], ['text', 'a[class*="saTitle"]'], ['text', '.vr-title'], ['text', 'h3.vr-tit'], ['text', 'h3 a'], ['text', 'h3']]],
+      snippet: ['or', [['text', '.space-txt'], ['text', '.star-wiki'], ['text', '.str_info'], ['text', 'p.sa-text-clamp3'], ['text', '[class*="saText"]']]],
+      command: {
+        link: {
+          redirects: [{ path: /(?:\/tc\b|\/jump\b|\/link\b)/, params: ['url'], codec: 'url' }],
+          directAttrs: ['data-mdurl', 'data-url', 'linkurl'],
+          directScope: '.res-list, .vrwrap, .reactResult',
+          directProtocol: 'https'
+        }
+      },
     },
     toutiao: {
-      match: /^(?:so|m)\.toutiao\.com$/i,
-      containers: '.result-content',
-      titles: ['a[href*="/search/jump"]', '.l-card-title a', '.l-card-title', '.cs-header a'],
-      snippets: ['.cs-card-content .text-regular', '.cs-source', '.l-paragraph', '.l-source'],
-      links: ['a[href*="/search/jump"]', 'a.l-card-title[href]', 'a[href]:not([href*="/search?"])', '.cs-header a[href]'],
-      categories: {
+      includeRegex: /^https?:\/\/(?:so|m)\.toutiao\.com(?::\d+)?(?:[/?#]|$)/i,
+      root: '.result-content',
+      url: ['or', [['attribute', 'href', 'a[href*="/search/jump"]'], ['attribute', 'href', 'a.l-card-title[href]'], ['attribute', 'href', 'a[href]:not([href*="/search?"])'], ['attribute', 'href', '.cs-header a[href]']]],
+      title: ['or', [['text', 'a[href*="/search/jump"]'], ['text', '.l-card-title a'], ['text', '.l-card-title'], ['text', '.cs-header a']]],
+      snippet: ['or', [['text', '.cs-card-content .text-regular'], ['text', '.cs-source'], ['text', '.l-paragraph'], ['text', '.l-source']]],
+      command: { link: { redirects: [{ path: /^\/search\/jump\/?$/, params: ['url'], codec: 'url', chain: { hostSelf: true, param: 'h5_url' } }] } },
+      pages: {
         images: {
-          match: /[?&]pd=atlas(?:&|#|$)/i,
-          containers: '.l-waterfallY-item',
-          titles: ['img[alt]@attr:alt'],
-          links: ['a[href*="/search/jump"]', 'a[href]'],
+          includeRegex: /[?&]pd=atlas(?:&|#|$)/i,
+          button: false,
+          root: '.l-waterfallY-item',
+          url: ['or', [['jsonPath', '0.original_page_url', ['jsonPath', '', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]]], ['attribute', 'href', 'a[href*="/search/jump"]'], ['attribute', 'href', 'a[href]']]],
+          title: ['or', [['attribute', 'alt', 'img[alt]'], ['jsonPath', '0.text', ['jsonPath', '', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]]]]],
+          snippet: ['jsonPath', '0.text', ['jsonPath', '', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]]],
         },
-        news: { match: /[?&]pd=information(?:&|#|$)/i },
-        videos: { match: /[?&]pd=[a-z_]*video/i },
+        news: { includeRegex: /[?&]pd=information(?:&|#|$)/i },
+        videos: { includeRegex: /[?&]pd=[a-z_]*video/i }
       },
     },
     quark: {
-      match: /^(?:(?:www|m|so)\.)?quark\.cn$|^(?:(?:quark|yz)\.)?(?:(?:www|m)\.)?sm\.cn$/i,
-      containers: 'div.qk-card',
-      titles: ['.qk-title-text', '.qk-title', 'a.qk-link-wrapper'],
-      snippets: ['.qk-paragraph-text', '.qk-paragraph'],
-      links: ['.qk-title a[href]', 'a.qk-link-wrapper[href]', 'a[href]'],
+      includeRegex: /^https?:\/\/(?:(?:www|m|so)\.)?quark\.cn(?::\d+)?(?:[/?#]|$)|^https?:\/\/(?:(?:quark|yz)\.)?(?:(?:www|m)\.)?sm\.cn(?::\d+)?(?:[/?#]|$)/i,
+      root: 'div.qk-card',
+      url: ['or', [['attribute', 'href', '.qk-title a[href]'], ['attribute', 'href', 'a.qk-link-wrapper[href]'], ['attribute', 'href', 'a[href]']]],
+      title: ['or', [['text', '.qk-title-text'], ['text', '.qk-title'], ['text', 'a.qk-link-wrapper']]],
+      snippet: ['or', [['text', '.qk-paragraph-text'], ['text', '.qk-paragraph']]],
     },
     github: {
-      match: /^https?:\/\/(?:www\.)?github\.com\/search\/?(?:[?#]|$)/i,
-      containers: "[data-testid='results-list'] > div",
-      titles: ["h3 a[data-component='Link']", 'h3 a', 'h3'],
-      snippets: ['h3 ~ div', 'h3 + div', 'article .description'],
-      links: ["h3 a[href]"],
+      includeRegex: /^https?:\/\/(?:www\.)?github\.com\/search\/?(?:[?#]|$)/i,
+      matches: ['*://*.github.com/search*'],
+      root: '[data-testid=\'results-list\'] > div',
+      url: ['or', [['attribute', 'href', '.search-title a[href]'], ['attribute', 'href', 'h3 a[href]']]],
+      title: ['or', [['text', '.search-title a'], ['text', 'h3 a[data-component=\'Link\']'], ['text', 'h3 a'], ['text', 'h3']]],
+      snippet: ['or', [['text', 'h3 ~ div'], ['text', 'h3 + div'], ['text', 'article .description']]],
       button: false,
     },
     greasyfork: {
-      match: /^https?:\/\/(?:www\.)?greasyfork\.org\/(?:[a-z]{2}(?:-[a-z0-9]{2,4})?\/)?scripts(?:\/(?:by-site\/[^\/?#]*|language\/[a-z0-9+-]+)\/?)?(?:[?#]|$)/i,
-      containers: '#browse-script-list li[data-script-id]',
-      titles: ['a.script-link', 'article h2 a'],
-      snippets: ['.script-description', 'article .description'],
-      links: ['a.script-link[href]'],
+      includeRegex: /^https?:\/\/(?:www\.)?greasyfork\.org\/(?:[a-z]{2}(?:-[a-z0-9]{2,4})?\/)?scripts(?:\/(?:by-site\/[^/?#]*|language\/[a-z0-9+-]+)\/?)?(?:[?#]|$)/i,
+      matches: ['*://*.greasyfork.org/*'],
+      root: '#browse-script-list li[data-script-id]',
+      url: ['attribute', 'href', 'a.script-link[href]'],
+      title: ['or', [['text', 'a.script-link'], ['text', 'article h2 a']]],
+      snippet: ['or', [['text', '.script-description'], ['text', 'article .description']]],
       button: false,
     },
     other: {
-      containers: '',
-      titles: [],
-      snippets: [],
-      links: 'a[href]',
+      root: '',
+      url: ['attribute', 'href', 'a[href]'],
+      title: ['text', 'h3'],
+      snippet: ['text', 'p'],
+      button: { inset: { top: '10px', right: '35px' }, exclude: 'header, [role="navigation"], [role="tablist"], [role="search"]' },
     }
   };
 
-  let activeSelectors = null; let _selectorStoreSignature = null; let _configStoreSignature = null;
+  let activeSelectors = null, _redirectSpecsCache = new Map(); let _selectorStoreSignature = null; let _configStoreSignature = null; let _siteAliasMap = null;
 
+  function splitTopLevelSelectorList(selector) {
+    const out = []; let quote = ''; let depth = 0; let start = 0;
+    for (let i = 0; i < selector.length; i++) {
+      const c = selector[i];
+      if (quote) { if (c === '\\') i++; else if (c === quote) quote = ''; continue; }
+      if (c === '"' || c === "'") { quote = c; continue; }
+      if (c === '[' || c === '(') depth++;
+      else if ((c === ']' || c === ')') && depth) depth--;
+      else if (c === ',' && !depth) { out.push(selector.slice(start, i)); start = i + 1; }
+    }
+    out.push(selector.slice(start));
+    return out;
+  }
   function normalizeSelectorList(value) {
-    if (Array.isArray(value)) return value.filter(s => typeof s === 'string' && s); if (typeof value === 'string' && value) return [value]; return [];
+    const raw = Array.isArray(value) ? value : (typeof value === 'string' && value ? [value] : []);
+    const out = [];
+    for (const item of raw) {
+      if (typeof item !== 'string' || !item) continue;
+      for (const part of splitTopLevelSelectorList(item)) {
+        let s = part.trim();
+        if (s.startsWith('&')) s = s.slice(1).trim();
+        if (s) out.push(s);
+      }
+    }
+    return out;
+  }
+  function normalizeCssRules(value) {
+    const raw = Array.isArray(value) ? value : (typeof value === 'string' && value ? [value] : []);
+    return raw.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim());
+  }
+  function normalizePreserveSpace(value) {
+    const height = (h) => { if (h === undefined || h === null || h === true) return '60vh'; if (typeof h === 'number' && isFinite(h) && h >= 0) return h + 'px'; if (typeof h === 'string' && h.trim()) return h.trim(); return null; };
+    if (value === true) return { height: '60vh' };
+    if (typeof value === 'number' || typeof value === 'string') { const h = height(value); return h ? { height: h } : null; }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const h = height(value.height); if (!h) return null;
+    const out = { height: h };
+    if (value.container !== undefined) { if (typeof value.container !== 'string' || !value.container.trim()) return null; out.container = value.container.trim(); }
+    return out;
+  }
+  function preserveSpaceCss(def) {
+    const ps = normalizePreserveSpace(def && def.preserveSpace);
+    if (!ps) return '';
+    if (!ps.container) { dbgWarn('preserveSpace: 未设置 container，占位规则已忽略'); return ''; }
+    return ps.container + ' { min-height: ' + ps.height + '; }';
+  }
+  function normalizeSiteList(value) {
+    const raw = Array.isArray(value) ? value : (typeof value === 'string' ? value.split(/[\s,]+/) : []);
+    return raw.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim());
+  }
+  function normalizeMatchPatterns(value) {
+    const raw = Array.isArray(value) ? value : (typeof value === 'string' && value ? [value] : []);
+    const list = raw.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim());
+    return list.length ? list : undefined;
   }
   function hasTopLevelComma(selector) {
-    let quote = ''; let depth = 0;
+    let quote = '', depth = 0;
     for (let i = 0; i < selector.length; i++) {
       const c = selector[i];
       if (quote) { if (c === '\\') i++; else if (c === quote) quote = ''; continue; }
@@ -347,37 +452,207 @@
     }
     return false;
   }
+  function commandSelectors(cmd, out = []) {
+    if (!Array.isArray(cmd) || typeof cmd[0] !== 'string') return out;
+    const t = cmd[0], a = cmd[1], b = cmd[2], c = cmd[3];
+    if (t === 'text' && typeof a === 'string') out.push(a);
+    else if (t === 'attribute' && typeof b === 'string') out.push(b);
+    else if (t === 'property' && typeof b === 'string') out.push(b);
+    else if (t === 'json' && typeof c === 'string') out.push(c);
+    else if (t === 'base64Url') { if (b !== undefined) commandSelectors(b, out); }
+    else if (t === 'queryParam') commandSelectors(b, out);
+    else if (t === 'rejectEngineHost' || t === 'domainToUrl' || t === 'domainToURL' || t === 'normalizeUrl' || t === 'rejectOpaqueRedirect') commandSelectors(a, out);
+    else if (t === 'jsonPath') commandSelectors(b, out);
+    else if (t === 'or' && Array.isArray(a)) a.forEach((x) => commandSelectors(x, out));
+    else if (t === 'regexInclude' || t === 'regexExclude') commandSelectors(b, out);
+    else if (t === 'regexSubstitute') commandSelectors(c, out);
+    return out;
+  }
 
   const builtinSelectorOf = (key) => (SELECTORS[key] && typeof SELECTORS[key] === 'object') ? SELECTORS[key] : {};
-  const CATEGORY_FIELDS = ['containers', 'titles', 'snippets', 'links', 'extraElements', 'button', 'match'];
-  function normalizeCategoryMap(cats) {
-    if (!cats || typeof cats !== 'object' || Array.isArray(cats)) return undefined;
+  const PAGE_FIELDS = ['root', 'url', 'title', 'snippet', 'extraSelector', 'button', 'skip', 'group', 'grid', 'dedupeBy', 'link', 'blockedCss', 'preserveSpace', 'site'];
+  const CMD_TYPES = new Set(['or', 'attribute', 'property', 'text', 'const', 'regexInclude', 'regexExclude', 'regexSubstitute', 'domainToUrl', 'domainToURL', 'rejectEngineHost', 'normalizeUrl', 'rejectOpaqueRedirect', 'jsonPath', 'queryParam', 'json', 'base64Url']);
+  function isCommandArray(v) { return Array.isArray(v) && typeof v[0] === 'string' && CMD_TYPES.has(v[0]); }
+  function simpleToCommand(v, mode) {
+    if (isCommandArray(v)) return v;
+    const list = Array.isArray(v) ? v.filter((s) => typeof s === 'string' && s) : (typeof v === 'string' && v ? [v] : []);
+    if (!list.length) return null;
+    const cmds = list.map((sel) => mode === 'link' ? ((sel === ':scope' || sel === ':scope[href]') ? ['attribute', 'href'] : ['attribute', 'href', sel]) : ['text', sel]);
+    return cmds.length === 1 ? cmds[0] : ['or', cmds];
+  }
+  function normalizeLink(link) {
+    if (!link || typeof link !== 'object' || Array.isArray(link)) return undefined;
     const out = {};
-    for (const name of Object.keys(cats)) {
-      const cat = cats[name];
-      if (!cat || typeof cat !== 'object' || Array.isArray(cat)) continue;
-      const clean = {};
-      for (const f of CATEGORY_FIELDS) {
-        if (cat[f] === undefined) continue;
-        if (f === 'titles' || f === 'snippets' || f === 'links' || f === 'extraElements') clean[f] = normalizeSelectorList(cat[f]);
-        else if (f === 'match' && cat[f] instanceof RegExp) clean[f] = { source: cat[f].source, flags: cat[f].flags || '' };
-        else clean[f] = cat[f];
+    if (link.redirects !== undefined) {
+      const fields = ['path', 'pathValue', 'hrefSuffix', 'stripPrefix'];
+      out.redirects = Array.isArray(link.redirects) ? link.redirects.map((spec) => {
+        if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return spec;
+        if (!fields.some((f) => { const v = spec[f]; return v && typeof v === 'object' && !(v instanceof RegExp) && typeof v.source === 'string'; })) return spec;
+        const copy = { ...spec };
+        for (const f of fields) { const v = copy[f]; if (v && typeof v === 'object' && !(v instanceof RegExp) && typeof v.source === 'string') { try { copy[f] = new RegExp(v.source, v.flags || ''); } catch (_) {} } }
+        return copy;
+      }) : link.redirects;
+    }
+    if (link.directAttrs !== undefined) out.directAttrs = link.directAttrs;
+    if (link.directScope !== undefined) out.directScope = link.directScope;
+    if (link.directProtocol !== undefined) out.directProtocol = link.directProtocol;
+    return out;
+  }
+  function normalizeButton(button) {
+    if (button === false) return false;
+    const src = button && typeof button === 'object' && !Array.isArray(button) ? button : null;
+    const out = {};
+    if (src) for (const f of ['scope', 'require', 'requireSelf', 'exclude']) if (src[f] !== undefined) out[f] = src[f];
+    let inset = null, zIndex, style = '';
+    const readStyle = (decl) => {
+      if (typeof decl !== 'string' || !decl.trim()) return;
+      const rest = [];
+      for (const part of decl.split(';')) {
+        const raw = part.trim(); if (!raw) continue;
+        const i = raw.indexOf(':'); if (i < 0) { rest.push(raw); continue; }
+        const key = raw.slice(0, i).trim().toLowerCase(), val = raw.slice(i + 1).trim();
+        if (!val) continue;
+        if (key === 'top' || key === 'right' || key === 'bottom' || key === 'left') { inset = inset || {}; inset[key] = val; }
+        else if (key === 'z-index') zIndex = val;
+        else rest.push(key + ': ' + val);
       }
+      if (rest.length) style = (style ? style + '; ' : '') + rest.join('; ');
+    };
+    if (Array.isArray(button)) {
+      const cmd = button[0];
+      const options = button[1] && typeof button[1] === 'object' ? button[1] : {};
+      inset = inset || {};
+      if (cmd === 'icon' || cmd === 'text') readStyle(options.style);
+      for (const f of ['top', 'right', 'bottom', 'left']) if (options[f] !== undefined) inset[f] = options[f];
+      if (options.zIndex !== undefined) zIndex = options.zIndex;
+      if (typeof button[2] === 'string' && button[2]) out.mount = button[2];
+      else if (Array.isArray(button[2])) out.mount = button[2];
+    } else if (src) {
+      if (src.inset && typeof src.inset === 'object') inset = { ...src.inset };
+      if (src.zIndex !== undefined) zIndex = src.zIndex;
+      if (typeof src.mount === 'string' && src.mount) out.mount = src.mount;
+      else if (Array.isArray(src.mount)) out.mount = src.mount;
+      if (src.options && typeof src.options === 'object') {
+        inset = { ...(inset || {}) };
+        for (const f of ['top', 'right', 'bottom', 'left']) if (src.options[f] !== undefined) inset[f] = src.options[f];
+        if (src.options.zIndex !== undefined) zIndex = src.options.zIndex;
+      }
+      readStyle(src.style);
+    }
+    if (inset && Object.keys(inset).length) out.inset = inset;
+    if (zIndex !== undefined) out.zIndex = zIndex;
+    if (style) out.style = style;
+    return out;
+  }
+  function cleanPage(page) {
+    const p = page && typeof page === 'object' && !Array.isArray(page) ? page : {};
+    const out = {};
+    if (p.includeRegex !== undefined) out.includeRegex = p.includeRegex;
+    else if (p.match !== undefined) out.includeRegex = p.match;
+    if (p.excludeRegex) out.excludeRegex = p.excludeRegex;
+    const mps = normalizeMatchPatterns(p.matches);
+    if (mps) out.matches = mps;
+    const exm = normalizeMatchPatterns(p.excludeMatches);
+    if (exm) out.excludeMatches = exm;
+    const serh = p.command && typeof p.command === 'object' && !Array.isArray(p.command) ? p.command : null;
+    const pick = (f) => p[f] !== undefined ? p[f] : (serh ? serh[f] : undefined);
+    const root = pick('root');
+    if (root !== undefined) out.root = root;
+    else if (p.containers !== undefined) out.root = p.containers;
+    const url = pick('url');
+    if (url !== undefined) out.url = url;
+    else if (p.links !== undefined) out.url = p.links;
+    if (p.title !== undefined) out.title = p.title;
+    else if (p.titles !== undefined) out.title = p.titles;
+    if (p.snippet !== undefined) out.snippet = p.snippet;
+    const extra = pick('extraSelector');
+    if (extra !== undefined) out.extraSelector = normalizeSelectorList(extra);
+    const rawButton = pick('button');
+    if (rawButton !== undefined) out.button = normalizeButton(rawButton);
+    for (const f of ['skip', 'group', 'grid', 'dedupeBy', 'link']) { const v = pick(f); if (v !== undefined) out[f] = v; }
+    const blockedCss = normalizeCssRules(p.blockedCss !== undefined ? p.blockedCss : (serh && serh.blockedCss));
+    if (blockedCss.length) out.blockedCss = blockedCss;
+    const rawPreserveSpace = pick('preserveSpace');
+    const preserveSpace = normalizePreserveSpace(rawPreserveSpace);
+    if (preserveSpace) out.preserveSpace = preserveSpace;
+    else if (rawPreserveSpace === false) out.preserveSpace = false;
+    const site = normalizeSiteList(p.site);
+    if (site.length) out.site = site;
+    if (p.delay !== undefined) out.delay = p.delay;
+    if (p.commonProps && typeof p.commonProps === 'object' && !Array.isArray(p.commonProps)) out.commonProps = { ...p.commonProps };
+    return out;
+  }
+  function normalizePageMap(pages) {
+    if (!pages) return undefined;
+    const isArray = Array.isArray(pages);
+    if (!isArray && typeof pages !== 'object') return undefined;
+    const items = isArray ? pages.map((page) => [page && typeof page === 'object' && !Array.isArray(page) && typeof page.name === 'string' ? page.name.trim() : '', page]) : Object.entries(pages);
+    const out = {};
+    for (const [name0, page] of items) {
+      if (!page || typeof page !== 'object' || Array.isArray(page)) continue;
+      let name = name0;
+      if (isArray) {
+        if (!name) { const cp = page.commonProps; name = cp && typeof cp === 'object' && !Array.isArray(cp) && typeof cp.$category === 'string' ? cp.$category.trim() : ''; }
+        if (!name) continue;
+      }
+      const clean = cleanPage(page);
+      delete clean.name;
+      if (!clean.commonProps || typeof clean.commonProps !== 'object' || Array.isArray(clean.commonProps) || clean.commonProps.$category === undefined) clean.commonProps = { ...(clean.commonProps || {}), $category: name };
       if (Object.keys(clean).length) out[name] = clean;
     }
     return out;
   }
+  function mergePageObjects(base, page) {
+    const out = { ...(base || {}), ...(page || {}) };
+    for (const f of ['title', 'snippet']) { if ((base && base[f]) || (page && page[f])) out[f] = (page && page[f]) || (base && base[f]); }
+    if ((base && base.link) || (page && page.link)) out.link = { ...((base && base.link) || {}), ...((page && page.link) || {}) };
+    return out;
+  }
+  function pickProp(def, name, baseProps) {
+    const d = def || {};
+    const raw = d[name] !== undefined ? d[name] : (name === 'title' ? d.titles : undefined);
+    return raw !== undefined ? simpleToCommand(raw, 'text') : (baseProps || {})[name];
+  }
+  function pickProps(def, base) {
+    const baseProps = base || {};
+    const props = {};
+    for (const name of ['title', 'snippet']) {
+      const v = pickProp(def, name, baseProps);
+      if (v !== undefined) props[name] = v;
+    }
+    return props;
+  }
   function mergeSelectorDef(def, base) {
-    const links = def.links !== undefined ? (Array.isArray(def.links) ? normalizeSelectorList(def.links) : (typeof def.links === 'string' && def.links ? def.links : 'a[href]')) : (base.links || 'a[href]');
-    const categories = def.categories !== undefined ? normalizeCategoryMap(def.categories) : (base.categories || undefined);
+    const d = cleanPage(def || {}), b = cleanPage(base || {});
+    const pages = def && def.pages !== undefined ? (() => {
+      const dp = normalizePageMap(def.pages), bp = normalizePageMap(base && base.pages);
+      if (!dp) return bp;
+      if (!bp) return dp;
+      const m = {};
+      for (const n of Object.keys(bp)) m[n] = { ...bp[n] };
+      for (const n of Object.keys(dp)) m[n] = mergePageObjects(m[n], dp[n]);
+      return m;
+    })() : normalizePageMap(base && base.pages) || undefined;
     return {
-      containers: typeof def.containers === 'string' ? def.containers : (base.containers || ''),
-      titles: def.titles !== undefined ? normalizeSelectorList(def.titles) : (base.titles || []),
-      snippets: def.snippets !== undefined ? normalizeSelectorList(def.snippets) : (base.snippets || []),
-      extraElements: def.extraElements !== undefined ? normalizeSelectorList(def.extraElements) : (base.extraElements || []),
-      links: links.length ? links : 'a[href]',
-      ...(categories ? { categories } : {}),
-      ...(def.button !== undefined ? { button: def.button !== false } : (base.button !== undefined ? { button: base.button !== false } : {}))
+      root: d.root !== undefined ? d.root : (b.root || ''),
+      url: d.url !== undefined ? simpleToCommand(d.url, 'link') : b.url,
+      title: pickProp(d, 'title', b),
+      snippet: pickProp(d, 'snippet', b),
+      extraSelector: d.extraSelector !== undefined ? d.extraSelector : (b.extraSelector || []),
+      button: d.button !== undefined ? d.button : b.button,
+      skip: d.skip !== undefined ? d.skip : b.skip,
+      group: d.group !== undefined ? d.group : b.group,
+      grid: d.grid !== undefined ? d.grid : b.grid,
+      dedupeBy: d.dedupeBy !== undefined ? d.dedupeBy : b.dedupeBy,
+      link: d.link !== undefined ? normalizeLink({ ...(b.link || {}), ...d.link }) : b.link,
+      blockedCss: d.blockedCss !== undefined ? d.blockedCss : b.blockedCss,
+      preserveSpace: d.preserveSpace !== undefined ? d.preserveSpace : b.preserveSpace,
+      site: d.site !== undefined ? d.site : b.site,
+      matches: d.matches !== undefined ? d.matches : b.matches,
+      excludeMatches: d.excludeMatches !== undefined ? d.excludeMatches : b.excludeMatches,
+      delay: d.delay !== undefined ? d.delay : b.delay,
+      priority: def && def.priority !== undefined ? def.priority : (base && base.priority),
+      ...(pages ? { pages } : {})
     };
   }
 
@@ -407,47 +682,46 @@
     b.enabled = enabled !== false; saveEngineSubscriptions(subs); refreshEngineSite(); return true;
   }
 
-  function parseSelectorMatch(def, base) {
-    let match = (base && base.match) || null;
+  function parseRegexLiteral(str) { const m = String(str).match(/^\/(.*)\/([a-z]*)$/i); return m ? { source: m[1], flags: m[2].toLowerCase() } : { source: String(str), flags: '' }; }
+  function sanitizeRegexFlags(f) { return String(f || '').toLowerCase().replace(/[^imsu]/g, ''); }
+  function isRegexLiteralStr(s) { return /^\/(.*)\/([a-z]*)$/i.test(String(s)); }
+
+  function coerceRegexValue(raw, fallback) {
+    let out = fallback || null;
     try {
-      if (typeof def.match === 'string' && def.match) {
-        const m = def.match.match(/^\/(.*)\/([a-z]*)$/i);
-        match = m ? new RegExp(m[1], m[2].toLowerCase().replace(/[^imsu]/g, '')) : new RegExp(def.match, 'i');
-      } else if (def.match && typeof def.match === 'object' && typeof def.match.source === 'string' && def.match.source) {
-        match = new RegExp(def.match.source, String(def.match.flags || '').toLowerCase().replace(/[^imsu]/g, ''));
-      }
-    } catch (e) { match = (base && base.match) || null; }
-    return match;
+      if (raw instanceof RegExp) out = raw;
+      else if (typeof raw === 'string' && raw) { const m = parseRegexLiteral(raw); out = new RegExp(m.source, isRegexLiteralStr(raw) ? sanitizeRegexFlags(m.flags) : 'i'); }
+      else if (raw && typeof raw === 'object' && typeof raw.source === 'string' && raw.source) out = new RegExp(raw.source, sanitizeRegexFlags(raw.flags));
+      else out = fallback || null;
+    } catch (e) { out = fallback || null; }
+    return out;
   }
 
+  function selectorMatchValue(def) { return def && typeof def === 'object' ? (def.includeRegex !== undefined ? def.includeRegex : def.match) : undefined; }
+  function parseSelectorMatch(def, base) { return coerceRegexValue(selectorMatchValue(def), selectorMatchValue(base) || null); }
+
   function coerceSelectorDef(def, base) {
-    const merged = { ...mergeSelectorDef(def, base || {}), match: parseSelectorMatch(def, base || {}) };
-    if (def.disabled === true || def.disable === true) merged.disabled = true;
-    if (merged.categories && typeof merged.categories === 'object') {
-      const cats = {};
-      for (const name of Object.keys(merged.categories)) {
-        const cat = { ...merged.categories[name] };
-        if (cat.match !== undefined) cat.match = coerceCategoryMatch(cat, null);
-        cats[name] = cat;
+    const merged = { ...mergeSelectorDef(def, base || {}), includeRegex: parseSelectorMatch(def, base || {}) };
+    const exBase = def.excludeRegex !== undefined ? def.excludeRegex : (base || {}).excludeRegex;
+    const ex = coerceRegexValue(exBase, null);
+    if (ex) merged.excludeRegex = ex;
+    if (def.disabled === true) merged.disabled = true;
+    else if (def.disabled === false) merged.disabled = false;
+    if (merged.pages && typeof merged.pages === 'object') {
+      const pages = {};
+      for (const name of Object.keys(merged.pages)) {
+        const page = { ...merged.pages[name] };
+        if (page.includeRegex !== undefined) page.includeRegex = coercePageMatch(page, null);
+        const pex = coerceRegexValue(page.excludeRegex, null);
+        if (pex) page.excludeRegex = pex; else delete page.excludeRegex;
+        pages[name] = page;
       }
-      merged.categories = cats;
+      merged.pages = pages;
     }
     return merged;
   }
 
-  function coerceCategoryMatch(def, base) {
-    let match = (base && base.match) || null;
-    try {
-      if (def.match instanceof RegExp) match = def.match;
-      else if (typeof def.match === 'string' && def.match) {
-        const m = def.match.match(/^\/(.*)\/([a-z]*)$/i);
-        match = new RegExp(m ? m[1] : def.match, m ? m[2].toLowerCase().replace(/[^imsu]/g, '') : 'i');
-      } else if (def.match && typeof def.match === 'object' && typeof def.match.source === 'string' && def.match.source) {
-        match = new RegExp(def.match.source, String(def.match.flags || '').toLowerCase().replace(/[^imsu]/g, ''));
-      }
-    } catch (e) { match = (base && base.match) || null; }
-    return match;
-  }
+  function coercePageMatch(def, base) { return coerceRegexValue(selectorMatchValue(def), selectorMatchValue(base) || null); }
 
   function getSubscribedSelectors() {
     const defs = {};
@@ -471,67 +745,86 @@
     if (activeSelectors) return activeSelectors; const builtin = SELECTORS; const subscribed = getSubscribedSelectors(); const user = getUserSelectors(); const merged = {};
     for (const key of Object.keys(user)) {
       if (key === 'other') continue; const def = user[key]; if (!def || typeof def !== 'object' || Array.isArray(def)) continue;
-      const base = subscribed[key] || builtin[key] || {};
-      if (def.categories !== undefined) { merged[key] = coerceSelectorDef(def, base); continue; }
-      const cats = base.categories || builtin[key] && builtin[key].categories;
-      if (cats) {
-        const flat = { ...def }; delete flat.categories;
-        merged[key] = { ...coerceSelectorDef(flat, base), categories: cats };
-        continue;
-      }
-      if (def.disabled === true || def.disable === true) {
-        merged[key] = { ...coerceSelectorDef(def, base), disabled: true }; continue;
-      }
-      const defContentKeys = Object.keys(def).filter(k => k !== 'disabled' && k !== 'disable' && def[k] !== undefined && def[k] !== null && def[k] !== '');
-      if (!defContentKeys.length) { const baseDef = subscribed[key] || builtin[key]; if (baseDef) merged[key] = (def.disabled === false || def.disable === false) ? { ...baseDef, disabled: false } : baseDef; continue; }
-      merged[key] = coerceSelectorDef(def, base);
+      merged[key] = coerceSelectorDef(def, subscribed[key] || builtin[key] || {});
     }
     for (const key of Object.keys(subscribed)) if (!(key in merged)) merged[key] = subscribed[key];
-    for (const key of Object.keys(builtin)) if (!(key in merged)) merged[key] = builtin[key];
-    const keys = Object.keys(merged); const gIdx = keys.indexOf('google'); const gsIdx = keys.indexOf('google_scholar');
-    let ordered = merged;
-    if (gIdx !== -1 && gsIdx !== -1 && gIdx < gsIdx) {
-      ordered = {};
-      for (const k of keys) {
-        if (k === 'google') {
-          ordered['google_scholar'] = merged['google_scholar']; ordered['google'] = merged['google'];
-        } else if (k !== 'google_scholar') {
-          ordered[k] = merged[k];
-        }
-      }
-    }
-    const yKeys = Object.keys(ordered); const yIdx = yKeys.indexOf('yahoo'); const yjIdx = yKeys.indexOf('yahoo_japan');
-    if (yIdx !== -1 && yjIdx !== -1 && yIdx < yjIdx) {
-      const fixed = {};
-      for (const k of yKeys) {
-        if (k === 'yahoo') {
-          fixed['yahoo_japan'] = ordered['yahoo_japan']; fixed['yahoo'] = ordered['yahoo'];
-        } else if (k !== 'yahoo_japan') {
-          fixed[k] = ordered[k];
-        }
-      }
-      ordered = fixed;
-    }
-    activeSelectors = ordered; return ordered;
+    for (const key of Object.keys(builtin)) if (!(key in merged)) merged[key] = coerceSelectorDef(builtin[key], {});
+    activeSelectors = merged; return merged;
   }
 
   function resetSelectorCache() {
-    activeSelectors = null; _engineCacheHost = null; _engineCacheResult = 'other'; _observedSelector = ''; _categoryCacheHref = null; _categoryCacheResult = 'web'; _catDefCacheKey = null; _catDefCache = null;
+    activeSelectors = null; _redirectSpecsCache.clear(); _siteAliasMap = null; _engineCacheHost = null; _engineCacheResult = 'other'; _observedSelector = ''; _categoryCacheHref = null; _categoryCacheResult = DEFAULT_CATEGORY; _catDefCacheKey = null; _catDefCache = null; _hideNamesCache = null;
+    if (_engineStyleEl) { try { _engineStyleEl.remove(); } catch (_) {} _engineStyleEl = null; }
   }
 
-  let _engineCacheHost = null; let _engineCacheResult = 'other';
+  let _engineCacheHost = null, _engineCacheResult = 'other';
+  const _matchPatternCache = new Map();
+  function matchPatternToRegex(pattern) {
+    const k = String(pattern); let r = _matchPatternCache.get(k);
+    if (r === undefined) {
+      r = null;
+      if (k === '<all_urls>') r = /^[\s\S]*$/;
+      else {
+        const m = /^(?:\*|[A-Za-z][0-9A-Za-z+.-]*):\/\/(?:\*|(?:\*\.)?[0-9A-Za-z](?:[0-9A-Za-z-]*[0-9A-Za-z])?(?:\.[0-9A-Za-z](?:[0-9A-Za-z-]*[0-9A-Za-z])?)*)\/(?:(?:\*|[0-9A-Za-z._~:/?[\]@!$&'()+,;=-]|%[0-9A-Fa-f]{2})*)$/.exec(k);
+        if (m) {
+          const sep = k.indexOf('://'); const hs = sep + 3; const he = k.indexOf('/', hs);
+          const scheme = k.slice(0, sep).toLowerCase(); const host = k.slice(hs, he).toLowerCase(); const path = k.slice(he);
+          const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const sRe = scheme === '*' ? '(?:http|https)' : esc(scheme);
+          const hRe = host === '*' ? '[^/]*' : (host.slice(0, 2) === '*.' ? '(?:[^./]+\\.)*' + esc(host.slice(2)) : esc(host));
+          const pRe = path === '/*' ? '/[\\s\\S]*' : path.split('*').map(esc).join('[\\s\\S]*');
+          try { r = new RegExp('^' + sRe + '://' + hRe + pRe + '$'); } catch (_) { r = null; }
+        }
+      }
+      _matchPatternCache.set(k, r);
+    }
+    return r;
+  }
+  function matchPatternsTest(patterns, href) {
+    if (!href || !patterns) return false;
+    let u; try { u = new URL(href); } catch (_) { return false; }
+    const scheme = u.protocol.slice(0, -1);
+    if (scheme !== 'http' && scheme !== 'https') return false;
+    const norm = scheme + '://' + u.hostname + u.pathname + u.search;
+    for (const p of (Array.isArray(patterns) ? patterns : [patterns])) {
+      if (typeof p !== 'string' || !p) continue;
+      const re = matchPatternToRegex(p);
+      if (re && re.test(norm)) return true;
+    }
+    return false;
+  }
   function getSearchEngine() {
     const loc = window.location || {}; const hostname = String(loc.hostname || ''); const href = String(loc.href || ''); const cacheKey = href || hostname;
     if (_engineCacheHost === cacheKey) return _engineCacheResult; _engineCacheHost = cacheKey; const defs = getSelectors();
-    for (const name of Object.keys(defs)) {
-      const def = defs[name]; if (!def || def.disabled || !def.match) continue;
-      if (def.match.test(hostname)) return (_engineCacheResult = name);
-      if (href && /:(?:\\?\/){2}/i.test(def.match.source) && def.match.test(href)) return (_engineCacheResult = name);
+    const names = Object.keys(defs).sort((a, b) => ((defs[b] && defs[b].priority) || 0) - ((defs[a] && defs[a].priority) || 0));
+    for (const name of names) {
+      const def = defs[name]; if (!def || def.disabled || (!def.includeRegex && !def.matches)) continue;
+      const re = def.includeRegex;
+      let ok = re ? !!(href && re.test(href)) : false;
+      if (ok && def.matches) ok = !!(href && matchPatternsTest(def.matches, href));
+      else if (!re) ok = !!(href && def.matches && matchPatternsTest(def.matches, href));
+      if (ok) {
+        const ex = coerceRegexValue(def.excludeRegex, null);
+        try { if (ex && ex.test(href)) continue; } catch (_) {}
+        if (href && matchPatternsTest(def.excludeMatches, href)) continue;
+        return (_engineCacheResult = name);
+      }
     }
     return (_engineCacheResult = 'other');
   }
 
-  let _categoryCacheHref = null; let _categoryCacheResult = 'web'; let _categoryCacheEngine = null;
+  function findPageByCategory(def, category) {
+    const pages = def && def.pages && typeof def.pages === 'object' ? def.pages : null;
+    if (!pages) return null;
+    for (const name of Object.keys(pages)) {
+      const page = pages[name];
+      if (page && page.commonProps && page.commonProps.$category === category) return page;
+    }
+    return null;
+  }
+
+  const DEFAULT_CATEGORY = 'web';
+  let _categoryCacheHref = null, _categoryCacheResult = DEFAULT_CATEGORY; let _categoryCacheEngine = null;
   function getSearchCategory(loc, engineArg) {
     if (loc === undefined || loc === null) {
       const href = String(window.location && window.location.href || '');
@@ -542,60 +835,124 @@
     }
     const engine = engineArg !== undefined ? engineArg : getSearchEngine();
     const href = String((loc || window.location) && (loc || window.location).href || window.location.href || '');
-    const cats = (getSelectors()[engine] || SELECTORS.other).categories;
-    if (cats && typeof cats === 'object') {
-      for (const name of Object.keys(cats)) {
-        const def = cats[name]; if (!def || typeof def !== 'object' || name === 'web') continue;
-        let m = null;
-        try { if (def.match instanceof RegExp) m = def.match; else if (typeof def.match === 'string' && def.match) { const mm = def.match.match(/^\/(.*)\/([a-z]*)$/i); m = new RegExp(mm ? mm[1] : def.match, (mm ? mm[2] : 'i').toLowerCase().replace(/[^imsu]/g, '') || 'i'); } } catch (e) {}
-        try { if (m && m.test(href)) return name; } catch (e) {}
+    const pages = (getSelectors()[engine] || SELECTORS.other).pages;
+    if (pages && typeof pages === 'object') {
+      for (const name of Object.keys(pages)) {
+        const def = pages[name]; if (!def || typeof def !== 'object') continue;
+        const m = coerceRegexValue(def.includeRegex !== undefined ? def.includeRegex : def.match, null);
+        if (!m && !def.matches) continue;
+        const ex = coerceRegexValue(def.excludeRegex, null);
+        try { if ((!m || m.test(href)) && (!def.matches || matchPatternsTest(def.matches, href)) && !(ex && ex.test(href)) && !matchPatternsTest(def.excludeMatches, href)) return (def.commonProps && def.commonProps.$category) || name; } catch (e) {}
       }
     }
-    return 'web';
+    return DEFAULT_CATEGORY;
   }
 
-  const ENGINE_HOST_REGEXES = {
-    bing: /(?:^|\.)bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i,
-    google: /(?:^|\.)google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i,
-    google_scholar: /(?:^|\.)scholar\.google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})$/i,
-    duckduckgo: /(?:^|\.)(?:duckduckgo\.com|ddg\.gg)$/i,
-    yahoo: /(?:^|\.)(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?search\.yahoo\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)$/i,
-    yahoo_japan: /(?:^|\.)(?:(?:[a-z]{1,6}\.)?(?:(?:images|video|videos|news)\.)?(?:r\.)?(?:search|rd|rds|rdsig|ard)\.yahoo\.co\.jp|news\.yahoo\.co\.jp)$/i,
-    so360: /(?:^|\.)so\.com$/i,
-    sogou: /(?:^|\.)sogou\.com$/i,
-    toutiao: /(?:^|\.)toutiao\.com$/i
-  };
-  function isEngineHost(engine, host) {
-    const re = ENGINE_HOST_REGEXES[engine]; return !!re && re.test(String(host || ''));
+    function isEngineHost(engine, host) {
+    let def = null; try { def = getSelectors()[engine]; } catch (_) {}
+    const h = String(host || '').replace(/\.$/, ''); if (!h) return false;
+    const re = def && def.includeRegex;
+    if (re) {
+      const test = (u) => { try { return re.test(u); } catch (_) { return false; } };
+      if (test('https://' + h + '/') || test('https://' + h) || test('http://' + h + '/')) return true;
+      try {
+        const loc = window.location || {};
+        if (String(loc.hostname || '').replace(/\.$/, '').toLowerCase() === h.toLowerCase() && re.test(String(loc.href || ''))) return true;
+      } catch (_) {}
+      return false;
+    }
+    return !!(def && def.matches && (Array.isArray(def.matches) ? def.matches : [def.matches]).some((p) => {
+      const hostPattern = typeof p === 'string' ? p.replace(/^([^:]+:\/\/[^/]+)\/.*$/, '$1/*') : '';
+      return !!hostPattern && matchPatternsTest([hostPattern], 'https://' + h + '/');
+    }));
   }
-  const isNotGoogleHost = (h) => !!h && !isEngineHost('google', h);
 
-  let _catDefCacheKey = null; let _catDefCache = null;
-  function resolveCategoryDef(engine) {
+  let _catDefCacheKey = null, _catDefCache = null;
+  function resolvePageDef(engine) {
     const def = getSelectors()[engine] || SELECTORS.other;
     const category = getSearchCategory();
     const cacheKey = engine + '|' + category;
     if (_catDefCacheKey === cacheKey) return _catDefCache;
-    const cat = def.categories && typeof def.categories === 'object' ? def.categories[category] : null;
-    let resolved = def;
-    if (cat && typeof cat === 'object') {
-      resolved = { ...def };
-      for (const k of ['containers', 'titles', 'snippets', 'links', 'extraElements', 'button']) {
-        if (cat[k] !== undefined) resolved[k] = cat[k];
-      }
-      resolved = mergeSelectorDef(resolved, def);
-    }
+    const page = findPageByCategory(def, category);
+    const resolved = page && typeof page === 'object' ? mergeSelectorDef(page, def) : def;
     _catDefCacheKey = cacheKey; _catDefCache = resolved;
     return resolved;
   }
 
-  function getContainerSelector(engine) {
-    return resolveCategoryDef(engine).containers;
+  function getRootSelector(engine) {
+    const root = resolvePageDef(engine).root;
+    return typeof root === 'string' ? root : rootAnchorSelector(root);
+  }
+  function getRootCommand(engine) {
+    return resolvePageDef(engine).root;
+  }
+  function rootAnchorSelector(cmd) {
+    if (typeof cmd === 'string') return cmd;
+    if (!Array.isArray(cmd)) return '';
+    if (cmd[0] === 'selector') return rootAnchorSelector(cmd[1]);
+    if (cmd[0] === 'upward') return rootAnchorSelector(cmd[2]);
+    return '';
+  }
+  function rootHasUpward(cmd) {
+    if (!Array.isArray(cmd)) return false;
+    if (cmd[0] === 'upward') return true;
+    if (cmd[0] === 'selector') return rootHasUpward(cmd[1]);
+    return false;
+  }
+  function rootCommandKey(cmd) {
+    return typeof cmd === 'string' ? cmd : JSON.stringify(cmd);
+  }
+  function queryRootCommand(cmd, scope = document) {
+    if (typeof cmd === 'string') { try { return Array.from(scope.querySelectorAll(cmd)); } catch (_) { return []; } }
+    if (!Array.isArray(cmd) || typeof cmd[0] !== 'string') return [];
+    if (cmd[0] === 'selector') return queryRootCommand(cmd[1], scope);
+    if (cmd[0] === 'upward') {
+      const level = cmd[1], out = [], inner = queryRootCommand(cmd[2], scope);
+      if (typeof level === 'string' && level) {
+        for (const el of inner) {
+          const parent = el.parentElement; let up = null;
+          try { up = parent && parent.closest ? parent.closest(level) : null; } catch (_) { up = null; }
+          if (up && up !== document.body && up !== document.documentElement) out.push(up);
+        }
+      } else {
+        const steps = Math.max(0, Number(level) || 0);
+        for (const el of inner) {
+          let cur = el;
+          for (let i = 0; i < steps && cur; i++) cur = cur.parentElement;
+          if (cur && cur !== document.body && cur !== document.documentElement) out.push(cur);
+        }
+      }
+      return [...new Set(out)];
+    }
+    return [];
+  }
+  function findRootContainer(node, cmd) {
+    if (!node || typeof node.closest !== 'function') return null;
+    if (typeof cmd === 'string') { try { return node.closest(cmd); } catch (_) { return null; } }
+    if (!Array.isArray(cmd) || typeof cmd[0] !== 'string') return null;
+    if (cmd[0] === 'selector') return findRootContainer(node, cmd[1]);
+    if (cmd[0] === 'upward') {
+      const anchor = rootAnchorSelector(cmd[2]); const level = cmd[1];
+      if (anchor) {
+        let cur = null; try { cur = node.closest(anchor); } catch (_) {}
+        if (typeof level === 'string' && level) { cur = cur && cur.parentElement && cur.parentElement.closest ? cur.parentElement.closest(level) : null; }
+        else { for (let i = 0; i < Math.max(0, Number(level) || 0) && cur; i++) cur = cur.parentElement; }
+        if (cur && cur !== document.body && cur !== document.documentElement) return cur;
+      }
+      let best = null;
+      for (const el of queryRootCommand(cmd, node.ownerDocument || document)) if (el.contains(node) && (!best || best.contains(el))) best = el;
+      return best;
+    }
+    return null;
   }
 
   function isEngineSite() {
     return getSearchEngine() !== 'other';
   }
+
+  function dbg(...args) { if (typeof currentConfig !== 'undefined' && currentConfig && currentConfig.debug) console.log('[屏蔽]', ...args); }
+  function dbgWarn(...args) { if (typeof currentConfig !== 'undefined' && currentConfig && currentConfig.debug) console.warn('[屏蔽]', ...args); }
+  function dbgError(...args) { if (typeof currentConfig !== 'undefined' && currentConfig && currentConfig.debug) console.error('[屏蔽]', ...args); }
 
   const LANG_TEXTS = {
     'zh-CN': {
@@ -666,6 +1023,8 @@
       selectorInvalidKey: '引擎ID仅允许字母/数字/_/-: {key}',
       selectorInvalidRegex: 'match 正则无效: {key}',
       selectorInvalidCss: 'CSS 选择器无效: {key}.{field}: {value}',
+      selectorLegacyField: '不支持的旧字段: {key}.{field}',
+      selectorInvalidCommand: '取值命令无效: {key}.{field}: {value}',
       selectorFieldRequired: '字段必填: {key}.{field}',
       selectorInvalidBool: '字段必须为布尔值: {key}.{field}',
     },
@@ -737,6 +1096,8 @@
       selectorInvalidKey: 'Engine id allows letters/digits/_/- only: {key}',
       selectorInvalidRegex: 'Invalid match regex: {key}',
       selectorInvalidCss: 'Invalid CSS selector: {key}.{field}: {value}',
+      selectorLegacyField: 'Unsupported legacy field: {key}.{field}',
+      selectorInvalidCommand: 'Invalid value command: {key}.{field}: {value}',
       selectorFieldRequired: 'Required field: {key}.{field}',
       selectorInvalidBool: 'Field must be a boolean: {key}.{field}',
     }
@@ -921,7 +1282,7 @@
   }
 
   function findBalancedParenEnd(str, openIdx) {
-    let depth = 0; let inSQ = false; let inDQ = false; let inRE = false; let inReClass = false;
+    let depth = 0, inSQ = false; let inDQ = false; let inRE = false; let inReClass = false;
     for (let i = openIdx; i < str.length; i++) {
       const ch = str[i];
       if (inSQ) { if (ch === '\\') i++; else if (ch === "'") inSQ = false; continue; }
@@ -1617,7 +1978,7 @@
 
   // 递归下降解析
   function parseCondExprTokens(tokens, leafParser, errors) {
-    let pos = 0; let depth = 0; const peek = () => tokens[pos]; const next = () => tokens[pos++];
+    let pos = 0, depth = 0; const peek = () => tokens[pos]; const next = () => tokens[pos++];
     const syntaxError = () => {
       errors.push({ kind: 'syntax' }); return { type: 'const', value: false };
     };
@@ -1695,6 +2056,16 @@
   }
 
   function evalDynamicLeaf(cond, title, url, snippet) {
+    const foldUrl = (value) => {
+      const raw = String(value || ''); if (!raw) return '';
+      const abs = /:\/\//.test(raw) || raw.startsWith('//'); let out = raw;
+      if (abs) out = toASCIIUrl(raw) || raw;
+      else if (/[^\x00-\x7F]/.test(raw) && /^[^/?#\s]+\.[^/?#\s]+/.test(raw)) {
+        const host = raw.split(/[/?#]/)[0]; const port = /:\d+$/.exec(host); const ascii = toASCIIHostname(host.replace(/:\d+$/, ''));
+        if (ascii && ascii !== host) out = ascii + (port ? port[0] : '') + raw.slice(host.length);
+      }
+      out = encodeNonAscii(out); return out.toLowerCase();
+    };
     if (cond.type === 'title' || cond.type === 'text') {
       const source = cond.type === 'title' ? title : snippet;
       if (!source || (cond.op !== '=~' && !cond.val)) return false; const lower = source.toLowerCase(); if (cond.op === '=') return lower === cond.val; if (cond.op === '^=') return lower.startsWith(cond.val);
@@ -1703,16 +2074,6 @@
     }
     if (cond.type === 'url') {
       if (!url || (cond.op !== '=~' && !cond.val)) return false; const lowerUrl = url.toLowerCase();
-      const foldUrl = (value) => {
-        const raw = String(value || ''); if (!raw) return '';
-        const abs = /:\/\//.test(raw) || raw.startsWith('//'); let out = raw;
-        if (abs) out = toASCIIUrl(raw) || raw;
-        else if (/[^\x00-\x7F]/.test(raw) && /^[^/?#\s]+\.[^/?#\s]+/.test(raw)) {
-          const host = raw.split(/[/?#]/)[0]; const port = /:\d+$/.exec(host); const ascii = toASCIIHostname(host.replace(/:\d+$/, ''));
-          if (ascii && ascii !== host) out = ascii + (port ? port[0] : '') + raw.slice(host.length);
-        }
-        out = encodeNonAscii(out); return out.toLowerCase();
-      };
       const cmpUrl = foldUrl(cond.op === '=~' ? '' : cond.val); const urlHit = (pred) => pred(lowerUrl) || pred(foldUrl(url));
       if (cond.op === '=') return urlHit(v => v === cmpUrl); if (cond.op === '^=') return urlHit(v => v.startsWith(cmpUrl)) || (!/:\/\//.test(cmpUrl) && urlHit(v => v.replace(/^[a-z][a-z0-9+.-]*:\/\//, '').startsWith(cmpUrl)));
       if (cond.op === '$=') return urlHit(v => v.endsWith(cmpUrl)); if (cond.op === '*=') return urlHit(v => v.includes(cmpUrl));
@@ -1741,19 +2102,19 @@
       const cmpVal = cond.type === 'host' ? toASCIIHostname(cond.val, cond.op === '^=' || cond.op === '*=') : cond.val; if (cond.op !== '=~' && !cmpVal) return false; const hasPortInCond = cond.type === 'host' && cmpVal.includes(':');
       const raw = cond.type === 'host' ? (hasPortInCond ? toASCIIHostname(u.host || u.hostname) : toASCIIHostname(u.hostname))
         : cond.type === 'path' ? (u.pathname + u.search)
-        : u.protocol.slice(0, -1); const value = raw.toLowerCase(); let altValue = value; let altCmpVal = cmpVal;
+        : u.protocol.slice(0, -1); const value = raw.toLowerCase(); let cmpFolded = cmpVal; let altValue = value; let altCmpVal = cmpVal;
       if (cond.type === 'path') {
-        altValue = (safeDecodeURIComponent(u.pathname) + u.search).toLowerCase(); altCmpVal = safeDecodeURIComponent(cmpVal).toLowerCase();
+        cmpFolded = foldUrl(cmpVal); altValue = (safeDecodeURIComponent(u.pathname) + u.search).toLowerCase(); altCmpVal = safeDecodeURIComponent(cmpVal).toLowerCase();
       }
-      if (cond.op === '=') return value === cmpVal || altValue === altCmpVal; if (cond.op === '^=') return value.startsWith(cmpVal) || altValue.startsWith(altCmpVal);
+      if (cond.op === '=') return value === cmpFolded || altValue === altCmpVal; if (cond.op === '^=') return value.startsWith(cmpFolded) || altValue.startsWith(altCmpVal);
       if (cond.op === '$=') {
         if (cond.type === 'host') {
           const target = cmpVal.replace(/^\.+|\.+$/g, ''); if (target.startsWith(':')) return value.endsWith(target);
           return value === target || value.endsWith(`.${target}`);
         }
-        return value.endsWith(cmpVal) || altValue.endsWith(altCmpVal);
+        return value.endsWith(cmpFolded) || altValue.endsWith(altCmpVal);
       }
-      if (cond.op === '*=') return value.includes(cmpVal) || altValue.includes(altCmpVal);
+      if (cond.op === '*=') return value.includes(cmpFolded) || altValue.includes(altCmpVal);
       if (cond.op === '=~') {
         if (cond.type === 'host') {
           const uHost = u.hostname; let unicodeHost = uHost;
@@ -1787,12 +2148,30 @@
     if (ast.type === 'not') return !evalCondAST(ast.child, title, url, snippet); if (ast.type === 'leaf') return evalDynamicLeaf(ast.cond, title, url, snippet); return !!ast.value;
   }
 
+  function siteAliasMap() {
+    if (_siteAliasMap) return _siteAliasMap;
+    const defs = getSelectors(); const adj = new Map();
+    const link = (a, b) => { if (!adj.has(a)) adj.set(a, new Set()); if (!adj.has(b)) adj.set(b, new Set()); adj.get(a).add(b); adj.get(b).add(a); };
+    for (const id of Object.keys(defs)) {
+      const key = String(id).toLowerCase(); if (!adj.has(key)) adj.set(key, new Set());
+      for (const alias of normalizeSiteList(defs[id] && defs[id].site)) { const a = alias.toLowerCase(); if (a && a !== key) link(key, a); }
+    }
+    const groups = new Map();
+    for (const node of adj.keys()) {
+      if (groups.has(node)) continue;
+      const comp = new Set(), stack = [node];
+      while (stack.length) { const n = stack.pop(); if (comp.has(n)) continue; comp.add(n); for (const m of adj.get(n) || []) if (!comp.has(m)) stack.push(m); }
+      const group = [...comp].sort().join('\u0000');
+      for (const n of comp) groups.set(n, group);
+    }
+    _siteAliasMap = groups; return groups;
+  }
+  function siteKey(value) { const k = String(value || '').toLowerCase(); return siteAliasMap().get(k) || k; }
   function parseConditionPart(trimmed, currentEngine, currentSite, currentCategory) {
     const enginePropMatch = trimmed.match(/^(?:\$site|engine)\s*[=:]\s*(?:['"](.*?)['"]|([^\s\)]+))\s*i?\s*$/i);
     if (enginePropMatch) {
-      const norm = (v) => { const k = String(v || '').toLowerCase(); return k === 'ddg' || k === 'duckduckgo_lite' ? 'duckduckgo' : k === 'yahoo-japan' ? 'yahoo_japan' : k; };
-      const target = norm(enginePropMatch[1] !== undefined ? enginePropMatch[1] : enginePropMatch[2]);
-      return { matched: true, static: !!target && target === norm(currentEngine) };
+      const target = String(enginePropMatch[1] !== undefined ? enginePropMatch[1] : (enginePropMatch[2] || '')).trim().toLowerCase();
+      return { matched: true, static: !!target && siteKey(target) === siteKey(currentEngine) };
     }
 
     const categoryMatch = trimmed.match(/^(?:\$category|category)\s*[=:]\s*(?:['"](.*?)['"]|([^\s\)]+))\s*i?\s*$/i);
@@ -1883,7 +2262,7 @@
   }
 
   function stripIfConditions(ruleStr, evaluateCond) {
-    let coreRule = ruleStr.trim(); let staticPass = true;
+    let coreRule = ruleStr.trim(), staticPass = true;
 
     const ranges = [];
     for (const occ of findIfOccurrences(coreRule)) {
@@ -2088,7 +2467,7 @@
     if (memo.has(memoKey)) return memo.get(memoKey); let remaining = rawRule.substring(prefixLen); let pattern, flags = ''; let flagsCandidate = ''; let lastSlashIndex = -1; let unclosed = false;
     for (let i = remaining.length - 1; i >= 0; i--) {
       if (remaining[i] === '/') {
-        let backslashCount = 0; let j = i - 1;
+        let backslashCount = 0, j = i - 1;
         while (j >= 0 && remaining[j] === '\\') {
           backslashCount++; j--;
         }
@@ -2111,7 +2490,7 @@
       pattern = remaining; unclosed = lastSlashIndex === -1;
     }
     if (!flags && remaining.endsWith('/')) {
-      let backslashCount = 0; let j = remaining.length - 2;
+      let backslashCount = 0, j = remaining.length - 2;
       while (j >= 0 && remaining[j] === '\\') {
         backslashCount++; j--;
       }
@@ -2136,7 +2515,7 @@
       }).join('.');
     }
     if (!isHost) part = encodeNonAscii(part);
-    let out = ''; let i = 0;
+    let out = '', i = 0;
     if (isHost && part.startsWith('*.')) {
       out += '(?:[^/]*\\.)?'; i = 2;
     }
@@ -2202,7 +2581,7 @@
       return escapedHost + dotTolerant + '(?::\\d+)?';
     }
 
-    let prefix = '^'; let hostIsFirst = false;
+    let prefix = '^', hostIsFirst = false;
     if (pattern.startsWith('*://')) {
       prefix += 'https?:\\/\\/(?:[^\\/@:]+(?::[^\\/@:]*)?@)?'; pattern = pattern.substring(4); hostIsFirst = true;
     } else {
@@ -2234,7 +2613,7 @@
     if (!memo) memo = ruleToRegex._memo = new Map(); if (memo.has(original)) return memo.get(original); let out; if (rule.startsWith('.')) rule = '*' + rule;
     if (!rule.startsWith('/') && !/^title\//i.test(rule) && !/^text\//i.test(rule) &&
       !rule.includes('://') && !rule.startsWith('.')) {
-      const restMatch = rule.match(/^([^\/?#]+)([\/?#].*)?$/);
+      const restMatch = rule.match(/^([^/?#]+)([\/?#].*)?$/);
       if (restMatch && restMatch[1].includes('.') && !restMatch[1].includes('*') && !/\s/.test(rule)) {
         rule = restMatch[2] ? '*://*.' + restMatch[1] + (restMatch[2].startsWith('/') ? restMatch[2] : '/' + restMatch[2]) : '*://*.' + rule + '/*';
       }
@@ -2266,7 +2645,7 @@
   }
 
   function matchWildcardDomainPattern(pattern) {
-    if (pattern.startsWith('.')) pattern = '*' + pattern; if (pattern.includes(':') && !pattern.startsWith('*://')) return null; const bareWildcard = pattern.match(/^\*\.([^\/\*\s:?#]+)$/);
+    if (pattern.startsWith('.')) pattern = '*' + pattern; if (pattern.includes(':') && !pattern.startsWith('*://')) return null; const bareWildcard = pattern.match(/^\*\.([^/\*\s:?#]+)$/);
     if (bareWildcard) {
       const domain = normalizeHostCandidate(bareWildcard[1]); if (domain) return { domain, domainType: 'wildcard' };
     }
@@ -2277,23 +2656,19 @@
         const domain = normalizeHostCandidate(pattern); if (domain) return { domain, domainType: 'wildcard' };
       }
     }
-    const wildcardMatch = pattern.match(/^\*:\/\/\*\.([^\/\*:@]+)\/\*$/);
+    const wildcardMatch = pattern.match(/^\*:\/\/\*\.([^/\*:@]+)\/\*$/);
     if (wildcardMatch) {
       const domain = normalizeHostCandidate(wildcardMatch[1]); if (domain) return { domain, domainType: 'wildcard' };
     }
-    const exactMatch = pattern.match(/^\*:\/\/([^\/\*:@]+)\/\*$/);
+    const exactMatch = pattern.match(/^\*:\/\/([^/\*:@]+)\/\*$/);
     if (exactMatch) {
       const domain = normalizeHostCandidate(exactMatch[1]); if (domain) return { domain, domainType: 'exact' };
     }
     return null;
   }
 
-  function matchSimpleDomain(coreRule) {
-    return matchWildcardDomainPattern(coreRule);
-  }
-
   function compileRuleRegex(coreRule) {
-    let memo = compileRuleRegex._memo; if (!memo) memo = compileRuleRegex._memo = new Map(); if (memo.has(coreRule)) return memo.get(coreRule); let type = 'url'; let pattern = ''; let flags = '';
+    let memo = compileRuleRegex._memo; if (!memo) memo = compileRuleRegex._memo = new Map(); if (memo.has(coreRule)) return memo.get(coreRule); let type = 'url', pattern = '', flags = '';
     if (coreRule.startsWith('/') && coreRule.lastIndexOf('/') === 0) {
       throw new Error('Unbalanced regex');
     }
@@ -2346,7 +2721,7 @@
     const blSets = {domains: compiledRules.domains, condDomains: compiledRules.conditionalDomains, urls: compiledRules.urls, titles: compiledRules.titles, texts: compiledRules.texts, condRules: compiledRules.conditionalRules};
 
     allRules.forEach((rule, ruleIndex) => {
-      if (typeof rule !== 'string') { if (currentConfig.debug) console.warn('非字符串规则项, 已跳过:', rule); return; }
+      if (typeof rule !== 'string') { dbgWarn('非字符串规则项, 已跳过:', rule); return; }
       rule = stripRuleComment(rule.trim()); if (!rule) return; let ruleValid = true;
       try {
         ruleValid = cachedAnalyzeRule(rule).valid;
@@ -2354,7 +2729,7 @@
         ruleValid = false;
       }
       if (!ruleValid) {
-        if (currentConfig.debug) console.warn('规则校验未通过, 已跳过:', rule); return;
+        dbgWarn('规则校验未通过, 已跳过:', rule); return;
       }
 
       const isLocal = ruleIndex < localRuleCount; const sourceInfo = isLocal ? { key: 'local', label: t('localRule') } : (subscriptionSources[ruleIndex - localRuleCount] || { key: 'local', label: t('localRule') });
@@ -2368,7 +2743,7 @@
           return;
         }
         if (!coreRule.startsWith('/') && !/^text\//i.test(coreRule) && !/^title\//i.test(coreRule)) {
-          const dm = matchSimpleDomain(coreRule);
+          const dm = matchWildcardDomainPattern(coreRule);
           if (dm) {
             const map = hasDynamic ? sets.condDomains : sets.domains;
             if (!map.has(dm.domain)) map.set(dm.domain, []);
@@ -2383,7 +2758,7 @@
           if (hasDynamic) sets.condRules.push({type: compiled.type, regex: compiled.regex, conditions: parsed.dynamicConditions, ...base});
           else (compiled.type === 'title' ? sets.titles : compiled.type === 'text' ? sets.texts : sets.urls).push({regex: compiled.regex, ...base});
         } catch (e) {
-          if (currentConfig.debug) console.warn('规则编译失败:', rule, e);
+          dbgWarn('规则编译失败:', rule, e);
         }
       };
 
@@ -2395,7 +2770,7 @@
         try {
           parsed = parseRuleWithConditions(hlRule);
         } catch (e) {
-          if (currentConfig.debug) console.warn('高亮规则解析失败:', hlRule, e); return;
+          dbgWarn('高亮规则解析失败:', hlRule, e); return;
         }
         if (!parsed.staticPass) return;
         let coreRule = parsed.coreRule;
@@ -2412,7 +2787,7 @@
       try {
         parsed = parseRuleWithConditions(rule);
       } catch (e) {
-        if (currentConfig.debug) console.warn('规则解析失败:', rule, e); return;
+        dbgWarn('规则解析失败:', rule, e); return;
       }
       if (!parsed.staticPass) return;
 
@@ -2551,7 +2926,7 @@
     const toBlockedInfo = (item) => ({ rule: item.originalRule, source: item.source, sourceKey: item.sourceKey });
     const [wlLocal, wlSub] = findWhitelistPair();
     const hlWl = currentConfig.highlightWhitelist === true ? (hlLocalEntry || hlEntry) : null;
-    let whitelistHit = wlLocal || (hlWl && isLocalEntry(hlWl) ? hlWl : null); let blockedInfo = null;
+    let whitelistHit = wlLocal || (hlWl && isLocalEntry(hlWl) ? hlWl : null), blockedInfo = null;
     if (!whitelistHit) {
       const [blLocal, blSub] = findBlockedPair();
       if (blLocal) blockedInfo = toBlockedInfo(blLocal);
@@ -2581,8 +2956,8 @@
     return /^https?:\/\//i.test(value) ? value : '';
   }
 
-  function decodeBingCkTarget(u) {
-    if (!u) return ''; let rawEncoded = u; if (/^a[01]/i.test(rawEncoded)) rawEncoded = rawEncoded.slice(2); let base64 = rawEncoded.replace(/-/g, '+').replace(/_/g, '/');
+  function decodeBase64UrlTarget(u, spec) {
+    if (!u) return ''; let rawEncoded = u; const pre = spec && spec.stripPrefix; if (pre) { try { const r = pre instanceof RegExp ? pre : (pre && typeof pre.source === 'string' ? new RegExp(pre.source, pre.flags || '') : (typeof pre === 'string' && pre ? new RegExp(pre) : null)); if (r) rawEncoded = rawEncoded.replace(r, ''); } catch (_) {} } let base64 = rawEncoded.replace(/-/g, '+').replace(/_/g, '/');
     const rem = base64.length % 4; if (rem === 1) return ''; if (rem > 0) base64 += '='.repeat(4 - rem); let realUrl = '';
     try {
       if (typeof atob === 'function') {
@@ -2606,99 +2981,111 @@
   }
 
   // 去除重定向
+    const REDIRECT_CODECS = {
+    base64url: (u, spec) => { const v = u.searchParams.get(spec.params && spec.params[0]); return decodeBase64UrlTarget(v, spec) || decodeRedirectTarget(v); },
+    url: (u, spec) => { for (const p of (spec.params || [])) { const v = decodeRedirectTarget(u.searchParams.get(p)); if (v) return v; } return ''; },
+    pattern: (u, spec) => {
+      const re = (v) => { try { return v instanceof RegExp ? v : (v && typeof v.source === 'string' ? new RegExp(v.source, v.flags || '') : (typeof v === 'string' && v ? new RegExp(v) : null)); } catch (_) { return null; } };
+      let next = '';
+      if (spec.pathValue) { const m = u.pathname.match(re(spec.pathValue)); if (m && m[1]) next = decodeRedirectTarget(m[1]); }
+      if (!next && spec.hrefSuffix) { const m = u.href.match(re(spec.hrefSuffix)); if (m && m[1]) next = decodeRedirectTarget(m[1]); }
+      if (!next) for (const p of (spec.params || [])) { const v = u.searchParams.get(p); if (v) { next = decodeRedirectTarget(v); if (next) break; } }
+      return next;
+    }
+  };
+  function getRedirectSpecs(host) {
+    host = String(host || '').replace(/\.$/, '');
+    if (_redirectSpecsCache.has(host)) return _redirectSpecsCache.get(host);
+    let specs = null;
+    try {
+      const defs = getSelectors();
+      const ids = Object.keys(defs).sort((a, b) => ((defs[b] && defs[b].priority) || 0) - ((defs[a] && defs[a].priority) || 0));
+      for (const id of ids) {
+        const def = defs[id]; const redirects = def && def.link && def.link.redirects; if (!def || def.disabled || !Array.isArray(redirects) || !redirects.length) continue;
+        if (isEngineHost(id, host)) { specs = redirects.map(r => ({ ...r, engine: id })); break; }
+      }
+    } catch (_) {}
+    _redirectSpecsCache.set(host, specs); return specs;
+  }
+  function tryUrl(raw) { try { return new URL(String(raw)); } catch (_) { return null; } }
+  function decodeRedirectOnce(raw) {
+    if (!raw) return '';
+    const u = tryUrl(raw); if (!u) return '';
+    const specs = getRedirectSpecs(u.hostname); if (!specs) return '';
+    for (const spec of specs) {
+      if (spec.path) { try { const p = spec.path; const re = p instanceof RegExp ? p : new RegExp(p && typeof p === 'object' && typeof p.source === 'string' ? p.source : p, p && typeof p === 'object' ? (p.flags || '') : ''); if (!re.test(u.pathname)) continue; } catch (_) { continue; } }
+      const codec = REDIRECT_CODECS[spec.codec]; if (!codec) continue;
+      let next = ''; try { next = codec(u, spec); } catch (_) {}
+      if (next && spec.chain && typeof spec.chain.param === 'string' && spec.chain.param) {
+        try {
+          const inner = new URL(next);
+          if (!spec.chain.hostSelf || (spec.engine && isEngineHost(spec.engine, inner.hostname))) {
+            const v = decodeRedirectTarget(inner.searchParams.get(spec.chain.param));
+            if (v) next = v;
+          }
+        } catch (_) {}
+      }
+      if (next) return next;
+    }
+    return '';
+  }
   function unwrapRedirectUrl(url) {
-    const isRedirectHost = (host) => {
-      host = String(host || '').replace(/\.$/, '');
-      return ['bing', 'google_scholar', 'google', 'duckduckgo', 'yahoo', 'yahoo_japan'].some(e => isEngineHost(e, host)) ||
-        isEngineHost('so360', host) || isEngineHost('sogou', host) || isEngineHost('toutiao', host);
-    };
     const seen = new Set();
     for (let depth = 0; depth < 5 && url && !seen.has(url); depth++) {
-      seen.add(url); let next = '';
-      try {
-        const urlObj = new URL(url); const host = urlObj.hostname.replace(/\.$/, ''); const path = urlObj.pathname;
-        if (isEngineHost('bing', host) && path.startsWith('/ck/a')) {
-          const uParam = urlObj.searchParams.get('u'); next = decodeBingCkTarget(uParam); if (!next && uParam) next = decodeRedirectTarget(uParam);
-        } else if (isEngineHost('google_scholar', host) && /\/scholar_url\/?$/i.test(path)) {
-          next = decodeRedirectTarget(urlObj.searchParams.get('url'));
-        } else if (isEngineHost('google', host) && /^\/(?:url|goto)\/?$/i.test(path)) {
-          next = decodeRedirectTarget(urlObj.searchParams.get('q') || urlObj.searchParams.get('url') || urlObj.searchParams.get('u'));
-        } else if (isEngineHost('google', host) && /^(?:\/aclk|\/imgres|\/translate|\/pagead\/aclk)(?:\/|\?|$)/i.test(path)) {
-          const tryGoogleParam = (p) => { const v = urlObj.searchParams.get(p); if (v) { next = decodeRedirectTarget(v); return !!next; } return false; };
-          for (const p of ['adurl', 'imgurl', 'url', 'u', 'dest']) { if (tryGoogleParam(p)) break; }
-        } else if (isEngineHost('duckduckgo', host) && /^\/l\/?$/i.test(path)) {
-          next = decodeRedirectTarget(urlObj.searchParams.get('uddg'));
-        } else if (isEngineHost('yahoo', host) || isEngineHost('yahoo_japan', host)) {
-          if (/ru=/i.test(path)) {
-            const ruMatch = path.match(/(?:^|\/)RU=([\s\S]*?)(?=(?:\/(?:rk|rs|rv|ro|re|rh|rt|_ylt|_ylu)=|\/$|$))/i); if (ruMatch && ruMatch[1]) next = decodeRedirectTarget(ruMatch[1]);
-          }
-          if (!next && url.includes('/*')) {
-            const starMatch = url.match(/\/\*+-?(https?(?::|%3A)[\s\S]*)$/i); if (starMatch && starMatch[1]) next = decodeRedirectTarget(starMatch[1]);
-          }
-          if (!next) {
-            const tryParam = (p) => { const v = urlObj.searchParams.get(p); if (v) next = decodeRedirectTarget(v); return !!next; };
-            if (!tryParam('ru') && /^\/(?:r|rd)(?:\/|$)|ru=/i.test(path)) {
-              for (const p of ['u', 'url', 'target', 'dest', 'dst', 'r']) { if (tryParam(p)) break; }
-            }
-          }
-        } else if (isEngineHost('toutiao', host) && /^\/search\/jump\/?$/i.test(path)) {
-          next = decodeRedirectTarget(urlObj.searchParams.get('url'));
-          if (next) {
-            try {
-              const inner = new URL(next); const h5 = isEngineHost('toutiao', inner.hostname) ? inner.searchParams.get('h5_url') : ''; if (h5) next = decodeRedirectTarget(h5) || next;
-            } catch (_) {}
-          }
-        } else if (isEngineHost('so360', host) && /^\/jump\/?$/i.test(path)) {
-          next = decodeRedirectTarget(urlObj.searchParams.get('u') || urlObj.searchParams.get('url'));
-        } else if (isEngineHost('sogou', host) && /(?:\/tc\b|\/jump\b|\/link\b)/i.test(path)) {
-          next = decodeRedirectTarget(urlObj.searchParams.get('url'));
-        } else if (isEngineHost('so360', host) && /(?:\/tc\b|\/link\b)/i.test(path)) {
-          next = decodeRedirectTarget(urlObj.searchParams.get('url'));
-        }
-      } catch (_) {}
-      if (!next || next === url) return url; let nextHost = '';
-      try { nextHost = new URL(next).hostname; } catch (_) { return next; }
-      if (!isRedirectHost(nextHost)) return next; url = next;
+      seen.add(url); const next = decodeRedirectOnce(url);
+      if (!next || next === url) break; url = next;
     }
     return url;
   }
+  
 
+  function hasRedirectSpec(url) {
+    if (!url) return false;
+    const u = tryUrl(url); if (!u) return false;
+    const specs = getRedirectSpecs(u.hostname); if (!Array.isArray(specs)) return false;
+    for (const spec of specs) {
+      if (!spec) continue;
+      if (spec.path) { try { const p = spec.path; const re = p instanceof RegExp ? p : new RegExp(p && typeof p === 'object' && typeof p.source === 'string' ? p.source : p, p && typeof p === 'object' ? (p.flags || '') : ''); if (!re.test(u.pathname)) continue; } catch (_) { continue; } }
+      return true;
+    }
+    return false;
+  }
   function isOpaqueRedirectUrl(url) {
     if (!url) return false;
-    let urlObj = null; try { urlObj = new URL(url); } catch (_) { return false; }
-    const host = urlObj.hostname.replace(/\.$/, ''); if (!isEngineHost('google', host)) return false;
-    if (!/^\/(?:url|goto)\/?$/i.test(urlObj.pathname)) return false;
-    const target = urlObj.searchParams.get('q') || urlObj.searchParams.get('url') || urlObj.searchParams.get('u');
-    return !decodeRedirectTarget(target);
+    if (!hasRedirectSpec(url)) return false;
+    const unwrapped = unwrapRedirectUrl(url);
+    return !unwrapped || unwrapped === url;
   }
 
+  function redirectsEnabled() { return !(typeof currentConfig !== 'undefined' && currentConfig && currentConfig.removeRedirects === false); }
   function getCleanUrl(link, engine) {
     if (!link || !link.href) return '';
     if (engine === undefined) engine = (typeof getSearchEngine === 'function') ? getSearchEngine() : '';
+    const redirectsOn = redirectsEnabled();
     let attr = '';
-    if ((engine === 'so360' || engine === 'sogou') && typeof link.getAttribute === 'function') {
-      attr = link.getAttribute('data-mdurl') || link.getAttribute('data-url') || link.getAttribute('linkurl') || '';
-      if (!attr) {
-        try {
-          const box = typeof link.closest === 'function' ? link.closest('.res-list, .vrwrap, .reactResult') : null;
-          const el = box && typeof box.querySelector === 'function' ? box.querySelector('[data-mdurl], [data-url]') : null;
-          if (el && typeof el.getAttribute === 'function') attr = el.getAttribute('data-mdurl') || el.getAttribute('data-url') || '';
-        } catch (_) {}
+    let directAttrs = null, directScope = '', directProtocol = '';
+    try { if (redirectsOn && typeof resolvePageDef === 'function') { const d = resolvePageDef(engine); const l = d && d.link; directAttrs = l && l.directAttrs; directScope = l && l.directScope; directProtocol = l && l.directProtocol; } } catch (_) {}
+    if (directAttrs && typeof link.getAttribute === 'function') {
+      const names = Array.isArray(directAttrs) ? directAttrs : [directAttrs];
+      for (const name of names) { attr = link.getAttribute(name) || ''; if (attr) break; }
+      if (!attr && directScope && typeof link.closest === 'function') {
+        const box = link.closest(directScope);
+        const el = box && typeof box.querySelector === 'function' ? box.querySelector(names.map(n => '[' + n + ']').join(',')) : null;
+        if (el && typeof el.getAttribute === 'function') for (const name of names) { attr = el.getAttribute(name) || ''; if (attr) break; }
       }
     }
-    if (attr) attr = /^\/\/\S/.test(String(attr)) ? 'https:' + String(attr) : String(attr);
-    if (/^https?:\/\/\S+$/i.test(attr) && attr !== link.href) return unwrapRedirectUrl(attr);
-    return unwrapRedirectUrl(link.href);
+    if (attr) { attr = String(attr); if (directProtocol && /^\/\/\S/.test(attr)) attr = directProtocol + ':' + attr; }
+    const unwrap = (u) => redirectsEnabled() ? unwrapRedirectUrl(u) : u;
+    if (/^https?:\/\/\S+$/i.test(attr) && attr !== link.href) return unwrap(attr);
+    return unwrap(link.href);
   }
 
   function resolveUrlDomain(link) {
     const rawHref = (link && link.href) || '';
-    const keepRaw = currentConfig.removeRedirects === false;
+    const keepRaw = !redirectsEnabled();
     let rawUrl = keepRaw ? rawHref : getCleanUrl(link);
-    let url = toASCIIUrl(rawUrl) || rawUrl; let domain = '';
-    try {
-      domain = toASCIIHostname(new URL(url).hostname);
-    } catch (e) {}
+    let url = toASCIIUrl(rawUrl) || rawUrl, domain = '';
+    const parsedUrl = tryUrl(url); if (parsedUrl) domain = toASCIIHostname(parsedUrl.hostname);
     if (domain && isOpaqueRedirectUrl(url)) domain = '';
     return { url, domain };
   }
@@ -2733,44 +3120,28 @@
     } catch (e) {
       return null;
     }
-  }
-
-  function queryResultSelector(result, selector) {
-    try { return result.matches && result.matches(selector) ? result : result.querySelector(selector); } catch (e) { return null; }
-  }
-  function getResultText(result, selectors) {
-    if (!Array.isArray(selectors)) return '';
-    for (const selector of selectors) {
-      const elem = queryResultSelector(result, selector);
-      const text = elem ? elem.textContent.trim() : ''; if (text) return text;
-    }
-    return '';
-  }
-
-  function getResultSnippet(result, engine) {
-    const selectors = resolveCategoryDef(engine).snippets; const snippet = getResultText(result, selectors); if (snippet) return snippet;
-    for (const element of getResultExtraElements(result, engine)) {
-      let matchedSelf = false;
-      for (const selector of selectors) {
-        try {
-          if (element.matches(selector)) { matchedSelf = true; break; }
-        } catch (e) { }
-      }
-      const text = matchedSelf ? element.textContent.trim() : getResultText(element, selectors); if (text) return text;
-    }
+  }    function getResultSnippet(result, engine) {
+    const def = resolvePageDef(engine); const cmd = def.snippet;
+    if (cmd) { const r = runCmdValue(result, cmd, 'text'); if (r && r.value) return r.value; }
+    if (cmd) for (const element of getResultExtraElements(result, engine)) { const r = runCmdValue(element, cmd, 'text'); if (r && r.value) return r.value; }
     return '';
   }
 
   function getResultExtraElements(result, engine = getSearchEngine()) {
-    const selectors = resolveCategoryDef(engine).extraElements; const parent = result.parentElement; if (!parent || !Array.isArray(selectors) || !selectors.length) return [];
+    const selectors = resolvePageDef(engine).extraSelector; const parent = result.parentElement; if (!parent || !Array.isArray(selectors) || !selectors.length) return [];
     const index = Array.prototype.indexOf.call(parent.children, result) + 1; const elements = new Set();
     for (const selector of selectors) {
-      if (typeof selector !== 'string' || !selector.trim() || hasTopLevelComma(selector)) continue;
-      try {
-        for (const element of parent.querySelectorAll(':scope > :nth-child(' + index + ') ' + selector)) {
-          if (element !== result && !element.contains(result)) elements.add(element);
-        }
-      } catch (e) {}
+      if (typeof selector !== 'string') continue;
+      for (const part of splitTopLevelSelectorList(selector)) {
+        let sel = part.trim();
+        if (sel.startsWith('&')) sel = sel.slice(1).trim();
+        if (!sel || hasTopLevelComma(sel)) continue;
+        try {
+          for (const element of parent.querySelectorAll(':scope > :nth-child(' + index + ') ' + sel)) {
+            if (element !== result && !element.contains(result)) elements.add(element);
+          }
+        } catch (e) {}
+      }
     }
     return [...elements];
   }
@@ -2813,230 +3184,98 @@
       }
       node = parent;
     }
+  }  const _cmdReCache = new Map();
+  function cmdRe(p) { let k, f = ''; if (p instanceof RegExp) { k = 'r\u0000' + p.source; f = p.flags; } else if (p && typeof p === 'object' && typeof p.source === 'string') { k = 'o\u0000' + p.source; f = String(p.flags || ''); } else { k = 's\u0000' + String(p); } let r = _cmdReCache.get(k + '\u0000' + f); if (r === undefined) { try { r = new RegExp(p instanceof RegExp ? p.source : (p && typeof p.source === 'string' ? p.source : String(p)), f); } catch (_) { r = null; } _cmdReCache.set(k + '\u0000' + f, r); } return r; }
+  function cmdQueryEl(root, sel) { if (!root || !sel) return null; try { return root.matches && root.matches(sel) ? root : (root.querySelector ? root.querySelector(sel) : null); } catch (_) { return null; } }
+  function runCmdEl(root, spec) {
+    if (spec == null) return root; if (typeof spec === 'string') return cmdQueryEl(root, spec); if (!Array.isArray(spec)) return root;
+    const t = spec[0], a = spec[1], b = spec[2];
+    if (t === 'upward') { if (typeof a === 'number') { let el = root; for (let i = 0; i < a && el; i++) el = el.parentElement; return el || null; } return root && root.parentElement && root.parentElement.closest ? root.parentElement.closest(a) : null; }
+    if (t === 'selector') return cmdQueryEl(runCmdEl(root, b), a);
+    return root;
   }
-
-  function extractLinkFromElement(el, spec) {
-    if (!el) return null;
-    const mode = spec.mode, arg = spec.arg;
-    try {
-      if (mode === 'attr') {
-        if (!arg || arg === 'href') { if (el.href) return el; return null; }
-        const v = el.getAttribute(arg);
-        if (v && /^https?:\/\//i.test(v)) return { href: v, getAttribute: a => el.getAttribute(a), setAttribute: (a, v2) => el.setAttribute(a, v2) };
-        return null;
+  function cmdText(el) { return el && typeof el.textContent === 'string' ? el.textContent.trim() : ''; }
+  function cmdAttr(el, name) { if (!el) return ''; const v = el.getAttribute ? el.getAttribute(name) : null; if (v != null && v !== '') return String(v); const p = el[name]; return typeof p === 'string' ? p : ''; }
+  function cmdPath(obj, path) { let cur = obj; for (const seg of String(path || '').replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean)) { if (cur == null) return undefined; cur = cur[seg]; } return cur; }
+  function cmdDomain(v) { const m = String(v || '').match(/(?:[\p{L}\p{N}][\p{L}\p{N}_-]*\.)+\p{L}{2,}/u); return m ? 'https://' + m[0] : ''; }
+  function cmdOrigin() { return (typeof location !== 'undefined' && location.origin) ? location.origin : 'https://example.com'; }
+  function cmdAbsUrl(v) { if (/^https?:\/\//i.test(String(v || ''))) return String(v); try { const u = new URL(String(v), cmdOrigin()); return /^https?:$/.test(u.protocol) ? u.href : ''; } catch (_) { return ''; } }
+  function isOpaqueRedirectValue(v) {
+    if (!v) return true; let abs = '';
+    try { abs = new URL(v, cmdOrigin()).href; } catch (_) { return true; }
+    if (!hasRedirectSpec(abs)) return false;
+    const u = unwrapRedirectUrl(abs); return !u || u === abs;
+  }
+  function runCmdValue(root, cmd, mode) {
+    if (cmd == null) return null;
+    if (typeof cmd === 'string') {
+      const el = cmdQueryEl(root, cmd); if (!el) return null;
+      if (mode === 'link') { const href = cmdAttr(el, 'href'); return href ? { value: href, element: el } : null; }
+      const text = cmdText(el); return text ? { value: text, element: el } : null;
+    }
+    if (!Array.isArray(cmd)) return null;
+    const t = cmd[0], a = cmd[1], b = cmd[2], c = cmd[3];
+    if (t === 'or') { const isElCmd = b === undefined || typeof b === 'string' || (Array.isArray(b) && (b[0] === 'selector' || b[0] === 'upward')); const base = isElCmd && b !== undefined ? runCmdEl(root, b) : root; if (!base) return null; for (const sub of (Array.isArray(a) ? a : [a])) { const r = runCmdValue(base, sub, mode); if (r && r.value) return r; } return null; }
+    if (t === 'property') { const el = runCmdEl(root, b); if (!el) return null; const v = el[a]; return (typeof v === 'string' || typeof v === 'number') && v !== '' ? { value: String(v), element: el } : null; }
+    if (t === 'attribute') { const el = runCmdEl(root, b); const v = cmdAttr(el, a); return v ? { value: v, element: el || root } : null; }
+    if (t === 'text') { const el = runCmdEl(root, a); const v = cmdText(el); return v ? { value: v, element: el || root } : null; }
+    if (t === 'const') return { value: String(a == null ? '' : a), element: root };
+    if (t === 'regexInclude' || t === 'regexExclude') { const r = runCmdValue(root, b, mode); if (!r || !r.value) return null; const re = cmdRe(a); if (!re) return r; return (re.test(r.value) === (t === 'regexInclude')) ? r : null; }
+    if (t === 'regexSubstitute') { const r = runCmdValue(root, c, mode); if (!r || !r.value) return null; const re = cmdRe(a); return re ? { value: r.value.replace(re, String(b == null ? '' : b)), element: r.element } : r; }
+    if (t === 'domainToUrl' || t === 'domainToURL') { const r = runCmdValue(root, a, 'text'); const v = cmdDomain(r && r.value); return v ? { value: v, element: r.element } : null; }
+    if (t === 'rejectEngineHost') { const r = runCmdValue(root, a, 'text'); if (!r || !r.value) return null; try { const h = new URL(r.value, cmdOrigin()).hostname; for (const e of Object.keys(getSelectors())) if (isEngineHost(e, h)) return null; } catch (_) { return null; } return r; }
+    if (t === 'normalizeUrl') { const r = runCmdValue(root, a, 'text'); if (!r || !r.value) return null; try { return { value: new URL(r.value, cmdOrigin()).href, element: r.element }; } catch (_) { return null; } }
+    if (t === 'rejectOpaqueRedirect') { const r = runCmdValue(root, a, mode); if (!redirectsEnabled()) return r; return r && r.value && !isOpaqueRedirectValue(r.value) ? r : null; }
+    if (t === 'jsonPath') {
+      if (!redirectsEnabled()) return null;
+      const r = runCmdValue(root, b, 'text'); if (!r) return null; let v = r.value;
+      if (typeof v === 'string') { try { v = JSON.parse(v); } catch (_) { try { v = JSON.parse(decodeURIComponent(v)); } catch (_) { return null; } } }
+      const out = a === '' || a == null ? v : cmdPath(v, a); return out == null || out === '' ? null : { value: out, element: r.element };
+    }
+    if (t === 'queryParam') {
+      if (!redirectsEnabled()) return null;
+      const r = runCmdValue(root, b, 'text'); if (!r || !r.value) return null;
+      try { const u = new URL(String(r.value), cmdOrigin()); let v = u.searchParams.get(a); if (!v) return null; if (!/^https?:\/\//i.test(v) && /%[0-9a-f]{2}/i.test(v)) { try { v = decodeURIComponent(v); } catch (_) {} } return { value: v, element: r.element }; } catch (_) { return null; }
+    }
+    if (t === 'json') {
+      if (!redirectsEnabled()) return null;
+      const el = runCmdEl(root, c); let obj = null;
+      try { obj = JSON.parse(cmdAttr(el, a) || '{}'); } catch (_) { return null; }
+      const v = cmdPath(obj, b); return typeof v === 'string' && v ? { value: v, element: el || root } : null;
+    }
+    if (t === 'base64Url') {
+      if (!redirectsEnabled()) return null;
+      const names = Array.isArray(a) ? a : (typeof a === 'string' && a ? [a] : null);
+      if (!names || !names.length || !names.every((n) => typeof n === 'string' && n)) return null;
+      const el = runCmdEl(root, b); let src = '';
+      for (const n of names) { src = cmdAttr(el, n) || ''; if (src) break; }
+      src = src.split('?')[0];
+      const segs = src.split('/');
+      for (let i = 1; i < segs.length; i++) {
+        let b64 = segs.slice(i).join('').replace(/-/g, '+').replace(/_/g, '/'); if (b64.length % 4) b64 += '='.repeat(4 - b64.length % 4);
+        try { const u = atob(b64); if (/^https?:\/\//i.test(u)) return { value: u, element: el || root }; } catch (_) {}
       }
-      if (mode === 'json') {
-        let obj = null;
-        try { obj = JSON.parse(el.getAttribute(arg.attr) || '{}'); } catch (_) { return null; }
-        let cur = obj;
-        for (const seg of arg.path) { if (cur && typeof cur === 'object') cur = cur[seg]; else { cur = undefined; break; } }
-        if (typeof cur === 'string' && /^https?:\/\//i.test(cur)) return { href: cur, getAttribute: a => el.getAttribute(a), setAttribute: (a, v2) => el.setAttribute(a, v2) };
-        return null;
-      }
-      if (mode === 'query') {
-        const raw = (arg.attr === 'href' && el.href) ? el.href : el.getAttribute(arg.attr);
-        if (!raw) return null;
-        try { const v = new URL(raw, location.origin).searchParams.get(arg.param); if (v && /^https?:\/\//i.test(v)) return { href: v, getAttribute: a => el.getAttribute(a), setAttribute: (a, v2) => el.setAttribute(a, v2) }; } catch (_) {}
-        try { const v2 = new URL(raw).searchParams.get(arg.param); if (v2 && /^https?:\/\//i.test(v2)) return { href: v2, getAttribute: a => el.getAttribute(a), setAttribute: (a, v3) => el.setAttribute(a, v3) }; } catch (_) {}
-        return null;
-      }
-      if (mode === 'b64url') {
-        let src = el.getAttribute('src') || el.getAttribute('data-src') || '';
-        src = src.split('?')[0];
-        const segs = src.split('/');
-        for (let i = 1; i < segs.length; i++) {
-          let b64 = segs.slice(i).join('').replace(/-/g, '+').replace(/_/g, '/'); if (b64.length % 4) b64 += '='.repeat(4 - b64.length % 4);
-          try { const u = atob(b64); if (/^https?:\/\//i.test(u)) return { href: u, getAttribute: a => el.getAttribute(a), setAttribute: (a, v2) => el.setAttribute(a, v2) }; } catch (_) {}
-        }
-        return null;
-      }
-      if (mode === 'clparams') {
-        const raw = el.getAttribute('data-cl-params') || '';
-        if (!raw) return null;
-        const m = raw.match(new RegExp('(?:^|;)' + arg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':([^;]*)'));
-        let v = m && m[1] ? m[1].trim() : '';
-        if (v && /^https?:\/\//i.test(v)) return { href: v, getAttribute: a => el.getAttribute(a), setAttribute: (a, v2) => el.setAttribute(a, v2) };
-        if (v && /^(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/|$)/i.test(v)) return { href: 'https://' + v, getAttribute: a => el.getAttribute(a), setAttribute: (a, v2) => el.setAttribute(a, v2) };
-        return null;
-      }
-    } catch (_) {}
+      return null;
+    }
     return null;
   }
-  function parseTopLevelAt(selector, modes) {
-    let quote = ''; let depth = 0;
-    for (let i = selector.length - 1; i >= 0; i--) {
-      const c = selector[i];
-      if (quote) { if (c === quote && selector[i - 1] !== '\\') quote = ''; continue; }
-      if (c === '"' || c === "'") { quote = c; continue; }
-      if (c === ']' || c === ')') depth++;
-      else if ((c === '[' || c === '(') && depth) depth--;
-      else if (c === '@' && !depth) { const m = selector.slice(i + 1).match(new RegExp('^(?:' + modes + ')(?::|$)')); if (m) return i; }
-    }
-    return -1;
-  }
-  function parseLinkSpec(selector) {
-    const at = typeof selector === 'string' ? parseTopLevelAt(selector, 'attr|json|query|b64url|clparams') : -1;
-    if (at === -1) return null;
-    const spec = { css: selector.slice(0, at), mode: selector.slice(at + 1).split(':')[0] };
-    const arg = selector.slice(at + 1).slice(spec.mode.length + 1);
-    if (spec.mode === 'json') {
-      const dot = arg.indexOf('.');
-      if (dot <= 0) return null;
-      spec.arg = { attr: arg.slice(0, dot), path: arg.slice(dot + 1).split('.') };
-    } else if (spec.mode === 'query') {
-      const dot = arg.indexOf('.');
-      if (dot <= 0) return null;
-      spec.arg = { attr: arg.slice(0, dot), param: arg.slice(dot + 1) };
-    } else if (spec.mode === 'attr') spec.arg = arg || 'href';
-    else spec.arg = arg;
-    return spec;
+  function makeResultLink(el, href) {
+    const g = (n) => el && el.getAttribute ? el.getAttribute(n) : null; const s = (n, v) => { if (el && el.setAttribute) el.setAttribute(n, v); };
+    return { href, getAttribute: g, setAttribute: s };
   }
   function getResultLink(result, engine) {
-    const rawDefs = resolveCategoryDef(engine).links;
-    const linkDefs = Array.isArray(rawDefs) ? rawDefs : (typeof rawDefs === 'string' && rawDefs ? [rawDefs] : []);
-    let foundEl = null;
-    for (const selector of linkDefs) {
-      const spec = parseLinkSpec(selector);
-      if (spec) {
-        let el = null;
-        try { el = spec.css ? (result.matches && result.matches(spec.css) ? result : result.querySelector(spec.css)) : result; } catch (_) {}
-        foundEl = extractLinkFromElement(el, spec);
-        if (foundEl) return foundEl;
-        continue;
-      }
-      try {
-        const el = result.matches && result.matches(selector) ? result : result.querySelector(selector);
-        if (el && el.href) { foundEl = el; break; }
-      } catch (_) {}
-    }
-    if (engine === 'bing' && foundEl && foundEl.href) {
-      try {
-        const u = new URL(foundEl.href);
-        if (isEngineHost('bing', u.hostname) && u.pathname.startsWith('/ck/a')) {
-          const unwrapTest = unwrapRedirectUrl(foundEl.href);
-          if (!unwrapTest || unwrapTest === foundEl.href) {
-            const attrEl = result.querySelector('.b_attribution, .b_algoheader cite, cite');
-            if (attrEl && attrEl.textContent) {
-              const citeText = attrEl.textContent.trim();
-              const domainMatch = citeText.match(/^https?:\/\/([^/\s]+)/i) ||
-                citeText.match(/^(?:[\p{L}\p{N}][\p{L}\p{N}_-]*\.)+\p{L}{2,}/u);
-               if (domainMatch) {
-                 if (domainMatch[0].startsWith('http')) {
-                   try {
-                     const citedUrl = new URL(domainMatch[0]);
-                     if (!isEngineHost('bing', citedUrl.hostname)) {
-                       return { href: citedUrl.href, getAttribute: (attr) => foundEl.getAttribute(attr), setAttribute: (attr, val) => foundEl.setAttribute(attr, val) };
-                     }
-                   } catch (_) {}
-                 }
-                 const candidateDomain = domainMatch[1] || domainMatch[0];
-                if (!isEngineHost('bing', candidateDomain) &&
-                    !candidateDomain.includes('..') && candidateDomain.includes('.')) {
-                  try {
-                    const fallbackUrl = new URL(`https://${toASCIIHostname(candidateDomain)}/`).href;
-                    return {
-                      href: fallbackUrl,
-                      getAttribute: (attr) => foundEl.getAttribute(attr),
-                      setAttribute: (attr, val) => foundEl.setAttribute(attr, val)
-                    };
-                  } catch (_) {}
-                }
-              }
-            }
-          }
-        }
-      } catch (_) {}
-    }
-    if (foundEl && engine === 'google' && getSearchCategory() !== 'images') {
-      try {
-        if (isEngineHost('google', new URL(foundEl.href, location.origin).hostname) || isOpaqueRedirectUrl(foundEl.href)) {
-          let unwrapOk = false;
-          try { const t = unwrapRedirectUrl(foundEl.href); if (t && t !== foundEl.href && isNotGoogleHost(toASCIIHostname(new URL(t).hostname))) unwrapOk = true; } catch (_) {}
-          if (!unwrapOk) {
-            const el = result.querySelector('.lJQCTe, .XVWGNd, .R8BTeb, span.ob9lvb, .eip8Bb');
-            const nodes = [];
-            if (el) {
-              nodes.push(el);
-              if (typeof el.closest === 'function') { const cite = el.closest('cite'); if (cite && cite !== el) nodes.push(cite); }
-            }
-            if (typeof result.querySelectorAll === 'function') { for (const cite of result.querySelectorAll('cite')) { if (!nodes.includes(cite)) nodes.push(cite); } }
-            for (const node of nodes) {
-              const txt = node && typeof node.textContent === 'string' ? node.textContent.trim() : '';
-              if (!txt) continue;
-              const um = txt.match(/^https?:\/\/[^\s'"<>]+/i);
-              const segs = um ? [] : txt.split(/\s*(?:›|»|>|\u2026|\.{3})\s*/).map(s => s.trim()).filter(Boolean);
-              let candidate = um ? um[0] : '';
-              if (!candidate && segs.length) {
-                const dm = segs[0].match(/^((?:[a-z0-9-]+\.)+[a-z]{2,})(?::\d+)?(?:[/?#].*)?$/i);
-                if (dm) { const rest = segs.slice(1).map(s => s.replace(/^\/+|\/+$/g, '')).filter(Boolean); candidate = 'https://' + dm[1] + (rest.length ? '/' + rest.join('/') : '/'); }
-              }
-              if (!candidate) continue;
-              let ok = false;
-              try { ok = isNotGoogleHost(toASCIIHostname(new URL(candidate).hostname)); } catch (_) {}
-              if (ok) return { href: candidate, getAttribute: a => foundEl.getAttribute(a), setAttribute: (a, v) => foundEl.setAttribute(a, v) };
-            }
-          }
-        }
-      } catch (_) {}
-    }
-    return foundEl;
-  }
-
-  function getResultTextFromSpec(result, spec) {
-    const el = spec.css ? result.querySelector(spec.css) : result;
-    if (!el) return '';
-    if (spec.mode === 'attr') return String(el.getAttribute(spec.arg) || '').trim();
-    if (spec.mode === 'json') {
-      try {
-        let cur = JSON.parse(el.getAttribute(spec.arg.attr) || '{}');
-        for (const seg of spec.arg.path) { if (cur && typeof cur === 'object') cur = cur[seg]; else { cur = undefined; break; } }
-        return typeof cur === 'string' ? cur.trim() : '';
-      } catch (_) { return ''; }
-    }
-    return (el.textContent || '').trim();
-  }
-  function parseTitleSpec(selector) {
-    const at = typeof selector === 'string' ? parseTopLevelAt(selector, 'attr|json|text') : -1;
-    if (at === -1) return null;
-    const spec = { css: selector.slice(0, at), mode: selector.slice(at + 1).split(':')[0] };
-    const arg = selector.slice(at + 1).slice(spec.mode.length + 1);
-    if (spec.mode === 'json') {
-      const dot = arg.indexOf('.');
-      if (dot <= 0) return null;
-      spec.arg = { attr: arg.slice(0, dot), path: arg.slice(dot + 1).split('.') };
-    } else spec.arg = arg || (spec.mode === 'text' ? '' : 'alt');
-    return spec;
-  }
-  function getResultTitle(result, engine) {
-    const titleSelectors = resolveCategoryDef(engine).titles;
-    if (Array.isArray(titleSelectors)) {
-      for (const selector of titleSelectors) {
-        const spec = parseTitleSpec(selector);
-        if (spec) {
-          const text = getResultTextFromSpec(result, spec);
-          if (text) return text;
-          continue;
-        }
-        const text = getResultText(result, [selector]);
-        if (text) return text;
-      }
-    }
+    const def = resolvePageDef(engine);
+    if (def.url) { const r = runCmdValue(result, def.url, 'link'); const href = r && r.value ? cmdAbsUrl(r.value) : ''; if (href) return makeResultLink(r.element || result, href); }
+    return null;
+  }    function getResultTitle(result, engine) {
+    const def = resolvePageDef(engine); const cmd = def.title;
+    if (cmd) { const r = runCmdValue(result, cmd, 'text'); if (r && r.value) return r.value; }
     return '';
   }
 
-  function getResultTitleElement(result, engine) {
-    const selectors = resolveCategoryDef(engine).titles;
-    if (!Array.isArray(selectors)) return null;
-    for (const selector of selectors) {
-      const spec = parseTitleSpec(selector);
-      if (spec) {
-        const elem = spec.css ? queryResultSelector(result, spec.css) : result;
-        if (elem) return elem;
-        continue;
-      }
-      const elem = queryResultSelector(result, selector);
-      if (elem && elem.textContent && elem.textContent.trim()) return elem;
-    }
+    function getResultTitleElement(result, engine) {
+    const def = resolvePageDef(engine); const cmd = def.title;
+    if (cmd) { const r = runCmdValue(result, cmd, 'text'); if (r && r.value) return r.element || result; }
     return null;
   }
 
@@ -3056,7 +3295,7 @@
     const isIP = ipParts.length === 4 && ipParts.every(p => {
       const n = parseInt(p, 10); return n >= 0 && n <= 255 && String(n) === p;
     });
-    let baseDomain = d; let suffixLike = false;
+    let baseDomain = d, suffixLike = false;
     if (!isIP) {
       for (;;) {
         const dot = baseDomain.indexOf('.'); if (dot <= 0) break; if (!COMMON_HOST_PREFIXES.has(baseDomain.slice(0, dot).toLowerCase())) break; const rest = baseDomain.slice(dot + 1);
@@ -3122,7 +3361,8 @@
     document.body.appendChild(panel);
 
     const rect = anchor.getBoundingClientRect(); const pw = panel.offsetWidth; const ph = panel.offsetHeight; const vw = window.innerWidth / scale, vh = window.innerHeight / scale;
-    let left = Math.min(Math.max(8, rect.right / scale - pw), vw - pw - 8); if (left < 8) left = 8; let top = rect.bottom / scale + 6; if (top + ph > vh - 8) top = Math.max(8, rect.top / scale - ph - 6); panel.style.left = left + 'px'; panel.style.top = top + 'px';
+    let left = Math.min(Math.max(8, rect.right / scale - pw), vw - pw - 8), top;
+    if (left < 8) left = 8; top = rect.bottom / scale + 6; if (top + ph > vh - 8) top = Math.max(8, rect.top / scale - ph - 6); panel.style.left = left + 'px'; panel.style.top = top + 'px';
     const close = () => {
       if (_blockConfirmOutsideHandler) {
         document.removeEventListener('click', _blockConfirmOutsideHandler, true); _blockConfirmOutsideHandler = null;
@@ -3153,9 +3393,7 @@
       });
     });
 
-    panel.querySelector('#sfb-confirm-cancel').onclick = (e) => {
-      e.stopPropagation(); close();
-    };
+    bindCancelButton('sfb-confirm-cancel', close);
     panel.querySelector('#sfb-confirm-ok').onclick = (e) => {
       e.stopPropagation(); const checked = panel.querySelector('input[type="radio"]:checked'); const idx = checked ? parseInt(checked.value, 10) : 0;
       const ruleInput = panel.querySelector(`.sfb-confirm-rule[data-idx="${idx}"]`);
@@ -3182,7 +3420,7 @@
     let engineMatch = null;
     try {
       const def = getSelectors()[getSearchEngine()];
-      const m = def && def.match;
+      const m = def && (def.includeRegex || def.match);
       if (m instanceof RegExp) engineMatch = m;
       else if (typeof m === 'string' && m) { try { engineMatch = new RegExp(m); } catch (_) {} }
     } catch (_) {}
@@ -3190,26 +3428,19 @@
     return currentHost.endsWith('.' + target);
   }
 
-  function isBlockButtonEnabledForEngine(engine) {
-    try {
-      const def = resolveCategoryDef(engine);
-      return !def || def.button !== false;
-    } catch (e) { return true; }
-  }
-
   function injectBlockButton(result, engine, domain) {
-    if (!isBlockButtonEnabledForEngine(engine)) return;
-    if (getSearchCategory() === 'images') return;
+    let def = null, boBase = null;
+    try { def = resolvePageDef(engine); const ob = resolvePageDef('other').button; if (ob && typeof ob === 'object' && !Array.isArray(ob)) boBase = ob; } catch (_) {}
+    const b = def ? def.button : undefined;
+    if (b === false) return;
     const isBlocked = result.getAttribute('data-is-blocked') === 'true';
-    if (!domain && !isBlocked) return; if (result.closest('header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav')) return;
-    if (engine === 'google') {
-      if (result.classList.contains('isv-r') || result.classList.contains('ivg-i') || result.querySelector('g-img')) {
-        if (!result.querySelector('h3')) return;
-      }
-      if (!result.closest('#center_col')) return;
-    }
-    if (engine === 'yandex') {
-      if (!result.closest('.main__content, .content, [class*="z6OLDwO9"]')) return;
+    if (!domain && !isBlocked) return;
+    const bo = b && typeof b === 'object' && !Array.isArray(b) ? b : null;
+    const defExclude = boBase && boBase.exclude;
+    if (defExclude && result.closest(bo && bo.exclude ? defExclude + ',' + bo.exclude : defExclude)) return;
+    if (bo) {
+      if (bo.scope && !result.closest(bo.scope)) return;
+      if (bo.require && (!bo.requireSelf || (result.matches && result.matches(bo.requireSelf))) && !result.querySelector(bo.require)) return;
     }
     if (result.querySelector('.serh-quick-block')) return;
 
@@ -3217,12 +3448,15 @@
     const iconColor = isBlocked ? '#3182ce' : 'currentColor';
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="${iconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line></svg>`;
 
-    ensurePositioned(result);
-    if (engine === 'bing' || engine === 'yandex' || engine === 'brave' || engine === 'yahoo' || engine === 'yahoo_japan') {
-      btn.style.right = '5px'; btn.style.top = '10px';
-    } else {
-      btn.style.right = '35px'; btn.style.top = '10px';
-    }
+    let host = result;
+    if (bo && bo.mount) { try { const m = Array.isArray(bo.mount) ? runCmdEl(result, bo.mount) : result.querySelector(bo.mount); if (m) host = m; } catch (_) {} }
+    ensurePositioned(host);
+    if (bo && typeof bo.style === 'string' && bo.style) { try { btn.style.cssText += ';' + bo.style; } catch (_) {} }
+    const inset = { ...(boBase && boBase.inset || {}), ...(bo && bo.inset || {}) };
+    btn.style.right = inset.right; btn.style.top = inset.top;
+    if (inset.bottom !== undefined) btn.style.bottom = inset.bottom;
+    if (inset.left !== undefined) btn.style.left = inset.left;
+    if (bo && bo.zIndex !== undefined) btn.style.zIndex = String(bo.zIndex);
 
     const stopNavEvents = (e) => {
       e.preventDefault(); e.stopPropagation();
@@ -3287,7 +3521,7 @@
       }
       applyBlockRule(currentConfig.blockDomain ? opts.domainRule : opts.exactRule);
     };
-    result.appendChild(btn);
+    host.appendChild(btn);
   }
 
   function removeMatchedRuleLabel(result) {
@@ -3306,24 +3540,38 @@
   function restoreOriginalDisplay(el) {
     if (!el) return; const orig = el.getAttribute('data-serh-orig-display'); el.style.display = orig !== null ? orig : '';
   }
-
-  function googleResultBlocks(parent) {
-    if (!parent || typeof parent.querySelectorAll !== 'function') return [];
-    return Array.from(parent.querySelectorAll('div.g, div.tF2Cxc, div.MjjYud')).filter(el => {
-      let ancestor = el.parentElement;
-      while (ancestor && ancestor !== parent) {
-        if (typeof ancestor.matches === 'function' && ancestor.matches('div.g, div.tF2Cxc, div.MjjYud')) return false;
-        ancestor = ancestor.parentElement;
+  function hideNames(kind, fallback) {
+    if (!_hideNamesCache) _hideNamesCache = {};
+    const key = kind + '|' + fallback;
+    if (_hideNamesCache[key]) return _hideNamesCache[key];
+    const set = new Set([fallback]);
+    for (const def of Object.values(getSelectors())) {
+      for (const o of [def, ...Object.values(def.pages || {})]) {
+        const v = o && o[kind] && o[kind].hideAttr;
+        if (typeof v === 'string' && v) set.add(v);
       }
-      return true;
-    });
+    }
+    return (_hideNamesCache[key] = [...set]);
   }
-
-  function yandexResultBlocks(parent) {
-    if (!parent || typeof parent.querySelectorAll !== 'function') return [];
-    let sel = 'div.Organic';
-    try { sel = getContainerSelector('yandex') || sel; } catch (e) {}
-    try { return Array.from(parent.children).filter(el => typeof el.matches === 'function' && el.matches(sel)); } catch (e) { return Array.from(parent.children); }
+  function hideSel(kind, fallback) { return hideNames(kind, fallback).map(a => '[' + a + ']').join(','); }
+  function resultGroupMembers(root, selector) {
+    const out = []; if (!root || !selector || typeof root.querySelectorAll !== 'function') return out;
+    try {
+      for (const el of root.querySelectorAll(selector)) {
+        let p = el.parentElement, nested = false;
+        while (p && p !== root) { if (typeof p.matches === 'function' && p.matches(selector)) { nested = true; break; } p = p.parentElement; }
+        if (!nested) out.push(el);
+      }
+    } catch (_) {}
+    return out;
+  }
+  function hideResultGroup(result, def) {
+    const g = def && def.group; if (!g || !result) return;
+    const root = g.container === 'parent' ? result.parentElement : (g.container && typeof result.closest === 'function' ? result.closest(g.container) : null);
+    if (!root || root === result) return;
+    const membersSel = g.members || def.root || '';
+    const members = resultGroupMembers(root, membersSel);
+    if (members.length) { hideParentIfNoVisibleSiblings(root, members, g.hideAttr || GROUP_HIDE_ATTR); root.setAttribute('data-serh-group-members', membersSel); }
   }
 
   function visibleUnblocked(el) {
@@ -3331,89 +3579,83 @@
   }
 
   function blockedShown() {
-    return showHiddenResults || currentConfig.collapseMode === true;
+    if (showHiddenResults) return true;
+    if (currentConfig.collapseMode !== true) return false;
+    try {
+      const def = resolvePageDef(getSearchEngine());
+      if (def && def.grid) return false;
+      if (getSearchCategory() === 'images') return false;
+    } catch (_) {}
+    return true;
   }
 
+    const map_groupMembers = new WeakMap();
+  const map_gridConfig = new WeakMap();
   function hideParentIfNoVisibleSiblings(parent, children, attr) {
-    const hasVisible = Array.from(children).some(visibleUnblocked);
-    if (hasVisible) return;
-    const alreadyHidden = parent.getAttribute(attr) === 'true';
-    saveOriginalDisplay(parent); parent.style.display = blockedShown() ? (parent.getAttribute('data-serh-orig-display') || '') : 'none'; parent.setAttribute(attr, 'true');
+    if (!parent) return;
+    const members = Array.from(children || []); if (!members.length) return;
+    map_groupMembers.set(parent, members);
+    const groupAttr = attr || GROUP_HIDE_ATTR;
+    if (parent.getAttribute('data-serh-group-attr') !== groupAttr) parent.setAttribute('data-serh-group-attr', groupAttr);
+    if (members.some(visibleUnblocked)) { if (parent.getAttribute('data-serh-group-hidden') === 'true') restoreParentDisplay(parent); return; }
+    const alreadyHidden = parent.getAttribute('data-serh-group-hidden') === 'true';
+    saveOriginalDisplay(parent); parent.style.display = blockedShown() ? (parent.getAttribute('data-serh-orig-display') || '') : 'none';
+    parent.setAttribute(groupAttr, 'true'); parent.setAttribute('data-serh-group-hidden', 'true');
     if (!alreadyHidden) _hiddenParentCount++;
   }
-
+  function recheckGroupRoot(root) {
+    if (!root) return;
+    let members = map_groupMembers.get(root);
+    if (!members || !members.length) {
+      const sel = root.getAttribute('data-serh-group-members') || '';
+      members = sel ? resultGroupMembers(root, sel) : [];
+    }
+    if (!members.length) return;
+    hideParentIfNoVisibleSiblings(root, members, root.getAttribute('data-serh-group-attr') || GROUP_HIDE_ATTR);
+  }
   function resetResultStyles(result) {
     restoreResultExtraElements(result); restoreResultCollapse(result); _hrefUrlCache.delete(result); _resultContentCache.delete(result); _resultRetryCounts.delete(result); _peekUrlCache.delete(result); result.removeAttribute('data-blocker-processed'); result.removeAttribute('data-retry-exhausted');
     result.removeAttribute('data-is-blocked'); result.removeAttribute('data-is-highlighted'); result.removeAttribute('data-highlight-n'); result.removeAttribute('data-highlight-rule'); result.removeAttribute('data-highlight-source'); result.removeAttribute('data-highlight-source-key'); clearMatchedData(result);
     result.classList.remove('serh-blocked-visible'); result.classList.remove('serh-blocked-collapsed'); result.style.outline = ''; result.style.outlineOffset = ''; const origDisplay = result.getAttribute('data-serh-orig-display');
     if (origDisplay !== null) { result.style.display = origDisplay; result.removeAttribute('data-serh-orig-display'); }
-    if (result.parentElement && result.parentElement.dataset.blockerYandexParent) {
-      const parent = result.parentElement;
-      const stillHasBlockedHidden = yandexResultBlocks(parent).some(el =>
-        el !== result && el.getAttribute('data-is-blocked') === 'true' && el.style.display === 'none');
-      const parentOrig = parent.getAttribute('data-serh-orig-display');
-      if (stillHasBlockedHidden) {
-        parent.style.display = 'none';
-      } else if (parent.getAttribute('data-is-blocked') !== 'true') {
-        parent.style.display = parentOrig !== null ? parentOrig : ''; parent.removeAttribute('data-blocker-yandex-parent'); parent.removeAttribute('data-serh-orig-display'); _hiddenParentCount--;
-      }
-    }
-    const gridItem = result.closest ? result.closest('[data-serh-grid-item-hidden]') : null;
-    if (gridItem) { gridItem.style.display = ''; gridItem.removeAttribute('data-serh-grid-item-hidden'); _hiddenParentCount--; }
-    const googleParent = result.closest ? result.closest('[data-blocker-google-parent]') : null;
-    if (googleParent) {
-      const stillHasBlockedHidden = googleResultBlocks(googleParent).some(el =>
-        el !== result && el.getAttribute('data-is-blocked') === 'true' && el.style.display === 'none');
-      const parentOrig = googleParent.getAttribute('data-serh-orig-display');
-      if (stillHasBlockedHidden) {
-        googleParent.style.display = 'none';
-      } else if (googleParent.getAttribute('data-is-blocked') !== 'true') {
-        googleParent.style.display = parentOrig !== null ? parentOrig : ''; googleParent.removeAttribute('data-blocker-google-parent'); googleParent.removeAttribute('data-serh-orig-display'); _hiddenParentCount--;
-      }
-    }
+    const groupRoot = result.closest ? result.closest(hideSel('group', GROUP_HIDE_ATTR)) : null; if (groupRoot) recheckGroupRoot(groupRoot);
+    const gridItem = result.closest ? result.closest(hideSel('grid', GRID_HIDE_ATTR)) : null; if (gridItem) recheckGridCell(gridItem);
     removeMatchedRuleLabel(result); if (!result.querySelector('.serh-quick-block')) result.style.position = '';
   }
-
   function restoreParentDisplay(parent) {
-    const orig = parent.getAttribute('data-serh-orig-display'); parent.style.display = orig !== null ? orig : ''; parent.removeAttribute('data-blocker-yandex-parent');
-    parent.removeAttribute('data-blocker-google-parent'); parent.removeAttribute('data-serh-grid-item-hidden'); parent.removeAttribute('data-serh-orig-display'); _hiddenParentCount--;
+    if (!parent) return;
+    const orig = parent.getAttribute('data-serh-orig-display'); parent.style.display = orig !== null ? orig : '';
+    const attr = parent.getAttribute('data-serh-group-attr') || GROUP_HIDE_ATTR;
+    parent.removeAttribute(attr); parent.removeAttribute('data-serh-group-members'); parent.removeAttribute('data-serh-group-attr');
+    for (const a of hideNames('group', GROUP_HIDE_ATTR)) parent.removeAttribute(a);
+    for (const a of hideNames('grid', GRID_HIDE_ATTR)) parent.removeAttribute(a);
+    parent.removeAttribute('data-serh-grid-items'); parent.removeAttribute('data-serh-grid-has'); parent.removeAttribute('data-serh-grid-deepest');
+    parent.removeAttribute('data-serh-orig-display'); _hiddenParentCount--;
+    map_groupMembers.delete(parent); map_gridConfig.delete(parent);
   }
-
   function restoreAllHiddenParents() {
-    document.querySelectorAll('[data-blocker-yandex-parent], [data-blocker-google-parent], [data-serh-grid-item-hidden]').forEach(restoreParentDisplay); _hiddenParentCount = 0;
+    document.querySelectorAll(hideSel('group', GROUP_HIDE_ATTR) + ',' + hideSel('grid', GRID_HIDE_ATTR)).forEach(restoreParentDisplay); _hiddenParentCount = 0;
   }
-
+  function recheckGridCell(cell) {
+    if (!cell) return;
+    const leaves = getGridLeaves(cell);
+    const stillBlocked = leaves.length ? leaves.some(gridLeafBlocked) : Array.from(cell.querySelectorAll('[data-is-blocked="true"]')).some(el => el.style.display === 'none');
+    const leafShown = (el) => {
+      let cur = el;
+      while (cur && cur !== cell) {
+        if (cur.style && cur.style.display === 'none') return false;
+        if (cur.getAttribute && cur.getAttribute('data-is-blocked') === 'true') return false;
+        cur = cur.parentElement;
+      }
+      return cur === cell;
+    };
+    const hasVisibleUnblocked = leaves.some(leafShown);
+    if (blockedShown() || !stillBlocked || hasVisibleUnblocked) restoreParentDisplay(cell);
+  }
   function reconcileHiddenParents() {
     if (_hiddenParentCount <= 0) return;
-    document.querySelectorAll('[data-blocker-yandex-parent]').forEach(parent => {
-      const blocks = yandexResultBlocks(parent);
-      const stillHiddenBlocked = blocks.some(el =>
-        el.style.display === 'none' && el.getAttribute('data-is-blocked') === 'true');
-      const hasVisibleUnblocked = blocks.some(visibleUnblocked);
-      if (parent.getAttribute('data-is-blocked') !== 'true' && !blockedShown() && (!stillHiddenBlocked || hasVisibleUnblocked)) restoreParentDisplay(parent);
-    });
-    document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
-      const blocks = googleResultBlocks(parent);
-      const stillHiddenBlocked = blocks.some(el =>
-        el.style.display === 'none' && el.getAttribute('data-is-blocked') === 'true');
-      const hasVisibleUnblocked = blocks.some(visibleUnblocked);
-      if (parent.getAttribute('data-is-blocked') !== 'true' && !blockedShown() && (!stillHiddenBlocked || hasVisibleUnblocked)) restoreParentDisplay(parent);
-    });
-    document.querySelectorAll('[data-serh-grid-item-hidden]').forEach(cell => {
-      const leaves = getGridLeaves(cell);
-      const stillBlocked = leaves.length ? leaves.some(gridLeafBlocked) : Array.from(cell.querySelectorAll('[data-is-blocked="true"]')).some(el => el.style.display === 'none');
-      const leafShown = (el) => {
-        let cur = el;
-        while (cur && cur !== cell) {
-          if (cur.style && cur.style.display === 'none') return false;
-          if (cur.getAttribute && cur.getAttribute('data-is-blocked') === 'true') return false;
-          cur = cur.parentElement;
-        }
-        return cur === cell;
-      };
-      const hasVisibleUnblocked = leaves.some(leafShown);
-      if (!blockedShown() && (!stillBlocked || hasVisibleUnblocked)) restoreParentDisplay(cell);
-    });
+    document.querySelectorAll(hideSel('group', GROUP_HIDE_ATTR)).forEach(recheckGroupRoot);
+    document.querySelectorAll(hideSel('grid', GRID_HIDE_ATTR)).forEach(recheckGridCell);
   }
 
   function reprocessContainer(container) {
@@ -3423,16 +3665,12 @@
       try {
         processSingleResult(container);
       } catch (e) {
-        if (currentConfig.debug) {
-          console.error('[屏蔽] 处理结果时出错:', container, e);
-        }
+        dbgError('处理结果时出错:', container, e);
       }
       container.setAttribute('data-observed', 'true');
       if (!container.hasAttribute('data-blocker-processed')) resultObserver.observe(container);
     } catch (e) {
-      if (currentConfig.debug) {
-        console.error('[屏蔽] 结果重处理失败:', container, e);
-      }
+      dbgError('结果重处理失败:', container, e);
     }
   }
 
@@ -3447,40 +3685,50 @@
     ensurePositioned(result); result.appendChild(label);
   }
 
-  function getGridLeaves(cell) {
+  function getGridLeaves(cell, g) {
     if (!cell || typeof cell.querySelectorAll !== 'function') return [];
+    let cfg = g || map_gridConfig.get(cell) || null;
+    if (!cfg) { const raw = cell.getAttribute && cell.getAttribute('data-serh-grid-items'); if (raw) { try { cfg = { items: JSON.parse(raw), has: cell.getAttribute('data-serh-grid-has') || '', deepest: cell.getAttribute('data-serh-grid-deepest') === 'true' }; } catch (_) {} } }
     try {
-      const isv = Array.from(cell.querySelectorAll('div.isv-r, div.ivg-i')); if (isv.length) return isv;
-      const cards = Array.from(cell.querySelectorAll('div[data-attrid="images universal"]')); if (cards.length) return cards;
-      return Array.from(cell.querySelectorAll('div.iuscp, div.imgpt')).filter(el => el.querySelector && el.querySelector('a.iusc') && !Array.from(el.querySelectorAll('div.iuscp, div.imgpt')).some(child => child.querySelector && child.querySelector('a.iusc')));
+      if (cfg && cfg.items) {
+        for (const sel of (Array.isArray(cfg.items) ? cfg.items : [cfg.items])) {
+          let list = Array.from(cell.querySelectorAll(sel));
+          if (cfg.has) list = list.filter(el => el.querySelector && el.querySelector(cfg.has));
+          if (cfg.deepest) list = list.filter(el => !Array.from(el.querySelectorAll(sel)).some(child => child !== el && (!cfg.has || (child.querySelector && child.querySelector(cfg.has)))));
+          if (list.length) return list;
+        }
+        return [];
+      }
+      return Array.from(cell.children || []);
     } catch (e) { return []; }
   }
   function gridLeafBlocked(el) {
     return !!el && (el.style.display === 'none' || el.getAttribute('data-is-blocked') === 'true' || !!(el.closest && el.closest('[data-is-blocked="true"]')));
   }
-  function hideGridCell(cell, attr) {
+  function hideGridCell(cell, attr, g) {
     if (!cell) return; const alreadyHidden = cell.getAttribute(attr) === 'true';
+    map_gridConfig.set(cell, g || null);
+    if (g) { try { cell.setAttribute('data-serh-grid-items', JSON.stringify(g.items || [])); } catch (_) {} if (g.has) cell.setAttribute('data-serh-grid-has', g.has); if (g.deepest) cell.setAttribute('data-serh-grid-deepest', 'true'); }
     cell.style.display = 'none'; cell.setAttribute(attr, 'true'); if (!alreadyHidden) _hiddenParentCount++;
   }
-  function markResultGridSlot(result, engine) {
-    if (engine === 'google') {
-      let cell = result;
+  function markResultGridSlot(result, engine, def) {
+    let g = def && def.grid;
+    if (!g) { try { g = resolvePageDef(engine).grid; } catch (_) {} }
+    if (!g) return;
+    let cell = result;
+    if (g.anchor === 'grid') {
       while (cell && cell.parentElement && cell.tagName !== 'BODY') { const d = getComputedStyle(cell.parentElement).display; if (d === 'grid' || d === 'inline-grid') break; cell = cell.parentElement; }
       if (!cell || cell === result || !cell.parentElement || cell.tagName === 'BODY') return;
-      const leaves = getGridLeaves(cell); const targets = leaves.length ? leaves : [result];
-      if (!targets.every(gridLeafBlocked)) return;
-      hideGridCell(cell, 'data-serh-grid-item-hidden');
-    } else if (engine === 'bing') {
-      const slot = result.closest ? result.closest('li') : null;
-      if (slot && slot !== result) {
-        const leaves = getGridLeaves(slot); const targets = leaves.length ? leaves : [result];
-        if (targets.every(gridLeafBlocked)) hideGridCell(slot, 'data-serh-grid-item-hidden');
-      }
-    }
+    } else if (g.cell && result.closest) {
+      cell = result.closest(g.cell);
+      if (!cell || cell === result) return;
+    } else return;
+    const leaves = getGridLeaves(cell, g); const targets = leaves.length ? leaves : [result];
+    if (!targets.every(gridLeafBlocked)) return;
+    hideGridCell(cell, g.hideAttr || GRID_HIDE_ATTR, g);
   }
 
   function processSingleResult(result) {
-    if (result.closest('.sys_algo_rs, .AlsoTry_M, [data-yga*="sugg"]')) return false;
     if (!_engineSiteSetup) return false;
 
     if (result.hasAttribute('data-blocker-processed')) {
@@ -3488,11 +3736,9 @@
     }
 
     if (!currentConfig.enabled) return false;
-    const engine = getSearchEngine(); const link = getResultLink(result, engine);
+    const engine = getSearchEngine(); const def = resolvePageDef(engine); if (def.skip && result.closest(def.skip)) return false; const link = getResultLink(result, engine);
     if (!link || !link.href) {
-      if (currentConfig.debug) {
-        console.warn('[屏蔽] 未找到链接，跳过结果:', result.tagName, result.className, result.innerHTML.substring(0, 200));
-      }
+      dbgWarn('未找到链接，跳过结果:', result.tagName, result.className, result.innerHTML.substring(0, 200));
       return false;
     }
 
@@ -3511,14 +3757,8 @@
       _resultRetryCounts.delete(result); saveOriginalDisplay(result); if (blockedShown()) restoreOriginalDisplay(result); else result.style.display = 'none'; setResultExtraElementsVisible(result, showHiddenResults);
       result.setAttribute('data-blocker-processed', 'true'); result.setAttribute('data-is-blocked', 'true');
 
-      if (engine === 'yandex') {
-        const parent = result.parentElement; if (parent) hideParentIfNoVisibleSiblings(parent, yandexResultBlocks(parent), 'data-blocker-yandex-parent');
-      }
-
-      if (engine === 'google' && result.matches && result.matches('div.g, div.tF2Cxc, div.MjjYud')) {
-        const parent = result.closest('div.MjjYud'); if (parent && parent !== result) hideParentIfNoVisibleSiblings(parent, googleResultBlocks(parent), 'data-blocker-google-parent');
-      }
-      if (getSearchCategory() === 'images' && !blockedShown()) markResultGridSlot(result, engine);
+      hideResultGroup(result, def);
+      if (!blockedShown() && def.grid) markResultGridSlot(result, engine, def);
 
       result.dataset.matchedRule = matchResult.rule || ''; result.dataset.matchedSource = matchResult.source || ''; result.dataset.matchedSourceKey = matchResult.sourceKey || '';
       if (blockedShown()) {
@@ -3554,9 +3794,7 @@
         try {
           blocked = processSingleResult(result);
         } catch (e) {
-          if (currentConfig.debug) {
-            console.error('[屏蔽] 处理结果时出错:', result, e);
-          }
+          dbgError('处理结果时出错:', result, e);
         }
         if (blocked) newlyBlocked++;
         if (result.hasAttribute('data-blocker-processed')) {
@@ -3594,21 +3832,27 @@
     }, RESULT_RETRY_DELAY * attempt);
   }
 
-  function clearStaleObserved(selector) {
+  function clearStaleObserved(rootCmd) {
+    const simple = typeof rootCmd === 'string' ? rootCmd : (Array.isArray(rootCmd) && rootCmd[0] === 'selector' ? rootCmd[1] : '');
+    let current = null;
+    if (!simple) { try { current = new Set(queryRootCommand(rootCmd)); } catch (_) { current = new Set(); } }
     document.querySelectorAll('[data-observed]').forEach(result => {
-      let stillMatches = false;
-      try { stillMatches = result.matches(selector); } catch (e) { stillMatches = false; }
-      if (stillMatches) return; resultObserver.unobserve(result); const quickBtn = result.querySelector('.serh-quick-block'); if (quickBtn) quickBtn.remove(); resetResultStyles(result);
+      let still = false;
+      if (simple) { try { still = result.matches(simple); } catch (_) { still = false; } }
+      else still = current.has(result);
+      if (still) return; resultObserver.unobserve(result); const quickBtn = result.querySelector('.serh-quick-block'); if (quickBtn) quickBtn.remove(); resetResultStyles(result);
       result.removeAttribute('data-observed');
     });
   }
 
-  function syncObservedSelector(selector) {
-    if (_observedSelector === selector) return; _observedSelector = selector; clearStaleObserved(selector);
+  function syncObservedSelector(rootCmd) {
+    const key = rootCommandKey(rootCmd);
+    if (_observedSelector === key) return; _observedSelector = key; clearStaleObserved(rootCmd);
   }
 
   function filterNestedContainers(nodes, selector) {
     const engine = getSearchEngine();
+    let dedupeBy = null; try { if (typeof resolvePageDef === 'function') dedupeBy = resolvePageDef(engine).dedupeBy || null; } catch (_) {}
     const arr = Array.from(nodes || []);
     const hasOwnLink = (el) => {
       try {
@@ -3631,29 +3875,32 @@
       }
       return true;
     });
-    if (getSearchCategory() === 'images' && engine === 'bing') {
+    if (dedupeBy) {
       const seen = new Set();
       return kept.filter(el => {
-        const iusc = el.querySelector ? el.querySelector('a.iusc') : null;
-        if (!iusc) return true;
-        if (seen.has(iusc)) return false;
-        seen.add(iusc); return true;
+        const tag = el.querySelector ? el.querySelector(dedupeBy) : null;
+        if (!tag) return true;
+        if (seen.has(tag)) return false;
+        seen.add(tag); return true;
       });
     }
     return kept;
   }
 
-  function queryUnobserved(selector) {
+  function queryUnobserved(rootCmd) {
+    const anchor = rootAnchorSelector(rootCmd); if (!anchor) return [];
+    const upward = rootHasUpward(rootCmd);
     try {
-      const nodes = document.querySelectorAll(`:is(${selector}):not([data-observed])`);
-      return filterNestedContainers(nodes, selector);
+      const selector = upward ? anchor : `:is(${anchor}):not([data-observed])`;
+      let nodes = Array.from(document.querySelectorAll(selector));
+      if (upward) nodes = queryRootCommand(rootCmd).filter(el => !el.hasAttribute('data-observed'));
+      return filterNestedContainers(nodes, upward ? '' : anchor);
     } catch (e) {
       try {
-        const out = [];
-        document.querySelectorAll(selector).forEach(el => {
-          if (!el.hasAttribute('data-observed')) out.push(el);
-        });
-        return filterNestedContainers(out, selector);
+        let out = [];
+        if (upward) out = queryRootCommand(rootCmd).filter(el => !el.hasAttribute('data-observed'));
+        else document.querySelectorAll(anchor).forEach(el => { if (!el.hasAttribute('data-observed')) out.push(el); });
+        return filterNestedContainers(out, upward ? '' : anchor);
       } catch (err) {
         return [];
       }
@@ -3669,26 +3916,24 @@
       showHiddenResults = false; _observedSelector = ''; return;
     }
 
-    const engine = getSearchEngine(); const selector = getContainerSelector(engine); if (!selector) return; syncObservedSelector(selector);
+    const engine = getSearchEngine(); const rootCmd = getRootCommand(engine); const anchor = rootAnchorSelector(rootCmd); if (!anchor) return; syncObservedSelector(rootCmd);
     if (currentConfig.debug) {
-      const allMatches = document.querySelectorAll(selector);
-      console.log(`[屏蔽] 引擎: ${engine}, 选择器: "${selector}", 匹配数量: ${allMatches.length}`);
-      if (allMatches.length > 0) {
-        console.log('[屏蔽] 第一个匹配元素:', allMatches[0]); console.log('[屏蔽] 第一个元素的 href:', allMatches[0].querySelector('a[href]')?.href);
-      } else {
-        console.log('[屏蔽] 选择器未匹配到任何元素'); console.log('[屏蔽] 页面中所有 li:', document.querySelectorAll('li').length); console.log('[屏蔽] 页面中所有 article:', document.querySelectorAll('article').length);
+      const allMatches = queryRootCommand(rootCmd);
+      dbg(`引擎: ${engine}, 选择器: "${rootCommandKey(rootCmd)}", 匹配数量: ${allMatches.length}`);
+      if (allMatches.length === 0) {
+        dbg('选择器未匹配到任何元素'); dbg('页面中所有 li:', document.querySelectorAll('li').length); dbg('页面中所有 article:', document.querySelectorAll('article').length);
         const classes = new Set();
         document.querySelectorAll('li').forEach(li => {
           if (li.className && typeof li.className === 'string') classes.add(li.className);
         });
-        console.log('[屏蔽] li 的 class 列表:', [...classes].slice(0, 30));
+        dbg('li 的 class 列表:', [...classes].slice(0, 30));
+      } else {
+        dbg('第一个匹配元素:', allMatches[0]); dbg('第一个元素的 href:', allMatches[0].querySelector('a[href]')?.href);
       }
     }
 
-    const newResults = queryUnobserved(selector);
-    if (currentConfig.debug) {
-      console.log(`[屏蔽] 未处理的新结果数量: ${newResults.length}`);
-    }
+    const newResults = queryUnobserved(rootCmd);
+    dbg(`未处理的新结果数量: ${newResults.length}`);
 
     newResults.forEach(result => {
       result.setAttribute('data-observed', 'true'); resultObserver.observe(result);
@@ -3705,7 +3950,7 @@
           get compiledRules() { return compiledRules; },
           getSearchEngine,
           getSearchCategory,
-          getContainerSelector,
+          getRootSelector,
           getSubdomainLevels,
           checkRuleMatchOptimized,
           unwrapRedirectUrl,
@@ -3724,14 +3969,12 @@
     if (!currentConfig.enabled) showHiddenResults = false;
     if (!isEngineSite()) return; buildRuleIndex(); exposeDebugApi();
 
-    const engine = getSearchEngine(); const selector = getContainerSelector(engine); if (!selector) return; syncObservedSelector(selector);
-    if (currentConfig.debug) {
-      console.log(`[屏蔽] 引擎: ${engine}, 选择器: "${selector}"`);
-      console.log(`[屏蔽] 规则数量: domains=${compiledRules.domains.size}, urls=${compiledRules.urls.length}, titles=${compiledRules.titles.length}, texts=${compiledRules.texts.length}`);
-    }
+    const engine = getSearchEngine(); const rootCmd = getRootCommand(engine); const anchor = rootAnchorSelector(rootCmd); if (!anchor) return; syncObservedSelector(rootCmd);
+    dbg(`引擎: ${engine}, 选择器: "${rootCommandKey(rootCmd)}"`);
+    dbg(`规则数量: domains=${compiledRules.domains.size}, urls=${compiledRules.urls.length}, titles=${compiledRules.titles.length}, texts=${compiledRules.texts.length}`);
 
     document.querySelectorAll('.serh-quick-block').forEach(btn => btn.remove()); restoreAllHiddenParents();
-    const newResults = queryUnobserved(selector); newResults.forEach(r => r.setAttribute('data-observed', 'true'));
+    const newResults = queryUnobserved(rootCmd); newResults.forEach(r => r.setAttribute('data-observed', 'true'));
     const batchId = ++forceReprocessBatchId; let totalBlocked = 0; const allResults = document.querySelectorAll('[data-observed]'); let processIdx = 0;
     function processBatch() {
       if (batchId !== forceReprocessBatchId) return; const batchSize = 30; const end = Math.min(processIdx + batchSize, allResults.length);
@@ -3740,31 +3983,27 @@
         try {
           if (processSingleResult(result)) totalBlocked++;
         } catch (e) {
-          if (currentConfig.debug) {
-            console.error('[屏蔽] 处理结果时出错:', result, e);
-          }
+          dbgError('处理结果时出错:', result, e);
         }
         if (!result.hasAttribute('data-blocker-processed')) resultObserver.observe(result);
       }
       if (processIdx < allResults.length) {
         requestAnimationFrame(processBatch);
       } else {
-        if (currentConfig.debug) {
-          console.log(`[屏蔽] 共屏蔽 ${totalBlocked} 个结果`);
-        }
+        dbg(`共屏蔽 ${totalBlocked} 个结果`);
         updateStatus(totalBlocked); reconcileHiddenParents();
       }
     }
     requestAnimationFrame(processBatch);
   }
 
-  // 预留翻页高度
+  // 屏蔽灰底
   const LAYOUT_CSS = `
-        body { min-height: 101vh !important; }
-        #rcnt, #rso { min-height: 60vh; }
+        .serh-blocked-visible { background-color: var(--serh-blocked-bg) !important; border-radius: 8px !important; padding: 8px !important; transition: background 0.2s; }
+        .serh-blocked-visible div { background-color: transparent !important; background: transparent !important; background-image: none !important; }
   `;
 
-  let widgetStylesInjected = false; let _globalStyleEl = null;
+  let widgetStylesInjected = false, _globalStyleEl = null; let _engineStyleEl = null;
   function injectWidgetStyles() {
     if (widgetStylesInjected) return; widgetStylesInjected = true;
     GM_addStyle(`
@@ -3861,7 +4100,7 @@
         .serh-scroll-btn { position: absolute; right: 7px; cursor: pointer; opacity: 0.5; font-size: 18px !important; line-height: 1 !important; user-select: none !important; transition: opacity 0.2s, transform 0.2s; background: transparent !important; border: none !important; padding: 0 !important; margin: 0 !important; z-index: 10; }
         .serh-scroll-btn:hover { opacity: 1; transform: scale(1.2); }
         .serh-quick-block:hover { transform: scale(1.1); opacity: 1; }
-        :is(.isv-r, .ivg-i, .image-section, g-img, .is-extra-container) .serh-quick-block, :is(header, [role="navigation"], [role="tablist"], [role="search"], g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav, #extabar) .serh-quick-block { display: none !important; }
+        :is(header, [role="navigation"], [role="tablist"], [role="search"]) .serh-quick-block { display: none !important; }
         :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel) { height: 332px; overflow: visible; }
         :is(#serh-webdav-panel, #serh-subscription-panel, #serh-engine-sub-panel, #serh-selector-panel) #serh-toast-container { max-width: none; width: auto; left: 0; right: 0; }
         body.serh-dark-on #serh-panel .serh-compact-row span { color: #f3f4f6 !important; }
@@ -3905,9 +4144,6 @@
         .serh-subscription-status-message.error { color: #c53030; }
         .serh-subscription-btn-group { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; flex-shrink: 0; }
         .serh-subscription-btn-group .serh-button { flex: 1 !important; }
-        /* 屏蔽灰底 */
-        .serh-blocked-visible, .g.serh-blocked-visible, .MjjYud.serh-blocked-visible { background-color: var(--serh-blocked-bg) !important; border-radius: 8px !important; padding: 8px !important; transition: background 0.2s; }
-        .serh-blocked-visible div, .serh-blocked-visible .yuRUbf, .serh-blocked-visible div[data-sokoban-container], .serh-blocked-visible div[data-snc] { background-color: transparent !important; background: transparent !important; background-image: none !important; }
         .serh-bubble-number { color: var(--serh-bubble-number) !important; line-height: 1 !important; }
         .serh-matched-rule { position: absolute; top: 2px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 70px); background: var(--serh-matched-bg); color: var(--serh-matched-fg); font-size: 12px; padding: 2px 8px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; z-index: 98; pointer-events: none; font-family: monospace; backdrop-filter: blur(2px); box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
         /* 高亮 */
@@ -3946,8 +4182,19 @@
       if (!_globalStyleEl) {
         const el = GM_addStyle(LAYOUT_CSS); if (el && typeof el.remove === 'function') _globalStyleEl = el;
       }
-    } else if (_globalStyleEl) {
-      _globalStyleEl.remove(); _globalStyleEl = null;
+      let def = null; try { def = resolvePageDef(engine); } catch (_) {}
+      let css = def ? normalizeCssRules(def.blockedCss).join('\n') : '';
+      const psCss = def ? preserveSpaceCss(def) : '';
+      if (psCss) css = css ? css + '\n' + psCss : psCss;
+      if (css) {
+        if (!_engineStyleEl) { const el = GM_addStyle(css); if (el && typeof el.remove === 'function') _engineStyleEl = el; }
+        else if (_engineStyleEl.textContent !== css) _engineStyleEl.textContent = css;
+      } else if (_engineStyleEl) {
+        _engineStyleEl.remove(); _engineStyleEl = null;
+      }
+    } else {
+      if (_globalStyleEl) { _globalStyleEl.remove(); _globalStyleEl = null; }
+      if (_engineStyleEl) { _engineStyleEl.remove(); _engineStyleEl = null; }
     }
     injectWidgetStyles();
   }
@@ -3955,6 +4202,9 @@
   function removeGlobalStyles() {
     if (_globalStyleEl) {
       _globalStyleEl.remove(); _globalStyleEl = null;
+    }
+    if (_engineStyleEl) {
+      _engineStyleEl.remove(); _engineStyleEl = null;
     }
   }
 
@@ -4015,8 +4265,8 @@
     if (!status) {
       status = document.createElement('div'); status.id = 'serh-status'; applyBubbleStyle(status);
 
-      let isDragging = false; let startX, startY, initialLeft, initialTop;
-      let longPressTimer = null; let hasLongPressed = false;
+      let isDragging = false, startX, startY, initialLeft, initialTop;
+      let longPressTimer = null, hasLongPressed = false;
       status.addEventListener('mousedown', startDrag);
       status.addEventListener('touchstart', startDrag, {
         passive: false
@@ -4138,7 +4388,7 @@
           }
         }
         addMatchedRuleLabel(el);
-      } else if (currentConfig.collapseMode === true) {
+      } else if (blockedShown()) {
         el.classList.remove('serh-blocked-visible'); el.classList.add('serh-blocked-collapsed');
         const btn = el.querySelector('.serh-quick-block'); if (btn) btn.remove();
         removeMatchedRuleLabel(el);
@@ -4148,20 +4398,19 @@
       }
     });
     if (showHiddenResults) {
-      document.querySelectorAll('[data-blocker-google-parent], [data-blocker-yandex-parent], [data-serh-grid-item-hidden]').forEach(parent => {
+      document.querySelectorAll(hideSel('group', GROUP_HIDE_ATTR) + ',' + hideSel('grid', GRID_HIDE_ATTR)).forEach(parent => {
         restoreOriginalDisplay(parent);
       });
     } else {
-      document.querySelectorAll('[data-blocker-yandex-parent]').forEach(parent => {
-        hideParentIfNoVisibleSiblings(parent, yandexResultBlocks(parent), 'data-blocker-yandex-parent');
+      document.querySelectorAll(hideSel('group', GROUP_HIDE_ATTR)).forEach(recheckGroupRoot);
+      document.querySelectorAll(hideSel('group', GROUP_HIDE_ATTR)).forEach(parent => {
+        const groupAttr = parent.getAttribute('data-serh-group-attr'); if (groupAttr) recheckGroupRoot(parent);
       });
-      document.querySelectorAll('[data-blocker-google-parent]').forEach(parent => {
-        hideParentIfNoVisibleSiblings(parent, googleResultBlocks(parent), 'data-blocker-google-parent');
-      });
+      document.querySelectorAll(hideSel('grid', GRID_HIDE_ATTR)).forEach(recheckGridCell);
       if (!blockedShown()) {
-        document.querySelectorAll('[data-serh-grid-item-hidden]').forEach(cell => { cell.style.display = 'none'; });
-        const engine = getSearchEngine();
-        if (getSearchCategory() === 'images') document.querySelectorAll('[data-is-blocked="true"]').forEach(el => markResultGridSlot(el, engine));
+        document.querySelectorAll(hideSel('grid', GRID_HIDE_ATTR)).forEach(cell => { cell.style.display = 'none'; });
+        const engine = getSearchEngine(); const def = resolvePageDef(engine);
+        if (def.grid) document.querySelectorAll('[data-is-blocked="true"]').forEach(el => markResultGridSlot(el, engine, def));
       }
     }
     const status = document.getElementById('serh-status');
@@ -4197,6 +4446,13 @@
 
   function getSelectorsModifiedTime() {
     try { const saved = GM_getValue(SELECTORS_LAST_MODIFIED_KEY, 0); return typeof saved === 'number' && Number.isFinite(saved) && saved > 0 ? saved : 0; } catch (e) { return 0; }
+  }
+
+  function hasPendingLocalChange() { return GM_getValue(WEBDAV_DIRTY_KEY, false) === true; }
+  function getWebDAVSyncWait() {
+    const retryCount = GM_getValue(WEBDAV_RETRY_COUNT_KEY, 0);
+    if (retryCount > 0) return Math.min(2 ** retryCount, 32) * 60000;
+    return hasPendingLocalChange() ? 0 : WEBDAV_AUTO_SYNC_INTERVAL - AUTO_SYNC_TOLERANCE;
   }
 
   function persistConfig(updateModifiedTime = false) {
@@ -4253,7 +4509,7 @@
     const seen = new Set(); const rules = [];
     rules.push('body.serh-collapse-on .serh-blocked-collapsed .serh-collapse-hide { display: none !important; }');
     for (const [key, def] of Object.entries(getSelectors())) {
-      for (const sel of [...(def.snippets || []), ...(def.extraElements || [])]) {
+      for (const sel of [...commandSelectors(def.snippet), ...(def.extraSelector || [])]) {
         if (typeof sel !== 'string' || !sel.trim() || hasTopLevelComma(sel)) continue;
         const scoped = `body.serh-collapse-on .serh-blocked-collapsed[data-serh-engine="${key}"] ${sel}`;
         if (seen.has(scoped)) continue; seen.add(scoped);
@@ -4317,13 +4573,26 @@
     }
   }
 
+  function setRulesTextareaValue(textarea, text) {
+    if (!textarea || textarea.value === text) return;
+    const old = textarea.value; const start = textarea.selectionStart; const end = textarea.selectionEnd; const top = textarea.scrollTop; const left = textarea.scrollLeft;
+    const map = (pos) => {
+      const max = Math.min(old.length, text.length); let p = 0; while (p < max && old.charCodeAt(p) === text.charCodeAt(p)) p++;
+      return pos <= p ? Math.min(pos, text.length) : Math.min(text.length, Math.max(p, pos + text.length - old.length));
+    };
+    const s = map(start), e = map(end);
+    textarea.value = text;
+    try { textarea.setSelectionRange(s, e); } catch (_) {}
+    textarea.scrollTop = top; textarea.scrollLeft = left;
+  }
+
   function appendRuleToTextarea(rule) {
     const textarea = document.getElementById('serh-rules'); if (!textarea) return; const clean = stripRuleComment(String(rule).trim()); const panel = document.getElementById('serh-panel');
     if (panel && Array.isArray(panel._initialRules) &&
         !panel._initialRules.some(r => getRuleKey(r) === getRuleKey(rule))) {
       panel._initialRules.push(rule);
     }
-    const lines = textarea.value ? textarea.value.split('\n') : []; if (lines.some(l => stripRuleComment(l.trim()) === clean)) return; lines.push(rule); textarea.value = lines.join('\n');
+    const lines = textarea.value ? textarea.value.split('\n') : []; if (lines.some(l => stripRuleComment(l.trim()) === clean)) return; lines.push(rule); setRulesTextareaValue(textarea, lines.join('\n'));
     updateLineNumbers();
   }
 
@@ -4338,7 +4607,7 @@
       const trimmed = l.trim(); if (!trimmed) return true; return !cleanSet.has(stripRuleComment(trimmed));
     });
     if (filtered.length !== lines.length) {
-      textarea.value = filtered.join('\n'); updateLineNumbers();
+      setRulesTextareaValue(textarea, filtered.join('\n')); updateLineNumbers();
     }
   }
 
@@ -4393,8 +4662,8 @@
     });
     const duplicateRules = [...ruleCounts.entries()].filter(([, c]) => c > 1);
 
-    const engine = getSearchEngine(); const selector = getContainerSelector(engine); let results = [];
-    try { if (selector) results = document.querySelectorAll(selector); } catch (e) { if (currentConfig.debug) console.warn('[统计] 容器选择器无效:', selector, e); }
+    const engine = getSearchEngine(); const rootCmd = getRootCommand(engine); let results = [];
+    try { results = queryRootCommand(rootCmd); } catch (e) { dbgWarn('[统计] 容器选择器无效:', rootCommandKey(rootCmd), e); }
     const statsBySource = new Map(); const countedResults = new Map();
     const addRuleHit = (rule, source, type, result) => {
       if (!rule || !source) return;
@@ -4578,9 +4847,7 @@
       hideStatsPanel(); saveConfig(); showToast(t('saved'), 'success');
     };
     document.getElementById('serh-test').onclick = toggleStatsPanel;
-    document.getElementById('serh-close').onclick = (e) => {
-      e.stopPropagation(); closePanel();
-    };
+    bindCancelButton('serh-close', closePanel);
     document.getElementById('serh-subscribe').onclick = showSubscriptionPanel; document.getElementById('serh-sync').onclick = showWebDAVPanel;
     document.getElementById('serh-import-file').onclick = importRulesFromFile; document.getElementById('serh-export-file').onclick = (e) => {
       e.stopPropagation(); if (document.getElementById('serh-export-menu')) closeExportMenu(); else showExportMenu(e.currentTarget);
@@ -4710,11 +4977,11 @@
     if (panel) panel._initialRules = [...finalRules]; if (JSON.stringify(userRules) !== JSON.stringify(finalRules)) syncRulesTextarea();
     if (showHiddenResults) {
       showHiddenResults = false;
-      if (currentConfig.collapseMode !== true) {
+      if (!blockedShown()) {
         document.querySelectorAll('[data-is-blocked="true"]').forEach(el => {
           el.style.display = 'none'; el.classList.remove('serh-blocked-visible'); el.classList.remove('serh-blocked-collapsed'); setResultExtraElementsVisible(el, false); removeMatchedRuleLabel(el); restoreResultCollapse(el);
         });
-        document.querySelectorAll('[data-blocker-google-parent], [data-blocker-yandex-parent]').forEach(parent => { parent.style.display = 'none'; });
+        document.querySelectorAll(hideSel('group', GROUP_HIDE_ATTR)).forEach(parent => { parent.style.display = 'none'; });
       }
     }
     forceReprocessAll();
@@ -4904,9 +5171,7 @@
       });
     }
 
-    document.getElementById('serh-settings-close').onclick = (e) => {
-      e.stopPropagation(); closePanel();
-    };
+    bindCancelButton('serh-settings-close', closePanel);
   }
 
   function showHighlightColorPanel() {
@@ -5087,13 +5352,11 @@
       [currentHue, currentSat, currentVal] = rgbToHsv(r, g, b); drawSVCanvas(currentHue); updatePickedColor(); updateIndicators(); showToast(t('resetPending'), 'success');
     };
 
-    document.getElementById('serh-hlcolor-cancel').onclick = (e) => {
-      e.stopPropagation(); closePanel();
-    };
+    bindCancelButton('serh-hlcolor-cancel', closePanel);
   }
 
   function regexSourceToLiteralText(source) {
-    let out = ''; let inClass = false;
+    let out = '', inClass = false;
     for (let i = 0; i < source.length; i++) {
       const ch = source[i];
       if (ch === '\\') { out += ch + (source[i + 1] || ''); i++; continue; }
@@ -5108,63 +5371,122 @@
     return String(text).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
   }
 
-  function serializeSelectors(base) {
+    function serializeSelectors(base) {
     const merged = base || getSelectors(); const parts = [];
     const keyToText = (key) => /^[A-Za-z_$][\w$]*$/.test(key) ? key : `'${escapeJsString(key)}'`;
+    const str = (s) => `'${escapeJsString(s)}'`;
+    const lit = (v) => {
+      if (typeof v === 'string') return str(v);
+      if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+      if (v == null) return 'null';
+      if (v instanceof RegExp) return `/${regexSourceToLiteralText(v.source)}/${v.flags || ''}`;
+      if (Array.isArray(v)) return `[${v.map(lit).join(', ')}]`;
+      if (typeof v === 'object') return `{ ${Object.entries(v).map(([k, x]) => `${keyToText(k)}: ${lit(x)}`).join(', ')} }`;
+      return 'null';
+    };
     const matchToText = (match) => {
-      const m = matchDefToParts(match);
-      return (m.source || m.flags) ? `/${regexSourceToLiteralText(m.source)}/${m.flags}` : `''`;
+      const bare = typeof match === 'string' && !isRegexLiteralStr(match); const m = matchDefToParts(match);      return (m.source || m.flags) ? `/${regexSourceToLiteralText(m.source)}/${m.flags || (bare ? 'i' : '')}` : `''`;
     };
-    const catToText = (catName, cat, indent = '') => {
-      const links = Array.isArray(cat.links)
-        ? `[${(cat.links || []).map(s => `'${escapeJsString(s)}'`).join(', ')}]`
-        : `'${escapeJsString(cat.links || '')}'`;
-      return `${indent}${keyToText(catName)}: {\n` +
-        (cat.match !== undefined ? `${indent}  match: ${matchToText(cat.match)},\n` : '') +
-        (cat.containers !== undefined ? `${indent}  containers: '${escapeJsString(cat.containers)}',\n` : '') +
-        (cat.titles !== undefined ? `${indent}  titles: [${(cat.titles || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` : '') +
-        (cat.snippets !== undefined ? `${indent}  snippets: [${(cat.snippets || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` : '') +
-        (cat.links !== undefined ? `${indent}  links: ${links},\n` : '') +
-        (cat.extraElements !== undefined ? `${indent}  extraElements: [${(cat.extraElements || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` : '') +
-        (cat.button !== undefined ? `${indent}  button: ${cat.button !== false},\n` : '') +
-        `${indent}}`;
+    const resultFields = ['root', 'url', 'title', 'snippet', 'extraSelector', 'button', 'skip', 'group', 'grid', 'dedupeBy', 'link', 'blockedCss', 'preserveSpace', 'site'];
+    const buttonHasPosition = (b) => b === false || (b && typeof b === 'object' && ((b.inset && Object.keys(b.inset).length) || b.zIndex !== undefined || b.style !== undefined || ['mount', 'scope', 'require', 'requireSelf', 'exclude'].some((f) => b[f] !== undefined)));
+    const buttonToText = (b) => {
+      if (b === false) return 'false';
+      if (b && typeof b === 'object') {
+        const out = {};
+        if (b.inset && typeof b.inset === 'object') { const opts = {}; for (const f of ['top', 'right', 'bottom', 'left']) if (b.inset[f] !== undefined) opts[f] = b.inset[f]; if (Object.keys(opts).length) out.inset = opts; }
+        if (b.zIndex !== undefined) out.zIndex = b.zIndex;
+        if (b.style !== undefined) out.style = b.style;
+        for (const f of ['mount', 'scope', 'require', 'requireSelf', 'exclude']) if (b[f] !== undefined) out[f] = b[f];
+        if (Object.keys(out).length) return `{ ${Object.entries(out).map(([k, x]) => `${keyToText(k)}: ${lit(x)}`).join(', ')} }`;
+      }
+      return lit(b);
     };
-    const defToText = (def, disabled) => {
-      const links = Array.isArray(def.links)
-        ? `[${(def.links || []).map(s => `'${escapeJsString(s)}'`).join(', ')}]`
-        : `'${escapeJsString(def.links || 'a[href]')}'`;
-      const cats = normalizeCategoryMap(def.categories);
-      const catsText = cats && Object.keys(cats).length
-        ? `  categories: {\n${Object.keys(cats).map(n => catToText(n, cats[n], '    ')).join(',\n')},\n  },\n`
-        : '';
-      return `{\n` +
-        `  match: ${matchToText(def.match)},\n` +
-        `  containers: '${escapeJsString(def.containers || '')}',\n` +
-        `  titles: [${(def.titles || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
-        `  snippets: [${(def.snippets || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
-        `  links: ${links},\n` +
-        `  extraElements: [${(def.extraElements || []).map(s => `'${escapeJsString(s)}'`).join(', ')}],\n` +
-        catsText +
-        (def.button !== undefined ? `  button: ${def.button !== false},\n` : '') +
-        (disabled ? `  disabled: true,\n` : (def.disabled === false ? `  disabled: false,\n` : '')) +
-        `}`;
+    const serhOf = (obj) => {
+      const out = {};
+      for (const f of ['skip', 'group', 'grid', 'dedupeBy', 'link', 'blockedCss', 'preserveSpace']) if (obj[f] !== undefined) out[f] = obj[f];
+      if (out.link) {
+        out.link = { ...out.link };
+        if (Array.isArray(out.link.redirects)) out.link.redirects = out.link.redirects.map((s) => (s && typeof s === 'object' ? { ...s } : s)); else if (out.link.redirects == null) delete out.link.redirects;
+        for (const spec of (out.link.redirects || [])) if (spec) for (const f of ['path', 'pathValue', 'hrefSuffix', 'stripPrefix']) { const v = spec[f]; if (v && typeof v === 'object' && !(v instanceof RegExp) && typeof v.source === 'string') { try { spec[f] = new RegExp(v.source, v.flags || ''); } catch (_) {} } }
+        if (!Object.keys(out.link).length) delete out.link;
+      }
+      return Object.keys(out).length ? out : null;
+    };
+    const asTextSimple = (v) => {
+      if (typeof v === 'string') return v;
+      if (Array.isArray(v) && v.length === 2 && v[0] === 'text' && typeof v[1] === 'string') return v[1];
+      if (Array.isArray(v) && v[0] === 'or' && Array.isArray(v[1]) && v[1].length) {
+        const list = v[1].map((x) => (typeof x === 'string' ? x : (Array.isArray(x) && x.length === 2 && x[0] === 'text' && typeof x[1] === 'string' ? x[1] : null)));
+        if (list.every((x) => x !== null)) return list;
+      }
+      return null;
+    };
+    const asLinkSimple = (v) => {
+      if (typeof v === 'string') return v;
+      if (Array.isArray(v) && v.length >= 2 && v[0] === 'attribute' && v[1] === 'href' && v.length <= 3) return v[2] === undefined ? ':scope[href]' : String(v[2]);
+      if (Array.isArray(v) && v[0] === 'or' && Array.isArray(v[1]) && v[1].length) {
+        const list = v[1].map((x) => (typeof x === 'string' ? x : (Array.isArray(x) && x.length >= 2 && x[0] === 'attribute' && x[1] === 'href' && x.length <= 3 ? (x[2] === undefined ? ':scope[href]' : String(x[2])) : null)));
+        if (list.every((x) => x !== null)) return list;
+      }
+      return null;
+    };
+    const simpleValue = (obj, f) => {
+      if (obj[f] === undefined) return undefined;
+      if (f === 'root') return obj[f];
+      const simple = f === 'url' ? asLinkSimple(obj[f]) : asTextSimple(obj[f]);
+      return simple === null ? obj[f] : simple;
+    };
+    const bodyLines = (obj, indent) => {
+      const lines = [];
+      for (const f of ['root', 'url', 'title', 'snippet']) if (obj[f] !== undefined) lines.push(`${indent}${f}: ${lit(simpleValue(obj, f))},`);
+      if (obj.site !== undefined) lines.push(`${indent}site: ${lit(obj.site)},`);
+      if (obj.delay !== undefined) lines.push(`${indent}delay: ${lit(obj.delay)},`);
+      if (obj.extraSelector !== undefined) {
+        const list = normalizeSelectorList(obj.extraSelector);
+        if (list.length) lines.push(`${indent}extraSelector: ${str(list.map((s) => '& ' + s).join(', '))},`);
+      }
+      if (obj.button !== undefined && buttonHasPosition(obj.button)) lines.push(`${indent}button: ${buttonToText(obj.button)},`);
+      const serh = serhOf(obj);
+      if (serh) lines.push(`${indent}command: ${lit(serh)},`);
+      return lines;
+    };
+    const pageToText = (pageName, page, engineKey) => {
+      const lines = [`    ${keyToText(pageName)}: {`];
+      if (page.includeRegex !== undefined || page.match !== undefined) lines.push(`      includeRegex: ${matchToText(page.includeRegex !== undefined ? page.includeRegex : page.match)},`);
+      if (page.excludeRegex) lines.push(`      excludeRegex: ${matchToText(page.excludeRegex)},`);
+      if (page.matches && page.matches.length) lines.push(`      matches: ${lit(page.matches)},`);
+      if (page.excludeMatches && page.excludeMatches.length) lines.push(`      excludeMatches: ${lit(page.excludeMatches)},`);
+      const cp = page.commonProps && typeof page.commonProps === 'object' && !Array.isArray(page.commonProps) ? page.commonProps : null;
+      const derived = { $site: engineKey, $category: pageName };
+      if (cp && Object.keys(cp).some((k) => cp[k] !== derived[k])) lines.push(`      commonProps: ${lit(cp)},`);
+      for (const line of bodyLines(page, '      ')) lines.push(line);
+      lines.push('    },');
+      return lines.join('\n');
+    };
+    const defToText = (def, disabled, key) => {
+      const lines = [];
+      if (def.includeRegex || def.match !== undefined) lines.push(`  includeRegex: ${matchToText(def.includeRegex !== undefined ? def.includeRegex : def.match)},`);
+      if (def.excludeRegex) lines.push(`  excludeRegex: ${matchToText(def.excludeRegex)},`);
+      if (def.matches && def.matches.length) lines.push(`  matches: ${lit(def.matches)},`);
+      if (def.excludeMatches && def.excludeMatches.length) lines.push(`  excludeMatches: ${lit(def.excludeMatches)},`);
+      if (def.priority !== undefined) lines.push(`  priority: ${lit(def.priority)},`);
+      for (const line of bodyLines(cleanPage(def), '  ')) lines.push(line);
+      const pages = normalizePageMap(def.pages);
+      if (pages && Object.keys(pages).length) lines.push(`  pages: {\n${Object.keys(pages).map((n) => pageToText(n, pages[n], key)).join('\n')}\n  },`);
+      if (disabled) lines.push('  disabled: true,'); else if (def.disabled === false) lines.push('  disabled: false,');
+      return `{\n${lines.join('\n')}\n}`;
     };
     for (const key of Object.keys(merged)) {
       if (key === 'other') continue; const def = merged[key];
       if (def && def.disabled) {
-        let hasCustom = !!(def.match || def.containers || (def.titles && def.titles.length) || (def.snippets && def.snippets.length) || (def.extraElements && def.extraElements.length) || (normalizeCategoryMap(def.categories) && Object.keys(normalizeCategoryMap(def.categories)).length));
-        if (!hasCustom && def.links !== undefined) {
-          const norm = (v) => JSON.stringify(normalizeSelectorList(v)); hasCustom = norm(def.links) !== norm('a[href]');
-        }
-        if (hasCustom) {
-          parts.push(`${keyToText(key)}: ${defToText(def, true)}`);
-          continue;
-        }
+        const pages = normalizePageMap(def.pages);
+        let hasCustom = !!(def.includeRegex || def.match || def.excludeRegex || def.matches || def.excludeMatches || def.root || def.url || def.title || def.snippet || def.site || def.delay !== undefined || (def.extraSelector && def.extraSelector.length) || def.group || def.grid || (def.blockedCss && def.blockedCss.length) || def.preserveSpace !== undefined || (pages && Object.keys(pages).length));
+        if (hasCustom) { parts.push(`${keyToText(key)}: ${defToText(def, true, key)}`); continue; }
         const builtin = getBaseSelectors()[key];
-        parts.push(`${keyToText(key)}: ${builtin ? defToText(builtin, true) : `{\n  disabled: true,\n}`}`);
+        parts.push(`${keyToText(key)}: ${builtin ? defToText(builtin, true, key) : '{\n  disabled: true,\n}'}`);
         continue;
       }
-      parts.push(`${keyToText(key)}: ${defToText(def, false)}`);
+      parts.push(`${keyToText(key)}: ${defToText(def, false, key)}`);
     }
     return parts.join(',\n');
   }
@@ -5182,123 +5504,285 @@
     return /::/.test(s) || /(^|[^:]):(?:before|after|first-line|first-letter)\b/i.test(s);
   }
 
-  function validateUserSelectors(config) {
-    if (!config || typeof config !== 'object' || Array.isArray(config)) return [t('selectorJsonError')]; const errors = [];
-    const checkSel = (value, field, parser, label) => {
-      const spec = parser ? parser(value) : null;
-      if (spec) { if (spec.css && (!isValidCssSelector(spec.css) || hasPseudoElement(spec.css))) errors.push(t('selectorInvalidCss', { key: label, field, value })); return; }
-      if (field === 'extraElements') {
-        if (!value.trim() || hasTopLevelComma(value) || hasPseudoElement(value) || !isValidCssSelector(':scope > :nth-child(1) ' + value)) errors.push(t('selectorInvalidCss', { key: label, field, value }));
+    function validateUserSelectors(config) {
+    if (!config || typeof config !== 'object' || Array.isArray(config)) return [t('selectorJsonError')];
+    const errors = [];
+    const css = (v, field, label, extra) => {
+      if (typeof v !== 'string' || !v.trim()) { errors.push(t('selectorFieldRequired', { key: label, field })); return; }
+      try { if (extra && hasTopLevelComma(v)) throw 0; if (!(extra ? isValidCssSelector(':scope > :nth-child(1) ' + v) : isValidCssSelector(v))) throw 0; } catch (_) { errors.push(t('selectorInvalidCss', { key: label, field, value: v })); return; }
+      if (hasPseudoElement(v)) errors.push(t('selectorInvalidCss', { key: label, field, value: v }));
+    };
+    const rootField = (v, field, label) => {
+      if (typeof v === 'string') { css(v, field, label); return; }
+      if (!Array.isArray(v) || typeof v[0] !== 'string') { errors.push(t('selectorInvalidCommand', { key: label, field, value: JSON.stringify(v) })); return; }
+      if (v[0] === 'selector') { css(v[1], field, label); return; }
+      if (v[0] === 'upward') {
+        if (typeof v[1] === 'string') { if (!v[1].trim()) errors.push(t('selectorFieldRequired', { key: label, field: field + '.level' })); else css(v[1], field + '.level', label); }
+        else { const level = Number(v[1]); if (!Number.isInteger(level) || level < 0) errors.push(t('selectorFieldRequired', { key: label, field: field + '.level' })); }
+        if (v[2] === undefined) errors.push(t('selectorFieldRequired', { key: label, field: field + '.inner' }));
+        else rootField(v[2], field, label);
         return;
       }
-      if (!isValidCssSelector(value) || hasPseudoElement(value)) errors.push(t('selectorInvalidCss', { key: label, field, value }));
+      errors.push(t('selectorInvalidCommand', { key: label, field, value: JSON.stringify(v) }));
     };
-    const parserOf = (field) => field === 'titles' ? parseTitleSpec : field === 'links' ? parseLinkSpec : null;
+    const el = (v, field, label) => {
+      if (v == null) return;
+      if (typeof v === 'string') { css(v, field, label); return; }
+      if (!Array.isArray(v) || typeof v[0] !== 'string') { errors.push(t('selectorInvalidCommand', { key: label, field, value: JSON.stringify(v) })); return; }
+      if (v[0] === 'upward') { if (typeof v[1] === 'string') css(v[1], field, label); else if (typeof v[1] !== 'number') errors.push(t('selectorInvalidCommand', { key: label, field, value: JSON.stringify(v) })); }
+      else if (v[0] === 'selector') { css(v[1], field, label); el(v[2], field, label); }
+      else errors.push(t('selectorInvalidCommand', { key: label, field, value: JSON.stringify(v) }));
+    };
+    const cmd = (v, field, label) => {
+      if (!Array.isArray(v) || typeof v[0] !== 'string') { errors.push(t('selectorInvalidCommand', { key: label, field, value: JSON.stringify(v) })); return; }
+      const ty = v[0], a = v[1], b = v[2], c = v[3];
+      const req = (x, f) => { if (typeof x !== 'string' || !x) errors.push(t('selectorFieldRequired', { key: label, field: f })); };
+      const re = (x, f) => { const ok = x instanceof RegExp ? true : (x && typeof x === 'object' && typeof x.source === 'string' ? !!x.source : (typeof x === 'string' && x)); if (!ok) { errors.push(t('selectorFieldRequired', { key: label, field: f })); return; } try { x instanceof RegExp ? new RegExp(x.source, x.flags) : (x && typeof x.source === 'string' ? new RegExp(x.source, sanitizeRegexFlags(x.flags)) : new RegExp(x)); } catch (_) { errors.push(t('selectorInvalidRegex', { key: label })); } };
+      switch (ty) {
+        case 'or': if (!Array.isArray(a)) errors.push(t('selectorInvalidCommand', { key: label, field, value: JSON.stringify(v) })); else a.forEach((x) => cmd(x, field, label)); if (b !== undefined && (typeof b === 'string' || (Array.isArray(b) && (b[0] === 'selector' || b[0] === 'upward')))) el(b, field, label); break;
+        case 'attribute': req(a, field); el(b, field, label); break;
+        case 'property': req(a, field); el(b, field, label); break;
+        case 'text': el(a, field, label); break;
+        case 'json': req(a, field); req(b, field); el(c, field, label); break;
+        case 'queryParam': req(a, field); cmd(b, field, label); break;
+        case 'base64Url': { const names = Array.isArray(a) ? a : [a]; if (!names.length || !names.every((x) => typeof x === 'string' && x)) errors.push(t('selectorFieldRequired', { key: label, field })); if (b !== undefined) el(b, field, label); break; }
+        case 'domainToUrl': case 'domainToURL': case 'rejectEngineHost': case 'normalizeUrl': case 'rejectOpaqueRedirect': cmd(a, field, label); break;
+        case 'jsonPath': if (typeof a !== 'string') errors.push(t('selectorFieldRequired', { key: label, field })); cmd(b, field, label); break;
+        case 'regexInclude': case 'regexExclude': re(a, field); cmd(b, field, label); break;
+        case 'regexSubstitute': re(a, field); req(b, field); cmd(c, field, label); break;
+        case 'const': break;
+        default: errors.push(t('selectorInvalidCommand', { key: label, field, value: JSON.stringify(v) }));
+      }
+    };
+    const valueField = (val, field, mode, label) => {
+      if (val === undefined) return;
+      if (isCommandArray(val)) { cmd(val, field, label); return; }
+      const list = Array.isArray(val) ? val : (typeof val === 'string' ? [val] : null);
+      if (!list || !list.every((x) => typeof x === 'string' && x)) { errors.push(t('selectorInvalidCommand', { key: label, field, value: JSON.stringify(val) })); return; }
+      for (const s of list) css(s, field, label);
+    };
+    const def = (d, label, isPage) => {
+      const regexField = (rawMatch, field) => {
+        if (rawMatch === undefined) return;
+        if (typeof rawMatch === 'string' && rawMatch) {
+          const lit = parseRegexLiteral(rawMatch); const badLit = isRegexLiteralStr(rawMatch) ? getInvalidRegexFlags(lit.flags) : '';
+          if (badLit) errors.push(t('invalidRegexFlags', { flags: badLit }));
+          else { try { isRegexLiteralStr(rawMatch) ? new RegExp(lit.source, lit.flags) : new RegExp(rawMatch); } catch (e) { errors.push(t('selectorInvalidRegex', { key: label })); } }
+        } else if (rawMatch && typeof rawMatch === 'object' && typeof rawMatch.source === 'string' && rawMatch.source) {
+          try { new RegExp(rawMatch.source, sanitizeRegexFlags(rawMatch.flags)); } catch (e) { errors.push(t('selectorInvalidRegex', { key: label })); }
+          const badFlags = getInvalidRegexFlags(String(rawMatch.flags || '')); if (badFlags) errors.push(t('invalidRegexFlags', { flags: badFlags }));
+        } else errors.push(t('selectorFieldRequired', { key: label, field }));
+      };
+      regexField(d.includeRegex !== undefined ? d.includeRegex : d.match, 'includeRegex');
+      regexField(d.excludeRegex, 'excludeRegex');
+      if (d.matches !== undefined) {
+        const list = Array.isArray(d.matches) ? d.matches : (typeof d.matches === 'string' ? [d.matches] : null);
+        if (!list || !list.length || !list.every((x) => typeof x === 'string' && x.trim())) errors.push(t('selectorFieldRequired', { key: label, field: 'matches' }));
+        else for (const p of list) if (!matchPatternToRegex(p)) errors.push(t('selectorInvalidRegex', { key: label }));
+      }
+      if (d.excludeMatches !== undefined) {
+        const list = Array.isArray(d.excludeMatches) ? d.excludeMatches : (typeof d.excludeMatches === 'string' ? [d.excludeMatches] : null);
+        if (!list || !list.length || !list.every((x) => typeof x === 'string' && x.trim())) errors.push(t('selectorFieldRequired', { key: label, field: 'excludeMatches' }));
+        else for (const p of list) if (!matchPatternToRegex(p)) errors.push(t('selectorInvalidRegex', { key: label }));
+      }
+      const root = d.root !== undefined ? d.root : d.containers;
+      const hasPages = Array.isArray(d.pages) ? d.pages.length > 0 : !!(d.pages && typeof d.pages === 'object' && Object.keys(d.pages).length);
+      const onlyDisabled = !isPage && d.disabled !== undefined && Object.keys(d).every((k) => k === 'disabled' || k === 'name');
+      if (root !== undefined) rootField(root, 'root', label); else if (!isPage && !hasPages && !onlyDisabled) errors.push(t('selectorFieldRequired', { key: label, field: 'root' }));
+      if (!isPage && !onlyDisabled && !getBaseSelectors()[label] && d.includeRegex === undefined && d.match === undefined && d.matches === undefined) errors.push(t('selectorFieldRequired', { key: label, field: 'includeRegex/matches' }));
+      const url = d.url !== undefined ? d.url : d.links;
+      if (url !== undefined) valueField(url, 'url', 'link', label);
+      if (d.title !== undefined) valueField(d.title, 'title', 'text', label);
+      if (d.snippet !== undefined) valueField(d.snippet, 'snippet', 'text', label);
+      if (d.titles !== undefined) valueField(d.titles, 'titles', 'text', label);
+      if (d.extraSelector !== undefined) {
+        const list = Array.isArray(d.extraSelector) ? d.extraSelector : (typeof d.extraSelector === 'string' ? [d.extraSelector] : null);
+        if (!list || !list.every((x) => typeof x === 'string' && x)) errors.push(t('selectorFieldRequired', { key: label, field: 'extraSelector' }));
+        else for (const s of list) {
+          const parts = splitTopLevelSelectorList(s);
+          if (parts.length > 1 && !parts.every((p) => p.trim().startsWith('&'))) { errors.push(t('selectorInvalidCss', { key: label, field: 'extraSelector', value: s })); continue; }
+          for (const part of parts) {
+            let sel = part.trim(); if (sel.startsWith('&')) sel = sel.slice(1).trim();
+            if (sel) css(sel, 'extraSelector', label, true);
+          }
+        }
+      }
+      if (d.button !== undefined) {
+        if (Array.isArray(d.button)) {
+          if (typeof d.button[0] !== 'string' || !d.button[0]) errors.push(t('selectorInvalidBool', { key: label, field: 'button' }));
+          const opts = d.button[1];
+          if (opts !== undefined && (!opts || typeof opts !== 'object' || Array.isArray(opts))) errors.push(t('selectorFieldRequired', { key: label, field: 'button.options' }));
+          else if (opts) for (const f of ['top', 'right', 'bottom', 'left', 'zIndex']) if (opts[f] !== undefined && typeof opts[f] !== 'string' && typeof opts[f] !== 'number') errors.push(t('selectorFieldRequired', { key: label, field: 'button.options.' + f }));
+          if (opts && opts.style !== undefined && typeof opts.style !== 'string') errors.push(t('selectorFieldRequired', { key: label, field: 'button.options.style' }));
+          if (opts && opts.position !== undefined && !['beforebegin', 'afterbegin', 'beforeend', 'afterend'].includes(opts.position)) errors.push(t('selectorFieldRequired', { key: label, field: 'button.options.position' }));
+          if (d.button[2] !== undefined) {
+            if (typeof d.button[2] === 'string') css(d.button[2], 'button.element', label);
+            else el(d.button[2], 'button.element', label);
+          }
+        } else if (d.button !== false && d.button !== true) {
+          if (!d.button || typeof d.button !== 'object') errors.push(t('selectorInvalidBool', { key: label, field: 'button' }));
+          else {
+            for (const f of ['scope', 'require', 'requireSelf', 'exclude']) if (d.button[f] !== undefined) css(d.button[f], 'button.' + f, label);
+            if (d.button.mount !== undefined) { if (Array.isArray(d.button.mount)) el(d.button.mount, 'button.mount', label); else css(d.button.mount, 'button.mount', label); }
+            if (d.button.style !== undefined && typeof d.button.style !== 'string') errors.push(t('selectorFieldRequired', { key: label, field: 'button.style' }));
+            if (d.button.inset && typeof d.button.inset === 'object') { for (const f of ['top', 'right', 'bottom', 'left']) if (d.button.inset[f] !== undefined && typeof d.button.inset[f] !== 'string' && typeof d.button.inset[f] !== 'number') errors.push(t('selectorFieldRequired', { key: label, field: 'button.inset.' + f })); }
+            if (d.button.zIndex !== undefined && typeof d.button.zIndex !== 'string' && typeof d.button.zIndex !== 'number') errors.push(t('selectorFieldRequired', { key: label, field: 'button.zIndex' }));
+          }
+        }
+      }
+      if (d.blockedCss !== undefined) {
+        const list = Array.isArray(d.blockedCss) ? d.blockedCss : (typeof d.blockedCss === 'string' ? [d.blockedCss] : null);
+        if (!list || !list.length || !list.every((x) => typeof x === 'string' && x.trim())) errors.push(t('selectorFieldRequired', { key: label, field: 'blockedCss' }));
+      }
+      if (d.preserveSpace !== undefined && d.preserveSpace !== false && d.preserveSpace !== null) {
+        const ps = normalizePreserveSpace(d.preserveSpace);
+        if (!ps) errors.push(t('selectorFieldRequired', { key: label, field: 'preserveSpace' }));
+        else if (ps.container !== undefined) css(ps.container, 'preserveSpace.container', label);
+      }
+      if (d.site !== undefined) {
+        const list = Array.isArray(d.site) ? d.site : (typeof d.site === 'string' ? normalizeSiteList(d.site) : null);
+        if (!list || !list.length || !list.every((x) => typeof x === 'string' && x.trim())) errors.push(t('selectorFieldRequired', { key: label, field: 'site' }));
+      }
+      if (d.skip !== undefined) css(d.skip, 'skip', label);
+      if (d.dedupeBy !== undefined) css(d.dedupeBy, 'dedupeBy', label);
+      if (d.priority !== undefined && (typeof d.priority !== 'number' || !isFinite(d.priority))) errors.push(t('selectorFieldRequired', { key: label, field: 'priority' }));
+      if (d.delay !== undefined && d.delay !== null && d.delay !== true && d.delay !== false && (typeof d.delay !== 'number' || !isFinite(d.delay) || d.delay < 0)) errors.push(t('selectorFieldRequired', { key: label, field: 'delay' }));      if (d.group !== undefined) {
+        if (!d.group || typeof d.group !== 'object' || Array.isArray(d.group)) errors.push(t('selectorFieldRequired', { key: label, field: 'group' }));
+        else {
+          if (d.group.container !== undefined && d.group.container !== 'parent') css(d.group.container, 'group.container', label);
+          if (d.group.members !== undefined) css(d.group.members, 'group.members', label);
+          if (d.group.hideAttr !== undefined && typeof d.group.hideAttr !== 'string') errors.push(t('selectorFieldRequired', { key: label, field: 'group.hideAttr' }));
+        }
+      }
+      if (d.grid !== undefined) {
+        if (!d.grid || typeof d.grid !== 'object' || Array.isArray(d.grid)) errors.push(t('selectorFieldRequired', { key: label, field: 'grid' }));
+        else {
+          if (d.grid.anchor !== undefined && d.grid.anchor !== 'grid') css(d.grid.anchor, 'grid.anchor', label);
+          if (d.grid.cell !== undefined) css(d.grid.cell, 'grid.cell', label);
+          if (d.grid.items !== undefined) { const ls = Array.isArray(d.grid.items) ? d.grid.items : [d.grid.items]; for (const s of ls) css(s, 'grid.items', label); }
+          if (d.grid.has !== undefined) css(d.grid.has, 'grid.has', label);
+          if (d.grid.deepest !== undefined && typeof d.grid.deepest !== 'boolean') errors.push(t('selectorFieldRequired', { key: label, field: 'grid.deepest' }));
+          if (d.grid.hideAttr !== undefined && typeof d.grid.hideAttr !== 'string') errors.push(t('selectorFieldRequired', { key: label, field: 'grid.hideAttr' }));
+        }
+      }
+      if (d.link !== undefined) {
+        if (!d.link || typeof d.link !== 'object' || Array.isArray(d.link)) errors.push(t('selectorFieldRequired', { key: label, field: 'link' }));
+        else {
+          if (d.link.redirects !== undefined && !Array.isArray(d.link.redirects)) errors.push(t('selectorFieldRequired', { key: label, field: 'link.redirects' }));
+          if (d.link.directAttrs !== undefined && !(typeof d.link.directAttrs === 'string' || (Array.isArray(d.link.directAttrs) && d.link.directAttrs.every((x) => typeof x === 'string' && x)))) errors.push(t('selectorFieldRequired', { key: label, field: 'link.directAttrs' }));
+          if (d.link.directScope !== undefined) css(d.link.directScope, 'link.directScope', label);
+          if (d.link.directProtocol !== undefined && typeof d.link.directProtocol !== 'string') errors.push(t('selectorFieldRequired', { key: label, field: 'link.directProtocol' }));
+        }
+      }
+      if (d.command !== undefined) {
+        if (!d.command || typeof d.command !== 'object' || Array.isArray(d.command)) errors.push(t('selectorFieldRequired', { key: label, field: 'command' }));
+        else def(d.command, label + '.command', true);
+      }
+      if (d.commonProps !== undefined) {
+        if (!d.commonProps || typeof d.commonProps !== 'object' || Array.isArray(d.commonProps)) errors.push(t('selectorFieldRequired', { key: label, field: 'commonProps' }));
+        else for (const [k, v] of Object.entries(d.commonProps)) if (typeof v !== 'string') errors.push(t('selectorFieldRequired', { key: label, field: 'commonProps.' + k }));
+      }
+      if (d.disabled !== undefined && d.disabled !== null && typeof d.disabled !== 'boolean') errors.push(t('selectorInvalidBool', { key: label, field: 'disabled' }));
+    };
     for (const key of Object.keys(config)) {
-      const def = config[key];
-      if (key === 'other') { errors.push(t('selectorReservedKey', { key })); continue; }
+      const d = config[key];
+      if (key === 'other' || key === '__proto__') { errors.push(t('selectorReservedKey', { key })); continue; }
       if (!/^[A-Za-z0-9_-]+$/.test(key)) { errors.push(t('selectorInvalidKey', { key })); continue; }
-      if (!def || typeof def !== 'object' || Array.isArray(def)) { errors.push(t('selectorFieldRequired', { key, field: 'match' })); continue; }
-      if (def.extraElements !== undefined) {
-        if (!Array.isArray(def.extraElements)) {
-          errors.push(t('selectorFieldRequired', { key, field: 'extraElements' }));
-        } else {
-          for (const s of def.extraElements) {
-            if (typeof s !== 'string' || !s.trim() || hasTopLevelComma(s) || hasPseudoElement(s) || !isValidCssSelector(':scope > :nth-child(1) ' + s)) {
-              errors.push(t('selectorInvalidCss', { key, field: 'extraElements', value: s }));
-            }
-          }
+      if (!d || typeof d !== 'object' || Array.isArray(d)) { errors.push(t('selectorFieldRequired', { key, field: 'match' })); continue; }
+      def(d, key, false);
+      if (d.pages !== undefined) {
+        if (!d.pages || typeof d.pages !== 'object') errors.push(t('selectorFieldRequired', { key, field: 'pages' }));
+        else if (Array.isArray(d.pages)) {
+          d.pages.forEach((page, idx) => {
+            if (!page || typeof page !== 'object' || Array.isArray(page)) { errors.push(t('selectorFieldRequired', { key, field: 'pages.' + idx })); return; }
+            const cp = page.commonProps;
+            const nm = typeof page.name === 'string' && page.name.trim() ? page.name.trim() : (cp && typeof cp === 'object' && !Array.isArray(cp) && typeof cp.$category === 'string' && cp.$category.trim() ? cp.$category.trim() : '');
+            if (!nm) { errors.push(t('selectorFieldRequired', { key, field: 'pages.' + idx + '.name' })); return; }
+            def(page, key + '.' + nm, true);
+          });
+        } else for (const pageName of Object.keys(d.pages)) {
+          const page = d.pages[pageName];
+          if (!page || typeof page !== 'object' || Array.isArray(page)) { errors.push(t('selectorFieldRequired', { key, field: 'pages.' + pageName })); continue; }
+          if (!/^[A-Za-z0-9_-]+$/.test(pageName)) { errors.push(t('selectorInvalidKey', { key: key + '.' + pageName })); continue; }
+          def(page, key + '.' + pageName, true);
         }
       }
-      if (def.disabled !== undefined && def.disabled !== null && typeof def.disabled !== 'boolean') errors.push(t('selectorInvalidBool', { key, field: 'disabled' }));
-      if (def.disable !== undefined && def.disable !== null && typeof def.disable !== 'boolean') errors.push(t('selectorInvalidBool', { key, field: 'disable' }));
-      if (def.button !== undefined && def.button !== null && typeof def.button !== 'boolean') errors.push(t('selectorInvalidBool', { key, field: 'button' }));
-      if (def.categories !== undefined) {
-        if (!def.categories || typeof def.categories !== 'object' || Array.isArray(def.categories)) {
-          errors.push(t('selectorFieldRequired', { key, field: 'categories' }));
-        } else {
-          for (const catName of Object.keys(def.categories)) {
-            const cat = def.categories[catName];
-            if (!cat || typeof cat !== 'object' || Array.isArray(cat)) { errors.push(t('selectorFieldRequired', { key, field: 'categories.' + catName })); continue; }
-            if (!/^[A-Za-z0-9_-]+$/.test(catName)) { errors.push(t('selectorInvalidKey', { key: key + '.' + catName })); continue; }
-            if (cat.match !== undefined) {
-              if (typeof cat.match === 'string' && cat.match) {
-                const lit = cat.match.match(/^\/(.*)\/([a-z]*)$/i); const badLit = lit ? getInvalidRegexFlags(lit[2]) : '';
-                if (badLit) errors.push(t('invalidRegexFlags', { flags: badLit }));
-                else { try { lit ? new RegExp(lit[1], lit[2].toLowerCase()) : new RegExp(cat.match); } catch (e) { errors.push(t('selectorInvalidRegex', { key: key + '.' + catName })); } }
-              } else if (cat.match && typeof cat.match === 'object' && typeof cat.match.source === 'string' && cat.match.source) {
-                try { new RegExp(cat.match.source, String(cat.match.flags || '').toLowerCase().replace(/[^imsu]/g, '')); } catch (e) { errors.push(t('selectorInvalidRegex', { key: key + '.' + catName })); }
-                const badFlags = getInvalidRegexFlags(String(cat.match.flags || '')); if (badFlags) errors.push(t('invalidRegexFlags', { flags: badFlags }));
-              } else errors.push(t('selectorFieldRequired', { key: key + '.' + catName, field: 'match' }));
-            }
-            if (cat.containers !== undefined) {
-              if (typeof cat.containers !== 'string' || (cat.containers.trim() && (!isValidCssSelector(cat.containers) || hasPseudoElement(cat.containers)))) errors.push(t('selectorInvalidCss', { key: key + '.' + catName, field: 'containers', value: cat.containers }));
-            }
-            for (const field of ['titles', 'snippets', 'links', 'extraElements']) {
-              const value = cat[field]; if (value === undefined || value === null) continue;
-              if (!Array.isArray(value) && typeof value !== 'string') { errors.push(t('selectorFieldRequired', { key: key + '.' + catName, field })); continue; }
-              for (const s of normalizeSelectorList(value)) checkSel(s, field, parserOf(field), key + '.' + catName);
-            }
-          }
-        }
-      }
-      if (def.disabled === true || def.disable === true) continue; if ((def.disabled === false || def.disable === false) && Object.keys(def).every(k => k === 'disabled' || k === 'disable')) continue;
-      if (typeof def.match === 'string' && def.match) {
-        const lit = def.match.match(/^\/(.*)\/([a-z]*)$/i); const badLit = lit ? getInvalidRegexFlags(lit[2]) : '';
-        if (badLit) errors.push(t('invalidRegexFlags', { flags: badLit }));
-        else { try { lit ? new RegExp(lit[1], lit[2].toLowerCase()) : new RegExp(def.match); } catch (e) { errors.push(t('selectorInvalidRegex', { key })); } }
-      } else if (def.match && typeof def.match === 'object' && typeof def.match.source === 'string' && def.match.source) {
-        try { new RegExp(def.match.source, String(def.match.flags || '').toLowerCase().replace(/[^imsu]/g, '')); } catch (e) { errors.push(t('selectorInvalidRegex', { key })); }
-        const badFlags = getInvalidRegexFlags(String(def.match.flags || '')); if (badFlags) errors.push(t('invalidRegexFlags', { flags: badFlags }));
-      } else {
-        errors.push(t('selectorFieldRequired', { key, field: 'match' }));
-      }
-      if (typeof def.containers !== 'string' || !def.containers.trim()) {
-        errors.push(t('selectorFieldRequired', { key, field: 'containers' }));
-      } else if (!isValidCssSelector(def.containers) || hasPseudoElement(def.containers)) {
-        errors.push(t('selectorInvalidCss', { key, field: 'containers', value: def.containers }));
-      }
-      for (const field of ['titles', 'snippets']) {
-        const value = def[field]; if (value === undefined || value === null) continue;
-        if (!Array.isArray(value) && typeof value !== 'string') {
-          errors.push(t('selectorFieldRequired', { key, field })); continue;
-        }
-        for (const s of normalizeSelectorList(value)) checkSel(s, field, parserOf(field), key);
-      }
-      if (def.links === undefined || def.links === null) continue;
-      if (typeof def.links !== 'string' && !Array.isArray(def.links)) { errors.push(t('selectorFieldRequired', { key, field: 'links' })); continue; }
-      for (const s of normalizeSelectorList(def.links)) checkSel(s, 'links', parseLinkSpec, key);
     }
     return errors;
   }
 
   function matchDefToParts(match) {
-    if (typeof match === 'string') { const m = match.match(/^\/(.*)\/([a-z]*)$/i); return m ? { source: m[1], flags: m[2].toLowerCase() } : { source: match, flags: '' }; }
+    if (typeof match === 'string') { const m = parseRegexLiteral(match); return { source: m.source, flags: m.flags }; }
     if (match instanceof RegExp) return { source: match.source, flags: match.flags || '' };
     if (match && typeof match === 'object' && typeof match.source === 'string') return { source: match.source, flags: String(match.flags || '').toLowerCase() }; return { source: '', flags: '' };
   }
+  function jsonKey(v) { return JSON.stringify(v, (k, x) => x instanceof RegExp ? { source: x.source, flags: x.flags } : x); }
 
+  function normalizeSelectorAliases(def) {
+    if (!def || typeof def !== 'object') return def;
+    const out = { ...def };
+    if (out.root === undefined && out.containers !== undefined) out.root = out.containers;
+    if (out.url === undefined && out.links !== undefined) out.url = simpleToCommand(out.links, 'link');
+    if (out.title === undefined && out.titles !== undefined) out.title = simpleToCommand(out.titles, 'text');
+    if (out.includeRegex === undefined && out.match !== undefined) out.includeRegex = out.match;
+    delete out.containers; delete out.links; delete out.titles; delete out.match;
+    return out;
+  }
+  function pageMapKey(pages) {
+    const map = normalizePageMap(pages) || {}; const out = {};
+    for (const name of Object.keys(map)) {
+      const page = mergeSelectorDef(map[name], {});
+      const m = matchDefToParts(map[name].includeRegex);
+      const ex = matchDefToParts(map[name].excludeRegex);
+      out[name] = { ...page, ...(m.source || m.flags ? { includeRegex: m } : {}), ...(ex.source || ex.flags ? { excludeRegex: ex } : {}) };
+    }
+    return jsonKey(out);
+  }
   function sameSelectorDef(a, b) {
-    if (!a || !b) return false; if (!!a.disabled !== !!b.disabled || !!a.disable !== !!b.disable) return false; const aM = matchDefToParts(a.match); const bM = matchDefToParts(b.match); if (aM.source !== bM.source || aM.flags !== bM.flags) return false;
-    if ((a.containers || '') !== (b.containers || '')) return false; const norm = (v) => JSON.stringify(normalizeSelectorList(v)); if (norm(a.titles) !== norm(b.titles)) return false;
-    if (norm(a.snippets) !== norm(b.snippets)) return false; if (norm(a.extraElements) !== norm(b.extraElements)) return false; if (norm(a.links) !== norm(b.links)) return false; if ((a.button === false) !== (b.button === false)) return false;
-    const aC = JSON.stringify(normalizeCategoryMap(a.categories) || {}); const bC = JSON.stringify(normalizeCategoryMap(b.categories) || {}); if (aC !== bC) return false; return true;
+    a = normalizeSelectorAliases(a); b = normalizeSelectorAliases(b);
+    if (!a || !b) return false; if (!!a.disabled !== !!b.disabled) return false;
+    const aM = matchDefToParts(a.includeRegex); const bM = matchDefToParts(b.includeRegex); if (aM.source !== bM.source || aM.flags !== bM.flags) return false;
+    const aX = matchDefToParts(a.excludeRegex); const bX = matchDefToParts(b.excludeRegex); if (aX.source !== bX.source || aX.flags !== bX.flags) return false;
+    const aD = mergeSelectorDef(a, {}), bD = mergeSelectorDef(b, {});
+    for (const k of ['root', 'url', 'title', 'snippet', 'extraSelector', 'button', 'skip', 'group', 'grid', 'dedupeBy', 'link', 'blockedCss', 'preserveSpace', 'site', 'matches', 'excludeMatches', 'priority', 'delay']) if (jsonKey(aD[k]) !== jsonKey(bD[k])) return false;
+    return pageMapKey(a.pages) === pageMapKey(b.pages);
   }
 
   function diffSelectorDefFields(def, builtin) {
+    def = normalizeSelectorAliases(def);
     const diff = {}; if (!def || typeof def !== 'object') return diff;
     if (!builtin) {
       for (const k of Object.keys(def)) diff[k] = def[k]; return diff;
     }
-    if (def.match !== undefined) {
-      const aM = matchDefToParts(def.match); const bM = matchDefToParts(builtin.match); if (aM.source !== bM.source || aM.flags !== bM.flags) diff.match = def.match;
+    const bInc = builtin.includeRegex !== undefined ? builtin.includeRegex : builtin.match;
+    const d = mergeSelectorDef(def, {}), b = mergeSelectorDef(builtin, {});
+    if (def.includeRegex !== undefined) {
+      const aM = matchDefToParts(def.includeRegex); const bM = matchDefToParts(bInc); if (aM.source !== bM.source || aM.flags !== bM.flags) diff.includeRegex = def.includeRegex;
     }
-    if (def.containers !== undefined && (def.containers || '') !== (builtin.containers || '')) diff.containers = def.containers; const norm = (v) => JSON.stringify(normalizeSelectorList(v));
-    for (const k of ['titles', 'snippets', 'extraElements', 'links']) {
-      if (def[k] !== undefined && norm(def[k]) !== norm(builtin[k])) diff[k] = def[k];
+    if (def.excludeRegex !== undefined) {
+      const aX = matchDefToParts(def.excludeRegex); const bX = matchDefToParts(builtin.excludeRegex); if (aX.source !== bX.source || aX.flags !== bX.flags) diff.excludeRegex = def.excludeRegex;
     }
-    if (def.categories !== undefined && JSON.stringify(normalizeCategoryMap(def.categories) || {}) !== JSON.stringify(normalizeCategoryMap(builtin.categories) || {})) diff.categories = def.categories;
-    if (def.button !== undefined && (def.button !== false) !== (builtin.button !== false)) diff.button = def.button !== false;
+    for (const k of ['root', 'url', 'title', 'snippet', 'extraSelector', 'button', 'skip', 'group', 'grid', 'dedupeBy', 'link', 'blockedCss', 'preserveSpace', 'site', 'matches', 'excludeMatches', 'priority', 'delay']) {
+      const src = def[k] !== undefined ? def[k] : (def.command && def.command[k]);
+      if (src !== undefined && jsonKey(d[k]) !== jsonKey(b[k])) diff[k] = src;
+    }
+    if (def.pages !== undefined) {
+      const dp = normalizePageMap(def.pages), bp = normalizePageMap(builtin.pages) || {}; const pd = {};
+      if (dp) for (const name of Object.keys(dp)) {
+        const page = dp[name], basePage = bp[name]; if (!basePage) { pd[name] = page; continue; }
+        const fields = {};
+        for (const k of Object.keys(page)) {
+          if (k === 'includeRegex' || k === 'excludeRegex') {
+            const a = matchDefToParts(page[k]), b = matchDefToParts(basePage[k]); if (a.source !== b.source || a.flags !== b.flags) fields[k] = page[k];
+          } else {
+            const norm = (v) => k === 'title' || k === 'snippet' ? simpleToCommand(v, 'text') : k === 'url' ? simpleToCommand(v, 'link') : v;
+            if (jsonKey(norm(page[k])) !== jsonKey(norm(basePage[k]))) fields[k] = page[k];
+          }
+        }
+        if (Object.keys(fields).length) pd[name] = fields;
+      }
+      if (Object.keys(pd).length) diff.pages = pd;
+    }
     return diff;
   }
 
@@ -5306,9 +5790,6 @@
     const out = {}; if (!config || typeof config !== 'object' || Array.isArray(config)) return out; const base = baseDefs || getBaseSelectors();
     for (const key of Object.keys(config)) {
       if (key === 'other') continue; const def = config[key]; if (!def || typeof def !== 'object' || Array.isArray(def)) continue; const builtin = base[key]; const rest = { ...def };
-      if (rest.disable !== undefined) {
-        if (rest.disabled === undefined) rest.disabled = rest.disable; delete rest.disable;
-      }
       if (!builtin) { out[key] = rest; continue; }
       const diff = diffSelectorDefFields(rest, builtin); const hasContent = Object.keys(rest).some(k => k !== 'disabled');
       if (rest.disabled === true) { if (builtin.disabled !== true || Object.keys(diff).length) diff.disabled = true; }
@@ -5316,6 +5797,13 @@
       if (Object.keys(diff).length > 0) out[key] = diff;
     }
     return out;
+  }
+
+  function selectorStoreValue(v) {
+    if (v instanceof RegExp) return { source: v.source, flags: v.flags || '' };
+    if (Array.isArray(v)) return v.map(selectorStoreValue);
+    if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v)) o[k] = selectorStoreValue(v[k]); return o; }
+    return v;
   }
 
   function pruneUserSelectors() {
@@ -5331,55 +5819,44 @@
   }
 
   function normalizeMatchLiteral(field, val) {
-    if (field !== 'match' || typeof val !== 'string') return val;
-    const m = val.match(/^\/(.*)\/([a-z]*)$/i);
-    if (!m || getInvalidRegexFlags(m[2])) return val;
-    return m[2] ? { source: m[1], flags: m[2].toLowerCase() } : m[1];
+    if ((field !== 'includeRegex' && field !== 'match' && field !== 'excludeRegex') || typeof val !== 'string') return val;
+    const m = parseRegexLiteral(val);
+    if (!isRegexLiteralStr(val) || getInvalidRegexFlags(m.flags)) return val;
+    return { source: m.source, flags: m.flags };
   }
 
-  function parseSelectorText(text) {
-    const fail = () => ({ config: null, errors: [t('selectorJsonError')] }); let s = String(text == null ? '' : text).trim(); if (!s) return fail();
-    if (s.charCodeAt(0) === 123 && !/^const\s+SELECTORS\s*=/i.test(s)) {
+    function parseSelectorText(text) {
+    const fail = () => ({ config: null, errors: [t('selectorJsonError')] });
+    let s = String(text == null ? '' : text).trim(); if (!s) return fail();
+    const normalizeRedirects = (link) => {
+      if (link && Array.isArray(link.redirects)) for (const spec of link.redirects) { if (spec) for (const f of ['path', 'pathValue', 'hrefSuffix', 'stripPrefix']) { const v = spec[f]; if (v && typeof v === 'object' && !(v instanceof RegExp) && typeof v.source === 'string') { try { spec[f] = new RegExp(v.source, v.flags || ''); } catch (_) {} } } }
+    };
+    const normalizeNode = (node) => {
+      if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+      if (node.includeRegex !== undefined) { node.includeRegex = normalizeMatchLiteral('includeRegex', node.includeRegex); delete node.match; }
+      else if (node.match !== undefined) { const inc = normalizeMatchLiteral('includeRegex', node.match); delete node.match; if (inc !== undefined) node.includeRegex = inc; }
+      if (node.excludeRegex !== undefined) node.excludeRegex = normalizeMatchLiteral('excludeRegex', node.excludeRegex);
+      normalizeRedirects(node.link);
+      if (node.command && typeof node.command === 'object') normalizeRedirects(node.command.link);
+      if (node.pages && typeof node.pages === 'object') { const ps = Array.isArray(node.pages) ? node.pages : Object.values(node.pages); for (const p of ps) normalizeNode(p); }
+    };
+    const normalizeAll = (obj) => {
+      for (const key of Object.keys(obj)) normalizeNode(obj[key]);
+      return obj;
+    };
+    if (s.charCodeAt(0) === 123) {
       try {
-        const parsedJson = JSON.parse(s);
-        if (parsedJson && typeof parsedJson === 'object' && !Array.isArray(parsedJson)) {
-          const cfg = {};
-          for (const k of Object.keys(parsedJson)) {
-            if (k === 'other' || k === '__proto__') continue; const def = parsedJson[k];
-            if (def && typeof def === 'object' && !Array.isArray(def)) {
-              const cleanDef = {};
-              for (const field of Object.keys(def)) {
-                if (field === '__proto__') continue; let val = def[field];
-                if (field === 'match') {
-                  if (typeof val === 'string') {
-                    const m = val.match(/^\/(.*)\/([a-z]*)$/i);
-                    if (m) {
-                      if (m[2] && getInvalidRegexFlags(m[2])) return { config: null, errors: [t('invalidRegexFlags', { flags: m[2] })] };
-                      cleanDef[field] = m[2] ? { source: m[1], flags: m[2].toLowerCase() } : m[1];
-                    } else {
-                      cleanDef[field] = val;
-                    }
-                  } else if (val && typeof val === 'object' && typeof val.source === 'string') {
-                    if (val.flags && getInvalidRegexFlags(val.flags)) return { config: null, errors: [t('invalidRegexFlags', { flags: val.flags })] };
-                    cleanDef[field] = val.flags ? { source: val.source, flags: String(val.flags).toLowerCase() } : val.source;
-                  } else {
-                    cleanDef[field] = val;
-                  }
-                } else {
-                  cleanDef[field] = val;
-                }
-              }
-              cfg[k] = cleanDef;
-            } else cfg[k] = def;
-          }
-          if (!Object.keys(cfg).length && Object.keys(parsedJson).length) return fail();
-          return { config: cfg, errors: [] };
+        const parsed = JSON.parse(s);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          const walk = (o) => { if (!o || typeof o !== 'object') return true; for (const k of Object.keys(o)) { if (k === '__proto__') return false; if (!walk(o[k])) return false; } return true; };
+          if (!Object.keys(parsed).length || !walk(parsed)) return fail();
+          for (const k of Object.keys(parsed)) if (k === 'other' || k === '__proto__') delete parsed[k];
+          return { config: normalizeAll(parsed), errors: [] };
         }
-      } catch (eJson) {}
+      } catch (_) {}
     }
-    s = s.replace(/^(?:(?:\/\/[^\n]*\n)|(?:\/\*[\s\S]*?\*\/)|\s)+/, '').replace(/^const\s+SELECTORS\s*=\s*/i, '').replace(/^(?:(?:\/\/[^\n]*\n)|(?:\/\*[\s\S]*?\*\/)|\s)+/, '').trim();
-    s = s.replace(/([\x7d;\]])\s*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)\s*$/, '$1').replace(/;\s*$/, '').trim();
-    if (s.startsWith('{') && s.endsWith('}')) s = s.slice(1, -1); const n = s.length; let i = 0;
+    s = s.replace(/^const\s+SELECTORS\s*=\s*/i, '').replace(/;\s*$/, '').trim();
+    let i = 0, n = s.length;
     const skipWs = () => {
       while (i < n) {
         if (/\s/.test(s[i])) { i++; continue; }
@@ -5399,118 +5876,67 @@
           if (nx === 'n') { val += '\n'; j += 2; continue; }
           if (nx === 'r') { val += '\r'; j += 2; continue; }
           if (nx === 't') { val += '\t'; j += 2; continue; }
-          if (nx === 'u' && /^[0-9a-fA-F]{4}/.test(s.slice(j + 2, j + 6))) {
-            val += String.fromCharCode(parseInt(s.slice(j + 2, j + 6), 16)); j += 6; continue;
-          }
-          if (nx === 'x' && /^[0-9a-fA-F]{2}/.test(s.slice(j + 2, j + 4))) {
-            val += String.fromCharCode(parseInt(s.slice(j + 2, j + 4), 16)); j += 4; continue;
-          }
+          if (nx === 'u' && /^[0-9a-fA-F]{4}/.test(s.slice(j + 2, j + 6))) { val += String.fromCharCode(parseInt(s.slice(j + 2, j + 6), 16)); j += 6; continue; }
+          if (nx === 'x' && /^[0-9a-fA-F]{2}/.test(s.slice(j + 2, j + 4))) { val += String.fromCharCode(parseInt(s.slice(j + 2, j + 4), 16)); j += 4; continue; }
           val += ch + (nx || ''); j += 2; continue;
         }
         if (ch === quote) { i = j + 1; return val; }
         val += ch; j++;
       }
-      return null;
+      throw 0;
     };
-    const config = {}; let keyCount = 0;
-    const readKey = () => {
-      if (s[i] === '\'' || s[i] === '"') return readString(); const m = /^[A-Za-z0-9_$][\w$-]*/.exec(s.slice(i)); if (!m) return null; i += m[0].length; return m[0];
-    };
-    while (true) {
-      skipWs(); if (i >= n) break;
-      if (s[i] === ',' || s[i] === ';') { i++; continue; }
-      const key = readKey(); if (key === null) return fail(); skipWs(); if (s[i] !== ':') return fail(); i++; skipWs(); if (s[i] !== '{') return fail(); i++; const def = {};
-      while (true) {
-        skipWs(); if (i >= n) return fail();
-        if (s[i] === ',') { i++; continue; }
-        if (s[i] === '}') { i++; break; }
-        const field = readKey(); if (field === null) return fail(); skipWs(); if (s[i] !== ':') return fail(); i++; skipWs();
-        if (s[i] === '/') {
-          let j = i + 1, src = '', inClass = false, closed = false;
-          while (j < n) {
-            const ch = s[j];
-            if (ch === '\\') { src += ch + (s[j + 1] || ''); j += 2; continue; }
-            if (inClass) { if (ch === ']') inClass = false; src += ch; j++; continue; }
-            if (ch === '[') { inClass = true; src += ch; j++; continue; }
-            if (ch === '/') { closed = true; j++; break; }
-            src += ch; j++;
-          }
-          if (!closed) return fail(); let k = j; while (k < n && /[a-z]/i.test(s[k])) k++; const flags = s.slice(j, k);
-          if (flags && getInvalidRegexFlags(flags)) return { config: null, errors: [t('invalidRegexFlags', { flags })] }; i = k; if (field !== 'match' && !(field === 'categories')) return fail();
-          if (field === 'categories') return fail();
-          def[field] = flags ? { source: src, flags: flags.toLowerCase() } : src;
-        } else if (s[i] === '\'' || s[i] === '"') {
-          const val = readString(); if (val === null) return fail(); def[field] = normalizeMatchLiteral(field, val);
-        } else if (s[i] === '{') {
-          if (field !== 'categories') return fail();
-          i++; const cats = {};
-          while (true) {
-            skipWs(); if (i >= n) return fail();
-            if (s[i] === ',') { i++; continue; }
-            if (s[i] === '}') { i++; break; }
-            const catName = readKey(); if (catName === null) return fail(); skipWs(); if (s[i] !== ':') return fail(); i++; skipWs(); if (s[i] !== '{') return fail(); i++;
-            const cat = {};
-            while (true) {
-              skipWs(); if (i >= n) return fail();
-              if (s[i] === ',') { i++; continue; }
-              if (s[i] === '}') { i++; break; }
-              const cField = readKey(); if (cField === null) return fail(); skipWs(); if (s[i] !== ':') return fail(); i++; skipWs();
-              if (s[i] === '/') {
-                let j = i + 1, src = '', inClass = false, closed = false;
-                while (j < n) {
-                  const ch = s[j];
-                  if (ch === '\\') { src += ch + (s[j + 1] || ''); j += 2; continue; }
-                  if (inClass) { if (ch === ']') inClass = false; src += ch; j++; continue; }
-                  if (ch === '[') { inClass = true; src += ch; j++; continue; }
-                  if (ch === '/') { closed = true; j++; break; }
-                  src += ch; j++;
-                }
-                if (!closed) return fail(); let k = j; while (k < n && /[a-z]/i.test(s[k])) k++; const flags = s.slice(j, k);
-                if (flags && getInvalidRegexFlags(flags)) return { config: null, errors: [t('invalidRegexFlags', { flags })] }; i = k; if (cField !== 'match') return fail();
-                cat[cField] = flags ? { source: src, flags: flags.toLowerCase() } : src;
-              } else if (s[i] === '\'' || s[i] === '"') {
-                const val = readString(); if (val === null) return fail(); cat[cField] = normalizeMatchLiteral(cField, val);
-              } else if (s[i] === '[') {
-                i++; const arr = [];
-                while (true) {
-                  skipWs(); if (i >= n) return fail();
-                  if (s[i] === ',') { i++; continue; }
-                  if (s[i] === ']') { i++; break; }
-                  if (s[i] === '\'' || s[i] === '"') {
-                    const val = readString(); if (val === null) return fail(); arr.push(val);
-                  } else return fail();
-                }
-                cat[cField] = arr;
-              } else if (s.startsWith('true', i) && !/[\w$]/.test(s[i + 4] || '')) {
-                cat[cField] = true; i += 4;
-              } else if (s.startsWith('false', i) && !/[\w$]/.test(s[i + 5] || '')) {
-                cat[cField] = false; i += 5;
-              } else return fail();
-            }
-            cats[catName] = cat;
-          }
-          def[field] = cats;
-        } else if (s[i] === '[') {
-          i++; const arr = [];
-          while (true) {
-            skipWs(); if (i >= n) return fail();
-            if (s[i] === ',') { i++; continue; }
-            if (s[i] === ']') { i++; break; }
-            if (s[i] === '\'' || s[i] === '"') {
-              const val = readString(); if (val === null) return fail(); arr.push(val);
-            } else return fail();
-          }
-          def[field] = arr;
-        } else if (s.startsWith('true', i) && !/[\w$]/.test(s[i + 4] || '')) {
-          def[field] = true; i += 4;
-        } else if (s.startsWith('false', i) && !/[\w$]/.test(s[i + 5] || '')) {
-          def[field] = false; i += 5;
-        } else return fail();
+    const readRegex = () => {
+      let j = i + 1, src = '', inClass = false;
+      while (j < n) {
+        const ch = s[j];
+        if (ch === '\\') { src += ch + (s[j + 1] || ''); j += 2; continue; }
+        if (inClass) { if (ch === ']') inClass = false; src += ch; j++; continue; }
+        if (ch === '[') { inClass = true; src += ch; j++; continue; }
+        if (ch === '/') { j++; break; }
+        src += ch; j++;
       }
-      keyCount++; if (key === 'other' || key === '__proto__') continue; config[key] = def;
+      let k = j; while (k < n && /[a-z]/i.test(s[k])) k++; const flags = s.slice(j, k);
+      if (flags && getInvalidRegexFlags(flags)) throw { flags };
+      i = k; return { source: src, flags: flags.toLowerCase() };
+    };
+    const readKey = () => {
+      skipWs();
+      if (s[i] === "'" || s[i] === '"') return readString();
+      const m = /^[A-Za-z0-9_$][\w$-]*/.exec(s.slice(i)); if (!m) throw 0; i += m[0].length; return m[0];
+    };
+    const readValue = () => {
+      skipWs(); const ch = s[i];
+      if (ch === "'" || ch === '"') return readString();
+      if (ch === '/') return readRegex();
+      if (ch === '[') {
+        i++; const arr = [];
+        while (true) { skipWs(); if (i >= n) throw 0; if (s[i] === ',') { i++; continue; } if (s[i] === ']') { i++; return arr; } arr.push(readValue()); }
+      }
+      if (ch === '{') {
+        i++; const obj = {};
+        while (true) {
+          skipWs(); if (i >= n) throw 0; if (s[i] === ',') { i++; continue; } if (s[i] === '}') { i++; return obj; }
+          const key = readKey(); if (key === '__proto__') throw 0; skipWs(); if (s[i] !== ':') throw 0; i++; obj[key] = readValue();
+        }
+      }
+      if (s.startsWith('true', i) && !/[\w$]/.test(s[i + 4] || '')) { i += 4; return true; }
+      if (s.startsWith('false', i) && !/[\w$]/.test(s[i + 5] || '')) { i += 5; return false; }
+      if (s.startsWith('null', i) && !/[\w$]/.test(s[i + 4] || '')) { i += 4; return null; }
+      const m = /^-?\d+(?:\.\d+)?/.exec(s.slice(i)); if (m) { i += m[0].length; return Number(m[0]); }
+      throw 0;
+    };
+    if (s[0] !== String.fromCharCode(123)) s = String.fromCharCode(123) + '\n' + s + '\n' + String.fromCharCode(125);
+    i = 0; n = s.length;
+    try {
+      const root = readValue(); skipWs(); if (i < n) return fail();
+      if (!root || typeof root !== 'object' || Array.isArray(root)) return fail();
+      for (const k of Object.keys(root)) if (k === 'other') delete root[k];
+      if (!Object.keys(root).length) return fail();
+      return { config: normalizeAll(root), errors: [] };
+    } catch (e) {
+      if (e && e.flags) return { config: null, errors: [t('invalidRegexFlags', { flags: e.flags })] };
+      return fail();
     }
-    if (keyCount && !Object.keys(config).length) return fail();
-    return { config, errors: [] };
   }
 
   function pickTextFile(accept, onLoaded) {
@@ -5602,7 +6028,7 @@
     setupBracketHighlight(textarea, 'js');
 
     const applyUserSelectors = (config) => {
-      GM_setValue(SELECTORS_KEY, diffUserSelectors(config, baseAtOpen)); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite(); markLocalModifiedTime(SELECTORS_LAST_MODIFIED_KEY);
+      GM_setValue(SELECTORS_KEY, selectorStoreValue(diffUserSelectors(config, baseAtOpen))); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); refreshEngineSite(); markLocalModifiedTime(SELECTORS_LAST_MODIFIED_KEY);
       triggerWebDAVSyncDelayed(5000);
     };
 
@@ -5646,9 +6072,7 @@
       textarea.value = serializeSelectors(baseAtOpen); showError([]); updateLineNumbers('selectors'); showToast(t('resetPending'), 'success');
     };
 
-    document.getElementById('serh-selector-cancel').onclick = (e) => {
-      e.stopPropagation(); closePanel();
-    };
+    bindCancelButton('serh-selector-cancel', closePanel);
   }
 
   function migrateSubscriptions() {
@@ -5671,6 +6095,11 @@
     cachedSubscriptionRules = null; _subscriptionStoreSignature = null; GM_setValue(SUBSCRIPTIONS_KEY, subscriptions); _subscriptionStoreSignature = getSubscriptionStoreSignature();
   }
 
+  function bindCancelButton(id, onClose) {
+    const btn = document.getElementById(id); if (!btn) return;
+    btn.onclick = (e) => { e.stopPropagation(); onClose(); };
+  }
+
   function getAllSubscriptionRules() {
     if (cachedSubscriptionRules) {
       const stored = _subscriptionStoreSignature; const fresh = getSubscriptionStoreSignature();
@@ -5686,24 +6115,33 @@
     cachedSubscriptionRules = rules; return rules;
   }
 
-  function getSubscriptionSyncSnapshot() {
-    const raw = GM_getValue(SUBSCRIPTION_SYNC_SNAPSHOT_KEY, null);
-    return raw && !Array.isArray(raw) && raw.target === webdavTargetId(loadWebDAVConfig()) && Array.isArray(raw.subs) ? raw.subs : null;
+  function makeSyncSnapshot(key, payloadKey, validate) {
+    return {
+      get() {
+        const raw = GM_getValue(key, null);
+        if (!raw || Array.isArray(raw) || typeof raw !== 'object' || typeof raw.target !== 'string') return null;
+        if (!validate(raw[payloadKey])) return null;
+        return raw.target === webdavTargetId(loadWebDAVConfig()) ? raw[payloadKey] : null;
+      },
+      set(value, config = null) {
+        if (!validate(value)) return;
+        GM_setValue(key, { target: webdavTargetId(config || loadWebDAVConfig()), [payloadKey]: value });
+      }
+    };
   }
+  function snapshotIsArray(v) { return Array.isArray(v); }
+  function snapshotIsObject(v) { return v && typeof v === 'object' && !Array.isArray(v); }
 
+  function getSubscriptionSyncSnapshot() { return makeSyncSnapshot(SUBSCRIPTION_SYNC_SNAPSHOT_KEY, 'subs', snapshotIsArray).get(); }
   function setSubscriptionSyncSnapshot(subs, config = null) {
     if (!Array.isArray(subs)) return;
-    GM_setValue(SUBSCRIPTION_SYNC_SNAPSHOT_KEY, { target: webdavTargetId(config || loadWebDAVConfig()), subs: subs.map(s => ({ url: s.url, name: s.name, enabled: s.enabled !== false })) });
+    makeSyncSnapshot(SUBSCRIPTION_SYNC_SNAPSHOT_KEY, 'subs', snapshotIsArray).set(subs.map(s => ({ url: s.url, name: s.name, enabled: s.enabled !== false })), config);
   }
 
-  function getEngineSubSyncSnapshot() {
-    const raw = GM_getValue(ENGINE_SUBS_SYNC_SNAPSHOT_KEY, null);
-    return raw && !Array.isArray(raw) && raw.target === webdavTargetId(loadWebDAVConfig()) && Array.isArray(raw.subs) ? raw.subs : null;
-  }
-
+  function getEngineSubSyncSnapshot() { return makeSyncSnapshot(ENGINE_SUBS_SYNC_SNAPSHOT_KEY, 'subs', snapshotIsArray).get(); }
   function setEngineSubSyncSnapshot(subs, config = null) {
     if (!Array.isArray(subs)) return;
-    GM_setValue(ENGINE_SUBS_SYNC_SNAPSHOT_KEY, { target: webdavTargetId(config || loadWebDAVConfig()), subs: subs.filter((s) => s && s.url && !isBuiltinEngineSub(s)).map(s => ({ url: s.url, name: s.name, enabled: s.enabled !== false })) });
+    makeSyncSnapshot(ENGINE_SUBS_SYNC_SNAPSHOT_KEY, 'subs', snapshotIsArray).set(subs.filter((s) => s && s.url && !isBuiltinEngineSub(s)).map(s => ({ url: s.url, name: s.name, enabled: s.enabled !== false })), config);
   }
 
   function applyCloudEngineSubscriptions(cloudSubs, preferLocal = false) {
@@ -5864,10 +6302,10 @@
     });
   }
 
-  let _netTimeOffset = null; let _netTimeCheckedAt = 0; let _netTimeQuerying = null; let _davClockOffset = null; let _davClockCheckedAt = 0;
+  let _netTimeOffset = null, _netTimeCheckedAt = 0; let _netTimeQuerying = null; let _davClockOffset = null; let _davClockCheckedAt = 0;
   function firstSuccess(promises) {
     return new Promise((resolve, reject) => {
-      let pending = promises.length; let settled = false;
+      let pending = promises.length, settled = false;
       if (!pending) {
         reject(new Error('net time unavailable')); return;
       }
@@ -5958,23 +6396,11 @@
 
   function webdavTargetId(config) { try { return getWebDAVRequest(config).fullUrl; } catch (e) { return ''; } }
 
-  function getRuleSyncSnapshot() {
-    const raw = GM_getValue(WEBDAV_SYNC_SNAPSHOT_KEY, null); if (!raw || typeof raw !== 'object' || typeof raw.target !== 'string' || !Array.isArray(raw.rules)) return null;
-    return raw.target === webdavTargetId(loadWebDAVConfig()) ? raw.rules : null;
-  }
+  function getRuleSyncSnapshot() { return makeSyncSnapshot(WEBDAV_SYNC_SNAPSHOT_KEY, 'rules', snapshotIsArray).get(); }
+  function setRuleSyncSnapshot(rules, config = null) { makeSyncSnapshot(WEBDAV_SYNC_SNAPSHOT_KEY, 'rules', snapshotIsArray).set(rules, config); }
 
-  function setRuleSyncSnapshot(rules, config = null) {
-    if (!Array.isArray(rules)) return; GM_setValue(WEBDAV_SYNC_SNAPSHOT_KEY, { target: webdavTargetId(config || loadWebDAVConfig()), rules });
-  }
-
-  function getSelectorSyncSnapshot() {
-    const raw = GM_getValue(WEBDAV_LAST_SYNC_SELECTORS_KEY, null);
-    return (raw && typeof raw === 'object' && !Array.isArray(raw) && raw.target === webdavTargetId(loadWebDAVConfig()) && raw.selectors && typeof raw.selectors === 'object' && !Array.isArray(raw.selectors)) ? raw.selectors : null;
-  }
-
-  function setSelectorSyncSnapshot(selectors, config = null) {
-    if (!selectors || typeof selectors !== 'object' || Array.isArray(selectors)) return; GM_setValue(WEBDAV_LAST_SYNC_SELECTORS_KEY, { target: webdavTargetId(config || loadWebDAVConfig()), selectors });
-  }
+  function getSelectorSyncSnapshot() { return makeSyncSnapshot(WEBDAV_LAST_SYNC_SELECTORS_KEY, 'selectors', snapshotIsObject).get(); }
+  function setSelectorSyncSnapshot(selectors, config = null) { makeSyncSnapshot(WEBDAV_LAST_SYNC_SELECTORS_KEY, 'selectors', snapshotIsObject).set(selectors, config); }
 
   function selectorsEqual(a, b) {
     const canon = (v) => {
@@ -6055,7 +6481,7 @@
     };
     const bestRow = (rows, slotKey) => {
       const baseLine = baseIndex.has(slotKey) ? baseRows[baseIndex.get(slotKey)].line : '';
-      let best = rows[0]; let score = -1;
+      let best = rows[0], score = -1;
       for (const row of rows) { const v = lineSim(row.line, baseLine); if (v > score) { score = v; best = row; } }
       return best;
     };
@@ -6216,21 +6642,41 @@
     const selectorPatchOk = (v) => {
       if (Array.isArray(v)) return true; if (!v || typeof v !== 'object') return false;
       const flagsOk = (f) => { f = String(f || '').toLowerCase(); return /^[imsu]*$/.test(f) && new Set(f).size === f.length; };
-      const probe = (s) => { if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return true; try { document.querySelector(s); return true; } catch (e) { return false; } };
-      const cssOk = (val, allowEmpty = false, parser = null) => { const list = typeof val === 'string' ? [val] : val; return Array.isArray(list) && list.every((s) => { if (typeof s !== 'string') return false; if (allowEmpty && !s.trim()) return true; if (!s.trim()) return false; const spec = parser ? parser(s) : null; return spec ? (!spec.css || probe(spec.css)) : probe(s); }); };
       const reOk = (val) => {
-        if (typeof val === 'string') { const lit = val.match(/^\/(.*)\/([a-z]*)$/i); if (lit && !flagsOk(lit[2])) return false; try { new RegExp(val); return true; } catch (e) { return false; } }
+        if (typeof val === 'string') { const lit = parseRegexLiteral(val); if (lit.flags && !flagsOk(lit.flags)) return false; try { new RegExp(val); return true; } catch (e) { return false; } }
         if (val && typeof val === 'object' && typeof val.source === 'string' && flagsOk(val.flags)) { try { new RegExp(val.source, String(val.flags || '').toLowerCase()); return true; } catch (e) { return false; } }
+        return false;
+      };
+      const probe = (s) => { if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return true; try { document.querySelector(s); return true; } catch (_) { return false; } };
+      const valueOk = (val, depth = 0) => {
+        if (val == null || typeof val === 'string' || typeof val === 'boolean' || typeof val === 'number') return true;
+        if (depth > 8) return false;
+        if (Array.isArray(val)) return val.every((x) => valueOk(x, depth + 1));
+        if (typeof val === 'object') return Object.keys(val).every((k) => k !== '__proto__' && valueOk(val[k], depth + 1));
+        return false;
+      };
+      const rootOk = (r, depth = 0) => {
+        if (depth > 8) return false;
+        if (typeof r === 'string') return !!r.trim() && probe(r);
+        if (!Array.isArray(r) || typeof r[0] !== 'string') return false;
+        if (r[0] === 'selector') return typeof r[1] === 'string' && !!r[1].trim() && probe(r[1]);
+        if (r[0] === 'upward') {
+          const levelOk = typeof r[1] === 'number' ? Number.isInteger(r[1]) && r[1] >= 0 : (typeof r[1] === 'string' && !!r[1].trim() && probe(r[1]));
+          return levelOk && r[2] !== undefined && rootOk(r[2], depth + 1);
+        }
         return false;
       };
       for (const key of Object.keys(v)) {
         const def = v[key];
-        if (key === 'other' || !/^[A-Za-z0-9_-]+$/.test(key)) return false;
+        if (key === 'other' || key === '__proto__' || !/^[A-Za-z0-9_-]+$/.test(key)) return false;
         if (!def || typeof def !== 'object' || Array.isArray(def)) return false;
-        if ((def.disabled !== undefined && def.disabled !== null && typeof def.disabled !== 'boolean') || (def.disable !== undefined && def.disable !== null && typeof def.disable !== 'boolean')) return false;
-        if (def.extraElements !== undefined && def.extraElements !== null && (!Array.isArray(def.extraElements) || !def.extraElements.every((s) => typeof s === 'string' && !!s.trim() && !hasTopLevelComma(s) && probe(':scope > :nth-child(1) ' + s)))) return false;
-        if (def.match !== undefined && def.match !== null && !reOk(def.match)) return false;
-        for (const f of ['containers', 'titles', 'snippets', 'links']) if (def[f] !== undefined && def[f] !== null && !cssOk(def[f], f !== 'containers', f === 'titles' ? parseTitleSpec : f === 'links' ? parseLinkSpec : null)) return false;
+        const inc = def.includeRegex !== undefined ? def.includeRegex : def.match;
+        if (inc !== undefined && inc !== null && !reOk(inc)) return false;
+        if (def.excludeRegex !== undefined && def.excludeRegex !== null && !reOk(def.excludeRegex)) return false;
+        const root = def.root !== undefined ? def.root : def.containers;
+        if (root !== undefined && !rootOk(root)) return false;
+        for (const f of ['url', 'title', 'snippet', 'extraSelector', 'button', 'skip', 'group', 'grid', 'dedupeBy', 'link', 'blockedCss', 'site', 'matches', 'excludeMatches', 'priority', 'delay', 'pages', 'titles', 'links']) if (def[f] !== undefined && !valueOk(def[f])) return false;
+        if (def.disabled !== undefined && def.disabled !== null && typeof def.disabled !== 'boolean') return false;
       }
       return true;
     };
@@ -6241,7 +6687,7 @@
       if (line.startsWith('# ScriptConfig:')) {
         const payload = line.substring('# ScriptConfig:'.length).trim(); let parsed = null;
         if (/^[\x7B\x5B]/.test(payload)) {
-          try { parsed = JSON.parse(payload); } catch (e) { if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[WebDAV] 配置头解析失败:', e); }
+          try { parsed = JSON.parse(payload); } catch (e) { dbgWarn('[WebDAV] 配置头解析失败:', e); }
         }
         if (parsed && !Array.isArray(parsed) && !config) { config = parsed; rawScriptConfig = line; headerLineIndexes.add(i); } else if (payload.startsWith('\x7B') && !config) headerLineIndexes.add(i);
         else if (!parsed && !/^[\x7B\x5B]/.test(payload)) headerLineIndexes.add(i);
@@ -6249,7 +6695,7 @@
         if (!selectors) {
           const payload = line.substring('# Selectors:'.length).trim(); let parsed = null;
           if (/^[\x7B\x5B]/.test(payload)) {
-            try { parsed = JSON.parse(payload); } catch (e) { if (typeof currentConfig !== 'undefined' && currentConfig.debug) console.warn('[WebDAV] 选择器头解析失败:', e); }
+            try { parsed = JSON.parse(payload); } catch (e) { dbgWarn('[WebDAV] 选择器头解析失败:', e); }
           }
           if (parsed && selectorPatchOk(parsed)) { selectors = parsed; rawSelectors = line; } else invalidSelectors = true;
           headerLineIndexes.add(i);
@@ -6326,12 +6772,12 @@
         allow404: true
       });
     } catch (e) {
-      if (currentConfig && currentConfig.debug) console.warn('[WebDAV] PROPFIND 请求失败，跳过目录检查:', e && e.message); return;
+      dbgWarn('[WebDAV] PROPFIND 请求失败，跳过目录检查:', e && e.message); return;
     }
 
     if (propfindResp.status === 207 || propfindResp.status === 200) return;
     if (propfindResp.status !== 404) {
-      if (currentConfig && currentConfig.debug) console.warn(`[WebDAV] PROPFIND 返回 HTTP ${propfindResp.status}，跳过目录检查`);
+      dbgWarn(`[WebDAV] PROPFIND 返回 HTTP ${propfindResp.status}，跳过目录检查`);
       return;
     }
 
@@ -6346,10 +6792,10 @@
     try {
       mkcolResp = await gmRequest('MKCOL', url, { headers, allow404: false });
     } catch (err) {
-      if (currentConfig && currentConfig.debug) console.warn('[WebDAV] MKCOL 请求失败，交由上传请求判定目录状态:', err && err.message); return;
+      dbgWarn('[WebDAV] MKCOL 请求失败，交由上传请求判定目录状态:', err && err.message); return;
     }
     if (mkcolResp && mkcolResp.status !== 405 && mkcolResp.status !== 301 && mkcolResp.status !== 409 && (mkcolResp.status < 200 || mkcolResp.status >= 300)) {
-      if (currentConfig && currentConfig.debug) console.warn(`[WebDAV] MKCOL 返回 HTTP ${mkcolResp.status}，交由上传请求判定目录状态`);
+      dbgWarn(`[WebDAV] MKCOL 返回 HTTP ${mkcolResp.status}，交由上传请求判定目录状态`);
     }
   }
 
@@ -6405,7 +6851,7 @@
     return prefix + content;
   }
 
-  // yaml解析
+  // 订阅解析
   function extractYamlRuleItems(lines) {
     let hasSection = false, name; const items = [], sectionStack = [];
     const yamlEscapes = { '0': '\0', a: '\x07', b: '\b', t: '\t', n: '\n', v: '\v', f: '\f', r: '\r', e: '\x1b', ' ': ' ', '"': '"', '/': '/', '\\': '\\', N: '\u0085', _: '\u00a0', L: '\u2028', P: '\u2029' };
@@ -6499,7 +6945,7 @@
   }
 
   function parseRulesetContent(content) {
-    let lines = String(content || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n'); let meta = {}; let isYaml = false; let head = null; const firstContentIdx = lines.findIndex((l) => l.trim() !== '');
+    let lines = String(content || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n'), meta = {}; let isYaml = false; let head = null; const firstContentIdx = lines.findIndex((l) => l.trim() !== '');
     if (firstContentIdx !== -1 && lines[firstContentIdx].trim() === '---') {
       const endIndex = lines.findIndex((l, i) => i > firstContentIdx && l.trim() === '---');
       if (endIndex !== -1) { head = extractYamlRuleItems(lines.slice(firstContentIdx + 1, endIndex)); lines = lines.slice(endIndex + 1); }
@@ -6536,9 +6982,7 @@ function collectSubscriptionRules(lines) {
     const cleanLine = stripRuleComment(line);
     if (cleanLine && validateRule(cleanLine)) {
       validRules.push(cleanLine);
-    } else if (currentConfig.debug) {
-      console.warn('[订阅] 无效规则已跳过:', line);
-    }
+    } else dbgWarn('[订阅] 无效规则已跳过:', line);
   }
   return validRules;
 }
@@ -6583,7 +7027,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     const errors = validateUserSelectors(parsed.config); if (errors.length) throw new Error(errors[0]);
     const count = Object.keys(parsed.config).length; if (!count) throw new Error(t('subImportFailed'));
     const subs = getEngineSubscriptions().map(s => s.url === url ? {
-      ...s, selectors: parsed.config, lastUpdate: Date.now(), lastAttempt: Date.now(),
+      ...s, selectors: selectorStoreValue(parsed.config), lastUpdate: Date.now(), lastAttempt: Date.now(),
       name: s.builtin ? (s.name || t('builtinEngineSub')) : s.name
     } : s);
     saveEngineSubscriptions(subs); refreshEngineSite();
@@ -6796,7 +7240,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
     document.getElementById(`${pid}-import`).onclick = async () => {
       const rows = Array.from(container.querySelectorAll('.serh-subscription-row')); persistCurrent(); showToast(t('importing'), 'info');
-      let total = 0; let failed = false;
+      let total = 0, failed = false;
       for (const row of rows) {
         const input = row.querySelector('.serh-subscription-url'); const url = input.value.trim(); const msgDiv = row.querySelector('.serh-subscription-status-message');
         if (!url) {
@@ -6825,9 +7269,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       }
     };
 
-    document.getElementById(`${pid}-cancel`).onclick = (e) => {
-      e.stopPropagation(); cancelDiscardsEdits = true; closePanel();
-    };
+    bindCancelButton(`${pid}-cancel`, () => { cancelDiscardsEdits = true; closePanel(); });
   }
 
   function showEngineSubscriptionPanel() {
@@ -7016,6 +7458,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       }
       collectMainPanelConfigState(); const changes = persistConfig(false); if (changes.rulesChanged) markLocalModifiedTime(); if (changes.settingsChanged) markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY); let content = currentConfig.rules.join('\n'); const loadingToast = showToast(t('webdavUploading'), 'info', 10000);
       try {
+        let uploadedTime = 0;
         const lockAcquired = await runWithSyncLock('webdav', async () => {
           const { folderUrl, fullUrl, headers } = getWebDAVRequest(config); await ensureWebDAVFolder(folderUrl, headers); let remotePreserved = {}; let remoteConfig = null;
           const resp = await gmRequest('GET', fullUrl, { headers, allow404: true });
@@ -7029,7 +7472,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           }
           const serverTime = parseHttpDateHeader(resp.responseHeaders); const netOffset = await getNetworkTimeOffset();
           const trustedNow = netOffset !== null ? Date.now() + netOffset : (serverTime > 0 ? serverTime : Date.now()); const validRemoteTimes = extractValidCloudTimes(remoteConfig, trustedNow);
-          const remoteSyncedAt = validRemoteTimes.length > 0 ? Math.max(...validRemoteTimes) : 0; const uploadedTime = Math.max(remoteSyncedAt + 1000, trustedNow);
+          const remoteSyncedAt = validRemoteTimes.length > 0 ? Math.max(...validRemoteTimes) : 0; uploadedTime = Math.max(remoteSyncedAt + 1000, trustedNow);
           const remoteRaw = String(resp.responseText || '');
           if (resp.status !== 404 && remoteRaw.trim() !== '' && !isInvalidSyncResponse(resp.responseText, resp.responseHeaders)) { try { await putWebDAVBackup(fullUrl, headers, remoteRaw); } catch (bakErr) { console.warn('[WebDAV] 备份失败:', bakErr && bakErr.message); } }
           await putWebDAVRules({ fullUrl, folderUrl, headers, rules: content.split('\n'), settingsModifiedAt: uploadedTime, config }, content, uploadedTime, remotePreserved, buildDavPutHeaders(headers, uploadedTime));
@@ -7040,7 +7483,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           showToast(t('webdavSyncLocked'), 'error', 4000); forceReprocessAll();
         } else {
           saveSuccessfulWebDAVConfig(config); showToast(t('uploadSuccess'), 'success'); const mainPanel = document.getElementById('serh-panel');
-          GM_setValue(WEBDAV_PENDING_KEY, false);
+          markWebDAVSyncSuccess(uploadedTime);
           if (mainPanel && Array.isArray(currentConfig.rules)) {
             mainPanel._initialRules = [...currentConfig.rules];
           }
@@ -7078,9 +7521,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       }
     };
 
-    document.getElementById('serh-webdav-cancel').onclick = (e) => {
-      e.stopPropagation(); closePanel();
-    };
+    bindCancelButton('serh-webdav-cancel', closePanel);
 
   }
 
@@ -7154,16 +7595,30 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     if (mainPanel && Array.isArray(currentConfig.rules)) {
       mainPanel._initialRules = [...currentConfig.rules];
     }
-    applyConfigToMainPanel(); forceReprocessAll(); GM_setValue(WEBDAV_PENDING_KEY, false); GM_setValue(WEBDAV_LAST_SYNC_KEY, trustedNow);
+    applyConfigToMainPanel(); forceReprocessAll(); markWebDAVSyncSuccess(trustedNow);
   }
 
-  function markWebDAVSyncFailure(ts) { GM_setValue(WEBDAV_PENDING_KEY, false); GM_setValue(WEBDAV_LAST_SYNC_KEY, ts > 0 ? ts : Date.now()); }
+  let _webdavRetryTimer = null;
+  function scheduleWebDAVSyncRetry() {
+    if (_webdavRetryTimer) { clearTimeout(_webdavRetryTimer); _webdavRetryTimer = null; }
+    if (!GM_getValue(WEBDAV_AUTO_SYNC_KEY, false)) return;
+    if (!(GM_getValue(WEBDAV_RETRY_COUNT_KEY, 0) > 0)) return;
+    const wait = getWebDAVSyncWait(); if (!(wait > 0)) return;
+    _webdavRetryTimer = setTimeout(() => {
+      _webdavRetryTimer = null;
+      if (!GM_getValue(WEBDAV_AUTO_SYNC_KEY, false) || !(GM_getValue(WEBDAV_RETRY_COUNT_KEY, 0) > 0)) return;
+      if (isSerhPanelOpen()) { scheduleWebDAVSyncRetry(); return; }
+      checkAutoWebDAV();
+    }, wait + 5000);
+  }
+  function markWebDAVSyncFailure(ts) { const count = GM_getValue(WEBDAV_RETRY_COUNT_KEY, 0) + 1; GM_setValue(WEBDAV_RETRY_COUNT_KEY, count >= 6 ? 0 : count); GM_setValue(WEBDAV_PENDING_KEY, count < 6); if (count >= 6) GM_setValue(WEBDAV_DIRTY_KEY, false); GM_setValue(WEBDAV_LAST_SYNC_KEY, ts > 0 ? ts : Date.now()); scheduleWebDAVSyncRetry(); }
+  function markWebDAVSyncSuccess(ts) { if (_webdavRetryTimer) { clearTimeout(_webdavRetryTimer); _webdavRetryTimer = null; } GM_setValue(WEBDAV_PENDING_KEY, false); GM_setValue(WEBDAV_DIRTY_KEY, false); GM_setValue(WEBDAV_RETRY_COUNT_KEY, 0); GM_setValue(WEBDAV_LAST_SYNC_KEY, ts > 0 ? ts : Date.now()); }
 
   async function performAutoWebDAVSync(config, depth = 0) {
     adoptStoredConfigIfNewer(); const { folderUrl, fullUrl, headers } = getWebDAVRequest(config);
 
     const resp = await gmRequest('GET', fullUrl, { headers, allow404: true }); const trustedNow = await getTrustedNow(parseHttpDateHeader(resp.responseHeaders));
-    let cloudRules = []; let cloudConfig = null; let cloudTime = 0; let cloudSettingsTime = 0; let cloudETag = ''; let cloudLastMod = ''; let parsedHeader = null;
+    let cloudRules = [], cloudConfig = null; let cloudTime = 0; let cloudSettingsTime = 0; let cloudETag = ''; let cloudLastMod = ''; let parsedHeader = null;
     if (resp.status !== 404) {
       const content = resp.responseText;
       if (isInvalidSyncResponse(content, resp.responseHeaders)) {
@@ -7215,9 +7670,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           }
           console.warn('[WebDAV] 空云端恢复上传失败:', err.message); markWebDAVSyncFailure(trustedNow); return;
         }
-        forceReprocessAll(); GM_setValue(WEBDAV_PENDING_KEY, false); GM_setValue(WEBDAV_LAST_SYNC_KEY, trustedNow); return;
+        forceReprocessAll(); markWebDAVSyncSuccess(trustedNow); return;
       }
-      console.warn('[WebDAV] 云端文件为空，已跳过'); GM_setValue(WEBDAV_PENDING_KEY, false); GM_setValue(WEBDAV_LAST_SYNC_KEY, trustedNow); return;
+      console.warn('[WebDAV] 云端文件为空，已跳过'); markWebDAVSyncSuccess(trustedNow); return;
     }
 
     if (resp.status === 404) {
@@ -7263,7 +7718,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         if (cloudConfig.builtinEngineSubEnabled !== undefined) applyBuiltinEngineSubEnabled(cloudConfig.builtinEngineSubEnabled);
       }
 
-      currentConfig.rules = mergedRules; persistConfig(false);
+      currentConfig.rules = mergedRules.slice(); persistConfig(false);
       const syncConfig = GM_getValue(WEBDAV_SYNC_CONFIG_KEY, false); const syncSelectors = syncConfig;
       const cloudSelectors = (cloudConfig && Object.prototype.hasOwnProperty.call(cloudConfig, 'selectors') && cloudConfig.selectors && typeof cloudConfig.selectors === 'object' && !Array.isArray(cloudConfig.selectors)) ? cloudConfig.selectors : null;
       let mergedSelectors = null;
@@ -7310,17 +7765,17 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       }
     }
 
-    forceReprocessAll(); applyGlobalConfigUi(); GM_setValue(WEBDAV_PENDING_KEY, false); GM_setValue(WEBDAV_LAST_SYNC_KEY, trustedNow);
+    forceReprocessAll(); applyGlobalConfigUi(); markWebDAVSyncSuccess(trustedNow);
   }
 
   function isSerhPanelOpen() {
     return ['serh-panel', 'serh-subscription-panel', 'serh-engine-sub-panel', 'serh-webdav-panel', 'serh-selector-panel', 'serh-settings-panel', 'serh-hlcolor-panel'].some(id => document.getElementById(id));
   }
 
-  let _webdavSyncDelayedTimer = null; let _webdavSyncPendingWhenPanelOpen = false;
+  let _webdavSyncDelayedTimer = null, _webdavSyncPendingWhenPanelOpen = false;
   function triggerWebDAVSyncDelayed(delayMs = 5000) {
     if (!GM_getValue(WEBDAV_AUTO_SYNC_KEY, false)) return;
-    GM_setValue(WEBDAV_PENDING_KEY, true);
+    GM_setValue(WEBDAV_DIRTY_KEY, true); GM_setValue(WEBDAV_PENDING_KEY, false); GM_setValue(WEBDAV_RETRY_COUNT_KEY, 0);
 
     if (_webdavSyncDelayedTimer) clearTimeout(_webdavSyncDelayedTimer);
     if (isSerhPanelOpen()) { _webdavSyncPendingWhenPanelOpen = true; return; }
@@ -7339,14 +7794,18 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   async function checkAutoWebDAV() {
     if (!GM_getValue(WEBDAV_AUTO_SYNC_KEY, false)) return; const config = loadWebDAVConfig(); if (!config || !config.url) return; if (!isHttpsUrl(config.url)) return;
     if (isSerhPanelOpen()) return;
-    const pending = GM_getValue(WEBDAV_PENDING_KEY, false);
-    const localNow = Date.now(); const localLastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0);
-    if (!pending && localLastSync > 0 && localNow >= localLastSync - WEBDAV_TIME_TOLERANCE && localNow - localLastSync < WEBDAV_AUTO_SYNC_INTERVAL - AUTO_SYNC_TOLERANCE) return;
-    const now = await getTrustedNow(); let lastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0); if (lastSync > now + WEBDAV_TIME_TOLERANCE) lastSync = 0;
-    if (!pending && lastSync > 0 && now - lastSync < WEBDAV_AUTO_SYNC_INTERVAL - AUTO_SYNC_TOLERANCE) return;
+    const wait = getWebDAVSyncWait();
+    if (wait > 0) {
+      const now = await getTrustedNow(); let lastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0); if (lastSync > now + WEBDAV_TIME_TOLERANCE) lastSync = 0;
+      if (lastSync > 0 && now - lastSync < wait) return;
+    }
     runBackgroundSync('webdav', async () => {
-      const trustedNow = await getTrustedNow(); let currentLastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0); if (currentLastSync > trustedNow + WEBDAV_TIME_TOLERANCE) currentLastSync = 0;
-      if (!GM_getValue(WEBDAV_PENDING_KEY, false) && currentLastSync > 0 && trustedNow - currentLastSync < WEBDAV_AUTO_SYNC_INTERVAL - AUTO_SYNC_TOLERANCE) return; if (isSerhPanelOpen()) return; await performAutoWebDAVSync(config);
+      const retryWait = getWebDAVSyncWait();
+      if (retryWait > 0) {
+        const trustedNow = await getTrustedNow(); let currentLastSync = GM_getValue(WEBDAV_LAST_SYNC_KEY, 0); if (currentLastSync > trustedNow + WEBDAV_TIME_TOLERANCE) currentLastSync = 0;
+        if (currentLastSync > 0 && trustedNow - currentLastSync < retryWait) return;
+      }
+      if (isSerhPanelOpen()) return; await performAutoWebDAVSync(config);
     }).catch(err => { markWebDAVSyncFailure(); console.error('[WebDAV] 同步失败:', err.message); });
   }
 
@@ -7581,6 +8040,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       setInterval(() => checkAutoEngineSubscription(), 60 * 60 * 1000),
       setInterval(checkAutoWebDAV, 60 * 60 * 1000)
     ];
+    if (!hasPendingLocalChange() && GM_getValue(WEBDAV_PENDING_KEY, false) && GM_getValue(WEBDAV_RETRY_COUNT_KEY, 0) === 0) GM_setValue(WEBDAV_DIRTY_KEY, true);
+    if (hasPendingLocalChange()) checkAutoWebDAV();
     setTimeout(() => {
       checkAutoSubscription(); checkAutoEngineSubscription(); checkAutoWebDAV();
     }, 5000 + Math.floor(Math.random() * 5000));
@@ -7599,16 +8060,24 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     applyDarkModeClass(); applyCollapseMode(); bindSearchForm(); updateStatus(document.querySelectorAll('[data-is-blocked="true"]').length);
   }
 
+  function scheduleInitialScan() {
+    const raw = resolvePageDef(getSearchEngine()).delay;
+    if (raw == null || raw === false) { scanNewResults(); return; }
+    const ms = raw === true ? 0 : Math.max(0, Number(raw) || 0);
+    const run = () => { if (_engineSiteSetup) scanNewResults(); };
+    if (document.readyState === 'complete') { ms ? setTimeout(run, ms) : run(); }
+    else window.addEventListener('load', () => { ms ? setTimeout(run, ms) : run(); }, { once: true });
+  }
   function ensureEngineSiteSetup() {
     if (_engineSiteSetup || !isEngineSite()) return; _engineSiteSetup = true; _observedBody = document.body;
-    try { injectGlobalStyles(); buildRuleIndex(); exposeDebugApi(); updateStatus(0); scanNewResults(); } catch (e) { _engineSiteSetup = false; _observedBody = null; throw e; }
+    try { injectGlobalStyles(); buildRuleIndex(); exposeDebugApi(); updateStatus(0); scheduleInitialScan(); } catch (e) { _engineSiteSetup = false; _observedBody = null; throw e; }
 
-    let _pendingRecords = []; let _mutationRafPending = false;
+    let _pendingRecords = [], _mutationRafPending = false;
     const flushMutations = () => {
       _mutationRafPending = false; const records = _pendingRecords; _pendingRecords = []; if (!records.length || !_engineSiteSetup) return;
       syncBodyBindings(); if (!currentConfig.enabled) { _hrefChangedContainers.clear(); _contentChangedContainers.clear(); return; } if (_domObserver) _domObserver.disconnect();
       try {
-        const selector = getContainerSelector(getSearchEngine());
+        const rootCmd = getRootCommand(getSearchEngine());
         for (const m of records) {
           let node = null;
           if (m.type === 'attributes') {
@@ -7620,8 +8089,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           } else {
             continue;
           }
-          if (!node || typeof node.closest !== 'function' || !selector) continue; let container = null;
-          try { container = node.closest(selector); } catch (e) { container = null; }
+          if (!node || typeof node.closest !== 'function' || !rootCmd) continue; let container = null;
+          try { container = findRootContainer(node, rootCmd); } catch (e) { container = null; }
           if (!container) continue;
           if (m.type === 'attributes') {
             _hrefChangedContainers.add(container);
@@ -7686,7 +8155,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   function ensureUrlWatcher() {
     if (_urlChangeHandler) return;
-    let lastHref = location.href; let lastCategory = getSearchCategory();
+    let lastHref = location.href, lastCategory = getSearchCategory();
     _urlChangeHandler = () => {
       const currentHref = location.href; const currentCat = getSearchCategory();
       if (currentHref !== lastHref || currentCat !== lastCategory) {
@@ -7787,11 +8256,12 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         checkExternalSelectorChange(); checkExternalConfigChange();
+      } else if (hasPendingLocalChange()) {
+        checkAutoWebDAV();
       }
     });
     window.addEventListener('pagehide', (e) => { if (!e.persisted) releaseSyncLock('webdav'); });
 
-    startBackgroundSync();
     registerMenu();
     exposeDebugApi();
     ensureUrlWatcher();
@@ -7802,6 +8272,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         console.error('[屏蔽] 引擎站点装配失败:', e);
       }
     }
+    startBackgroundSync();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else setTimeout(init, 0);
