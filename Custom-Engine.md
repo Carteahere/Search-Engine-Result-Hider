@@ -17,11 +17,11 @@
 
 | 字段 | 类型 | 说明 | 必填 |
 | --- | --- | --- | --- |
-| `matches` | string \| string[] | 整条 URL 匹配，和 `includeRegex` 至少存在一个 | ✔（仅 `disabled` 开关覆盖时省略） |
+| `matches` | string \| string[] | 整条 URL 匹配，和 `includeRegex` 至少存在一个 | ✔ |
 | `excludeMatches` | string \| string[] | 整条 URL 排除，命中时屏蔽不生效并按优先级回退 | |
-| `includeRegex` | regex | 整条 URL 匹配正则（含协议与路径，如 `/^https?:\/\/.../`），和 `matches` 至少存在一个 | ✔（仅 `disabled` 开关覆盖时省略） |
+| `includeRegex` | regex | 整条 URL 匹配正则，和 `matches` 至少存在一个 | ✔ |
 | `excludeRegex` | regex | 整条 URL 排除正则，命中时屏蔽不生效并按优先级回退 | |
-| `root` | string \| array | 结果容器选择器，可写 CSS 选择器，**一键屏蔽**按钮依赖容器选择器定位 | ✔（仅 `disabled` 开关覆盖时省略） |
+| `root` | string \| array | 结果容器选择器，可写 CSS 选择器，**一键屏蔽**按钮依赖容器选择器定位 | ✔ |
 | `url` | command \| string \| string[] | 结果链接选择器，可写命令数组或 CSS 选择器，默认 `a[href]` | ✔ |
 | `title` | command \| string \| string[] | 结果标题选择器，可写命令数组或 CSS 选择器 | |
 | `snippet` | command \| string \| string[] | 结果摘要选择器，可写命令数组或 CSS 选择器 | |
@@ -30,7 +30,9 @@
 
 旧写法 `containers`、`links`、`titles`、`match` 分别映射为 `root`、`url`、`title`、`includeRegex`
 
-`root` 可写命令：`['upward', 层数, 内层选择器]`、`['upward', 选择器, 内层选择器]`（向上找最近的匹配祖先）、`['selector', 选择器]`，用于结果容器是内层元素父级的情况
+`root` 可写命令：
+1. `['upward', 层数, 内层选择器]`、`['upward', 选择器, 内层选择器]`，向上找最近的匹配祖先
+2. `['selector', 选择器]`，用于结果容器是内层元素父级的情况
 
 ### 1.1.2 高级结构：
 
@@ -61,15 +63,15 @@
 
 **`link.redirects` 支持字段：**
 
-| 字段 | 说明 |
-| --- | --- |
-| `path` | URL 路径匹配正则 |
-| `params` | 依次尝试的查询参数名 |
-| `pathValue` | 对 URL 路径匹配的捕获正则，第 1 捕获组为编码目标（如 yahoo 的 `RU=`） |
-| `hrefSuffix` | 对整条 URL 匹配的捕获正则，第 1 捕获组为编码目标（如 yahoo 的 `/*-` 尾缀） |
-| `codec` | 解码器，内置 `url`、`base64url`、`pattern` |
-| `stripPrefix` | `base64url` 解码前剥离的前缀正则（如 bing 的 `/^a[01]/i`） |
-| `chain` | URL 解包后仍是引擎重定向链接时，按指定查询参数再解一层，如 `{ hostSelf: true, param: 'h5_url' }`，`hostSelf` 省略时不限制目标域名 |
+| 字段 | 说明 | 示例 |
+| --- | --- | --- |
+| `path` | URL 路径匹配正则 | — |
+| `params` | 依次尝试的查询参数名 | — |
+| `pathValue` | 对 URL 路径匹配的捕获正则，第 1 捕获组为编码目标 | yahoo 的 `RU=` |
+| `hrefSuffix` | 对整条 URL 匹配的捕获正则，第 1 捕获组为编码目标 | yahoo 的 `/*-` 尾缀 |
+| `codec` | 解码器，内置 `url`、`base64url`、`pattern` | — |
+| `stripPrefix` | `base64url` 解码前剥离的前缀正则 | bing 的 `/^a[01]/i` |
+| `chain` | URL 解包后仍是引擎重定向链接时，按指定查询参数再解一层，`hostSelf` 省略时不限制目标域名 | `{ hostSelf: true, param: 'h5_url' }` |
 
 **搜索类型子结构：**
 

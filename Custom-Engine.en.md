@@ -30,7 +30,10 @@ In the script, an engine's selector structure is a group of fields wrapped in `e
 
 The legacy forms `containers`, `links`, `titles`, and `match` map to `root`, `url`, `title`, and `includeRegex` respectively.
 
-`root` supports the commands `['upward', levels, innerSelector]`, `['upward', selector, innerSelector]` (walk up to the nearest matching ancestor) and `['selector', selector]`, for cases where the result container is an ancestor of the inner element.
+Commands available for `root`:
+
+1. `['upward', levels, innerSelector]`, `['upward', selector, innerSelector]` — walk up to the nearest matching ancestor.
+2. `['selector', selector]` — for cases where the result container is the parent of the inner element.
 
 ### 1.1.2 Advanced Structure:
 
@@ -61,15 +64,15 @@ The legacy forms `containers`, `links`, `titles`, and `match` map to `root`, `ur
 
 **Fields supported by each `link.redirects` item:**
 
-| Field | Description |
-| --- | --- |
-| `path` | URL path matching regex |
-| `params` | Query parameter names tried in order |
-| `pathValue` | Capture regex matched against the URL path; capture group 1 is the encoded target (e.g. yahoo's `RU=`) |
-| `hrefSuffix` | Capture regex matched against the whole URL; capture group 1 is the encoded target (e.g. yahoo's `/*-` suffix) |
-| `codec` | Decoder; built-in `url`, `base64url`, `pattern` |
-| `stripPrefix` | Prefix regex stripped before `base64url` decoding (e.g. bing's `/^a[01]/i`) |
-| `chain` | When the unwrapped URL is still an engine redirect link, unwraps one more level via the specified query parameter, e.g. `{ hostSelf: true, param: 'h5_url' }`; when `hostSelf` is omitted the target host is not restricted |
+| Field | Description | Example |
+| --- | --- | --- |
+| `path` | URL path matching regex | — |
+| `params` | Query parameter names tried in order | — |
+| `pathValue` | Capture regex matched against the URL path; capture group 1 is the encoded target | yahoo's `RU=` |
+| `hrefSuffix` | Capture regex matched against the whole URL; capture group 1 is the encoded target | yahoo's `/*-` suffix |
+| `codec` | Decoder; built-in `url`, `base64url`, `pattern` | — |
+| `stripPrefix` | Prefix regex stripped before `base64url` decoding | bing's `/^a[01]/i` |
+| `chain` | When the unwrapped URL is still an engine redirect link, unwraps one more level via the specified query parameter; when `hostSelf` is omitted the target host is not restricted | `{ hostSelf: true, param: 'h5_url' }` |
 
 **Search type substructure:**
 
@@ -153,7 +156,7 @@ Simple form:
 
 ```javascript
 example_engine: {
-  includeRegex: /^(?:(?:www|m)\.)?example\.com$/i,
+  includeRegex: /^https?:\/\/(?:(?:www|m)\.)?example\.com(?:[/?#]|$)/i,
   root: '.result',
   url: 'a[href]',
   title: ['.title'],
@@ -167,8 +170,8 @@ Advanced form:
 
 ```javascript
 advanced_engine: {
-  includeRegex: /^(?:(?:www|m)\.)?example\.com$/i,
-  excludeRegex: /^news\.example\.com$/i,
+  includeRegex: /^https?:\/\/(?:(?:www|m)\.)?example\.com(?:[/?#]|$)/i,
+  excludeRegex: /^https?:\/\/news\.example\.com(?:[/?#]|$)/i,
   priority: 10,
   site: ['example_engine', 'other_name'],
   root: '.result',
