@@ -146,7 +146,7 @@ return { collectSubscriptionRules, parseRulesetContent, isNonRuleTextResponse, i
 }
 // 重定向解包沙箱
 function makeCleanUrlApi() {
-  return new Function(`${ENGINE_HOST_SRC}\nfunction resolvePageDef(engine) { return engine === 'so360' || engine === 'sogou' ? { link: { directAttrs: ['data-mdurl', 'data-url', 'linkurl'], directScope: '.res-list, .vrwrap, .reactResult' } } : {}; }\n` + ['tryUrl', 'decodeRedirectTarget', 'decodeBase64UrlTarget', 'unwrapRedirectUrl', 'isOpaqueRedirectUrl', 'getCleanUrl', 'isEngineHost'].map((n) => extractFn(src, n)).join('\n') + '\nreturn getCleanUrl;')();
+  return new Function(`${ENGINE_HOST_SRC}\nfunction resolvePageDef(engine) { return engine === 'so360' || engine === 'sogou' ? { link: { directAttrs: ['data-mdurl', 'data-url', 'linkurl'], directScope: '.res-list, .vrwrap, .reactResult' } } : {}; }\n` + ['tryUrl', 'decodeRedirectTarget', 'cmdB64Text', 'decodeBase64UrlTarget', 'unwrapRedirectUrl', 'isOpaqueRedirectUrl', 'getCleanUrl', 'isEngineHost'].map((n) => extractFn(src, n)).join('\n') + '\nreturn getCleanUrl;')();
 }
 
 // ==== 一、核心行为 ====
@@ -379,7 +379,7 @@ assert('规则-030: yahoo套yahoo与bing ck套yahoo解到最终结果', (() => {
   return getCleanUrl({ href: 'https://r.search.yahoo.com/_ylt=A/RV=1/RU=https%3A%2F%2Fr.search.yahoo.com%2FRV%3D2%2FRU%3Dhttps%253A%252F%252Fexample.com%252Fpage%2FRK%3D2/RK=2/RS=x' }) === 'https://example.com/page' && getCleanUrl(bingYahoo) === 'https://example.com/page';
 })());
 assert('规则-031: data-url仅360/搜狗读取, 自定义引擎用href', getCleanUrl({ href: 'https://target.example/a', getAttribute: (n) => n === 'data-url' ? 'https://cdn.example/x' : null }, 'example') === 'https://target.example/a' && getCleanUrl({ href: 'https://m.so.com/link?m=x', getAttribute: (n) => n === 'data-mdurl' ? 'https://target.example/a' : null }, 'so360') === 'https://target.example/a');
-const unwrap = new Function(`${ENGINE_HOST_SRC}\nvar _redirectSpecsCache = new Map();\n` + ['tryUrl', 'decodeRedirectTarget', 'getRedirectSpecs', 'decodeRedirectOnce', 'decodeBase64UrlTarget', 'unwrapRedirectUrl', 'isEngineHost'].map((n) => extractFn(src, n)).join('\n') + '\nreturn unwrapRedirectUrl;')();
+const unwrap = new Function(`${ENGINE_HOST_SRC}\nvar _redirectSpecsCache = new Map();\n` + ['tryUrl', 'decodeRedirectTarget', 'getRedirectSpecs', 'decodeRedirectOnce', 'cmdB64Text', 'decodeBase64UrlTarget', 'unwrapRedirectUrl', 'isEngineHost'].map((n) => extractFn(src, n)).join('\n') + '\nreturn unwrapRedirectUrl;')();
 assert('规则-032: /aclk?adurl 与 /pagead/aclk 解包', unwrap('https://www.google.com/aclk?sa=l&adurl=https%3A%2F%2Fads.example.com%2Fx') === 'https://ads.example.com/x' && unwrap('https://www.google.com/pagead/aclk?adurl=https%3A%2F%2Fads.example.com%2Fy') === 'https://ads.example.com/y');
 const opaque = new Function(`${ENGINE_HOST_SRC}\nvar _redirectSpecsCache = new Map();\n` + ['tryUrl', 'decodeRedirectTarget', 'getRedirectSpecs', 'hasRedirectSpec', 'isOpaqueRedirectUrl', 'isEngineHost'].map((n) => extractFn(src, n)).join('\n') + '\nreturn isOpaqueRedirectUrl;')();
 const realGotoToken = 'CAESdwHrOzAVviBTh0oG5HfKYOFhyRtw29uZRfju1ROpYoFN1tfC6B8zJfQueB8aSNp2eVjuHmYa_7JCnfQZ1yvAwsuCdGJ7aZ9Xzjl_kWh6hOo4Q_HrKX1C4fqKyX-fE5A1ehwz3w0ml64RCxA8QFWwLII6XEe1HIgI';

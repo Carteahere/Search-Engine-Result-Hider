@@ -53,7 +53,6 @@ const KEYS = {
   LOCAL_LAST_MODIFIED_KEY: 'searchfilter_local_last_modified',
   SETTINGS_LAST_MODIFIED_KEY: 'searchfilter_settings_last_modified',
   WEBDAV_LAST_SYNC_KEY: 'searchfilter_webdav_last_sync',
-  WEBDAV_PENDING_KEY: 'searchfilter_webdav_pending',
   WEBDAV_DIRTY_KEY: 'searchfilter_webdav_dirty',
   WEBDAV_RETRY_COUNT_KEY: 'searchfilter_webdav_retry_count',
   WEBDAV_SYNC_SNAPSHOT_KEY: 'searchfilter_webdav_sync_snapshot',
@@ -133,7 +132,6 @@ function makeSyncEnv({ cloudStatus = 200, cloudText = '', localRules = [], local
     const SELECTORS_KEY = ${JSON.stringify(KEYS.SELECTORS_KEY)};
     const LOCAL_LAST_MODIFIED_KEY = ${JSON.stringify(KEYS.LOCAL_LAST_MODIFIED_KEY)};
     const WEBDAV_LAST_SYNC_KEY = ${JSON.stringify(KEYS.WEBDAV_LAST_SYNC_KEY)};
-    const WEBDAV_PENDING_KEY = ${JSON.stringify(KEYS.WEBDAV_PENDING_KEY)};
     const WEBDAV_DIRTY_KEY = ${JSON.stringify(KEYS.WEBDAV_DIRTY_KEY)};
     const WEBDAV_RETRY_COUNT_KEY = ${JSON.stringify(KEYS.WEBDAV_RETRY_COUNT_KEY)};
     const WEBDAV_SYNC_SNAPSHOT_KEY = ${JSON.stringify(KEYS.WEBDAV_SYNC_SNAPSHOT_KEY)};
@@ -604,7 +602,6 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   const run = (lastSync, offset, dirty = false, retry = 0) => { let called = 0;
     const fn = new Function('GM_getValue', 'loadWebDAVConfig', 'isHttpsUrl', 'isSerhPanelOpen', 'getTrustedNow', 'runBackgroundSync', `
       const WEBDAV_AUTO_SYNC_KEY = 'searchfilter_webdav_auto_sync';
-      const WEBDAV_PENDING_KEY = ${JSON.stringify(KEYS.WEBDAV_PENDING_KEY)};
       const WEBDAV_DIRTY_KEY = ${JSON.stringify(KEYS.WEBDAV_DIRTY_KEY)};
       const WEBDAV_RETRY_COUNT_KEY = ${JSON.stringify(KEYS.WEBDAV_RETRY_COUNT_KEY)};
       const WEBDAV_LAST_SYNC_KEY = ${JSON.stringify(KEYS.WEBDAV_LAST_SYNC_KEY)};
@@ -613,7 +610,7 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
       ${extractFn(src, 'getWebDAVSyncWait')}
       ${extractFn(src, 'checkAutoWebDAV')}
       return checkAutoWebDAV;
-    `)((k, d) => (k === 'searchfilter_webdav_auto_sync' ? true : k === KEYS.WEBDAV_PENDING_KEY ? false : k === KEYS.WEBDAV_DIRTY_KEY ? dirty : k === KEYS.WEBDAV_RETRY_COUNT_KEY ? retry : k === KEYS.WEBDAV_LAST_SYNC_KEY ? lastSync : d), () => ({ url: 'https://dav.example.com/dav/' }), (u) => /^https:/.test(u), () => false, async () => Date.now() + offset, async () => { called++; });
+    `)((k, d) => (k === 'searchfilter_webdav_auto_sync' ? true : k === KEYS.WEBDAV_DIRTY_KEY ? dirty : k === KEYS.WEBDAV_RETRY_COUNT_KEY ? retry : k === KEYS.WEBDAV_LAST_SYNC_KEY ? lastSync : d), () => ({ url: 'https://dav.example.com/dav/' }), (u) => /^https:/.test(u), () => false, async () => Date.now() + offset, async () => { called++; });
     return fn().then(() => called);
   };
   assert('授时-006: 受信基准到期60min触发同步且未到期30min不触发且本地有修改立即触发且未到退避时间不重复', await run(Date.now() - 50 * 60000, 600000) === 1 && await run(Date.now() - 20 * 60000, 600000) === 0 && await run(Date.now() - 10 * 1000, 0, true) === 1 && await run(Date.now() - 10 * 1000, 0, true, 1) === 0);
@@ -718,14 +715,14 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   run([{ url: 'https://a/s.js', name: 'A', enabled: true }]);
   assert('同步-029: 云端不含builtin时仲裁保留本地builtin及开关', saved.length === 1 && saved[0][0].url === BUILTIN && saved[0][0].enabled === false && saved[0][0].lastUpdate === 9 && saved[0].length === 2 && saved[0][1].url === 'https://a/s.js');
 }
-// 修复留档: WebDAV同步失败按2/4/8/16/32min退避重试, 第6次失败清pending推迟1h, 成功重置计数(主版)
+// 修复留档: WebDAV同步失败按2/4/8/16/32min退避重试, 第6次失败清DIRTY推迟1h, 成功重置计数(主版)
 {
   const store = new Map(); const GM_getValue = (k, d) => (store.has(k) ? store.get(k) : d); const GM_setValue = (k, v) => { store.set(k, v); };
-  const { failure, success } = new Function('GM_getValue', 'GM_setValue', 'WEBDAV_PENDING_KEY', 'WEBDAV_DIRTY_KEY', 'WEBDAV_RETRY_COUNT_KEY', 'WEBDAV_LAST_SYNC_KEY', 'let _webdavRetryTimer = null; function scheduleWebDAVSyncRetry() {}\n' + extractFn(src, 'markWebDAVSyncFailure') + '\n' + extractFn(src, 'markWebDAVSyncSuccess') + '\nreturn { failure: markWebDAVSyncFailure, success: markWebDAVSyncSuccess };')(GM_getValue, GM_setValue, KEYS.WEBDAV_PENDING_KEY, KEYS.WEBDAV_DIRTY_KEY, KEYS.WEBDAV_RETRY_COUNT_KEY, KEYS.WEBDAV_LAST_SYNC_KEY);
+  const { failure, success } = new Function('GM_getValue', 'GM_setValue', 'WEBDAV_DIRTY_KEY', 'WEBDAV_RETRY_COUNT_KEY', 'WEBDAV_LAST_SYNC_KEY', 'let _webdavRetryTimer = null; function scheduleWebDAVSyncRetry() {}\n' + extractFn(src, 'markWebDAVSyncFailure') + '\n' + extractFn(src, 'markWebDAVSyncSuccess') + '\nreturn { failure: markWebDAVSyncFailure, success: markWebDAVSyncSuccess };')(GM_getValue, GM_setValue, KEYS.WEBDAV_DIRTY_KEY, KEYS.WEBDAV_RETRY_COUNT_KEY, KEYS.WEBDAV_LAST_SYNC_KEY);
   const waits = [];
-  for (let i = 1; i <= 6; i++) { failure(1000 * i); waits.push(store.get(KEYS.WEBDAV_PENDING_KEY) ? Math.min(2 ** store.get(KEYS.WEBDAV_RETRY_COUNT_KEY), 32) * 60000 : 3600000); }
+  for (let i = 1; i <= 6; i++) { failure(1000 * i); const c = store.get(KEYS.WEBDAV_RETRY_COUNT_KEY); waits.push(c > 0 ? Math.min(2 ** c, 32) * 60000 : 3600000); }
   success(7000);
-  const reset = store.get(KEYS.WEBDAV_PENDING_KEY) === false && store.get(KEYS.WEBDAV_RETRY_COUNT_KEY) === 0 && store.get(KEYS.WEBDAV_LAST_SYNC_KEY) === 7000;
+  const reset = store.get(KEYS.WEBDAV_DIRTY_KEY) === false && store.get(KEYS.WEBDAV_RETRY_COUNT_KEY) === 0 && store.get(KEYS.WEBDAV_LAST_SYNC_KEY) === 7000;
   assert('同步-030: 同步失败退避2/4/8/16/32min后第6次失败推迟1h, 成功重置计数', JSON.stringify(waits) === JSON.stringify([120000, 240000, 480000, 960000, 1920000, 3600000]) && reset);
 }
 // 修复留档: 备份PUT窗口内新增规则不得进入快照, 否则下轮被判云端删除而本地云端同时丢失

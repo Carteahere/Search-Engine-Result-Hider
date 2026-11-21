@@ -32,12 +32,12 @@ function extractFn(text, fnName) {
     if (/\brecheckGroupRoot\b|\bresetResultStyles\b|\breconcileHiddenParents\b/.test(fn)) prelude.push(rawExtract(text, 'resultGroupMembers'), rawExtract(text, 'hideParentIfNoVisibleSiblings'), rawExtract(text, 'recheckGroupRoot'));
     if (/\brecheckGridCell\b|\bresetResultStyles\b|\breconcileHiddenParents\b/.test(fn)) prelude.push(rawExtract(text, 'recheckGridCell'), rawExtract(text, 'getGridLeaves'), rawExtract(text, 'gridLeafBlocked'));
     const helperRe = /\bnormalizeSelectorAliases\b|\bsameSelectorDef\b|\bdiffSelectorDefFields\b|\bmergeSelectorDef\b|\bcleanPage\b|\bnormalizePageMap\b|\bmergePageObjects\b|\bpickProps?\b|\bsimpleToCommand\b|\bisCommandArray\b|\bnormalizeLink\b|\bpageMapKey\b|\bcoerceSelectorDef\b|\bcoercePageMatch\b|\bparseSelectorMatch\b|\bselectorMatchValue\b|\bresolvePageDef\b|\bfindPageByCategory\b|\bnormalizeButton\b|\bsplitTopLevelSelectorList\b|\bnormalizePreserveSpace\b|\bnormalizeCssRules\b|\bnormalizeSiteList\b|\bnormalizeMatchPatterns\b/;
-    if (helperRe.test(fnName) || helperRe.test(fn)) prelude.push("var CMD_TYPES = new Set(['or', 'attribute', 'property', 'text', 'const', 'regexInclude', 'regexExclude', 'regexSubstitute', 'domainToUrl', 'domainToURL', 'rejectEngineHost', 'normalizeUrl', 'rejectOpaqueRedirect', 'unwrapRedirect', 'jsonPath', 'queryParam', 'json', 'base64Url']);\n" + ['isCommandArray', 'simpleToCommand', 'normalizeLink', 'redirectsEnabled', 'splitTopLevelSelectorList', 'normalizeButton', 'normalizeCssRules', 'normalizeSiteList', 'normalizeMatchPatterns', 'normalizePreserveSpace', 'cleanPage', 'normalizePageMap', 'mergePageObjects', 'pickProp', 'pickProps', 'normalizeSelectorAliases', 'matchDefToParts', 'jsonKey', 'jsonKey', 'pageMapKey', 'findPageByCategory', 'selectorMatchValue', 'parseSelectorMatch', 'coercePageMatch'].map((n) => rawExtract(text, n)).join('\n'));
+    if (helperRe.test(fnName) || helperRe.test(fn)) prelude.push("var CMD_TYPES = new Set(['or', 'attribute', 'property', 'text', 'const', 'regexInclude', 'regexExclude', 'regexSubstitute', 'rejectEngineHost', 'normalizeUrl', 'rejectOpaqueRedirect', 'jsonPath', 'jsonParse', 'urlDecode', 'queryParam', 'base64Decode', 'base64Url', 'prefix']);\n" + ['isCommandArray', 'simpleToCommand', 'normalizeLink', 'redirectsEnabled', 'splitTopLevelSelectorList', 'normalizeButton', 'normalizeCssRules', 'normalizeSiteList', 'normalizeMatchPatterns', 'normalizePreserveSpace', 'cleanPage', 'normalizePageMap', 'mergePageObjects', 'pickProp', 'pickProps', 'normalizeSelectorAliases', 'matchDefToParts', 'jsonKey', 'jsonKey', 'pageMapKey', 'findPageByCategory', 'selectorMatchValue', 'parseSelectorMatch', 'coercePageMatch'].map((n) => rawExtract(text, n)).join('\n'));
     if (/\bmap_groupMembers\b/.test(fn)) prelude.push('var map_groupMembers = new WeakMap();');
     if (/\bmap_gridConfig\b/.test(fn)) prelude.push('var map_gridConfig = new WeakMap();');
     if (/\bhideNames\b|\bhideSel\b|\bGRID_HIDE_ATTR\b|\bGROUP_HIDE_ATTR\b/.test(fn)) { const hm = text.match(/const (GRID_HIDE_ATTR = '[^']+', GROUP_HIDE_ATTR = '[^']+');/); prelude.push((hm ? 'var ' + hm[1] + ';' : '') + 'var _hideNamesCache = null; var __hideSelectorsData = null; function getSelectors() { return __hideSelectorsData || {}; }', rawExtract(text, 'hideNames'), rawExtract(text, 'hideSel')); }
     if (/\bunwrapRedirectUrl\b|\bisOpaqueRedirectUrl\b|\bdecodeRedirectOnce\b|\bgetRedirectSpecs\b|\bisOpaqueRedirectValue\b/.test(fn)) prelude.push("var _redirectSpecsCache = new Map();\n" + (text.match(/const REDIRECT_CODECS = \{[\s\S]*?\n  \};/) || [''])[0].replace('const REDIRECT_CODECS', 'var REDIRECT_CODECS') + '\n' + ['redirectsEnabled', 'getRedirectSpecs', 'decodeRedirectOnce', 'unwrapRedirectUrl', 'hasRedirectSpec', 'isOpaqueRedirectUrl', 'tryUrl'].map((n) => rawExtract(text, n)).join('\n'));
-    if (/\brunCmdValue\b|\bmakeResultLink\b|\bisOpaqueRedirectValue\b/.test(fn)) prelude.push("var _cmdReCache = new Map();\n" + ['cmdRe', 'cmdQueryEl', 'runCmdEl', 'cmdText', 'cmdAttr', 'cmdPath', 'cmdDomain', 'cmdOrigin', 'cmdAbsUrl', 'isOpaqueRedirectValue', 'runCmdValue', 'makeResultLink'].map((n) => rawExtract(text, n)).join('\n'));
+    if (/\brunCmdValue\b|\bmakeResultLink\b|\bisOpaqueRedirectValue\b/.test(fn)) prelude.push("var _cmdReCache = new Map();\n" + ['cmdRe', 'cmdQueryEl', 'runCmdEl', 'cmdText', 'cmdAttr', 'cmdPath', 'cmdB64Text', 'decodeBase64UrlTarget', 'cmdOrigin', 'cmdAbsUrl', 'isOpaqueRedirectValue', 'runCmdValue', 'makeResultLink'].map((n) => rawExtract(text, n)).join('\n'));
   }
   if (['scanNewResults', 'teardownEngineSite'].includes(fnName)) prelude.push('function restoreResultExtraElements() {}\nfunction reconcileHiddenParents() {}\nfunction restoreAllHiddenParents() {}');
   return prelude.concat([fn]).join('\n');
@@ -97,7 +97,7 @@ const body = `
 const ENGINE_SUBSCRIPTIONS_KEY = 'searchfilter_engine_subscriptions'; const BUILTIN_ENGINE_SUB_URL = 'https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/SELECTORS.js'; const SELECTORS_KEY = 'searchfilter_selectors';
 const SUPPORTED_REGEX_FLAGS = 'imsu';
 const SELECTORS = ${selectorsObjectText}; var DEFAULT_CATEGORY = 'web'; let activeSelectors = null; let _redirectSpecsCache = new Map(); let _engineCacheHost = null; let _categoryCacheHref = null; let _categoryCacheResult = 'web'; let _categoryCacheEngine = null; let _catDefCacheKey = null; let _catDefCache = null; let _hideNamesCache = null; let _matchPatternCache = new Map();
-var CMD_TYPES = new Set(['or', 'attribute', 'property', 'text', 'const', 'regexInclude', 'regexExclude', 'regexSubstitute', 'domainToUrl', 'domainToURL', 'rejectEngineHost', 'normalizeUrl', 'rejectOpaqueRedirect', 'unwrapRedirect', 'jsonPath', 'queryParam', 'json', 'base64Url']);
+var CMD_TYPES = new Set(['or', 'attribute', 'property', 'text', 'const', 'regexInclude', 'regexExclude', 'regexSubstitute', 'rejectEngineHost', 'normalizeUrl', 'rejectOpaqueRedirect', 'jsonPath', 'jsonParse', 'urlDecode', 'queryParam', 'base64Decode', 'base64Url', 'prefix']);
 const PAGE_FIELDS = ['root', 'url', 'title', 'snippet', 'extraSelector', 'button', 'skip', 'group', 'grid', 'dedupeBy', 'link', 'blockedCss', 'site'];
 ${extractFn(src, 'isEngineHost')}
 ${builtinSelectorOfLine[0]} let _engineCacheResult = 'other'; let _observedSelector = ''; let _engineStyleEl = null;
@@ -267,14 +267,17 @@ check('选择器-023: duckduckgo/ddg为Lite别名且yahoo与yahoo_japan不互别
   api.setStore({ btnx: { match: 'a', root: '.x', button: ['inset', { top: '8px', right: '6px', zIndex: 10 }] } });
   const btnObj = api.getSelectors().btnx.button;
   const btnObjOk = !!btnObj && btnObj.inset && btnObj.inset.top === '8px' && btnObj.inset.right === '6px' && btnObj.zIndex === 10;
-  api.setStore({ btnicon: { match: 'a', root: '.x', button: ['icon', { style: 'top: 12px; right: 8px; z-index: 3; --ub-icon-size: 16px;' }, '.m'] } });
+  api.setStore({ btnmount: { match: 'a', root: '.x', button: ['inset', { top: '12px', right: '8px', zIndex: 3 }, '.m'] } });
+  const mountBtn = api.getSelectors().btnmount.button;
+  const mountText = api.serializeSelectors(); const mountRT = api.parseSelectorText(mountText);
+  const mountOk = !!mountBtn && mountBtn.inset.top === '12px' && mountBtn.inset.right === '8px' && mountBtn.zIndex === 3 && mountBtn.mount === '.m' && !mountRT.errors.length && api.validateUserSelectors({ btnmount: api.getUserSelectors().btnmount }).length === 0;
+  api.setStore({ btnel: { match: 'a', root: '.x', button: ['inset', { top: '4px' }, ['upward', 1]] } });
+  const elBtn = api.getSelectors().btnel.button;
+  const elOk = !!elBtn && elBtn.inset.top === '4px' && Array.isArray(elBtn.mount) && elBtn.mount[0] === 'upward' && api.validateUserSelectors({ btnel: api.getUserSelectors().btnel }).length === 0;
+  api.setStore({ btnicon: { match: 'a', root: '.x', button: ['icon', { style: 'top: 12px; right: 8px; z-index: 3;' }, '.m'] } });
   const iconBtn = api.getSelectors().btnicon.button;
-  const iconText = api.serializeSelectors(); const iconRT = api.parseSelectorText(iconText);
-  const iconOk = !!iconBtn && iconBtn.inset.top === '12px' && iconBtn.inset.right === '8px' && iconBtn.zIndex === '3' && iconBtn.style === '--ub-icon-size: 16px' && iconBtn.mount === '.m' && !iconRT.errors.length && api.validateUserSelectors({ btnicon: api.getUserSelectors().btnicon }).length === 0;
-  api.setStore({ btntext: { match: 'a', root: '.x', button: ['text', { position: 'afterend', style: 'top: 4px' }, ['upward', 1]] } });
-  const textBtn = api.getSelectors().btntext.button;
-  const textOk = !!textBtn && textBtn.inset.top === '4px' && Array.isArray(textBtn.mount) && textBtn.mount[0] === 'upward' && api.validateUserSelectors({ btntext: api.getUserSelectors().btntext }).length === 0;
-  check('选择器-027: button元组归一化icon按钮style解析text按钮mount元素命令且domainToURL同为合法命令', btnObjOk && iconOk && textOk && api.isCommandArray(['domainToURL', ['text', 'cite']]) && api.isCommandArray(['domainToUrl', ['text', 'cite']]) && api.validateUserSelectors({ cmdAlias: { match: 'a', root: '.x', url: ['domainToURL', ['text', 'cite']] } }).length === 0);
+  const iconOk = !!iconBtn && iconBtn.mount === '.m' && !iconBtn.inset && !iconBtn.style && !iconBtn.zIndex;
+  check('选择器-027: button元组归一化inset按钮mount与元素命令icon/text不再解析style且prefix合法而domainToUrl已移除', btnObjOk && mountOk && elOk && iconOk && api.isCommandArray(['prefix', 'https://', ['text', 'cite']]) && !api.isCommandArray(['domainToUrl', ['text', 'cite']]) && api.validateUserSelectors({ cmdPrefix: { match: 'a', root: '.x', url: ['prefix', 'https://', ['text', 'cite']] } }).length === 0 && api.validateUserSelectors({ cmdGone: { match: 'a', root: '.x', url: ['domainToUrl', ['text', 'cite']] } }).length > 0);
   const deepCmd = ['or', [
     ['jsonPath', '0.original_page_url', ['jsonPath', '', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]]],
     ['attribute', 'href', 'a[href*="/search/jump"]'],
@@ -1135,10 +1138,12 @@ await (async () => {
       ${extractFn(src, 'findPageByCategory')}
       ${extractFn(src, 'tryUrl')}
       ${extractFn(src, 'decodeRedirectTarget')}
-      ${extractFn(src, 'decodeBase64UrlTarget')}
+      ${extractFn(src, 'cmdB64Text')}
+      ${extractFn(src, 'cmdB64Text')}
+    ${extractFn(src, 'decodeBase64UrlTarget')}
       ${extractFn(src, 'isOpaqueRedirectUrl')}
       ${extractFn(src, 'unwrapRedirectUrl')}
-      ${['tryUrl', 'cmdRe', 'cmdQueryEl', 'runCmdEl', 'cmdText', 'cmdAttr', 'cmdPath', 'cmdDomain', 'cmdOrigin', 'cmdAbsUrl', 'isOpaqueRedirectValue', 'redirectsEnabled', 'getRedirectSpecs', 'decodeRedirectOnce', 'hasRedirectSpec', 'runCmdValue', 'makeResultLink'].map((n) => extractFn(src, n)).join('\n')}
+      ${['tryUrl', 'cmdRe', 'cmdQueryEl', 'runCmdEl', 'cmdText', 'cmdAttr', 'cmdPath', 'cmdB64Text', 'decodeBase64UrlTarget', 'cmdOrigin', 'cmdAbsUrl', 'isOpaqueRedirectValue', 'redirectsEnabled', 'getRedirectSpecs', 'decodeRedirectOnce', 'hasRedirectSpec', 'runCmdValue', 'makeResultLink'].map((n) => extractFn(src, n)).join('\n')}
       ${extractFn(src, 'getResultLink')}
       return { getResultLink, unwrapRedirectUrl, runCmdValue, selectors: SELECTORS_NORM };
     `)(eval(`(${getSelectorsObjectText()})`), src.match(/const REDIRECT_CODECS = \{[\s\S]*?\n  \};/)[0].replace('const REDIRECT_CODECS', 'var REDIRECT_CODECS') + '\nvar _redirectSpecsCache = new Map();');
@@ -1240,10 +1245,12 @@ return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS
     ${extractFn(src, 'mergeSelectorDef')}
     ${extractFn(src, 'resolvePageDef')}
     ${extractFn(src, 'decodeRedirectTarget')}
+    ${extractFn(src, 'cmdB64Text')}
+    ${extractFn(src, 'cmdB64Text')}
     ${extractFn(src, 'decodeBase64UrlTarget')}
     ${extractFn(src, 'isOpaqueRedirectUrl')}
     ${extractFn(src, 'unwrapRedirectUrl')}
-    ${['tryUrl', 'cmdRe', 'cmdQueryEl', 'runCmdEl', 'cmdText', 'cmdAttr', 'cmdPath', 'cmdDomain', 'cmdOrigin', 'cmdAbsUrl', 'isOpaqueRedirectValue', 'redirectsEnabled', 'getRedirectSpecs', 'decodeRedirectOnce', 'hasRedirectSpec', 'runCmdValue', 'makeResultLink'].map((n) => extractFn(src, n)).join('\n')}
+    ${['tryUrl', 'cmdRe', 'cmdQueryEl', 'runCmdEl', 'cmdText', 'cmdAttr', 'cmdPath', 'cmdB64Text', 'decodeBase64UrlTarget', 'cmdOrigin', 'cmdAbsUrl', 'isOpaqueRedirectValue', 'redirectsEnabled', 'getRedirectSpecs', 'decodeRedirectOnce', 'hasRedirectSpec', 'runCmdValue', 'makeResultLink'].map((n) => extractFn(src, n)).join('\n')}
     ${extractFn(src, 'getResultLink')}
     return { getResultLink };
   `)(eval(`(${getSelectorsObjectText()})`), src.match(/const REDIRECT_CODECS = \{[\s\S]*?\n  \};/)[0].replace('const REDIRECT_CODECS', 'var REDIRECT_CODECS') + '\nvar _redirectSpecsCache = new Map();');
@@ -1272,8 +1279,10 @@ return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS
     ${extractFn(src, 'matchPatternsTest')}
     const currentConfig = { removeRedirects: true };
     ${extractFn(src, 'decodeRedirectTarget')}
+    ${extractFn(src, 'cmdB64Text')}
+    ${extractFn(src, 'cmdB64Text')}
     ${extractFn(src, 'decodeBase64UrlTarget')}
-    ${['tryUrl', 'cmdRe', 'cmdQueryEl', 'runCmdEl', 'cmdText', 'cmdAttr', 'cmdPath', 'cmdDomain', 'cmdOrigin', 'cmdAbsUrl', 'isOpaqueRedirectValue', 'redirectsEnabled', 'getRedirectSpecs', 'decodeRedirectOnce', 'unwrapRedirectUrl', 'hasRedirectSpec', 'runCmdValue', 'getCleanUrl', 'resolveUrlDomain'].map((n) => extractFn(src, n)).join('\n')}
+    ${['tryUrl', 'cmdRe', 'cmdQueryEl', 'runCmdEl', 'cmdText', 'cmdAttr', 'cmdPath', 'cmdB64Text', 'decodeBase64UrlTarget', 'cmdOrigin', 'cmdAbsUrl', 'isOpaqueRedirectValue', 'redirectsEnabled', 'getRedirectSpecs', 'decodeRedirectOnce', 'unwrapRedirectUrl', 'hasRedirectSpec', 'runCmdValue', 'getCleanUrl', 'resolveUrlDomain'].map((n) => extractFn(src, n)).join('\n')}
     return { runCmdValue, getCleanUrl, resolveUrlDomain, currentConfig };
   `)(() => eval(`(${getSelectorsObjectText()})`), src.match(/const REDIRECT_CODECS = \{[\s\S]*?\n  \};/)[0].replace('const REDIRECT_CODECS', 'var REDIRECT_CODECS') + '\nvar _redirectSpecsCache = new Map();');
   const imgHref = 'https://www.google.com/imgres?imgurl=https%3A%2F%2Fcdn.example.net%2Fpic.jpg&tbnid=x';
@@ -1282,12 +1291,60 @@ return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS
   const qpCmd = ['queryParam', 'imgurl', ['attribute', 'href', 'a[href*="/imgres"]']];
   const onVal = (rt.runCmdValue(imgRoot, qpCmd, 'link') || {}).value;
   rt.currentConfig.removeRedirects = false;
-  const offVal = rt.runCmdValue(imgRoot, qpCmd, 'link');
+  const offVal = (rt.runCmdValue(imgRoot, qpCmd, 'link') || {}).value;
   const linkEl = { href: 'https://www.google.com/url?q=https%3A%2F%2Fblog.example.com%2Fa', getAttribute: () => null, closest: () => null };
   const cleanOff = rt.getCleanUrl(linkEl, 'google');
   rt.currentConfig.removeRedirects = true;
   const cleanOn = rt.getCleanUrl(linkEl, 'google');
-  check('选择器-080: 关闭去除重定向后 queryParam 不再解包且回退原链接', onVal === 'https://cdn.example.net/pic.jpg' && offVal === null && cleanOff === linkEl.href && cleanOn === linkEl.href);
+  check('选择器-080: 关闭去除重定向后 queryParam 等取值命令仍生效且getCleanUrl回退原链接', onVal === 'https://cdn.example.net/pic.jpg' && offVal === 'https://cdn.example.net/pic.jpg' && cleanOff === linkEl.href && cleanOn === linkEl.href);
+  const gp = { textContent: 'gp-text' };
+  const midEl = { textContent: 'mid', parentElement: gp, closest: (sel) => (sel === 'div.up' ? gp : null) };
+  const spanEl = { textContent: 'leaf', parentElement: midEl };
+  const upRoot = { matches: () => false, querySelector: (sel) => (sel === 'span.mark' ? spanEl : null), getAttribute: () => null, textContent: '' };
+  const upNum = (rt.runCmdValue(upRoot, ['text', ['upward', 2, 'span.mark']], 'text') || {}).value;
+  const upSel = (rt.runCmdValue(upRoot, ['text', ['upward', 'div.up', 'span.mark']], 'text') || {}).value;
+  check('选择器-098: 元素upward支持内层元素命令定位起点再向上取层或祖先', upNum === 'gp-text' && upSel === 'gp-text');
+  const b64u = Buffer.from('https://example.com/图片', 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const b64El = { getAttribute: (n) => (n === 'src' ? 'https://imgs.search.brave.com/ab12/' + b64u : null) };
+  const b64Root = { matches: () => false, querySelector: (sel) => (sel === 'img[src]' ? b64El : null), getAttribute: () => null, textContent: '' };
+  rt.currentConfig.removeRedirects = false;
+  const b64OffVal = (rt.runCmdValue(b64Root, ['base64Url', ['src'], 'img[src]'], 'link') || {}).value;
+  rt.currentConfig.removeRedirects = true;
+  const b64OnVal = (rt.runCmdValue(b64Root, ['base64Url', ['src'], 'img[src]'], 'link') || {}).value;
+  check('选择器-099: base64Url复用统一解码器支持多字节且开关去除重定向不影响取值', b64OffVal === 'https://example.com/图片' && b64OnVal === 'https://example.com/图片');
+  const dataEl = { getAttribute: (n) => (n === 'data' ? '{"u":"https://example.com/x","n":2}' : null) };
+  const dataRoot = { matches: () => false, querySelector: (sel) => (sel === 'a.thumb' ? dataEl : null), getAttribute: () => null, textContent: '' };
+  const jpObj = (rt.runCmdValue(dataRoot, ['jsonParse', ['attribute', 'data', 'a.thumb']], 'text') || {}).value;
+  const jpPass = (rt.runCmdValue(dataRoot, ['jsonPath', 'u', ['jsonParse', ['jsonParse', ['attribute', 'data', 'a.thumb']]]], 'text') || {}).value;
+  const jpMiss = rt.runCmdValue(dataRoot, ['jsonParse', ['attribute', 'href', 'a.thumb']], 'text');
+  check('选择器-100: jsonParse解析JSON对象原样透传且解析失败返回空', jpObj && typeof jpObj === 'object' && jpObj.u === 'https://example.com/x' && jpPass === 'https://example.com/x' && jpMiss === null);
+  const txtEl = { textContent: 'a%20b%2Fc' };
+  const txtRoot = { matches: () => false, querySelector: (sel) => (sel === '.v' ? txtEl : null), getAttribute: () => null, textContent: '' };
+  const udVal = (rt.runCmdValue(txtRoot, ['urlDecode', ['text', '.v']], 'text') || {}).value;
+  const udBad = rt.runCmdValue(txtRoot, ['urlDecode', ['const', '100%']], 'text');
+  check('选择器-101: urlDecode做一次URI解码且畸形序列返回空', udVal === 'a b/c' && udBad === null);
+  const b64std = Buffer.from('https://example.com/图片', 'utf8').toString('base64');
+  const b64El2 = { getAttribute: (n) => (n === 'data-img' ? b64std : null) };
+  const b64Root2 = { matches: () => false, querySelector: (sel) => (sel === 'img' ? b64El2 : null), getAttribute: () => null, textContent: '' };
+  const b64dVal = (rt.runCmdValue(b64Root2, ['base64Decode', ['attribute', 'data-img', 'img']], 'text') || {}).value;
+  const b64dSafe = (rt.runCmdValue(b64Root2, ['base64Decode', ['const', b64u]], 'text') || {}).value;
+  const b64dBad = rt.runCmdValue(b64Root2, ['base64Decode', ['const', 'a']], 'text');
+  check('选择器-102: base64Decode解码标准与url安全base64多字节且非法输入返回空', b64dVal === 'https://example.com/图片' && b64dSafe === 'https://example.com/图片' && b64dBad === null);
+  const preRoot = { matches: () => false, querySelector: (sel) => (sel === '.dom' ? { textContent: 'www.example.com' } : null), getAttribute: () => null, textContent: '' };
+  const preVal = (rt.runCmdValue(preRoot, ['prefix', 'https://', ['text', '.dom']], 'text') || {}).value;
+  const preReg = (rt.runCmdValue(preRoot, ['prefix', 'https://', ['regexSubstitute', /^[\s\S]*?((?:[\p{L}\p{N}][\p{L}\p{N}_-]*\.)+\p{L}{2,})[\s\S]*$/u, '$1', ['text', '.dom']]], 'text') || {}).value;
+  check('选择器-103: prefix拼接前缀并可配合regexSubstitute复现域名提取', preVal === 'https://www.example.com' && preReg === 'https://www.example.com');
+  const qpHref = 'https://e.com/x?u=a%2520b&r=1';
+  const qpRoot2 = { matches: () => false, querySelector: (sel) => (sel === 'a[href]' ? { getAttribute: (n) => (n === 'href' ? qpHref : null) } : null), getAttribute: () => null, textContent: '' };
+  const qpRaw = (rt.runCmdValue(qpRoot2, ['queryParam', 'u', ['attribute', 'href', 'a[href]']], 'link') || {}).value;
+  const qpDec = (rt.runCmdValue(qpRoot2, ['urlDecode', ['queryParam', 'u', ['attribute', 'href', 'a[href]']]], 'link') || {}).value;
+  check('选择器-104: queryParam纯取参不再自动二次解码需显式urlDecode', qpRaw === 'a%20b' && qpDec === 'a b');
+  const encData = encodeURIComponent('{"u":"https://x.com/a"}');
+  const encEl = { getAttribute: (n) => (n === 'data' ? encData : null) };
+  const encRoot = { matches: () => false, querySelector: (sel) => (sel === 'a.thumb' ? encEl : null), getAttribute: () => null, textContent: '' };
+  const encDirect = rt.runCmdValue(encRoot, ['jsonPath', 'u', ['attribute', 'data', 'a.thumb']], 'text');
+  const encCombo = (rt.runCmdValue(encRoot, ['jsonPath', 'u', ['or', [['jsonParse', ['attribute', 'data', 'a.thumb']], ['jsonParse', ['urlDecode', ['attribute', 'data', 'a.thumb']]]]]], 'text') || {}).value;
+  check('选择器-105: jsonPath不再隐式URI解码双编码JSON需or组合jsonParse与urlDecode还原', encDirect === null && encCombo === 'https://x.com/a');
 }
 
 // ---- 顶层 links 字符串提取 / 容器自身标题 ----
@@ -1312,12 +1369,13 @@ return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS
     ${extractFn(src, 'mergeSelectorDef')}
     ${extractFn(src, 'resolvePageDef')}
     ${extractFn(src, 'decodeRedirectTarget')}
+    ${extractFn(src, 'cmdB64Text')}
     ${extractFn(src, 'decodeBase64UrlTarget')}
     ${extractFn(src, 'isOpaqueRedirectUrl')}
     ${extractFn(src, 'unwrapRedirectUrl')}
     ${extractFn(src, 'getResultLink')}
     return { getResultLink };
-  `)({ test: { match: /search\.example\.com/, root: '.r', url: ['json', 'data', 'url', 'a.thumb'] } });
+  `)({ test: { match: /search\.example\.com/, root: '.r', url: ['jsonPath', 'url', ['attribute', 'data', 'a.thumb']] } });
   const thumb = { getAttribute: (a) => a === 'data' ? '{"url":"https://example.com/x"}' : null, setAttribute() {} };
   const res = { matches: () => false, querySelector: (s) => s === 'a.thumb' ? thumb : null };
   const l = linkApiS.getResultLink(res, 'test');
@@ -1362,6 +1420,7 @@ return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS
     ${extractFn(src, 'coerceSelectorDef')}
     ${extractFn(src, 'resolvePageDef')}
     ${extractFn(src, 'decodeRedirectTarget')}
+    ${extractFn(src, 'cmdB64Text')}
     ${extractFn(src, 'decodeBase64UrlTarget')}
     ${extractFn(src, 'isOpaqueRedirectUrl')}
     ${extractFn(src, 'unwrapRedirectUrl')}
@@ -1559,7 +1618,7 @@ return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS
 {
   const sel = eval(`(${getSelectorsObjectText()})`);
   const cmdApi = new Function('location', `
-    ${['cmdRe', 'cmdQueryEl', 'runCmdEl', 'cmdText', 'cmdAttr', 'cmdPath', 'cmdDomain', 'cmdOrigin', 'isOpaqueRedirectValue', 'runCmdValue', 'makeResultLink'].map((n) => extractFn(src, n)).join('\n')}
+    ${['cmdRe', 'cmdQueryEl', 'runCmdEl', 'cmdText', 'cmdAttr', 'cmdPath', 'cmdB64Text', 'cmdOrigin', 'isOpaqueRedirectValue', 'runCmdValue', 'makeResultLink'].map((n) => extractFn(src, n)).join('\n')}
     return { runCmdValue };
   `)({ origin: 'https://so.toutiao.com' });
   const preload = JSON.stringify([{ original_page_url: 'http://blog.sina.cn/x', text: 'cat title' }]);
@@ -1578,7 +1637,7 @@ return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS
   const start = liteSrc.indexOf('const SELECTORS = {'); const open = liteSrc.indexOf('{', start);
   const liteSel = eval(`(${liteSrc.slice(open, extractObjectLiteral(liteSrc, open) + 1)})`);
   const liteCmdApi = new Function('location', `
-    ${['cmdRe', 'cmdQueryEl', 'runCmdEl', 'cmdText', 'cmdAttr', 'cmdPath', 'cmdDomain', 'cmdOrigin', 'isOpaqueRedirectValue', 'runCmdValue', 'makeResultLink'].map((n) => extractFn(liteSrc, n)).join('\n')}
+    ${['cmdRe', 'cmdQueryEl', 'runCmdEl', 'cmdText', 'cmdAttr', 'cmdPath', 'cmdB64Text', 'cmdOrigin', 'isOpaqueRedirectValue', 'runCmdValue', 'makeResultLink'].map((n) => extractFn(liteSrc, n)).join('\n')}
     return { runCmdValue };
   `)({ origin: 'https://so.toutiao.com' });
   const preload = JSON.stringify([{ original_page_url: 'http://blog.sina.cn/x', text: 'cat title' }]);
@@ -1616,7 +1675,7 @@ return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS
 {
   const cmdApi = new Function(`
     function redirectsEnabled() { return true; }
-    ${['cmdRe', 'cmdQueryEl', 'runCmdEl', 'cmdText', 'cmdAttr', 'cmdPath', 'cmdDomain', 'cmdOrigin', 'cmdAbsUrl', 'runCmdValue', 'makeResultLink'].map((n) => extractFn(src, n)).join('\n')}
+    ${['cmdRe', 'cmdQueryEl', 'runCmdEl', 'cmdText', 'cmdAttr', 'cmdPath', 'cmdB64Text', 'cmdOrigin', 'cmdAbsUrl', 'decodeBase64UrlTarget', 'runCmdValue', 'makeResultLink'].map((n) => extractFn(src, n)).join('\n')}
     return { runCmdValue };
   `)();
   const el = (attrs) => ({ attrs, getAttribute: (k) => (attrs[k] !== undefined ? attrs[k] : null) });
@@ -1635,7 +1694,7 @@ return { parseSelectorText, validateUserSelectors, pruneUserSelectors, SELECTORS
   const liteSrc2 = readRepoFile('Lite.user.js');
   const liteCmd = new Function(`
     function redirectsEnabled() { return true; }
-    ${['cmdRe', 'cmdQueryEl', 'runCmdEl', 'cmdText', 'cmdAttr', 'cmdPath', 'cmdDomain', 'cmdOrigin', 'isOpaqueRedirectValue', 'runCmdValue', 'makeResultLink'].map((n) => extractFn(liteSrc2, n)).join('\n')}
+    ${['cmdRe', 'cmdQueryEl', 'runCmdEl', 'cmdText', 'cmdAttr', 'cmdPath', 'cmdB64Text', 'cmdOrigin', 'isOpaqueRedirectValue', 'decodeBase64UrlTarget', 'runCmdValue', 'makeResultLink'].map((n) => extractFn(liteSrc2, n)).join('\n')}
     return { runCmdValue };
   `)();
   const litePropEl = { href: 'https://example.com/l', textContent: 'L', getAttribute: () => null };
