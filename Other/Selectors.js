@@ -1,7 +1,7 @@
 bing: {
   includeRegex: /^https?:\/\/(?:(?:www[2-4]?|cn|global|m)\.)?bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)(?::\d+)?(?:[/?#]|$)/i,
   root: 'li.b_algo, div.b_algo',
-  url: ['or', [['rejectOpaqueRedirect', ['attribute', 'href', 'a:has(> h2)[href], .b_algoheader a[href], h2 a[href]']], ['normalizeUrl', ['rejectEngineHost', ['domainToUrl', ['text', '.b_attribution, .b_algoheader cite, cite']]]], ['attribute', 'href', 'a:has(> h2)[href], .b_algoheader a[href], h2 a[href]']]],
+  url: ['or', [['rejectOpaqueRedirect', ['attribute', 'href', 'a:has(> h2)[href], .b_algoheader a[href], h2 a[href]']], ['normalizeUrl', ['rejectEngineHost', ['regexSubstitute', /^[\s\S]*?((?:[\p{L}\p{N}][\p{L}\p{N}_-]*\.)+\p{L}{2,})[\s\S]*$/u, 'https://$1', ['text', '.b_attribution, .b_algoheader cite, cite']]]], ['attribute', 'href', 'a:has(> h2)[href], .b_algoheader a[href], h2 a[href]']]],
   title: ['or', [['text', 'h2 a'], ['text', 'a h2'], ['text', '.b_title'], ['text', '.mc_vtvc_title'], ['text', 'a.title']]],
   snippet: ['or', [['text', '.b_caption p'], ['text', '.b_snippet'], ['text', '.b_paractl p'], ['text', '.b_lineclamp2'], ['text', '.mc_vtvc_meta'], ['text', '.snippet']]],
   button: { inset: { top: '10px', right: '5px' } },
@@ -11,8 +11,8 @@ bing: {
       includeRegex: /^https?:\/\/images\.|^https?:\/\/[^/?#]+\/images(?:[/?#]|$)/i,
       button: false,
       root: 'li:has(div.iuscp), div.iuscp, div.imgpt',
-      url: ['or', [['json', 'm', 'purl', 'a.iusc'], ['json', 'm', 'murl', 'a.iusc'], ['attribute', 'href', 'a[href]']]],
-      title: ['or', [['json', 'm', 't', 'a.iusc'], ['attribute', 'alt', 'img[alt]']]],
+      url: ['or', [['jsonPath', 'purl', ['attribute', 'm', 'a.iusc']], ['jsonPath', 'murl', ['attribute', 'm', 'a.iusc']], ['attribute', 'href', 'a[href]']]],
+      title: ['or', [['jsonPath', 't', ['attribute', 'm', 'a.iusc']], ['attribute', 'alt', 'img[alt]']]],
       command: { grid: { cell: 'li', items: ['div.iuscp, div.imgpt'], has: 'a.iusc', deepest: true }, dedupeBy: 'a.iusc' }
     },
     videos: {
@@ -42,7 +42,7 @@ google: {
   includeRegex: /^https?:\/\/(?:(?:www|images|video|videos|search|encrypted|m)\.)?google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})(?::\d+)?\//i,
   excludeRegex: /^https?:\/\/[^/]+\/(?!(?:search|webhp|imghp|videohp)(?:[/?#]|$)|[?#]|$)/i,
   root: 'div.g, div.MjjYud:not(:has(#m-x-content)):not(:has(span.mgAbYb)):has(a[href])',
-  url: ['or', [['rejectOpaqueRedirect', ['attribute', 'href', 'a[href]']], ['rejectEngineHost', ['domainToUrl', ['text', '.lJQCTe, .XVWGNd, .R8BTeb, span.ob9lvb, .eip8Bb']]], ['rejectEngineHost', ['domainToUrl', ['text', 'cite']]], ['attribute', 'href', 'a[href]']]],
+  url: ['or', [['rejectOpaqueRedirect', ['attribute', 'href', 'a[href]']], ['rejectEngineHost', ['regexSubstitute', /^[\s\S]*?((?:[\p{L}\p{N}][\p{L}\p{N}_-]*\.)+\p{L}{2,})[\s\S]*$/u, 'https://$1', ['text', '.lJQCTe, .XVWGNd, .R8BTeb, span.ob9lvb, .eip8Bb']]], ['rejectEngineHost', ['regexSubstitute', /^[\s\S]*?((?:[\p{L}\p{N}][\p{L}\p{N}_-]*\.)+\p{L}{2,})[\s\S]*$/u, 'https://$1', ['text', 'cite']]], ['attribute', 'href', 'a[href]']]],
   title: ['or', [['text', 'h3'], ['text', 'div[role="heading"]'], ['text', '.LC20lb'], ['text', '.DKV0Md'], ['text', '.sXLaOe'], ['text', '.c9DxTc'], ['text', 'a h3']]],
   snippet: ['or', [['text', '.st'], ['text', '.VwiC3b'], ['text', '.s3v9rd'], ['text', '.IsZvec'], ['text', '.lyLwlc'], ['text', '.yXK7lf'], ['text', '.ITZIwc']]],
   button: { scope: '#center_col', require: 'h3', requireSelf: 'g-img, .isv-r, .ivg-i', exclude: 'g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav, #extabar, .isv-r, .ivg-i, .image-section, g-img, .is-extra-container' },
@@ -244,9 +244,9 @@ toutiao: {
       includeRegex: /[?&]pd=atlas(?:&|#|$)/i,
       button: false,
       root: '.l-waterfallY-item',
-      url: ['or', [['jsonPath', '0.original_page_url', ['jsonPath', '', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]]], ['attribute', 'href', 'a[href*="/search/jump"]'], ['attribute', 'href', 'a[href]']]],
-      title: ['or', [['attribute', 'alt', 'img[alt]'], ['jsonPath', '0.text', ['jsonPath', '', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]]]]],
-      snippet: ['jsonPath', '0.text', ['jsonPath', '', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]]],
+      url: ['or', [['jsonPath', '0.original_page_url', ['or', [['jsonParse', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]], ['jsonParse', ['urlDecode', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]]]]]], ['attribute', 'href', 'a[href*="/search/jump"]'], ['attribute', 'href', 'a[href]']]],
+      title: ['or', [['attribute', 'alt', 'img[alt]'], ['jsonPath', '0.text', ['or', [['jsonParse', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]], ['jsonParse', ['urlDecode', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]]]]]]]],
+      snippet: ['jsonPath', '0.text', ['or', [['jsonParse', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]], ['jsonParse', ['urlDecode', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]]]]]],
     },
     news: { includeRegex: /[?&]pd=information(?:&|#|$)/i },
     videos: { includeRegex: /[?&]pd=[a-z_]*video/i }

@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.9.0
+// @version      8.9.1
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version removes networking features including WebDAV Sync / Rule Subscription / Engine Subscription.
@@ -36,7 +36,7 @@
   const CONFIG_KEY = 'searchfilter_blocker', SELECTORS_KEY = 'searchfilter_selectors', EXPORT_PICK_KEY = 'searchfilter_export_pick';
   const HL_STATS_REGEX = /^@\d+/;
   const RESULT_RETRY_LIMIT = 3, RESULT_RETRY_DELAY = 200;
-  const GRID_HIDE_ATTR = 'data-serhl-grid-item-hidden', GROUP_HIDE_ATTR = 'data-serh-group-hidden';
+  const GRID_HIDE_ATTR = 'data-serhl-grid-item-hidden', GROUP_HIDE_ATTR = 'data-serhl-group-hidden';
   let _hideNamesCache = null;
 
   const CFG_DEFAULTS = { enabled: true, showBlockBtn: false, blockDomain: false, blockConfirm: true, showMatchedSource: true, showBubble: true, panelCentered: true, bubbleAction: 'openPanel', uiScale: 'l', darkMode: 'system', collapseMode: false, highlightWhitelist: false, removeRedirects: true, bracketHighlight: true, language: 'zh-CN' };
@@ -77,7 +77,7 @@
     bing: {
       includeRegex: /^https?:\/\/(?:(?:www[2-4]?|cn|global|m)\.)?bing\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)(?::\d+)?(?:[/?#]|$)/i,
       root: 'li.b_algo, div.b_algo',
-      url: ['or', [['rejectOpaqueRedirect', ['attribute', 'href', 'a:has(> h2)[href], .b_algoheader a[href], h2 a[href]']], ['normalizeUrl', ['rejectEngineHost', ['domainToUrl', ['text', '.b_attribution, .b_algoheader cite, cite']]]], ['attribute', 'href', 'a:has(> h2)[href], .b_algoheader a[href], h2 a[href]']]],
+      url: ['or', [['rejectOpaqueRedirect', ['attribute', 'href', 'a:has(> h2)[href], .b_algoheader a[href], h2 a[href]']], ['normalizeUrl', ['rejectEngineHost', ['regexSubstitute', /^[\s\S]*?((?:[\p{L}\p{N}][\p{L}\p{N}_-]*\.)+\p{L}{2,})[\s\S]*$/u, 'https://$1', ['text', '.b_attribution, .b_algoheader cite, cite']]]], ['attribute', 'href', 'a:has(> h2)[href], .b_algoheader a[href], h2 a[href]']]],
       title: ['or', [['text', 'h2 a'], ['text', 'a h2'], ['text', '.b_title'], ['text', '.mc_vtvc_title'], ['text', 'a.title']]],
       snippet: ['or', [['text', '.b_caption p'], ['text', '.b_snippet'], ['text', '.b_paractl p'], ['text', '.b_lineclamp2'], ['text', '.mc_vtvc_meta'], ['text', '.snippet']]],
       button: { inset: { top: '10px', right: '5px' } },
@@ -87,8 +87,8 @@
           includeRegex: /^https?:\/\/images\.|^https?:\/\/[^/?#]+\/images(?:[/?#]|$)/i,
           button: false,
           root: 'li:has(div.iuscp), div.iuscp, div.imgpt',
-          url: ['or', [['json', 'm', 'purl', 'a.iusc'], ['json', 'm', 'murl', 'a.iusc'], ['attribute', 'href', 'a[href]']]],
-          title: ['or', [['json', 'm', 't', 'a.iusc'], ['attribute', 'alt', 'img[alt]']]],
+          url: ['or', [['jsonPath', 'purl', ['attribute', 'm', 'a.iusc']], ['jsonPath', 'murl', ['attribute', 'm', 'a.iusc']], ['attribute', 'href', 'a[href]']]],
+          title: ['or', [['jsonPath', 't', ['attribute', 'm', 'a.iusc']], ['attribute', 'alt', 'img[alt]']]],
           command: { grid: { cell: 'li', items: ['div.iuscp, div.imgpt'], has: 'a.iusc', deepest: true }, dedupeBy: 'a.iusc' }
         },
         videos: {
@@ -118,7 +118,7 @@
       includeRegex: /^https?:\/\/(?:(?:www|images|video|videos|search|encrypted|m)\.)?google\.(?:[a-z]{2,3}(?:\.[a-z]{2})?|[a-z]{4,})(?::\d+)?\//i,
       excludeRegex: /^https?:\/\/[^/]+\/(?!(?:search|webhp|imghp|videohp)(?:[/?#]|$)|[?#]|$)/i,
       root: 'div.g, div.MjjYud:not(:has(#m-x-content)):not(:has(span.mgAbYb)):has(a[href])',
-      url: ['or', [['rejectOpaqueRedirect', ['attribute', 'href', 'a[href]']], ['rejectEngineHost', ['domainToUrl', ['text', '.lJQCTe, .XVWGNd, .R8BTeb, span.ob9lvb, .eip8Bb']]], ['rejectEngineHost', ['domainToUrl', ['text', 'cite']]], ['attribute', 'href', 'a[href]']]],
+      url: ['or', [['rejectOpaqueRedirect', ['attribute', 'href', 'a[href]']], ['rejectEngineHost', ['regexSubstitute', /^[\s\S]*?((?:[\p{L}\p{N}][\p{L}\p{N}_-]*\.)+\p{L}{2,})[\s\S]*$/u, 'https://$1', ['text', '.lJQCTe, .XVWGNd, .R8BTeb, span.ob9lvb, .eip8Bb']]], ['rejectEngineHost', ['regexSubstitute', /^[\s\S]*?((?:[\p{L}\p{N}][\p{L}\p{N}_-]*\.)+\p{L}{2,})[\s\S]*$/u, 'https://$1', ['text', 'cite']]], ['attribute', 'href', 'a[href]']]],
       title: ['or', [['text', 'h3'], ['text', 'div[role="heading"]'], ['text', '.LC20lb'], ['text', '.DKV0Md'], ['text', '.sXLaOe'], ['text', '.c9DxTc'], ['text', 'a h3']]],
       snippet: ['or', [['text', '.st'], ['text', '.VwiC3b'], ['text', '.s3v9rd'], ['text', '.IsZvec'], ['text', '.lyLwlc'], ['text', '.yXK7lf'], ['text', '.ITZIwc']]],
       button: { scope: '#center_col', require: 'h3', requireSelf: 'g-img, .isv-r, .ivg-i', exclude: 'g-scrolling-carousel, #hdtb, #appbar, #searchform, #top_nav, #extabar, .isv-r, .ivg-i, .image-section, g-img, .is-extra-container' },
@@ -320,9 +320,9 @@
           includeRegex: /[?&]pd=atlas(?:&|#|$)/i,
           button: false,
           root: '.l-waterfallY-item',
-          url: ['or', [['jsonPath', '0.original_page_url', ['jsonPath', '', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]]], ['attribute', 'href', 'a[href*="/search/jump"]'], ['attribute', 'href', 'a[href]']]],
-          title: ['or', [['attribute', 'alt', 'img[alt]'], ['jsonPath', '0.text', ['jsonPath', '', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]]]]],
-          snippet: ['jsonPath', '0.text', ['jsonPath', '', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]]],
+          url: ['or', [['jsonPath', '0.original_page_url', ['or', [['jsonParse', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]], ['jsonParse', ['urlDecode', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]]]]]], ['attribute', 'href', 'a[href*="/search/jump"]'], ['attribute', 'href', 'a[href]']]],
+          title: ['or', [['attribute', 'alt', 'img[alt]'], ['jsonPath', '0.text', ['or', [['jsonParse', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]], ['jsonParse', ['urlDecode', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]]]]]]]],
+          snippet: ['jsonPath', '0.text', ['or', [['jsonParse', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]], ['jsonParse', ['urlDecode', ['queryParam', 'preload', ['queryParam', 'url', ['attribute', 'href', 'a[href*="/search/jump"]']]]]]]]],
         },
         news: { includeRegex: /[?&]pd=information(?:&|#|$)/i },
         videos: { includeRegex: /[?&]pd=[a-z_]*video/i }
@@ -437,11 +437,12 @@
     if (t === 'text' && typeof a === 'string') out.push(a);
     else if (t === 'attribute' && typeof b === 'string') out.push(b);
     else if (t === 'property' && typeof b === 'string') out.push(b);
-    else if (t === 'json' && typeof c === 'string') out.push(c);
     else if (t === 'base64Url') { if (b !== undefined) commandSelectors(b, out); }
     else if (t === 'queryParam') commandSelectors(b, out);
-    else if (t === 'rejectEngineHost' || t === 'domainToUrl' || t === 'domainToURL' || t === 'normalizeUrl' || t === 'rejectOpaqueRedirect') commandSelectors(a, out);
+    else if (t === 'rejectEngineHost' || t === 'normalizeUrl' || t === 'rejectOpaqueRedirect') commandSelectors(a, out);
     else if (t === 'jsonPath') commandSelectors(b, out);
+    else if (t === 'jsonParse' || t === 'urlDecode' || t === 'base64Decode') commandSelectors(a, out);
+    else if (t === 'prefix') commandSelectors(b, out);
     else if (t === 'or' && Array.isArray(a)) a.forEach((x) => commandSelectors(x, out));
     else if (t === 'regexInclude' || t === 'regexExclude') commandSelectors(b, out);
     else if (t === 'regexSubstitute') commandSelectors(c, out);
@@ -450,7 +451,7 @@
 
   const builtinSelectorOf = (key) => (SELECTORS[key] && typeof SELECTORS[key] === 'object') ? SELECTORS[key] : {};
   const PAGE_FIELDS = ['root', 'url', 'title', 'snippet', 'extraSelector', 'button', 'skip', 'group', 'grid', 'dedupeBy', 'link', 'blockedCss', 'preserveSpace', 'site'];
-  const CMD_TYPES = new Set(['or', 'attribute', 'property', 'text', 'const', 'regexInclude', 'regexExclude', 'regexSubstitute', 'domainToUrl', 'domainToURL', 'rejectEngineHost', 'normalizeUrl', 'rejectOpaqueRedirect', 'jsonPath', 'queryParam', 'json', 'base64Url']);
+  const CMD_TYPES = new Set(['or', 'attribute', 'property', 'text', 'const', 'regexInclude', 'regexExclude', 'regexSubstitute', 'rejectEngineHost', 'normalizeUrl', 'rejectOpaqueRedirect', 'jsonPath', 'jsonParse', 'urlDecode', 'queryParam', 'base64Decode', 'base64Url', 'prefix']);
   function isCommandArray(v) { return Array.isArray(v) && typeof v[0] === 'string' && CMD_TYPES.has(v[0]); }
   function simpleToCommand(v, mode) {
     if (isCommandArray(v)) return v;
@@ -498,10 +499,8 @@
       if (rest.length) style = (style ? style + '; ' : '') + rest.join('; ');
     };
     if (Array.isArray(button)) {
-      const cmd = button[0];
       const options = button[1] && typeof button[1] === 'object' ? button[1] : {};
       inset = inset || {};
-      if (cmd === 'icon' || cmd === 'text') readStyle(options.style);
       for (const f of ['top', 'right', 'bottom', 'left']) if (options[f] !== undefined) inset[f] = options[f];
       if (options.zIndex !== undefined) zIndex = options.zIndex;
       if (typeof button[2] === 'string' && button[2]) out.mount = button[2];
@@ -2789,27 +2788,14 @@
     return /^https?:\/\//i.test(value) ? value : '';
   }
 
+  function cmdB64Text(v) { let base64 = String(v || '').replace(/-/g, '+').replace(/_/g, '/'); const rem = base64.length % 4; if (rem === 1) return ''; if (rem > 0) base64 += '='.repeat(4 - rem); try { if (typeof atob === 'function') { const bin = atob(base64); return typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8').decode(Uint8Array.from(bin, c => c.charCodeAt(0))) : decodeURIComponent(escape(bin)); } return Buffer.from(base64, 'base64').toString('utf8'); } catch (_) { return ''; } }
   function decodeBase64UrlTarget(u, spec) {
-    if (!u) return ''; let rawEncoded = u; const pre = spec && spec.stripPrefix; if (pre) { try { const r = pre instanceof RegExp ? pre : (pre && typeof pre.source === 'string' ? new RegExp(pre.source, pre.flags || '') : (typeof pre === 'string' && pre ? new RegExp(pre) : null)); if (r) rawEncoded = rawEncoded.replace(r, ''); } catch (_) {} } let base64 = rawEncoded.replace(/-/g, '+').replace(/_/g, '/');
-    const rem = base64.length % 4; if (rem === 1) return ''; if (rem > 0) base64 += '='.repeat(4 - rem); let realUrl = '';
-    try {
-      if (typeof atob === 'function') {
-        const bin = atob(base64);
-        if (typeof TextDecoder !== 'undefined') {
-          const bytes = Uint8Array.from(bin, c => c.charCodeAt(0)); realUrl = new TextDecoder('utf-8').decode(bytes);
-        } else {
-          realUrl = decodeURIComponent(escape(bin));
-        }
-      } else {
-        realUrl = Buffer.from(base64, 'base64').toString('utf8');
-      }
-    } catch (_) { return ''; }
-
+    if (!u) return ''; let rawEncoded = u; const pre = spec && spec.stripPrefix; if (pre) { try { const r = pre instanceof RegExp ? pre : (pre && typeof pre.source === 'string' ? new RegExp(pre.source, pre.flags || '') : (typeof pre === 'string' && pre ? new RegExp(pre) : null)); if (r) rawEncoded = rawEncoded.replace(r, ''); } catch (_) {} }
+    let realUrl = cmdB64Text(rawEncoded);
     for (let i = 0; i < 2; i++) {
       if (/^https?:\/\//i.test(realUrl)) break;
       try { const decoded = decodeURIComponent(realUrl); if (decoded === realUrl) break; realUrl = decoded; } catch (_) { break; }
     }
-
     return /^https?:\/\//i.test(realUrl) ? realUrl : '';
   }
 
@@ -3022,14 +3008,14 @@
   function runCmdEl(root, spec) {
     if (spec == null) return root; if (typeof spec === 'string') return cmdQueryEl(root, spec); if (!Array.isArray(spec)) return root;
     const t = spec[0], a = spec[1], b = spec[2];
-    if (t === 'upward') { if (typeof a === 'number') { let el = root; for (let i = 0; i < a && el; i++) el = el.parentElement; return el || null; } return root && root.parentElement && root.parentElement.closest ? root.parentElement.closest(a) : null; }
+    if (t === 'upward') { const base = runCmdEl(root, b); if (typeof a === 'number') { let el = base; for (let i = 0; i < a && el; i++) el = el.parentElement; return el || null; } return base && base.parentElement && base.parentElement.closest ? base.parentElement.closest(a) : null; }
     if (t === 'selector') return cmdQueryEl(runCmdEl(root, b), a);
     return root;
   }
   function cmdText(el) { return el && typeof el.textContent === 'string' ? el.textContent.trim() : ''; }
   function cmdAttr(el, name) { if (!el) return ''; const v = el.getAttribute ? el.getAttribute(name) : null; if (v != null && v !== '') return String(v); const p = el[name]; return typeof p === 'string' ? p : ''; }
   function cmdPath(obj, path) { let cur = obj; for (const seg of String(path || '').replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean)) { if (cur == null) return undefined; cur = cur[seg]; } return cur; }
-  function cmdDomain(v) { const m = String(v || '').match(/(?:[\p{L}\p{N}][\p{L}\p{N}_-]*\.)+\p{L}{2,}/u); return m ? 'https://' + m[0] : ''; }
+
   function cmdOrigin() { return (typeof location !== 'undefined' && location.origin) ? location.origin : 'https://example.com'; }
   function cmdAbsUrl(v) { if (/^https?:\/\//i.test(String(v || ''))) return String(v); try { const u = new URL(String(v), cmdOrigin()); return /^https?:$/.test(u.protocol) ? u.href : ''; } catch (_) { return ''; } }
   function isOpaqueRedirectValue(v) {
@@ -3054,39 +3040,30 @@
     if (t === 'const') return { value: String(a == null ? '' : a), element: root };
     if (t === 'regexInclude' || t === 'regexExclude') { const r = runCmdValue(root, b, mode); if (!r || !r.value) return null; const re = cmdRe(a); if (!re) return r; return (re.test(r.value) === (t === 'regexInclude')) ? r : null; }
     if (t === 'regexSubstitute') { const r = runCmdValue(root, c, mode); if (!r || !r.value) return null; const re = cmdRe(a); return re ? { value: r.value.replace(re, String(b == null ? '' : b)), element: r.element } : r; }
-    if (t === 'domainToUrl' || t === 'domainToURL') { const r = runCmdValue(root, a, 'text'); const v = cmdDomain(r && r.value); return v ? { value: v, element: r.element } : null; }
     if (t === 'rejectEngineHost') { const r = runCmdValue(root, a, 'text'); if (!r || !r.value) return null; try { const h = new URL(r.value, cmdOrigin()).hostname; for (const e of Object.keys(getSelectors())) if (isEngineHost(e, h)) return null; } catch (_) { return null; } return r; }
     if (t === 'normalizeUrl') { const r = runCmdValue(root, a, 'text'); if (!r || !r.value) return null; try { return { value: new URL(r.value, cmdOrigin()).href, element: r.element }; } catch (_) { return null; } }
     if (t === 'rejectOpaqueRedirect') { const r = runCmdValue(root, a, mode); if (!redirectsEnabled()) return r; return r && r.value && !isOpaqueRedirectValue(r.value) ? r : null; }
     if (t === 'jsonPath') {
-      if (!redirectsEnabled()) return null;
       const r = runCmdValue(root, b, 'text'); if (!r) return null; let v = r.value;
-      if (typeof v === 'string') { try { v = JSON.parse(v); } catch (_) { try { v = JSON.parse(decodeURIComponent(v)); } catch (_) { return null; } } }
+      if (typeof v === 'string') { try { v = JSON.parse(v); } catch (_) { return null; } }
       const out = a === '' || a == null ? v : cmdPath(v, a); return out == null || out === '' ? null : { value: out, element: r.element };
     }
+    if (t === 'jsonParse') { const r = runCmdValue(root, a, 'text'); if (!r || r.value == null) return null; let v = r.value; if (typeof v === 'string') { try { v = JSON.parse(v); } catch (_) { return null; } } return v && typeof v === 'object' ? { value: v, element: r.element } : null; }
+    if (t === 'urlDecode') { const r = runCmdValue(root, a, 'text'); if (!r || typeof r.value !== 'string' || !r.value) return null; try { return { value: decodeURIComponent(r.value), element: r.element }; } catch (_) { return null; } }
+    if (t === 'base64Decode') { const r = runCmdValue(root, a, 'text'); if (!r || typeof r.value !== 'string' || !r.value) return null; const v = cmdB64Text(r.value); return v ? { value: v, element: r.element } : null; }
+    if (t === 'prefix') { const r = runCmdValue(root, b, 'text'); if (!r || typeof r.value !== 'string' || !r.value) return null; return { value: String(a == null ? '' : a) + r.value, element: r.element }; }
     if (t === 'queryParam') {
-      if (!redirectsEnabled()) return null;
       const r = runCmdValue(root, b, 'text'); if (!r || !r.value) return null;
-      try { const u = new URL(String(r.value), cmdOrigin()); let v = u.searchParams.get(a); if (!v) return null; if (!/^https?:\/\//i.test(v) && /%[0-9a-f]{2}/i.test(v)) { try { v = decodeURIComponent(v); } catch (_) {} } return { value: v, element: r.element }; } catch (_) { return null; }
-    }
-    if (t === 'json') {
-      if (!redirectsEnabled()) return null;
-      const el = runCmdEl(root, c); let obj = null;
-      try { obj = JSON.parse(cmdAttr(el, a) || '{}'); } catch (_) { return null; }
-      const v = cmdPath(obj, b); return typeof v === 'string' && v ? { value: v, element: el || root } : null;
+      try { const u = new URL(String(r.value), cmdOrigin()); const v = u.searchParams.get(a); return v ? { value: v, element: r.element } : null; } catch (_) { return null; }
     }
     if (t === 'base64Url') {
-      if (!redirectsEnabled()) return null;
       const names = Array.isArray(a) ? a : (typeof a === 'string' && a ? [a] : null);
       if (!names || !names.length || !names.every((n) => typeof n === 'string' && n)) return null;
       const el = runCmdEl(root, b); let src = '';
       for (const n of names) { src = cmdAttr(el, n) || ''; if (src) break; }
       src = src.split('?')[0];
       const segs = src.split('/');
-      for (let i = 1; i < segs.length; i++) {
-        let b64 = segs.slice(i).join('').replace(/-/g, '+').replace(/_/g, '/'); if (b64.length % 4) b64 += '='.repeat(4 - b64.length % 4);
-        try { const u = atob(b64); if (/^https?:\/\//i.test(u)) return { value: u, element: el || root }; } catch (_) {}
-      }
+      for (let i = 1; i < segs.length; i++) { const u = decodeBase64UrlTarget(segs.slice(i).join('')); if (u) return { value: u, element: el || root }; }
       return null;
     }
     return null;
@@ -3402,7 +3379,7 @@
     if (!root || root === result) return;
     const membersSel = g.members || def.root || '';
     const members = resultGroupMembers(root, membersSel);
-    if (members.length) { hideParentIfNoVisibleSiblings(root, members, g.hideAttr || GROUP_HIDE_ATTR); root.setAttribute('data-serh-group-members', membersSel); }
+    if (members.length) { hideParentIfNoVisibleSiblings(root, members, g.hideAttr || GROUP_HIDE_ATTR); root.setAttribute('data-serhl-group-members', membersSel); }
   }
 
   function visibleUnblocked(el) {
@@ -3427,22 +3404,22 @@
     const members = Array.from(children || []); if (!members.length) return;
     map_groupMembers.set(parent, members);
     const groupAttr = attr || GROUP_HIDE_ATTR;
-    if (parent.getAttribute('data-serh-group-attr') !== groupAttr) parent.setAttribute('data-serh-group-attr', groupAttr);
-    if (members.some(visibleUnblocked)) { if (parent.getAttribute('data-serh-group-hidden') === 'true') restoreParentDisplay(parent); return; }
-    const alreadyHidden = parent.getAttribute('data-serh-group-hidden') === 'true';
+    if (parent.getAttribute('data-serhl-group-attr') !== groupAttr) parent.setAttribute('data-serhl-group-attr', groupAttr);
+    if (members.some(visibleUnblocked)) { if (parent.getAttribute('data-serhl-group-hidden') === 'true') restoreParentDisplay(parent); return; }
+    const alreadyHidden = parent.getAttribute('data-serhl-group-hidden') === 'true';
     saveOriginalDisplay(parent); parent.style.display = blockedShown() ? (parent.getAttribute('data-serhl-orig-display') || '') : 'none';
-    parent.setAttribute(groupAttr, 'true'); parent.setAttribute('data-serh-group-hidden', 'true');
+    parent.setAttribute(groupAttr, 'true'); parent.setAttribute('data-serhl-group-hidden', 'true');
     if (!alreadyHidden) _hiddenParentCount++;
   }
   function recheckGroupRoot(root) {
     if (!root) return;
     let members = map_groupMembers.get(root);
     if (!members || !members.length) {
-      const sel = root.getAttribute('data-serh-group-members') || '';
+      const sel = root.getAttribute('data-serhl-group-members') || '';
       members = sel ? resultGroupMembers(root, sel) : [];
     }
     if (!members.length) return;
-    hideParentIfNoVisibleSiblings(root, members, root.getAttribute('data-serh-group-attr') || GROUP_HIDE_ATTR);
+    hideParentIfNoVisibleSiblings(root, members, root.getAttribute('data-serhl-group-attr') || GROUP_HIDE_ATTR);
   }
   function resetResultStyles(result) {
     restoreResultExtraElements(result); restoreResultCollapse(result); _hrefUrlCache.delete(result); _resultContentCache.delete(result); _resultRetryCounts.delete(result); _peekUrlCache.delete(result); result.removeAttribute('data-blocker-processed'); result.removeAttribute('data-retry-exhausted');
@@ -3456,11 +3433,11 @@
   function restoreParentDisplay(parent) {
     if (!parent) return;
     const orig = parent.getAttribute('data-serhl-orig-display'); parent.style.display = orig !== null ? orig : '';
-    const attr = parent.getAttribute('data-serh-group-attr') || GROUP_HIDE_ATTR;
-    parent.removeAttribute(attr); parent.removeAttribute('data-serh-group-members'); parent.removeAttribute('data-serh-group-attr');
+    const attr = parent.getAttribute('data-serhl-group-attr') || GROUP_HIDE_ATTR;
+    parent.removeAttribute(attr); parent.removeAttribute('data-serhl-group-members'); parent.removeAttribute('data-serhl-group-attr');
     for (const a of hideNames('group', GROUP_HIDE_ATTR)) parent.removeAttribute(a);
     for (const a of hideNames('grid', GRID_HIDE_ATTR)) parent.removeAttribute(a);
-    parent.removeAttribute('data-serh-grid-items'); parent.removeAttribute('data-serh-grid-has'); parent.removeAttribute('data-serh-grid-deepest');
+    parent.removeAttribute('data-serhl-grid-items'); parent.removeAttribute('data-serhl-grid-has'); parent.removeAttribute('data-serhl-grid-deepest');
     parent.removeAttribute('data-serhl-orig-display'); _hiddenParentCount--;
     map_groupMembers.delete(parent); map_gridConfig.delete(parent);
   }
@@ -3515,7 +3492,7 @@
   function getGridLeaves(cell, g) {
     if (!cell || typeof cell.querySelectorAll !== 'function') return [];
     let cfg = g || map_gridConfig.get(cell) || null;
-    if (!cfg) { const raw = cell.getAttribute && cell.getAttribute('data-serh-grid-items'); if (raw) { try { cfg = { items: JSON.parse(raw), has: cell.getAttribute('data-serh-grid-has') || '', deepest: cell.getAttribute('data-serh-grid-deepest') === 'true' }; } catch (_) {} } }
+    if (!cfg) { const raw = cell.getAttribute && cell.getAttribute('data-serhl-grid-items'); if (raw) { try { cfg = { items: JSON.parse(raw), has: cell.getAttribute('data-serhl-grid-has') || '', deepest: cell.getAttribute('data-serhl-grid-deepest') === 'true' }; } catch (_) {} } }
     try {
       if (cfg && cfg.items) {
         for (const sel of (Array.isArray(cfg.items) ? cfg.items : [cfg.items])) {
@@ -3535,7 +3512,7 @@
   function hideGridCell(cell, attr, g) {
     if (!cell) return; const alreadyHidden = cell.getAttribute(attr) === 'true';
     map_gridConfig.set(cell, g || null);
-    if (g) { try { cell.setAttribute('data-serh-grid-items', JSON.stringify(g.items || [])); } catch (_) {} if (g.has) cell.setAttribute('data-serh-grid-has', g.has); if (g.deepest) cell.setAttribute('data-serh-grid-deepest', 'true'); }
+    if (g) { try { cell.setAttribute('data-serhl-grid-items', JSON.stringify(g.items || [])); } catch (_) {} if (g.has) cell.setAttribute('data-serhl-grid-has', g.has); if (g.deepest) cell.setAttribute('data-serhl-grid-deepest', 'true'); }
     cell.style.display = 'none'; cell.setAttribute(attr, 'true'); if (!alreadyHidden) _hiddenParentCount++;
   }
   function markResultGridSlot(result, engine, def) {
@@ -3981,6 +3958,7 @@
       let css = def ? normalizeCssRules(def.blockedCss).join('\n') : '';
       const psCss = def ? preserveSpaceCss(def) : '';
       if (psCss) css = css ? css + '\n' + psCss : psCss;
+      css = css.replace(/serh-/g, 'serhl-');
       if (css) {
         if (!_engineStyleEl) { const el = GM_addStyle(css); if (el && typeof el.remove === 'function') _engineStyleEl = el; }
         else if (_engineStyleEl.textContent !== css) _engineStyleEl.textContent = css;
@@ -4199,7 +4177,7 @@
     } else {
       document.querySelectorAll(hideSel('group', GROUP_HIDE_ATTR)).forEach(recheckGroupRoot);
       document.querySelectorAll(hideSel('group', GROUP_HIDE_ATTR)).forEach(parent => {
-        const groupAttr = parent.getAttribute('data-serh-group-attr'); if (groupAttr) recheckGroupRoot(parent);
+        const groupAttr = parent.getAttribute('data-serhl-group-attr'); if (groupAttr) recheckGroupRoot(parent);
       });
       document.querySelectorAll(hideSel('grid', GRID_HIDE_ATTR)).forEach(recheckGridCell);
       if (!blockedShown()) {
@@ -4576,12 +4554,14 @@
 
     function findCommentLineIndices(lines) {
       const indices = [];
-      for (let i = 0; i < lines.length; i++) if (lines[i][0] === '#') indices.push(i);
+      for (let i = 0; i < lines.length; i++) if (lines[i].trim()[0] === '#') indices.push(i);
       return indices;
     }
 
     function jumpToComment(direction) {
       const text = textarea.value; const lines = text.split('\n'); const commentIndices = findCommentLineIndices(lines); if (!commentIndices.length) return;
+      const lineOffsets = []; let offset = 0;
+      for (let i = 0; i < lines.length; i++) { lineOffsets.push(offset); offset += lines[i].length + 1; }
 
       const cursorPos = textarea.selectionStart || 0; let currentLineIndex = text.substring(0, cursorPos).split('\n').length - 1;
       let targetLineIndex = -1;
@@ -4602,10 +4582,7 @@
       }
 
       if (targetLineIndex === -1) return;
-      let targetPos = 0;
-      for (let i = 0; i < targetLineIndex; i++) {
-        targetPos += lines[i].length + 1;
-      }
+      const targetPos = lineOffsets[targetLineIndex] + (lines[targetLineIndex].length - lines[targetLineIndex].trimStart().length);
 
       if (document.activeElement === textarea) {
         textarea.focus({ preventScroll: true });
@@ -5387,7 +5364,7 @@
       if (v == null) return;
       if (typeof v === 'string') { css(v, field, label); return; }
       if (!Array.isArray(v) || typeof v[0] !== 'string') { errors.push(t('selectorInvalidCommand', { key: label, field, value: JSON.stringify(v) })); return; }
-      if (v[0] === 'upward') { if (typeof v[1] === 'string') css(v[1], field, label); else if (typeof v[1] !== 'number') errors.push(t('selectorInvalidCommand', { key: label, field, value: JSON.stringify(v) })); }
+      if (v[0] === 'upward') { if (typeof v[1] === 'string') css(v[1], field, label); else if (typeof v[1] !== 'number') errors.push(t('selectorInvalidCommand', { key: label, field, value: JSON.stringify(v) })); el(v[2], field, label); }
       else if (v[0] === 'selector') { css(v[1], field, label); el(v[2], field, label); }
       else errors.push(t('selectorInvalidCommand', { key: label, field, value: JSON.stringify(v) }));
     };
@@ -5401,10 +5378,11 @@
         case 'attribute': req(a, field); el(b, field, label); break;
         case 'property': req(a, field); el(b, field, label); break;
         case 'text': el(a, field, label); break;
-        case 'json': req(a, field); req(b, field); el(c, field, label); break;
         case 'queryParam': req(a, field); cmd(b, field, label); break;
         case 'base64Url': { const names = Array.isArray(a) ? a : [a]; if (!names.length || !names.every((x) => typeof x === 'string' && x)) errors.push(t('selectorFieldRequired', { key: label, field })); if (b !== undefined) el(b, field, label); break; }
-        case 'domainToUrl': case 'domainToURL': case 'rejectEngineHost': case 'normalizeUrl': case 'rejectOpaqueRedirect': cmd(a, field, label); break;
+        case 'jsonParse': case 'urlDecode': case 'base64Decode': cmd(a, field, label); break;
+        case 'prefix': req(a, field); cmd(b, field, label); break;
+        case 'rejectEngineHost': case 'normalizeUrl': case 'rejectOpaqueRedirect': cmd(a, field, label); break;
         case 'jsonPath': if (typeof a !== 'string') errors.push(t('selectorFieldRequired', { key: label, field })); cmd(b, field, label); break;
         case 'regexInclude': case 'regexExclude': re(a, field); cmd(b, field, label); break;
         case 'regexSubstitute': re(a, field); req(b, field); cmd(c, field, label); break;
@@ -5471,8 +5449,6 @@
           const opts = d.button[1];
           if (opts !== undefined && (!opts || typeof opts !== 'object' || Array.isArray(opts))) errors.push(t('selectorFieldRequired', { key: label, field: 'button.options' }));
           else if (opts) for (const f of ['top', 'right', 'bottom', 'left', 'zIndex']) if (opts[f] !== undefined && typeof opts[f] !== 'string' && typeof opts[f] !== 'number') errors.push(t('selectorFieldRequired', { key: label, field: 'button.options.' + f }));
-          if (opts && opts.style !== undefined && typeof opts.style !== 'string') errors.push(t('selectorFieldRequired', { key: label, field: 'button.options.style' }));
-          if (opts && opts.position !== undefined && !['beforebegin', 'afterbegin', 'beforeend', 'afterend'].includes(opts.position)) errors.push(t('selectorFieldRequired', { key: label, field: 'button.options.position' }));
           if (d.button[2] !== undefined) {
             if (typeof d.button[2] === 'string') css(d.button[2], 'button.element', label);
             else el(d.button[2], 'button.element', label);
