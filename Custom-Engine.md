@@ -21,7 +21,7 @@
 | `excludeMatches` | string \| string[] | 整条 URL 排除，命中时屏蔽不生效并按优先级回退 | |
 | `includeRegex` | regex | 整条 URL 匹配正则，和 `matches` 至少存在一个 | ✔ |
 | `excludeRegex` | regex | 整条 URL 排除正则，命中时屏蔽不生效并按优先级回退 | |
-| `root` | string \| array | 结果容器选择器，可写 CSS 选择器，**一键屏蔽**按钮依赖容器选择器定位 | ✔ |
+| `root` | string \| array | 结果容器选择器，可写命令或 CSS 选择器，**一键屏蔽**按钮依赖容器选择器定位 | ✔ |
 | `url` | command \| string \| string[] | 结果链接选择器，可写命令数组或 CSS 选择器，默认 `a[href]` | ✔ |
 | `title` | command \| string \| string[] | 结果标题选择器，可写命令数组或 CSS 选择器 | |
 | `snippet` | command \| string \| string[] | 结果摘要选择器，可写命令数组或 CSS 选择器 | |
@@ -41,7 +41,7 @@
 | `name` | string | 仅用于引擎备注，在脚本中无用 |
 | `priority` | number | 引擎匹配优先级，数值越大优先级越高 |
 | `delay` | boolean \| number | 脚本启动延迟，填入数字，单位 `ms`， `true` 或缺少该字段时在页面加载完成后立即执行屏蔽 |
-| `preserveSpace` | boolean \| number \| string \| object | 页面空白占位，避免整页结果被屏蔽后无法触发翻页，`true` 默认 `60vh`，单位 `px`，对象写 `{ height, container }`，`container` 为占位选择器 |
+| `preserveSpace` | boolean \| number \| string \| object | 页面空白占位，避免整页结果被屏蔽后无法触发翻页，填入数字，单位 `px`，`true` 默认 `60vh`，对象写 `{ height, container }`，`container` 为占位选择器 |
 | `extraSelector` | string \| string[] | CSS 相对选择器，以结果容器为起点选出关联元素，写成含顶层逗号的单字符串时每项以 `&` 开头 |
 | `site` | string \| string[] | 引擎别名，可用于 `$site`，可写多个别名，逗号隔开 |
 | `command` | — | 脚本的一组多功能命令，详细见下方 **command 分组** |
@@ -113,19 +113,21 @@ pages: [
 | `['property', 属性名, 元素选择器?]` | 取元素 JS 属性，如 `href`、`textContent`、`src`，元素省略时为结果容器自身 |
 | `['text', 元素选择器?]` | 取元素文本 |
 | `['const', 值]` | 返回固定字符串值 |
-| `['json', 属性名, 路径, 元素选择器?]` | 解析属性中的 JSON 后按路径取值 |
+| `['jsonParse', 值命令]` | 把值解析为 JSON，值已是对象时原样返回 |
+| `['jsonPath', 路径, 值命令]` | 把值解析为 JSON，然后按路径取值，路径可为空 |
 | `['queryParam', 参数名, 值命令]` | 从值中的 URL 查询参数取值 |
-| `['jsonPath', 路径, 值命令]` | 把值解析为 JSON 后按路径取值，路径可为空 |
-| `['domainToURL', 值命令]` | 别名 `domainToUrl`，从文本中提取域名并补全为 https URL |
+| `['urlDecode', 值命令]` | 对值做一次 URI 解码（`decodeURIComponent`），失败返回空 |
+| `['base64Decode', 值命令]` | 把值按 base64/base64url 解码为文本 |
+| `['prefix', 前缀, 值命令]` | 在值前拼接固定前缀，如 `['prefix', 'https://', 值命令]` |
 | `['normalizeUrl', 值命令]` | 规范化为绝对 URL |
 | `['rejectEngineHost', 值命令]` | 值是搜索引擎自身域名时返回空 |
 | `['rejectOpaqueRedirect', 值命令]` | 丢弃无法解包的搜索引擎跳转链接 |
 | `['or', [命令...], 元素选择器?]` | 依次尝试，返回第一个非空结果，第3参数可限定取值元素 |
 | `['regexInclude' / 'regexExclude', 正则, 值命令]` | 命中/不命中正则时保留 |
 | `['regexSubstitute', 正则, 替换, 值命令]` | 正则替换 |
-| `['base64Url', 属性名, 元素选择器?]` | 从指定属性的 base64 路径片段解码 URL，可写数组依次尝试 |
+| `['base64Url', 属性名, 元素选择器?]` | 从指定属性的 base64 路径片段解码 URL |
 
-元素参数支持 `['upward', 层数]`、`['upward', 选择器]`、`['selector', 选择器, 元素命令?]`
+元素参数支持 `['upward', 层数, 元素命令?]`、`['upward', 选择器, 元素命令?]`、`['selector', 选择器, 元素命令?]`
 
 ### 1.2.2 屏蔽按钮：
 
@@ -134,7 +136,6 @@ pages: [
 | --- | --- |
 | 对象形式 | `{ inset: { top, right, bottom, left }, zIndex, style, mount, scope, require, requireSelf, exclude }` |
 | 数组形式 | `['inset', { top, right, bottom, left, zIndex }, mount?]`，第3参数等价 `mount` |
-| SERPINFO 兼容 | `['icon', { style }, mount?]`、`['text', { position, style }, mount?]`，`style` 为 CSS 声明串，其中的 `top`/`right`/`bottom`/`left`/`z-index` 会转成按钮定位，其余声明原样作用到按钮，`text` 的 `position` 暂不生效 |
 
 `button` 对象字段：
 
@@ -173,7 +174,7 @@ advanced_engine: {
   priority: 10,
   site: ['example_engine', 'other_name'],
   root: '.result',
-  url: ['or', [['json', 'data', 'url', 'a.thumb'], ['attribute', 'href', 'a[href]']]],
+  url: ['or', [['jsonPath', 'url', ['attribute', 'data', 'a.thumb']], ['attribute', 'href', 'a[href]']]],
   title: ['text', '.title'],
   snippet: ['text', '.content'],
   button: { inset: { top: '10px', right: '35px' } },

@@ -21,7 +21,7 @@ In the script, an engine's selector structure is a group of fields wrapped in `e
 | `excludeMatches` | string \| string[] | Excluded from the whole URL; when it hits, blocking does not take effect and matching falls back by priority | |
 | `includeRegex` | regex | URL matching regex; at least one of this and `matches` must exist | ✔ |
 | `excludeRegex` | regex | URL exclusion regex; when it hits, blocking does not take effect and matching falls back by priority | |
-| `root` | string \| array | Result container selector; can be a CSS selector; the **One-click Block** button relies on the container selector to locate results | ✔ |
+| `root` | string \| array | Result container selector; command or CSS selector; the **One-click Block** button relies on the container selector to locate results | ✔ |
 | `url` | command \| string \| string[] | Result link selector; command array or CSS selector, default `a[href]` | ✔ |
 | `title` | command \| string \| string[] | Title selector; command array or CSS selector | |
 | `snippet` | command \| string \| string[] | Snippet selector; command array or CSS selector | |
@@ -114,19 +114,21 @@ pages: [
 | `['property', name, selector?]` | Read an element JS property such as `href`, `textContent`, `src`; when the element is omitted, the result container itself is used |
 | `['text', selector?]` | Read element text |
 | `['const', value]` | Return a fixed string value |
-| `['json', attr, path, selector?]` | Parse the JSON in the attribute and read a value by path |
-| `['queryParam', param, command]` | Read the value of a URL query parameter from the value |
+| `['jsonParse', command]` | Parse the value as JSON; objects pass through unchanged |
 | `['jsonPath', path, command]` | Parse the value as JSON and read a value by path; the path may be empty |
-| `['domainToURL', command]` | Alias `domainToUrl`; extract a domain from text and complete it into an https URL |
+| `['queryParam', param, command]` | Read the value of a URL query parameter from the value |
+| `['urlDecode', command]` | URI-decode the value once (`decodeURIComponent`); returns empty on failure |
+| `['base64Decode', command]` | Decode the value from base64/base64url into text |
+| `['prefix', text, command]` | Prepend a fixed prefix to the value, e.g. `['prefix', 'https://', command]` |
 | `['normalizeUrl', command]` | Normalize to an absolute URL |
 | `['rejectEngineHost', command]` | Return empty when the value is the search engine's own host |
 | `['rejectOpaqueRedirect', command]` | Drop search engine redirect links that cannot be unwrapped |
 | `['or', [commands...], selector?]` | Try in order and return the first non-empty result; the third argument can limit the element read from |
 | `['regexInclude' / 'regexExclude', regex, command]` | Keep the value when the regex matches / does not match |
 | `['regexSubstitute', regex, replacement, command]` | Regex replacement |
-| `['base64Url', attribute, selector?]` | Decode a URL from the base64 path fragment in the given attribute; accepts an array tried in order |
+| `['base64Url', attribute, selector?]` | Decode a URL from the base64 path fragment in the given attribute |
 
-Element arguments also support `['upward', levels]`, `['upward', selector]`, `['selector', selector, elementCommand?]`.
+Element arguments also support `['upward', levels, elementCommand?]`, `['upward', selector, elementCommand?]`, `['selector', selector, elementCommand?]`.
 
 ### 1.2.2 Block Button:
 
@@ -136,7 +138,6 @@ Button relative position format:
 | --- | --- |
 | Object form | `{ inset: { top, right, bottom, left }, zIndex, style, mount, scope, require, requireSelf, exclude }` |
 | Array form | `['inset', { top, right, bottom, left, zIndex }, mount?]`; the 3rd argument is equivalent to `mount` |
-| SERPINFO compatible | `['icon', { style }, mount?]` and `['text', { position, style }, mount?]`; `style` is a CSS declaration string whose `top`/`right`/`bottom`/`left`/`z-index` become the button position and whose remaining declarations are applied to the button as-is; `text`'s `position` is not applied yet |
 
 Fields of the `button` object:
 
@@ -175,7 +176,7 @@ advanced_engine: {
   priority: 10,
   site: ['example_engine', 'other_name'],
   root: '.result',
-  url: ['or', [['json', 'data', 'url', 'a.thumb'], ['attribute', 'href', 'a[href]']]],
+  url: ['or', [['jsonPath', 'url', ['attribute', 'data', 'a.thumb']], ['attribute', 'href', 'a[href]']]],
   title: ['text', '.title'],
   snippet: ['text', '.content'],
   button: { inset: { top: '10px', right: '35px' } },
