@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.9.1
+// @version      8.9.2
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version removes networking features including WebDAV Sync / Rule Subscription / Engine Subscription.
@@ -2691,9 +2691,10 @@
     const scanPatterns = (patterns, value, filter, foldUrl, collect) => {
       if (!value) return null;
       const alt = foldUrl ? decodeUrlForMatch(value) : '';
+      const enc = foldUrl ? encodeNonAscii(value) : '';
       for (const item of patterns) {
         if (filter && !filter(item)) continue;
-        if (!(safeRegexTest(item.regex, value) || (alt && alt !== value && safeRegexTest(item.regex, alt)))) continue;
+        if (!(safeRegexTest(item.regex, value) || (alt && alt !== value && safeRegexTest(item.regex, alt)) || (enc && enc !== value && safeRegexTest(item.regex, enc)))) continue;
         if (collect) { collect(item); continue; } return item;
       }
       return null;
@@ -2715,8 +2716,9 @@
         }
         const value = item.type === 'title' ? title : item.type === 'text' ? snippet : url;
         const alt = (item.type === 'url' || item.type === 'regex') && value ? decodeUrlForMatch(value) : '';
+        const enc = (item.type === 'url' || item.type === 'regex') && value ? encodeNonAscii(value) : '';
         if ((item.type === 'url' || item.type === 'regex' || item.type === 'title' || item.type === 'text') &&
-            value && (safeRegexTest(item.regex, value) || (alt && alt !== value && safeRegexTest(item.regex, alt)))) {
+            value && (safeRegexTest(item.regex, value) || (alt && alt !== value && safeRegexTest(item.regex, alt)) || (enc && enc !== value && safeRegexTest(item.regex, enc)))) {
           if (collect) { collect(item); continue; } return item;
         }
       }
@@ -2811,25 +2813,33 @@
       return next;
     }
   };
-  function getRedirectSpecs(host) {
-    host = String(host || '').replace(/\.$/, '');
-    if (_redirectSpecsCache.has(host)) return _redirectSpecsCache.get(host);
+  function getRedirectSpecs(host, engine) {
+    host = String(host || '').replace(/\.$/, ''); const cacheKey = engine ? engine + '\u0000' + host : host;
+    if (_redirectSpecsCache.has(cacheKey)) return _redirectSpecsCache.get(cacheKey);
     let specs = null;
     try {
       const defs = getSelectors();
-      const ids = Object.keys(defs).sort((a, b) => ((defs[b] && defs[b].priority) || 0) - ((defs[a] && defs[a].priority) || 0));
-      for (const id of ids) {
-        const def = defs[id]; const redirects = def && def.link && def.link.redirects; if (!def || def.disabled || !Array.isArray(redirects) || !redirects.length) continue;
-        if (isEngineHost(id, host)) { specs = redirects.map(r => ({ ...r, engine: id })); break; }
+      if (engine && isEngineHost(engine, host)) {
+        try {
+          const link = resolvePageDef(engine).link;
+          if (link && Array.isArray(link.redirects) && link.redirects.length) specs = link.redirects.map(r => ({ ...r, engine }));
+        } catch (_) {}
+      }
+      if (!specs) {
+        const ids = Object.keys(defs).sort((a, b) => ((defs[b] && defs[b].priority) || 0) - ((defs[a] && defs[a].priority) || 0));
+        for (const id of ids) {
+          const def = defs[id]; const redirects = def && def.link && def.link.redirects; if (!def || def.disabled || !Array.isArray(redirects) || !redirects.length) continue;
+          if (isEngineHost(id, host)) { specs = redirects.map(r => ({ ...r, engine: id })); break; }
+        }
       }
     } catch (_) {}
-    _redirectSpecsCache.set(host, specs); return specs;
+    _redirectSpecsCache.set(cacheKey, specs); return specs;
   }
   function tryUrl(raw) { try { return new URL(String(raw)); } catch (_) { return null; } }
-  function decodeRedirectOnce(raw) {
+  function decodeRedirectOnce(raw, engine) {
     if (!raw) return '';
     const u = tryUrl(raw); if (!u) return '';
-    const specs = getRedirectSpecs(u.hostname); if (!specs) return '';
+    const specs = getRedirectSpecs(u.hostname, engine); if (!specs) return '';
     for (const spec of specs) {
       if (spec.path) { try { const p = spec.path; const re = p instanceof RegExp ? p : new RegExp(p && typeof p === 'object' && typeof p.source === 'string' ? p.source : p, p && typeof p === 'object' ? (p.flags || '') : ''); if (!re.test(u.pathname)) continue; } catch (_) { continue; } }
       const codec = REDIRECT_CODECS[spec.codec]; if (!codec) continue;
@@ -2847,10 +2857,10 @@
     }
     return '';
   }
-  function unwrapRedirectUrl(url) {
+  function unwrapRedirectUrl(url, engine) {
     const seen = new Set();
     for (let depth = 0; depth < 5 && url && !seen.has(url); depth++) {
-      seen.add(url); const next = decodeRedirectOnce(url);
+      seen.add(url); const next = decodeRedirectOnce(url, engine);
       if (!next || next === url) break; url = next;
     }
     return url;
@@ -2893,7 +2903,7 @@
       }
     }
     if (attr) { attr = String(attr); if (directProtocol && /^\/\/\S/.test(attr)) attr = directProtocol + ':' + attr; }
-    const unwrap = (u) => redirectsEnabled() ? unwrapRedirectUrl(u) : u;
+    const unwrap = (u) => redirectsEnabled() ? unwrapRedirectUrl(u, engine) : u;
     if (/^https?:\/\/\S+$/i.test(attr) && attr !== link.href) return unwrap(attr);
     return unwrap(link.href);
   }
