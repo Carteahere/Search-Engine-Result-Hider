@@ -4,23 +4,23 @@
 
 [中文](README.md) | [English](README.en.md)
 
-Implements complex-rule search result blocking on browsers that only support scripts installation.  
-Compatible with uBlacklist basic rules and subscription, supports URL matching, regular expression matching, title matching, result snippet matching, highlighting target results, whitelist matching, `@if` additional judgment conditions, blocking on images/videos search pages, and adding **custom engines**.
+Implements complex-rule search result blocking on browsers that only support script installation.  
+Compatible with uBlacklist basic rules and subscriptions, supports URL matching, regex matching, title matching, result snippet matching, highlighting target results, whitelist matching, `@if` additional judgment conditions, blocking on search pages such as images/videos, and adding **custom engines**.
 
 Currently supported search engines:  
-Bing, Google, Google Scholar, DuckDuckGo(&lite), Yandex, Brave, Ecosia, Startpage, Yahoo(&Japan), 360 Search, Sogou, Toutiao, Quark(&Shenma), GitHub Search, GreasyFork Search
+Bing, Google, Google Scholar, DuckDuckGo(&lite), Yandex, Brave, Ecosia, Startpage, Yahoo(&Japan), 360 Search, Sogou, Toutiao Search, Quark(&Shenma), GitHub Search, GreasyFork Search
 
 **Install:**  
 Open and install using a browser that supports Tampermonkey / Greasemonkey scripts.  
 Release Version [Github-AutoUpdate](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Search-Engine-Result-Hider_autoupdate.user.js) | [GreasyFork](https://greasyfork.org/en/scripts/552394) | [ScriptCat](https://scriptcat.org/zh-CN/script-show-page/8237)  
-Lite Version [Lite](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite.user.js) (Remove WebDAV Sync / Rule Subscription / Engine Subscription, no networking function) 
+Lite Version [Lite](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Lite.user.js) (Removing WebDAV sync / rule subscription / engine subscription, etc., no networking function).
 
-### 1.2 Features:
+### 1.2 Current Features:
 
 - Basic/advanced syntax matching results
 - Matched rule statistics and debug output
 - Import/export rules
-- Rule error detection
+- Rule syntax check
 - One-click blocking
 - Rule subscription
 - WebDAV sync
@@ -30,36 +30,37 @@ Lite Version [Lite](https://raw.githubusercontent.com/Carteahere/Search-Engine-R
   ┗ Custom highlight colors
 
 Partial setting instructions:
-1. Show Source: Enabled by default, when disabled, the rules that match the blocked results will not be shown on it.
-2. Folding mode: Disabled by default, when enabled, blocked results will show titles only.
-3. Bubble Action: The floating ball opens the panel on tap by default; when switched to `Show/Hide Results` mode, tapping shows/hides blocked results and long-pressing opens the panel, and clicking the block button on a blocked result again unblocks it.
+
+1. Collapse Mode: Disabled by default, when enabled, blocked results show titles only.
+2. Show Source: Enabled by default, when disabled, the matched rules are not shown on blocked results.
+3. Bubble Action: The floating ball opens the panel on tap by default; when switched to `Show/Hide Results`, tapping shows/hides blocked results, long-pressing opens the panel, clicking the block button of a blocked result again cancels blocking.
 
 ### 1.3 About WebDAV:
 
-1. Auto-sync runs in the background with a 3-way snapshot merge sync once every 1h; manual upload/download is a forced overwrite, and after the first upload the cloud file generates a `rules.txt.bak` backup file on every subsequent upload.
-2. The address only supports **https** and full paths, e.g., Nutstore `https://dav.jianguoyun.com/dav/your_folder/`; the folder is created automatically if the path does not exist, and after changing the file name such as `rules.txt` you need to manually upload and overwrite it once.
-3. Tampermonkey has no secure storage API, so passwords can only be saved with local obfuscation; for security, you must use a separate application password.
-4. To ensure the accuracy of timestamps during synchronization, an automatic access will be made to the timeapi / akamai / cloudflare networking timing points. If the access fails or the `Time Calibration` switch is turned off, the `date` timestamp from WebDAV will be used by default.
+1. Auto-sync runs in the background, performing a 3-way snapshot merge sync once every 1h, manual upload/download is a forced overwrite, the cloud file generates a `rules.txt.bak` backup file on every upload after the first upload.
+2. The address only supports **https** and full paths, such as Nutstore `https://dav.jianguoyun.com/dav/your_folder/`, the path folder is automatically created when it does not exist, after modifying the file name such as `rules.txt`, you need to manually upload and overwrite once.
+3. Tampermonkey has no secure storage API, passwords can only be obfuscated locally, for security you must use a separate application password.
+4. To ensure timestamp accuracy during sync, it will automatically access the timeapi/cloudflare networked time source once, if the access fails or the `Time Calibration` switch is turned off, the `date` timestamp of WebDAV is used by default.
 
 ### 1.4 About Subscriptions:
 
-1. Rule subscription updates also run in the background, fetching once every 12h. It supports `UTF-8` plain text remote links such as [rules.txt](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt), and subscription rules are appended after local rules.
-2. Compatible uBlacklist subscription `.yaml` / `.txt`, do not support `##` / `#@#` uBO rules, they are filtered out automatically on subscription import.
-3. The search engine subscription supports `.js` / `.json`, with [Selectors.js](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js) being built-in by default and the engines list being automatically updated.
-4. Subscription/synchronization requires cross-origin request permissions; if a permission prompt appears, select `Always allow all`.
+1. Rule subscription updates also run in the background, fetching once every 12h, supports `UTF-8` plain text such as [rules.txt](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt), subscription rules are appended after local rules for application.
+2. Supports uBlacklist rule subscriptions and the `YAML frontmatter` format, does not support uBO rules such as `##` / `#@#`, they are automatically filtered when imported through a subscription.
+3. The search engine subscription has [Selectors.js](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js) built in by default and automatically updates the engines list.
+4. Subscription/sync requires cross-origin request permission, if a permission request popup appears, select `Always allow all`.
 
 ### 1.5 Other:
 
-1. Redirections will be automatically removed for some search engines, and can be toggled on or off in the settings.
-2. Rule priority: Local whitelist > Local blacklist > Subscription whitelist > Subscription blacklist
-3. ⬆️/⬇️ jump to the previous/next comment line; when on the first line or first comment line, ⬆️ jumps to the last line. Comment lines cannot be duplicated, or content under the same comment line will be merged during synchronization.
-4. To avoid cross-page data conflicts, do not open panel editing rules on multiple tabs at the same time, and pause synchronization when opening the panel.
+1. Redirects are automatically removed for some search engines, can be toggled in the settings.
+2. Rule priority: Local whitelist > Local blacklist > Subscription whitelist > Subscription blacklist.
+3. ⬆️/⬇️ functions move to the previous/next comment line, on the first line or the first comment line, ⬆️ jumps to the last line, comment lines cannot be repeated, otherwise the content under the same comment line will be merged during synchronization.
+4. To avoid cross-page data conflicts, do not open the panel to edit rules in multiple tabs at the same time, pause sync when opening the panel.
 
 ## Docs
 
-For detailed rule syntax, see [Rule-Explanation](Rule-Explanation.en.md)
+For specific rule syntax, see [Rule-Explanation](Rule-Explanation.en.md)
 
-For tutorials on custom engines , see [Custom-Engine](Custom-Engine.en.md)
+For the tutorial on adding custom engines, see [Custom-Engine](Custom-Engine.en.md)
 
 For debug mode and rule self-check error instructions, see [Debug](Debug.en.md)
 
@@ -67,15 +68,15 @@ Simple rule examples:
 
 | Rule | Example | Description |
 | --- | --- | --- |
-| URL | `*://*.example.com/*` | block `example.com` |
-| URL | `*://*.例子.com/*` | Equivalent blocking `*://*.xn--fsqu00a.com` |
-| regex | `/example\.(com\|net)/i` | block `example.com` and `example.net` |
-| title | `title/.*example.*/i` | block results whose title contains `example` |
-| snippet | `text/.*example.*/i` | block results whose page description content (snippet) contains `example` |
-| highlight | `@1*://*.example.com/*` | add a colored border to `example.com` results |
-| whitelist | `@*://*.example.com/*` | allow `example.com` |
-| `@if` condition | `*://*.example.com/* @if(title *= "keyword")` | block `example.com` results whose title contains `keyword` |
-| multiple `@if` conditions | `*://*.example.com/* @if((title *= "a" \| title *= "b") & !(url *= "c"))` | block `example.com` results whose title contains `a` or `b` and whose URL does not contain `c` |
+| URL | `*://*.example.com/*` | Block `example.com` |
+| URL | `*://*.例子.com/*` | Equivalent to blocking `*://*.xn--fsqu00a.com` |
+| regex | `/example\.(com\|net)/i` | Block `example.com` and `example.net` |
+| title | `title/.*example.*/i` | Block results whose title contains `example` |
+| snippet | `text/.*example.*/i` | Block results whose page description content (snippet) contains `example` |
+| highlight | `@1*://*.example.com/*` | Add a highlighted border to `example.com` |
+| whitelist | `@*://*.example.com/*` | Allow `example.com` |
+| `@if` condition | `*://*.example.com/* @if(title *= "example")` | Block `example.com` results whose title contains `example` |
+| multiple `@if` conditions | `*://*.example.com/* @if((title *= "a" \| title *= "b") & !(url *= "c"))` | Block `example.com` results whose title contains `a` or `b` and whose URL does not contain `c` |
 
 ## Screenshots
 

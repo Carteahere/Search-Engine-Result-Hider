@@ -1,92 +1,92 @@
 ## Custom Engine
 
-Open the edit panel through the script manager menu `🖋️ Custom Engine` (JS format, same structure as the built-in [Selectors.js](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js)).  
-Not limited to search engines; in theory, any site page that contains containers can be added.
+Open the edit panel through the script manager menu `🖋️ Custom Engine`, `js`/`json` format, with the same structure as the built-in engine [Selectors.js](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js).  
+Not limited to search engines, in theory, any site page that contains containers can be added.
 
 **Built-in engine IDs:**
 
 `google`, `google_scholar`, `bing`, `duckduckgo`, `duckduckgo_lite`, `yandex`, `brave`, `ecosia`, `startpage`, `yahoo`, `yahoo_japan`, `so360`, `sogou`, `toutiao`, `quark`, `github`, `greasyfork`
 
-In `@if($site = "engine")`, by default `yahoo-japan` = `yahoo_japan`, `ddg` = `duckduckgo` = `duckduckgo_lite`; custom aliases can be defined in the `site` field
+In `@if($site = "engine")`, by default `yahoo-japan` = `yahoo_japan`, `ddg` = `duckduckgo` = `duckduckgo_lite`, and custom aliases can be defined in the `site` field.
 
 ### 1.1 Selector Structure:
 
-In the script, an engine's selector structure is a group of fields wrapped in `engine_id: {...}`. Engine IDs allow letters/numbers/`_`/`-`, and `other` is a reserved key that cannot be used. When a custom engine shares an ID with a built-in engine or their sites overlap, it overrides the built-in selector. Priority: custom engines > subscription engines > built-in engines.
+In the script, an engine's selector structure is a group of fields contained in `engine_id: {...}`, engine IDs allow letters/numbers/`_`/`-`, `other` is a reserved key that cannot be written, when a custom engine and a built-in engine have the same ID or their sites overlap, the built-in selector is overridden, priority: custom engines > subscription engines > built-in engines.
 
 ### 1.1.1 Basic Structure:
 
 | Field | Type | Description | Required |
 | --- | --- | --- | --- |
-| `matches` | string \| string[] | Matched against the whole URL; at least one of this and `includeRegex` must exist | ✔ |
-| `excludeMatches` | string \| string[] | Excluded from the whole URL; when it hits, blocking does not take effect and matching falls back by priority | |
-| `includeRegex` | regex | URL matching regex; at least one of this and `matches` must exist | ✔ |
-| `excludeRegex` | regex | URL exclusion regex; when it hits, blocking does not take effect and matching falls back by priority | |
-| `root` | string \| array | Result container selector; command or CSS selector; the **One-click Block** button relies on the container selector to locate results | ✔ |
-| `url` | command \| string \| string[] | Result link selector; command array or CSS selector, default `a[href]` | ✔ |
-| `title` | command \| string \| string[] | Title selector; command array or CSS selector | |
-| `snippet` | command \| string \| string[] | Snippet selector; command array or CSS selector | |
-| `disabled` | boolean | Engine enable switch; `true` disables the engine | |
-| `button` | boolean \| object \| array | Display toggle or position of the **One-click Block** button; `false` hides the button on that engine; for custom relative positions see **1.2.2** |
+| `matches` | string \| string[] | Whole-URL matching, at least one of this and `includeRegex` must exist | ✔ |
+| `excludeMatches` | string \| string[] | Whole-URL exclusion, when it hits, blocking does not take effect and matching falls back by priority | |
+| `includeRegex` | regex | Whole-URL matching regex, at least one of this and `matches` must exist | ✔ |
+| `excludeRegex` | regex | Whole-URL exclusion regex, when it hits, blocking does not take effect and matching falls back by priority | |
+| `root` | string \| array | Result container selector, can be a command or CSS selector, the **One-click Block** button relies on the container selector for positioning | ✔ |
+| `url` | command \| string \| string[] | Result link selector, can be a command array or CSS selector, default `a[href]` | ✔ |
+| `title` | command \| string \| string[] | Result title selector, can be a command array or CSS selector | |
+| `snippet` | command \| string \| string[] | Result snippet selector, can be a command array or CSS selector | |
+| `disabled` | boolean | Engine enable switch, `true` disables the engine | |
+| `button` | boolean \| object \| array | Display switch or position of the **One-click Block** button, `false` hides the button on that engine, for custom relative positions see **1.2.2** | |
 
 The legacy forms `containers`, `links`, `titles`, and `match` map to `root`, `url`, `title`, and `includeRegex` respectively.
 
-Commands available for `root`:
+Commands that can be written for `root`:
 
-1. `['upward', levels, innerSelector]`, `['upward', selector, innerSelector]` — walk up to the nearest matching ancestor.
-2. `['selector', selector]` — for cases where the result container is the parent of the inner element.
+1. `['upward', levels, innerSelector]`, `['upward', selector, innerSelector]`, walk up to the nearest matching ancestor.
+2. `['selector', selector]`, for cases where the result container is the parent of the inner element.
 
 ### 1.1.2 Advanced Structure:
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `name` | string | For remarks only; not read by the script |
-| `priority` | number | Engine matching priority; the larger the value, the higher the priority |
-| `delay` | boolean \| number | Script startup delay; when filled with a number, the unit is `ms`; `true` or a missing field executes blocking immediately after the page finishes loading |
-| `preserveSpace` | boolean \| number \| string \| object | Reserve blank page space to keep pagination working after all results are blocked; `true` defaults to `60vh`, unit `px`; object form `{ height, container }` where `container` is the placeholder selector |
-| `extraSelector` | string \| string[] | Relative CSS selector; starting from the result container, selects associated elements. When written as a single string containing top-level commas, each item starts with `&` |
-| `site` | string \| string[] | Engine aliases, usable in `$site`; multiple aliases can be written, separated by commas |
-| `command` | — | A group of multi-purpose commands of the script; see the **`command` group** below for details |
-| `pages` | — | Search type category definitions; supports object or array form, the object key name is the `$category`; see **Search type substructure** below for details |
+| `name` | string | Only used for engine remarks, useless in the script |
+| `priority` | number | Engine matching priority, the larger the value, the higher the priority |
+| `delay` | boolean \| number | Script startup delay, when filled with a number, the unit is `ms`, `true` or a missing field executes blocking immediately after the page finishes loading |
+| `preserveSpace` | boolean \| number \| string \| object | Page blank space placeholder, to avoid being unable to trigger pagination after all results on the page are blocked, when filled with a number, the unit is `px`, `true` defaults to `60vh`, object form `{ height, container }`, `container` is the placeholder selector |
+| `extraSelector` | string \| string[] | CSS relative selector, starting from the result container to select associated elements, when written as a single string containing a top-level comma, each item starts with `&` |
+| `site` | string \| string[] | Engine aliases, can be used for `$site`, multiple aliases can be written, separated by commas |
+| `command` | — | A group of multi-function commands of the script, see the **`command` group** below for details |
+| `pages` | — | Search type category definitions, supports object or array form, the object key name is the `$category`, see the **Search type substructure** below for details |
 
 **`command` group:**
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `link.redirects` | object[] | Redirect removal logic; whether it is enabled is decided by the `Remove redirects` toggle |
+| `link.redirects` | object[] | Redirect removal logic, whether it is enabled is decided by the `Remove redirects` switch in settings |
 | `link.directAttrs` | string \| string[] | During redirect removal, which attribute to read first |
-| `link.directScope` | string \| string[] | During redirect removal, the scope in which to find that attribute |
-| `link.directProtocol` | string | During redirect removal, the scheme prepended when a value read from `directAttrs` starts with `//` |
+| `link.directScope` | string \| string[] | During redirect removal, within which scope to find that attribute |
+| `link.directProtocol` | string | During redirect removal, the protocol filled in when `directAttrs` reads a value starting with `//` |
 | `skip` | string | Skip the specified result containers |
-| `group` | object | Hide the parent structure after all results in the same group are blocked; supports `container`, `members`, `hideAttr` |
-| `grid` | object | Hide empty grid slots on the image search page; supports `anchor`, `cell`, `items`, `has`, `deepest`, `hideAttr` |
-| `dedupeBy` | string | Deduplicate results by the elements selected by this CSS selector, avoiding duplicates |
-| `blockedCss` | string[] | Engine-specific styles injected with the script when this engine matches; used for the engine's blocked gray background/layout fixes; can be declared at both the top level and `pages` categories; a category-level declaration overrides the engine-level one |
+| `group` | object | Hide the parent structure after all results in the same group are blocked, supports `container`, `members`, `hideAttr` |
+| `grid` | object | Hide blank grid slots on the image search page, supports `anchor`, `cell`, `items`, `has`, `deepest`, `hideAttr` |
+| `dedupeBy` | string | Deduplicate results by the elements selected by this CSS selector, to avoid duplicates |
+| `blockedCss` | string[] | Engine-specific styles, injected with the script when that engine matches, used for the engine's blocked gray background/layout fixes, can be declared at both the top level and in `pages` categories, the category level overrides the engine level |
 
-**Fields supported by each `link.redirects` item:**
+**Fields supported by `link.redirects`:**
 
 | Field | Description | Example |
 | --- | --- | --- |
 | `path` | URL path matching regex | — |
 | `params` | Query parameter names tried in order | — |
-| `pathValue` | Capture regex matched against the URL path; capture group 1 is the encoded target | yahoo's `RU=` |
-| `hrefSuffix` | Capture regex matched against the whole URL; capture group 1 is the encoded target | yahoo's `/*-` suffix |
-| `codec` | Decoder; built-in `url`, `base64url`, `pattern` | — |
+| `pathValue` | Capture regex for URL path matching, the 1st capture group is the encoded target | yahoo's `RU=` |
+| `hrefSuffix` | Capture regex for whole-URL matching, the 1st capture group is the encoded target | yahoo's `/*-` suffix |
+| `codec` | Decoder, built-in `url`, `base64url`, `pattern` | — |
 | `stripPrefix` | Prefix regex stripped before `base64url` decoding | bing's `/^a[01]/i` |
-| `chain` | When the unwrapped URL is still an engine redirect link, unwraps one more level via the specified query parameter; when `hostSelf` is omitted the target host is not restricted | `{ hostSelf: true, param: 'h5_url' }` |
+| `chain` | When the URL is still an engine redirect link after unwrapping, unwrap one more level by the specified query parameter, when `hostSelf` is omitted, the target domain is not restricted | `{ hostSelf: true, param: 'h5_url' }` |
 
 **Search type substructure:**
 
-Similar to SERPINFO's `pages`, this defines matching and selectors separately for specific search types such as images/videos; the whole URL is matched in declaration order, the first category that hits is adopted, and when nothing hits or no category is declared, `web` is the default. `pages` supports both object and array form.
+Similar to SERPINFO's `pages`, it defines matching and selectors separately for specific search types such as images/videos, matches the whole URL in declaration order, adopts that category when it hits, defaults to `web` when nothing hits or no category is declared, `pages` supports object or array form.
 
 | Field | Type | Description |
 | --- | --- | --- |
-| (key name) | string | Category name, i.e. the `$category`; letters/numbers/`_`/`-` are allowed |
+| (key name) | string | Category name, i.e. the `$category`, letters/numbers/`_`/`-` are allowed |
 | `matches`/`excludeMatches` | string \| string[] | Whole-URL matching/exclusion, same as the basic structure |
 | `includeRegex`/`excludeRegex` | regex | URL regex matching/exclusion, same as the basic structure |
-| `commonProps` | object | `$site` / `$category` are derived automatically from the engine ID and category name; write them only when overriding is needed |
-| (structure fields) | — | May write `root`, `url`, `title`, `snippet`, `button`, `extraSelector`, `command`, etc.; unspecified fields inherit from the top level, and `blockedCss` overrides the top-level rule |
+| `commonProps` | object | `$site` / `$category` are automatically derived from the engine ID and category name, only written when an override is needed |
+| (structure fields) | — | Can write `root`, `url`, `title`, `snippet`, `button`, `extraSelector`, `command`, etc., unwritten fields inherit the top-level definitions, `blockedCss` overrides the top-level rule |
 
-Object form: the key name is the `$category`
+Object form: the key name is the `$category`.
 
 ```javascript
 pages: {
@@ -95,7 +95,7 @@ pages: {
 }
 ```
 
-Array form: each item uses `name` as its key and derives `$category`; a `commonProps.$category` override can be written; items lacking both `name` and `$category` are ignored
+Array form: each item uses `name` as the key and derives `$category`, can write `commonProps.$category` to override, items lacking `name` and without `$category` are ignored.
 
 ```javascript
 pages: [
@@ -110,25 +110,25 @@ pages: [
 
 | Command | Description |
 | --- | --- |
-| `['attribute', name, selector?]` | Read an element attribute; when the element is omitted, the result container itself is used |
-| `['property', name, selector?]` | Read an element JS property such as `href`, `textContent`, `src`; when the element is omitted, the result container itself is used |
-| `['text', selector?]` | Read element text |
+| `['attribute', attributeName, elementSelector?]` | Get the element attribute, when the element is omitted, it is the result container itself |
+| `['property', attributeName, elementSelector?]` | Get the element JS property, such as `href`, `textContent`, `src`, when the element is omitted, it is the result container itself |
+| `['text', elementSelector?]` | Get the element text |
 | `['const', value]` | Return a fixed string value |
-| `['jsonParse', command]` | Parse the value as JSON; objects pass through unchanged |
-| `['jsonPath', path, command]` | Parse the value as JSON and read a value by path; the path may be empty |
-| `['queryParam', param, command]` | Read the value of a URL query parameter from the value |
-| `['urlDecode', command]` | URI-decode the value once (`decodeURIComponent`); returns empty on failure |
-| `['base64Decode', command]` | Decode the value from base64/base64url into text |
-| `['prefix', text, command]` | Prepend a fixed prefix to the value, e.g. `['prefix', 'https://', command]` |
-| `['normalizeUrl', command]` | Normalize to an absolute URL |
-| `['rejectEngineHost', command]` | Return empty when the value is the search engine's own host |
-| `['rejectOpaqueRedirect', command]` | Drop search engine redirect links that cannot be unwrapped |
-| `['or', [commands...], selector?]` | Try in order and return the first non-empty result; the third argument can limit the element read from |
-| `['regexInclude' / 'regexExclude', regex, command]` | Keep the value when the regex matches / does not match |
-| `['regexSubstitute', regex, replacement, command]` | Regex replacement |
-| `['base64Url', attribute, selector?]` | Decode a URL from the base64 path fragment in the given attribute |
+| `['jsonParse', valueCommand]` | Parse the value as JSON, return it as is when the value is already an object |
+| `['jsonPath', path, valueCommand]` | Parse the value as JSON, then get the value by path, the path can be empty |
+| `['queryParam', param, valueCommand]` | Get the value from the URL query parameter in the value |
+| `['urlDecode', valueCommand]` | URI-decode the value once (`decodeURIComponent`), return empty on failure |
+| `['base64Decode', valueCommand]` | Decode the value as base64/base64url into text |
+| `['prefix', prefix, valueCommand]` | Concatenate a fixed prefix before the value, e.g. `['prefix', 'https://', valueCommand]` |
+| `['normalizeUrl', valueCommand]` | Normalize to an absolute URL |
+| `['rejectEngineHost', valueCommand]` | Return empty when the value is the search engine's own domain |
+| `['rejectOpaqueRedirect', valueCommand]` | Discard search engine redirect links that cannot be unwrapped |
+| `['or', [commands...], elementSelector?]` | Try in order, return the first non-empty result, the 3rd parameter can limit the value element |
+| `['regexInclude' / 'regexExclude', regex, valueCommand]` | Keep when the regex matches/does not match |
+| `['regexSubstitute', regex, replacement, valueCommand]` | Regex replacement |
+| `['base64Url', attributeName, elementSelector?]` | Decode the URL from the base64 path fragment of the specified attribute |
 
-Element arguments also support `['upward', levels, elementCommand?]`, `['upward', selector, elementCommand?]`, `['selector', selector, elementCommand?]`.
+Element parameters support `['upward', levels, elementCommand?]`, `['upward', selector, elementCommand?]`, `['selector', selector, elementCommand?]`.
 
 ### 1.2.2 Block Button:
 
@@ -137,19 +137,19 @@ Button relative position format:
 | Type | Description |
 | --- | --- |
 | Object form | `{ inset: { top, right, bottom, left }, zIndex, style, mount, scope, require, requireSelf, exclude }` |
-| Array form | `['inset', { top, right, bottom, left, zIndex }, mount?]`; the 3rd argument is equivalent to `mount` |
+| Array form | `['inset', { top, right, bottom, left, zIndex }, mount?]`, the 3rd parameter is equivalent to `mount` |
 
 Fields of the `button` object:
 
 | Field | Description |
 | --- | --- |
-| `inset` | Button offset object `{ top, right, bottom, left }`; unwritten `top`/`right` fall back to 10px/35px |
+| `inset` | Button offset position object `{ top, right, bottom, left }`, unwritten `top`/`right` fall back to 10px/35px by default |
 | `zIndex` | The button's `z-index` |
-| `mount` | Button mount target selector or element command; when it matches, the button is mounted on that element inside the result container, otherwise on the result container itself |
-| `scope` | Button visibility condition; the result container must be inside an element matching this selector |
-| `require` | Button visibility condition; the result container must contain an element matching this selector |
-| `requireSelf` | Used with `require`; when the result container itself matches this selector, `require` is also considered satisfied; when unset, `require` only checks inside the container |
-| `exclude` | Button disabling condition; the button does not appear when the result container is inside an element matching this selector; appended after the default exclusion list (`header`, navigation, etc.) |
+| `mount` | Button mount target selector or element command, when it hits, the button mounts on that element inside the result container, when it does not hit, it still mounts on the result container |
+| `scope` | Button appearance condition, the result container must be inside an element matching this selector |
+| `require` | Button appearance condition, an element matching this selector must exist inside the result container |
+| `requireSelf` | Used with `require`, when the result container itself matches this selector, it is also considered to satisfy `require`, when not written, `require` only checks inside the container |
+| `exclude` | Button disable condition, when the result container is inside an element matching this selector, the button does not appear, appended after the default exclusion list (`header`, navigation, etc.) |
 
 ### 1.3 Engine Examples:
 
@@ -198,12 +198,12 @@ advanced_engine: {
 
 **Notes:**
 
-1. Custom engine IDs support `$site = "Engine ID"` and can be used in rules such as block/highlight/whitelist; none of the selector fields support pseudo-elements such as `::after`.
-2. On save, only keys that differ from the built-ins are stored; unmodified built-ins are not written to storage. Changing a value back to the built-in one, or using the `Reset` button, restores following script updates. When no selector matches, it falls back to `other` (empty) by default.
-3. When adding a non-engine site with search functionality (in-site search), it is recommended to write the rule so that it applies only to that site. For example, on `m.example.com`, write the rule as `title/.*keyword.*/i @if($site = "example")`, i.e. the target site is the current non-engine site, which avoids blocking results containing the same keyword on external sites.
+1. Custom engine IDs support `$site = "Engine ID"` and can be used in rules such as blocking/highlighting/whitelisting, none of the selector fields support pseudo-elements, such as `::after`.
+2. On save, only keys that differ from the built-ins are stored, unmodified built-ins are not written to storage, changing back to the built-in value or the `Reset` button restores following script updates, when no selector matches, it falls back to an empty `other` by default.
+3. When adding a non-engine site with search functionality (i.e. in-site search), it is recommended to write the rule to be used only on that site, for example on `m.example.com`, write the rule as `title/.*keyword.*/i @if($site = "example")` etc., i.e. the target site is the current non-engine site, to avoid results containing the same keyword also being blocked on external sites.
 
 **Auto-analysis:**
 
-1. Conversion script: Install `node.js`, download [auto_convert.cmd](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/auto_convert.cmd) (Windows) or [auto_convert.sh](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/auto_convert.sh) (Android / Linux), and run it in the same directory as the target page's `.mht` / `.mhtml` offline file. This conversion script performs basic container structure analysis and generates the corresponding `.js` selector file.
-2. AI generation: If the conversion script cannot recognize the structure and you do not know how to capture the selectors, you can send the custom engine documentation and the `.mht` / `.mhtml` / `.html` offline file to AI to analyze and generate the corresponding selector structure.
-3. The container naming of the mobile/desktop/regional sites of the same website may differ, so save separate offline files for analysis and fill in multiple selectors.
+1. Conversion script: install `node.js`, download [auto_convert.cmd](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/auto_convert.cmd) (Windows) or [auto_convert.sh](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/auto_convert.sh) (Android / Linux), run it in the same directory as the target page's `.mht` / `.mhtml` offline file, this conversion script can perform basic container structure analysis and generate the corresponding `.js` selector file.
+2. AI generation: if the conversion script cannot recognize it and you also do not know how to capture selectors, you can send the custom engine documentation and the `.mht` / `.mhtml` / `.html` offline file to AI to analyze and generate the corresponding selector structure.
+3. The container naming of mobile/desktop/regional sites of the same website may differ, you need to save offline files separately for analysis and fill in multiple selectors.

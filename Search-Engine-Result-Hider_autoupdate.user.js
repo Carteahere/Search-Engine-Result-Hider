@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.9.1
+// @version      8.9.2
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -39,7 +39,7 @@
 
   // 存储配置
   const CONFIG_KEY = 'searchfilter_blocker', WEBDAV_KEY = 'searchfilter_webdav', SELECTORS_KEY = 'searchfilter_selectors', EXPORT_PICK_KEY = 'searchfilter_export_pick';
-  const SUBSCRIPTION_URL_KEY = 'searchfilter_subscription_url', SUBSCRIPTION_LAST_UPDATE_KEY = 'searchfilter_subscription_last_update';
+  const SUBSCRIPTION_URL_KEY = 'searchfilter_subscription_url', SUBSCRIPTION_LAST_UPDATE_KEY = 'searchfilter_subscription_last_update', SUB_VERSION_KEY = 'searchfilter_sub_version';
   const SUBSCRIPTION_RULES_KEY = 'searchfilter_subscription_rules', SUBSCRIPTIONS_KEY = 'searchfilter_subscriptions';
   const WEBDAV_LAST_SYNC_KEY = 'searchfilter_webdav_last_sync', LOCAL_LAST_MODIFIED_KEY = 'searchfilter_local_last_modified', WEBDAV_DIRTY_KEY = 'searchfilter_webdav_dirty', WEBDAV_RETRY_COUNT_KEY = 'searchfilter_webdav_retry_count';
   const SETTINGS_LAST_MODIFIED_KEY = 'searchfilter_settings_last_modified', SELECTORS_LAST_MODIFIED_KEY = 'searchfilter_selectors_last_modified', SETTINGS_TIME_MIGRATED_KEY = 'searchfilter_settings_time_migrated';
@@ -2850,9 +2850,10 @@
     const scanPatterns = (patterns, value, filter, foldUrl, collect) => {
       if (!value) return null;
       const alt = foldUrl ? decodeUrlForMatch(value) : '';
+      const enc = foldUrl ? encodeNonAscii(value) : '';
       for (const item of patterns) {
         if (filter && !filter(item)) continue;
-        if (!(safeRegexTest(item.regex, value) || (alt && alt !== value && safeRegexTest(item.regex, alt)))) continue;
+        if (!(safeRegexTest(item.regex, value) || (alt && alt !== value && safeRegexTest(item.regex, alt)) || (enc && enc !== value && safeRegexTest(item.regex, enc)))) continue;
         if (collect) { collect(item); continue; } return item;
       }
       return null;
@@ -2878,8 +2879,9 @@
         }
         const value = item.type === 'title' ? title : item.type === 'text' ? snippet : url;
         const alt = (item.type === 'url' || item.type === 'regex') && value ? decodeUrlForMatch(value) : '';
+        const enc = (item.type === 'url' || item.type === 'regex') && value ? encodeNonAscii(value) : '';
         if ((item.type === 'url' || item.type === 'regex' || item.type === 'title' || item.type === 'text') &&
-            value && (safeRegexTest(item.regex, value) || (alt && alt !== value && safeRegexTest(item.regex, alt)))) {
+            value && (safeRegexTest(item.regex, value) || (alt && alt !== value && safeRegexTest(item.regex, alt)) || (enc && enc !== value && safeRegexTest(item.regex, enc)))) {
           if (collect) { collect(item); continue; } return item;
         }
       }
@@ -2979,25 +2981,33 @@
       return next;
     }
   };
-  function getRedirectSpecs(host) {
-    host = String(host || '').replace(/\.$/, '');
-    if (_redirectSpecsCache.has(host)) return _redirectSpecsCache.get(host);
+  function getRedirectSpecs(host, engine) {
+    host = String(host || '').replace(/\.$/, ''); const cacheKey = engine ? engine + '\u0000' + host : host;
+    if (_redirectSpecsCache.has(cacheKey)) return _redirectSpecsCache.get(cacheKey);
     let specs = null;
     try {
       const defs = getSelectors();
-      const ids = Object.keys(defs).sort((a, b) => ((defs[b] && defs[b].priority) || 0) - ((defs[a] && defs[a].priority) || 0));
-      for (const id of ids) {
-        const def = defs[id]; const redirects = def && def.link && def.link.redirects; if (!def || def.disabled || !Array.isArray(redirects) || !redirects.length) continue;
-        if (isEngineHost(id, host)) { specs = redirects.map(r => ({ ...r, engine: id })); break; }
+      if (engine && isEngineHost(engine, host)) {
+        try {
+          const link = resolvePageDef(engine).link;
+          if (link && Array.isArray(link.redirects) && link.redirects.length) specs = link.redirects.map(r => ({ ...r, engine }));
+        } catch (_) {}
+      }
+      if (!specs) {
+        const ids = Object.keys(defs).sort((a, b) => ((defs[b] && defs[b].priority) || 0) - ((defs[a] && defs[a].priority) || 0));
+        for (const id of ids) {
+          const def = defs[id]; const redirects = def && def.link && def.link.redirects; if (!def || def.disabled || !Array.isArray(redirects) || !redirects.length) continue;
+          if (isEngineHost(id, host)) { specs = redirects.map(r => ({ ...r, engine: id })); break; }
+        }
       }
     } catch (_) {}
-    _redirectSpecsCache.set(host, specs); return specs;
+    _redirectSpecsCache.set(cacheKey, specs); return specs;
   }
   function tryUrl(raw) { try { return new URL(String(raw)); } catch (_) { return null; } }
-  function decodeRedirectOnce(raw) {
+  function decodeRedirectOnce(raw, engine) {
     if (!raw) return '';
     const u = tryUrl(raw); if (!u) return '';
-    const specs = getRedirectSpecs(u.hostname); if (!specs) return '';
+    const specs = getRedirectSpecs(u.hostname, engine); if (!specs) return '';
     for (const spec of specs) {
       if (spec.path) { try { const p = spec.path; const re = p instanceof RegExp ? p : new RegExp(p && typeof p === 'object' && typeof p.source === 'string' ? p.source : p, p && typeof p === 'object' ? (p.flags || '') : ''); if (!re.test(u.pathname)) continue; } catch (_) { continue; } }
       const codec = REDIRECT_CODECS[spec.codec]; if (!codec) continue;
@@ -3015,10 +3025,10 @@
     }
     return '';
   }
-  function unwrapRedirectUrl(url) {
+  function unwrapRedirectUrl(url, engine) {
     const seen = new Set();
     for (let depth = 0; depth < 5 && url && !seen.has(url); depth++) {
-      seen.add(url); const next = decodeRedirectOnce(url);
+      seen.add(url); const next = decodeRedirectOnce(url, engine);
       if (!next || next === url) break; url = next;
     }
     return url;
@@ -3061,7 +3071,7 @@
       }
     }
     if (attr) { attr = String(attr); if (directProtocol && /^\/\/\S/.test(attr)) attr = directProtocol + ':' + attr; }
-    const unwrap = (u) => redirectsEnabled() ? unwrapRedirectUrl(u) : u;
+    const unwrap = (u) => redirectsEnabled() ? unwrapRedirectUrl(u, engine) : u;
     if (/^https?:\/\/\S+$/i.test(attr) && attr !== link.href) return unwrap(attr);
     return unwrap(link.href);
   }
@@ -6057,6 +6067,13 @@
     if (typeof GM_deleteValue === 'function') { GM_deleteValue(SUBSCRIPTION_URL_KEY); GM_deleteValue(SUBSCRIPTION_RULES_KEY); GM_deleteValue(SUBSCRIPTION_LAST_UPDATE_KEY); }
   }
 
+  function refreshSubscriptionsOnVersionChange() {
+    if (GM_getValue(SUB_VERSION_KEY) === GM_info.script.version) return;
+    GM_setValue(SUB_VERSION_KEY, GM_info.script.version);
+    saveSubscriptions(getSubscriptions().map(s => ({ ...s, lastUpdate: 0, lastAttempt: 0 })));
+    saveEngineSubscriptions(getEngineSubscriptions().map(s => ({ ...s, lastUpdate: 0, lastAttempt: 0 })));
+  }
+
   function getSubscriptions() {
     const value = GM_getValue(SUBSCRIPTIONS_KEY, []); if (!Array.isArray(value)) return []; return value.filter(s => s && typeof s === 'object' && !Array.isArray(s) && typeof s.url === 'string');
   }
@@ -6335,9 +6352,6 @@
         } catch (_) {
           return 0;
         }
-      }),
-      queryNetworkTimeEndpoint('https://time.akamai.com/?ms', (resp) => {
-        const sec = parseFloat(String(resp.responseText || '').trim()); return sec > 0 ? Math.round(sec * 1000) : 0;
       }),
       queryNetworkTimeEndpoint('https://cloudflare.com/cdn-cgi/trace', (resp) => {
         const m = /(?:^|\n)ts=([0-9.]+)(?:\n|$)/.exec(String(resp.responseText || '')); const sec = m ? parseFloat(m[1]) : 0; return sec > 0 ? Math.round(sec * 1000) : 0;
@@ -6899,7 +6913,7 @@
         continue;
       }
       if (!sectionStack.length) {
-        if (name === undefined) { const nm = line.match(/^\s*name\s*:\s*(.+?)\s*$/); if (nm) name = stripQ(nm[1]); }
+        if (name === undefined) { const nm = line.match(/^\s*(?:name|title)\s*:\s*(.+?)\s*$/i); if (nm) name = stripQ(nm[1]); }
         continue;
       }
       const s = line.trim(); if (!s || s.startsWith('#')) continue;
@@ -6929,7 +6943,7 @@
     if (!isYaml) {
       for (const line of lines) {
         const s = line.trim(); if (!s || s.startsWith('#')) continue;
-        if (/^(?:name|rules|blacklist|whitelist|matches)\s*:/i.test(s)) {
+        if (/^(?:name|title|rules|blacklist|whitelist|matches)\s*:/i.test(s)) {
           isYaml = true; break;
         }
         if (validateRule(s)) break;
@@ -7016,7 +7030,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       autoUpdateKey: 'subscriptionAutoUpdate',
       get: getSubscriptions, save: saveSubscriptions, signature: subscriptionsSignature,
       countOf: sub => (sub && Array.isArray(sub.rules) ? sub.rules.length : 0),
-      rowLabel: (sub, index) => `${t('subscription')}${index + 1}`,
+      rowLabel: (sub, index) => ((sub && sub.name) || `${t('subscription')}${index + 1}`),
       importOne: performSubscriptionForUrl,
       afterChange: () => { markLocalModifiedTime(SETTINGS_LAST_MODIFIED_KEY); forceReprocessAll(); triggerWebDAVSyncDelayed(5000); }
     },
@@ -7176,7 +7190,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
         row.dataset.originalUrl = currentUrl; const toggle = row.querySelector('.serh-subscription-enable-toggle');
         if (toggle) row.dataset.originalEnabled = String(toggle.checked);
       });
-      if (isEngine) reindexRows();
+      reindexRows();
       if (changed) spec.afterChange();
       return true;
     }
@@ -7234,7 +7248,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
           msgDiv.textContent = t('subImportFailed'); msgDiv.className = 'serh-subscription-status-message error';
         }
       }
-      subscriptions = spec.get(); if (isEngine) reindexRows(); forceReprocessAll();
+      subscriptions = spec.get(); reindexRows(); forceReprocessAll();
       if (isEngine) {
         if (total > 0) showToast(t('subscriptionSuccess', { count: total }), 'success');
         else if (!failed) showToast(t('saved'), 'success');
@@ -7861,7 +7875,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     });
   }
 
-  function loadExportPick() { const raw = GM_getValue(EXPORT_PICK_KEY, null); const out = { rules: true, subscription: false, engine: false, settings: false }; if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const k of Object.keys(out)) if (typeof raw[k] === 'boolean') out[k] = raw[k]; return out; }
+  function loadExportPick() { const raw = GM_getValue(EXPORT_PICK_KEY, null); const out = { rules: true, subscription: false, engine: false, settings: false }; if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const k of Object.keys(out)) if (typeof raw[k] === 'boolean') out[k] = raw[k]; if (!out.rules && !out.subscription && !out.engine && !out.settings) out.rules = true; return out; }
   function saveExportPick() { const raw = GM_getValue(EXPORT_PICK_KEY, null); const out = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? { ...raw } : {}; for (const k of Object.keys(_exportPick)) out[k] = !!_exportPick[k]; GM_setValue(EXPORT_PICK_KEY, out); }
 
   function closeExportMenu() {
@@ -8222,7 +8236,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   }
 
   function init() {
-    applyDarkModeClass(); applyUiScale(); applyCollapseMode(); migrateSubscriptions(); pruneUserSelectors(); _selectorStoreSignature = getSelectorStoreSignature(); _configStoreSignature = getConfigStoreSignature();
+    applyDarkModeClass(); applyUiScale(); applyCollapseMode(); migrateSubscriptions(); refreshSubscriptionsOnVersionChange(); pruneUserSelectors(); _selectorStoreSignature = getSelectorStoreSignature(); _configStoreSignature = getConfigStoreSignature();
     if (window.matchMedia) {
       try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyDarkModeClass); } catch (e) {}
     }

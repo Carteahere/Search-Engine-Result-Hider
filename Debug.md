@@ -64,18 +64,18 @@ d.checkRuleMatchOptimized(
 // 规则语法错误
 规则编译失败: *://example.com/* Error: Unbalanced regex
 
-// 表示：规则语法有误，需要检查规则格式（常见错误信息如 Unbalanced regex / Empty regex pattern）
+// 表示：规则语法有误，需要检查规则格式
 ```
-### 3.4 Debug API示例
+### 3.4 Debug API 示例
 
 开启调试模式后 `window.__SERH_DEBUG__`（Lite：`window.__SERHL_DEBUG__`）才会被挂载，关闭调试模式自动清除
 
 | API | 签名 | 返回/说明 |
 | --- | --- | --- |
 | config | getter | 当前完整配置对象（只读引用） |
-| compiledRules | getter | 编译后的规则索引：domains(Map)、urls/titles/texts、highlight*、whitelist*、conditional* 等分类数组 |
+| compiledRules | getter | 编译后的规则索引：domains(Map)、urls/titles/texts、highlight* 等分类数组 |
 | getSearchEngine() | () | 当前引擎 ID（google/bing/…），非引擎站点返回 other |
-| getSearchCategory(loc?) | (location?) | 当前搜索类型（默认 web/images/videos/news） |
+| getSearchCategory(loc?) | (location?) | 当前搜索类型（默认 web） |
 | getRootSelector(engine) | (engineId) | 该引擎的结果容器 CSS 选择器字符串 |
 | getSubdomainLevels(domain) | (hostname) | 域名层级数组，如 'a.b.example.com' → ['a.b.example.com', 'b.example.com', 'example.com', 'com'] |
 | checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels?) | 第 5 参可省略 | false 或 {highlight: N} / {blocked: true, rule, source} / {highlight: N, blocked: true, rule, source} |
@@ -85,15 +85,15 @@ d.checkRuleMatchOptimized(
 
 | 提示 | 示例 | 原因 | 修改 |
 | --- | --- | --- | --- |
-| 高亮序号需＞0 | `@0*://*.example.com/*` | `@N` 的序号 N 为 0 | 改为 `@1`～`@5`（N＞5 时效果回退 `@1`） |
+| 高亮序号需＞0 | `@0*://*.example.com/*` | `@N` 的序号 N 为 0 | 改为 `@1`～`@5` |
 | 规则前缀后缺少内容 | `title//` | 前缀（`@`/`@N`/`title/`/`text/`）后面是空的 | 补上具体规则或正则内容 |
-| URL 通配符格式无效: {rule} | `@@*://example.com/*` | `@@` 开头（uBO 例外语法）不被支持；或通配符结构无法解析 | 去掉多余 `@`；检查通配符格式（白名单只需单个 `@`） |
+| URL 通配符格式无效: {rule} | `@@*://example.com/*` | `@@` 开头（uBO 例外语法）不支持或通配符结构无法解析 | 去掉多余 `@`，检查通配符格式（白名单只需单个 `@`） |
 | 正则表达式无效 | `title/(未闭合/` | 斜杠未闭合、括号/量词等正则语法错误 | 补全闭合斜杠，修正正则语法 |
-| 正则 flags 无效: {flags} | `/x/g、title/x/gi` | 不支持 `g`/`y`（脚本只判断是否匹配）；或使用了不存在的 flag | 删除 `g`/`y`，仅用 `i`/`m`/`s`/`u` |
-| `@if(...)` 括号未闭合 | `*://x.com/* @if(title *= "a"` | `@if( `的括号不配对 | 补全右括号 `)` |
+| 正则 flags 无效: {flags} | `/x/g、title/x/gi` | 使用了 `g`/`y` 或不存在的 flag | 删除 `g`/`y`，仅用 `i`/`m`/`s`/`u` |
+| `@if(...)` 括号未闭合 | `*://x.com/* @if(title *= "a"` | `@if(` 的括号不配对 | 补全右括号 `)` |
 | `@if()` 条件不能为空 | `*://x.com/* @if()` | 括号内没有条件 | 填入条件表达式 |
 | 未知 `@if` 条件: {part} | `@if(foo = "a")` | 条件键名不在支持列表（`$site`/`$category`/`site`/`title`/`text`/`url`/`host`/`path`/`scheme`） | 检查键名拼写 |
 | 条件正则无效: {part} | `@if(title =~ /(/)` | `@if` 内 `=~` 正则本身语法错误 | 修正正则 |
 | `@if` 表达式语法错误: {part} | `@if(title *= )` | 条件表达式缺操作数、括号分组不完整等 | 补全表达式 |
 | URL规则无效 | 通配规则转正则后无法编译 | URL 通配符内部异常 | 简化规则结构重试 |
-| 不支持元素规则 | `example.com##div.x` | 规则含`##`/`#@#`等DOM/uBO规则 | 删除对应规则 |
+| 不支持元素规则 | `example.com##div.x` | 规则含 `##`/`#@#` 等 uBO 规则 | 删除对应规则 |

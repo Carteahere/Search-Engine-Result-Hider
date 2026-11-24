@@ -5,7 +5,7 @@
 [中文](README.md) | [English](README.en.md)
 
 在仅支持安装脚本的浏览器上实现复杂规则屏蔽搜索结果功能  
-兼容uBlacklist基础规则和订阅，支持URL匹配、正则匹配、标题匹配、结果摘要(snippet)匹配、高亮目标结果、白名单匹配、`@if` 附加判断条件、图片/视频等搜索页屏蔽，以及添加**自定义引擎**
+兼容 uBlacklist 基础规则和订阅，支持 URL 匹配、正则匹配、标题匹配、结果摘要(snippet)匹配、高亮目标结果、白名单匹配、`@if` 附加判断条件、图片/视频等搜索页屏蔽，以及添加**自定义引擎**
 
 当前适配搜索引擎：  
 Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、Startpage、Yahoo(&Japan)、360搜索、搜狗、头条搜索、夸克(&神马)、GitHub搜索、GreasyFork搜索
@@ -31,8 +31,8 @@ Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、S
 
 部分设置说明：
 
-1. 来源显示：默认开启，关闭后不在被屏蔽结果上显示命中规则
-2. 折叠模式：默认关闭，开启后被屏蔽结果只显示标题
+1. 折叠模式：默认关闭，开启后被屏蔽结果只显示标题
+2. 来源显示：默认开启，关闭后不在被屏蔽结果上显示命中规则
 3. 功能切换：悬浮球默认点击打开面板；切换为`显隐结果`时点击显示/隐藏被屏蔽结果、长按打开面板，被屏蔽结果的屏蔽按钮再次点击则取消屏蔽
 
 ### 1.3 关于WebDAV：
@@ -40,14 +40,14 @@ Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、S
 1. 自动同步后台运行，每1h三方快照合并同步一次，手动上传/下载为强制覆盖，云端文件在首次上传后每次上传都会生成 `rules.txt.bak` 备份文件
 2. 地址只支持**https**和完整路径，如坚果云 `https://dav.jianguoyun.com/dav/your_folder/`，路径文件夹不存在时会自动创建，文件名如 `rules.txt` 修改后需手动上传覆盖一次
 3. 油猴无安全存储API，密码只能本地混淆处理，安全起见必须使用单独应用密码
-4. 同步时为确保时间戳准确，会自动访问一次 timeapi / akamai / cloudflare 联网授时点，访问失败或关闭 `时间校准` 开关则默认使用 webdav 的 `date` 时间戳
+4. 同步时为确保时间戳准确，会自动访问一次 timeapi/cloudflare 联网授时点，访问失败或关闭 `时间校准` 开关则默认使用 webdav 的 `date` 时间戳
 
 ### 1.4 关于订阅：
 
-1. 规则订阅更新同样后台运行，每12h拉取一次，支持 `UTF-8` 纯文本远程链接如 [rules.txt](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt) ，订阅规则在本地规则后追加应用
-2. 兼容 uBlacklist 订阅 `.yaml` / `.txt`，不支持 `##` / `#@#` 等uBO规则，通过订阅导入会自动过滤
-3. 搜索引擎订阅支持`.js` / `.json`，默认内置 [Selectors.js](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js) 并自动更新引擎列表
-4. 订阅/同步需要跨域请求权限，若有权限申请弹窗选`总是允许全部`
+1. 规则订阅更新同样后台运行，每12h拉取一次，支持 `UTF-8` 纯文本如 [rules.txt](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/rules.txt) ，订阅规则在本地规则后追加应用
+2. 支持 uBlacklist 规则订阅和 `YAML frontmatter` 格式，不支持 `##` / `#@#` 等uBO规则，通过订阅导入会自动过滤
+3. 搜索引擎订阅默认内置 [Selectors.js](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js) 并自动更新引擎列表
+4. 订阅/同步需要跨域请求权限，若有权限申请弹窗选 `总是允许全部`
 
 ### 1.5 其他：
 

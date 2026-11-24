@@ -1,4 +1,4 @@
-## Debug
+## Testing Instructions
 
 ### 3.1 Environment Requirements
 
@@ -7,7 +7,7 @@
 
 ### 3.2 Running Tests
 
-Put the `test` folder and the script in the same directory, tests auto read `.js` script in the parent directory, grouped by domain: conditional expression parsing, WebDAV synchronization & subscription, rules logic, selectors & engines.
+Place the `test` folder and the script in the same directory to run, the tests automatically read the `.js` script in the parent directory, divided by functional domain into: conditional expression parsing, WebDAV sync & subscription, rules logic, selectors & engines.
 
 ```bash
 # Run all tests
@@ -16,7 +16,7 @@ node test/test-connect.cjs
 node test/test-rules.cjs
 node test/test-selectors.cjs
 
-# Run specific test
+# Run a specific test
 node test/test-conditions.cjs 2>&1 | Select-String "failed"
 ```
 
@@ -24,7 +24,7 @@ Success output looks like `10 passed, 0 failed`
 
 ### 3.3 Debug Mode
 
-Enable script debug mode, use the [网页调试](https://greasyfork.org/zh-CN/scripts/475228) script or browser F12 DevTools → Console tab to view output.
+Enable script debug mode, use the [网页调试](https://greasyfork.org/zh-CN/scripts/475228) script or the browser F12 DevTools → Console tab to view output.
 
 ```javascript
 // Release version
@@ -55,7 +55,7 @@ Normal output
 [屏蔽] 未处理的新结果数量: 15
 [屏蔽] 共屏蔽 3 个结果
 
-// Means: Google engine identified, 15 results found, 3 blocked
+// Means: Google engine successfully identified, 15 results found, 3 blocked
 ```
 
 Error output
@@ -64,37 +64,36 @@ Error output
 // Rule syntax error
 规则编译失败: *://example.com/* Error: Unbalanced regex
 
-// Means: Rule syntax error, check the rule format (common messages: Unbalanced regex / Empty regex pattern)
+// Means: The rule syntax is wrong, the rule format needs to be checked
 ```
-
 ### 3.4 Debug API Examples
 
-`window.__SERH_DEBUG__` (Lite: `window.__SERHL_DEBUG__`) is only mounted after debug mode is enabled, and is removed automatically when debug mode is turned off.
+`window.__SERH_DEBUG__` (Lite: `window.__SERHL_DEBUG__`) is mounted only after debug mode is enabled, and is automatically cleared when debug mode is turned off.
 
 | API | Signature | Return / Description |
 | --- | --- | --- |
-| config | getter | Full current config object (read-only reference) |
-| compiledRules | getter | Compiled rule index: `domains`(Map), `urls`/`titles`/`texts`, `highlight*`, `whitelist*`, `conditional*` category arrays |
-| getSearchEngine() | () | Current engine ID (`google`/`bing`/…); returns `other` on non-engine sites |
-| getSearchCategory(loc?) | (location?) | Current search type (defaults `web`/`images`/`videos`/`news`) |
+| config | getter | Current full config object (read-only reference) |
+| compiledRules | getter | Compiled rule index: category arrays such as `domains`(Map), `urls`/`titles`/`texts`, `highlight*` |
+| getSearchEngine() | () | Current engine ID (`google`/`bing`/…), returns `other` on non-engine sites |
+| getSearchCategory(loc?) | (location?) | Current search type (default `web`) |
 | getRootSelector(engine) | (engineId) | CSS selector string of the engine's result containers |
 | getSubdomainLevels(domain) | (hostname) | Domain level array, e.g. `'a.b.example.com'` → `['a.b.example.com', 'b.example.com', 'example.com', 'com']` |
-| checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels?) | 5th param optional | `false`, or `{highlight: N}` / `{blocked: true, rule, source}` / `{highlight: N, blocked: true, rule, source}` |
-| forceReprocessAll() | () | Rebuilds the rule index and forces reprocessing of all results on the current page (batched 30 per frame); for manual refresh after changing rules |
+| checkRuleMatchOptimized(url, domain, title, snippet, subdomainLevels?) | 5th param can be omitted | `false` or `{highlight: N}` / `{blocked: true, rule, source}` / `{highlight: N, blocked: true, rule, source}` |
+| forceReprocessAll() | () | Rebuilds the rule index and forces reprocessing of all results on the current page (batched 30 per frame), used for manual refresh after changing rules |
 
-### 3.5 Rules Detection Reference Table
+### 3.5 Rule Self-Check Reference Table
 
 | Message | Example | Cause | Fix |
 | --- | --- | --- | --- |
-| Highlight index must be > 0 | `@0*://*.example.com/*` | Index `N` of `@N` is 0 | Use `@1`–`@5` (`N` > 5 falls back to `@1`) |
-| Missing content after rule prefix | `title//` | Nothing after the prefix (`@`/`@N`/`title/`/`text/`) | Add the actual rule or regex content |
-| Invalid URL wildcard format: {rule} | `@@*://example.com/*` | The `@@` prefix (uBO exception syntax) is unsupported; or the wildcard structure cannot be parsed | Remove the extra `@`; check the wildcard format (whitelist needs only a single `@`) |
-| Invalid regex | `title/(unclosed/` | Unclosed slashes, invalid groups/quantifiers, etc. | Close the slashes, fix the regex syntax |
-| Invalid regular expression flags: {flags} | `/x/g`, `title/x/gi` | `g`/`y` are unsupported (the script only tests for a match); or a non-existent flag | Remove `g`/`y`, use only `i`/`m`/`s`/`u` |
-| Unbalanced `@if(...)` parentheses | `*://x.com/* @if(title *= "a"` | Parentheses of `@if(` are not paired | Add the closing `)` |
+| Highlight index must be > 0 | `@0*://*.example.com/*` | Index `N` of `@N` is 0 | Change to `@1`–`@5` |
+| Missing content after rule prefix | `title//` | Nothing after the prefix (`@`/`@N`/`title/`/`text/`) | Add the specific rule or regex content |
+| Invalid URL wildcard format: {rule} | `@@*://example.com/*` | The `@@` prefix (uBO exception syntax) is unsupported, or the wildcard structure cannot be parsed | Remove the extra `@`, check the wildcard format (whitelist needs only a single `@`) |
+| Invalid regex | `title/(unclosed/` | Unclosed slashes, regex syntax errors such as parentheses/quantifiers | Close the slashes, fix the regex syntax |
+| Invalid regular expression flags: {flags} | `/x/g`, `title/x/gi` | `g`/`y` or a non-existent flag is used | Remove `g`/`y`, use only `i`/`m`/`s`/`u` |
+| Unbalanced `@if(...)` parentheses | `*://x.com/* @if(title *= "a"` | The parentheses of `@if(` are not paired | Add the missing closing `)` |
 | `@if()` condition cannot be empty | `*://x.com/* @if()` | No condition inside the parentheses | Enter a condition expression |
-| Unknown `@if` condition: {part} | `@if(foo = "a")` | Key not in the supported list (`$site`/`$category`/`site`/`title`/`text`/`url`/`host`/`path`/`scheme`) | Check the key spelling |
-| Invalid condition regex: {part} | `@if(title =~ /(/)` | The `=~` regex inside `@if` is itself invalid | Fix the regex |
-| Syntax error in `@if` expression: {part} | `@if(title *= )` | Missing operand, incomplete parenthesis grouping, etc. | Complete the expression |
-| Invalid URL rule | Wildcard rule fails to compile into a regex | Internal wildcard conversion exception | Simplify the rule structure and retry |
-| Element rules are not supported | `example.com##div.x` |  Rule contains DOM/uBO rules such as `##`/`#@#` | Delete corresponding rule |
+| Unknown `@if` condition: {part} | `@if(foo = "a")` | The condition key is not in the supported list (`$site`/`$category`/`site`/`title`/`text`/`url`/`host`/`path`/`scheme`) | Check the key spelling |
+| Invalid condition regex: {part} | `@if(title =~ /(/)` | The `=~` regex inside `@if` is itself invalid syntax | Fix the regex |
+| Syntax error in `@if` expression: {part} | `@if(title *= )` | The condition expression is missing an operand, the parenthesis grouping is incomplete, etc. | Complete the expression |
+| Invalid URL rule | The wildcard rule cannot be compiled after conversion to a regex | Internal URL wildcard exception | Simplify the rule structure and retry |
+| Element rules are not supported | `example.com##div.x` | The rule contains uBO rules such as `##`/`#@#` | Delete the corresponding rule |

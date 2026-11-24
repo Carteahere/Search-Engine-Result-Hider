@@ -1,6 +1,6 @@
 ## 自定义引擎
 
-通过脚本管理器菜单 `🖋️ 自定义引擎` 打开编辑面板（JS 格式，与内置 [Selectors.js](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js) 结构一致）  
+通过脚本管理器菜单 `🖋️ 自定义引擎` 打开编辑面板，`js`/`json` 格式，与内置引擎 [Selectors.js](https://raw.githubusercontent.com/Carteahere/Search-Engine-Result-Hider/main/Other/Selectors.js) 结构一致  
 不局限于搜索引擎，理论上只要是含有容器的站点网页都能添加
 
 **内置引擎ID：**
