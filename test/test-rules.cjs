@@ -211,6 +211,7 @@ assert('规则-011: 合法订阅行全部保留且uBO网络规则被过滤与校
 
 // frontmatter 与 YAML 端到端
 // 易错留档: parseRulesetContent检测键白名单无title等元数据键, 无前导---的frontmatter写title加无空格单词值时该行被validateRule判为合法条件规则并中断检测, 整文件按纯文本导入混入幽灵屏蔽规则(主版)
+// 修复留档: 检测键白名单加title且title读作元数据名称, 无前导---的title单词值按YAML解析不再混入幽灵规则(主版, 规则-055)
 // 易错留档: 裸---行可过validateRule, 无前导---且含未识别键的rules键体订阅在检测循环被---截断误判纯文本, 0条规则通过校验致导入失败且自动更新重复失败(主版)
 const { lines } = api.parseRulesetContent('---\nname: Test\n---\n# c\n!scheme="https"\n*://*.example.com/*\n');
 const yParsed = api.parseRulesetContent('name: Y List\nrules:\n  - example.com\n  - \'*://*.example.com/*\'\n  - example.com##.ad\n  - ||ubo.com^\n');
@@ -678,6 +679,21 @@ assert('规则-050: Lite三方合并他侧删除不复活且纯新增保留', JS
   const frag = chk('https://evil.com/#https%3A%2F%2Fexample.com%2Fadmin');
   const path = chk('https://evil.com/path/https%3A%2F%2Fexample.com%2Fadmin');
   assert('规则-053: URL正则不解码query与fragment中的编码URL仍按解码pathname匹配', !(query && query.blocked) && !(frag && frag.blocked) && !!(path && path.blocked));
+}
+{
+  const api = makeRulesApi(); api.setState(['*://*.example.com/帖子/*'], []); api.buildRuleIndex();
+  const chk = (u) => api.checkRuleMatchOptimized(u, 'www.example.com', '', '', ['www.example.com', 'example.com']);
+  const raw = chk('https://www.example.com/帖子/123');
+  const enc = chk('https://www.example.com/%E5%B8%96%E5%AD%90/123');
+  const other = chk('https://www.example.com/other/123');
+  assert('规则-054: 通配规则非ASCII路径对未编码href按编码归一命中且编码href命中异路径不命中', !!(raw && raw.blocked === true) && !!(enc && enc.blocked === true) && !(other && other.blocked));
+}
+{
+  const api = makeFilterApi();
+  const yTitle = api.parseRulesetContent('title: AdBlock\nrules:\n  - "*://*.a.com/*"\n');
+  const yHead = api.parseRulesetContent('---\ntitle: My List\n---\n*://*.b.com/*\n');
+  const yNameFirst = api.parseRulesetContent('name: RealName\ntitle: Sample ruleset\nrules:\n  - c.com\n');
+  assert('规则-055: title元数据读作订阅名且无前导---的title单词值按YAML解析不混入幽灵规则', yTitle.meta.name === 'AdBlock' && JSON.stringify(api.collectSubscriptionRules(yTitle.lines.map((l) => l.trim()))) === JSON.stringify(['*://*.a.com/*']) && yHead.meta.name === 'My List' && JSON.stringify(api.collectSubscriptionRules(yHead.lines.map((l) => l.trim()))) === JSON.stringify(['*://*.b.com/*']) && yNameFirst.meta.name === 'RealName');
 }
 
 // 易错: 优先级依赖规则拼接顺序, getRuleKey 以去注释正文为键会合并重复行

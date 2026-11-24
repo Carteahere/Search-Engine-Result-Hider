@@ -58,7 +58,8 @@ const KEYS = {
   WEBDAV_SYNC_SNAPSHOT_KEY: 'searchfilter_webdav_sync_snapshot',
   SUBSCRIPTION_SYNC_SNAPSHOT_KEY: 'searchfilter_subscription_sync_snapshot',
   WEBDAV_LAST_SYNC_SELECTORS_KEY: 'searchfilter_webdav_last_sync_selectors',
-  SELECTORS_LAST_MODIFIED_KEY: 'searchfilter_selectors_last_modified'
+  SELECTORS_LAST_MODIFIED_KEY: 'searchfilter_selectors_last_modified',
+  SUB_VERSION_KEY: 'searchfilter_sub_version'
 };
 
 const baseSyncFns = [
@@ -527,7 +528,7 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   const getOffset = new Function(`
     ${netTimePrelude}
     async function gmRequest(method, url) {
-      if (url.startsWith('https://timeapi.io/') || url.startsWith('https://time.akamai.com/')) throw new Error('down');
+      if (url.startsWith('https://timeapi.io/')) throw new Error('down');
       if (url.startsWith('https://cloudflare.com/')) return { responseText: 'fl=x\\nts=1790185623.000\\nloc=CN' };
       throw new Error('unexpected ' + url);
     }
@@ -538,7 +539,7 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   `)();
   const offset = await getOffset();
   const expect = 1790185623000 - Date.now();
-  assert('授时-002: 前两源失败时回退cloudflare ts解析', typeof offset === 'number' && offset !== null && Math.abs(offset - expect) < 1000);
+  assert('授时-002: timeapi失败时回退cloudflare ts解析', typeof offset === 'number' && offset !== null && Math.abs(offset - expect) < 1000);
 }
 {
   const store = new Map([['searchfilter_net_time_cache', { offset: 5000, checkedAt: Date.now() }]]);
@@ -757,6 +758,21 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   const main = parseMain(content), lite = parseLite(content.split('\n'));
   const rest = '# ScriptConfig: {"b":2}|*://a.com/*';
   assert('同步-032: 主/Lite重复ScriptConfig头均取首个且第二条保留正文', main.config.a === 1 && main.config.b === undefined && main.restLines.join('|') === rest && lite.settings.a === 1 && lite.settings.b === undefined && lite.rest.join('|') === rest);
+}
+// 修复留档: 脚本版本变化时重置订阅时间戳供启动检查无视12h间隔立即拉取一次, 缓存保留至拉取成功(主版)
+{
+  const store = new Map(); const savedSubs = []; const savedEngine = [];
+  const run = new Function('GM_getValue', 'GM_setValue', 'GM_info', 'SUB_VERSION_KEY', 'getSubscriptions', 'saveSubscriptions', 'getEngineSubscriptions', 'saveEngineSubscriptions', extractFn(src, 'refreshSubscriptionsOnVersionChange') + '\nreturn refreshSubscriptionsOnVersionChange;')(
+    (k, d) => (store.has(k) ? store.get(k) : d), (k, v) => store.set(k, v), { script: { version: '8.9.3' } }, KEYS.SUB_VERSION_KEY,
+    () => [{ url: 'https://r/1.txt', enabled: true, lastUpdate: 111, lastAttempt: 222, rules: ['*://a.com/*'] }],
+    (s) => savedSubs.push(s),
+    () => [{ url: 'https://b/b.js', builtin: true, name: 'B', enabled: true, lastUpdate: 333, lastAttempt: 444, selectors: { google: {} } }, { url: 'https://e/e.js', name: 'E', enabled: true, lastUpdate: 555, lastAttempt: 666, selectors: {} }],
+    (s) => savedEngine.push(s)
+  );
+  run();
+  const reset = store.get(KEYS.SUB_VERSION_KEY) === '8.9.3' && savedSubs.length === 1 && savedSubs[0][0].lastUpdate === 0 && savedSubs[0][0].lastAttempt === 0 && savedSubs[0][0].rules.length === 1 && savedEngine.length === 1 && savedEngine[0][0].lastUpdate === 0 && savedEngine[0][0].lastAttempt === 0 && savedEngine[0][1].lastUpdate === 0 && savedEngine[0][1].lastAttempt === 0 && savedEngine[0][0].builtin === true && savedEngine[0][0].selectors.google !== undefined;
+  run();
+  assert('同步-033: 版本变化重置规则与引擎订阅lastUpdate/lastAttempt且保留缓存字段, 同版本不重复重置', reset && savedSubs.length === 1 && savedEngine.length === 1);
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

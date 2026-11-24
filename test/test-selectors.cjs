@@ -393,6 +393,28 @@ check('选择器-023: duckduckgo/ddg为Lite别名且yahoo与yahoo_japan不互别
   api.setStore({});
   const prioritySpecs = new Function('getSelectors', 'isEngineHost', `var _redirectSpecsCache = new Map(); ${extractFn(src, 'getRedirectSpecs')}\nreturn getRedirectSpecs;`)(() => ({ low: { match: /x/, priority: 1, link: { redirects: [{ codec: 'url', params: ['a'] }] } }, high: { match: /x/, priority: 10, link: { redirects: [{ codec: 'url', params: ['b'] }] } } }), () => true);
   check('选择器-041: 重定向规格按 priority 选择', prioritySpecs('h.example')[0].engine === 'high');
+  const mkPageRedir = (text) => new Function(`
+    var _redirectSpecsCache = new Map();
+    function getSelectors() { return { pg: { root: '.r', link: { redirects: [{ path: '^/web', params: ['u'], codec: 'url' }] }, pages: { images: { link: { redirects: [{ path: '^/img', params: ['u'], codec: 'url' }] } } } } }; }
+    function isEngineHost(id, host) { return host === 'pg.example'; }
+    function resolvePageDef(engine) { return { link: getSelectors()[engine].pages.images.link }; }
+    ${extractFn(text, 'getRedirectSpecs')}
+    return getRedirectSpecs;
+  `)();
+  const pageRedirOk = (text) => { const fn = mkPageRedir(text); const page = fn('pg.example', 'pg'); const raw = fn('pg.example'); return Array.isArray(page) && page.length === 1 && page[0].path === '^/img' && Array.isArray(raw) && raw.length === 1 && raw[0].path === '^/web'; };
+  const mkPageClean = (text) => new Function(`
+    var _redirectSpecsCache = new Map(); const currentConfig = { removeRedirects: true };
+    function getSelectors() { return { pg: { root: '.r', link: { redirects: [{ path: '^/web', params: ['u'], codec: 'url' }] }, pages: { images: { link: { redirects: [{ path: '^/img', params: ['u'], codec: 'url' }] } } } } }; }
+    function isEngineHost(id, host) { return host === 'pg.example'; }
+    function resolvePageDef(engine) { return { link: getSelectors()[engine].pages.images.link }; }
+    function getSearchEngine() { return 'pg'; }
+    function redirectsEnabled() { return true; }
+    ${text.match(/const REDIRECT_CODECS = \{[\s\S]*?\n  \};/)[0].replace('const REDIRECT_CODECS', 'var REDIRECT_CODECS')}
+    ${['tryUrl', 'decodeRedirectTarget', 'decodeBase64UrlTarget', 'cmdB64Text', 'getRedirectSpecs', 'decodeRedirectOnce', 'unwrapRedirectUrl', 'getCleanUrl'].map((n) => extractFn(text, n)).join('\n')}
+    return getCleanUrl;
+  `)();
+  const pageCleanOk = (text) => mkPageClean(text)({ href: 'https://pg.example/img?u=https%3A%2F%2Ftarget.example%2Fa' }) === 'https://target.example/a';
+  check('选择器-106: 分类页 link.redirects 在指定引擎时生效且无引擎参数保持引擎级', pageRedirOk(src) && pageRedirOk(readRepoFile('Lite.user.js')) && pageCleanOk(src) && pageCleanOk(readRepoFile('Lite.user.js')));
   // excludeRegex 引擎级命中整条URL跳过该引擎按优先级回退; page级命中该分类不采用并回退web
   api.setStore({
     exlo: { match: '^https?:\\/\\/(?:[^\\/?#]*\\.)?ex\\.example(?:[\\/?#]|$)', root: '.lo', url: ['attribute', 'href', 'a[href]'] },
