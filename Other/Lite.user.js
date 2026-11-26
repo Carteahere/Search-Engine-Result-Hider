@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.9.2
+// @version      8.9.3
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version removes networking features including WebDAV Sync / Rule Subscription / Engine Subscription.
@@ -1230,7 +1230,7 @@
       target.pending = false; return;
     }
 
-    const lines = textarea.value.split('\n'); const len = lines.length; const token = ++target.token;
+    const lines = textarea.value.split('\n'); const len = lines.length; const token = ++target.token; const fmRange = findYamlFrontmatterRange(lines);
     lineNums.style.minWidth = `max(20px, calc(${String(len).length}ch + 8px))`;
 
     let index = 0;
@@ -1251,7 +1251,8 @@
         if (!node) {
           node = document.createElement('div'); node.style.position = 'relative'; node.style.color = '#a0aec0'; node.style.height = '1.4em'; frag.appendChild(node);
         }
-        const analysis = target.syntaxCheck && currentConfig.errorDetection !== false ? cachedAnalyzeRule(lines[i]) : { valid: true, errors: [] }; const valid = analysis.valid;
+        const inFrontmatter = fmRange && i >= fmRange.start && i <= fmRange.end;
+        const analysis = target.syntaxCheck && !inFrontmatter && currentConfig.errorDetection !== false ? cachedAnalyzeRule(lines[i]) : { valid: true, errors: [] }; const valid = analysis.valid;
         const errMsg = valid ? '' : analysis.errors.join(' | ');
         const html = `${i + 1}${valid ? '' : `<span class="serhl-line-error" title="${escHtml(errMsg)}" data-error="${escHtml(errMsg)}" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 10px; background: #edf2f7; z-index: 1; cursor: pointer;">⚠️</span>`}`;
         if (node.dataset.v !== html) {
@@ -1721,6 +1722,15 @@
 
   function filterValidRuleLines(lines) {
     return lines.map(line => line.trim()).filter(line => line.length > 0);
+  }
+
+  function findYamlFrontmatterRange(lines) {
+    const arr = Array.isArray(lines) ? lines : String(lines ?? '').split('\n');
+    let first = -1;
+    for (let i = 0; i < arr.length; i++) { if (String(arr[i] ?? '').trim() !== '') { first = i; break; } }
+    if (first === -1 || String(arr[first] ?? '').trim() !== '---') return null;
+    for (let i = first + 1; i < arr.length; i++) { const s = String(arr[i] ?? '').trim(); if (s === '---' || s === '...') return { start: first, end: i }; }
+    return null;
   }
 
   function hasEffectiveRules(lines) {
@@ -4363,7 +4373,8 @@
     const statsContent = document.getElementById('serhl-stats-content'); if (!statsContent) return;
 
     const textarea = document.getElementById('serhl-rules'); const rulesText = textarea ? textarea.value : currentConfig.rules.join('\n'); const rawLines = rulesText.split('\n');
-    const localRules = filterValidRuleLines(rawLines);
+    const fmRange = findYamlFrontmatterRange(rawLines);
+    const localRules = filterValidRuleLines(fmRange ? rawLines.filter((_, i) => i < fmRange.start || i > fmRange.end) : rawLines);
     const activeRules = localRules
       .filter(rule => !rule.startsWith('#'))
       .map(rule => stripRuleComment(rule))
@@ -4669,6 +4680,16 @@
   function mergeRules3Way(baseRules, localRules, cloudRules, preferLocal = true) {
     baseRules = Array.isArray(baseRules) ? baseRules : []; localRules = Array.isArray(localRules) ? localRules : []; cloudRules = Array.isArray(cloudRules) ? cloudRules : [];
 
+    const splitFm = (list) => {
+      let first = -1;
+      for (let i = 0; i < list.length; i++) { if (String(list[i] ?? '').trim() !== '') { first = i; break; } }
+      if (first === -1 || String(list[first] ?? '').trim() !== '---') return { head: [], body: list };
+      for (let i = first + 1; i < list.length; i++) { const s = String(list[i] ?? '').trim(); if (s === '---' || s === '...') return { head: list.slice(0, i + 1), body: list.slice(i + 1) }; }
+      return { head: [], body: list };
+    };
+    const baseParts = splitFm(baseRules); const localParts = splitFm(localRules); const cloudParts = splitFm(cloudRules);
+    baseRules = baseParts.body; localRules = localParts.body; cloudRules = cloudParts.body;
+
     const baseKeys = new Set(baseRules.map(getRuleKey).filter(Boolean)); const localKeys = new Set(localRules.map(getRuleKey).filter(Boolean));
     const cloudKeys = new Set(cloudRules.map(getRuleKey).filter(Boolean));
     const localDeleted = new Set([...baseKeys].filter(k => !localKeys.has(k))); const cloudDeleted = new Set([...baseKeys].filter(k => !cloudKeys.has(k)));
@@ -4814,7 +4835,8 @@
     });
     emitPending(END); for (const key of place.keys()) emit(key); baseRows.forEach((row) => emit(row.key)); for (const key of sharedKeys) emit(key);
     for (const row of [...localRows, ...cloudRows]) if (!baseIndex.has(row.key) && !deleted(row.key) && !mappedKeys.has(row.key) && !seen.has(row.key)) emit(row.key);
-    return result;
+    const fmHead = localParts.head.length ? localParts.head : cloudParts.head;
+    return fmHead.concat(result);
   }
 
   function saveConfig() {
@@ -5924,9 +5946,11 @@
 
   function parseConfigHeader(lines) {
     const rest = []; let settings = null, selectors = null, scanning = true, invalidSelectors = false;
+    const fmRange = findYamlFrontmatterRange(lines); const scanStart = fmRange ? fmRange.end + 1 : 0;
     for (let i = 0; i < lines.length; i++) {
+      if (fmRange && i >= fmRange.start && i <= fmRange.end) continue;
       const line = lines[i], s = line.trim();
-      if (scanning && i < 10) {
+      if (scanning && i < scanStart + 10) {
         if (!s) {
           rest.push(line); continue;
         }
