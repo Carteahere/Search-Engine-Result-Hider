@@ -1,5 +1,18 @@
 ## 规则说明
 
+规则支持写入 `YAML frontmatter` 数据头，如：
+
+```yaml
+---
+title: My Rules
+date: 1970-01-01
+note: test example
+---
+*://*.example.com/*
+```
+
+规则订阅可识别 `title:`/`name:` 项并显示对应名称，导入/同步规则时会自动应用前10行内的 `# ScriptConfig:{...}` 设置配置，此时 `YAML frontmatter` 不计入检测行数
+
 ### 2.1 一键屏蔽：
 
 悬浮球：打开面板模式，点击**未被屏蔽结果**的屏蔽按钮时
