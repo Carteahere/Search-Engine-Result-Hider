@@ -65,7 +65,7 @@ const KEYS = {
 const baseSyncFns = [
   'scanRuleString', 'findBalancedParenEnd', 'getSyncSettings', 'getCloudModifiedTime',
   'subscriptionsSignature', 'buildDavPutHeaders', 'persistSyncSnapshots', 'putWebDAVRules',
-  'getRuleKey', 'filterValidRuleLines', 'hasEffectiveRules', 'getSubscriptionSyncSnapshot', 'setSubscriptionSyncSnapshot',
+  'getRuleKey', 'filterValidRuleLines', 'hasEffectiveRules', 'findYamlFrontmatterRange', 'getSubscriptionSyncSnapshot', 'setSubscriptionSyncSnapshot',
   'getRuleSyncSnapshot', 'setRuleSyncSnapshot', 'webdavTargetId', 'mergeRules3Way', 'makeSyncSnapshot',
   'stripRuleComment', 'hasTopLevelComma', 'isHttpsUrl', 'getWebDAVRequest', 'ensureWebDAVFolder', 'isHtmlResponse', 'isInvalidSyncResponse', 'parseRegexLiteral', 'sanitizeRegexFlags', 'isRegexLiteralStr', 'parseSyncHeader', 'isNonRuleTextResponse',
   'buildUploadContent', 'gmPutWebDAV', 'putWebDAVBackup',
@@ -361,7 +361,7 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
 // ---- 同步-012: parseSyncHeader 头解析与损坏头剔除 ----
 {
   const parse = new Function(
-    'function dbg() {} function dbgWarn() {} function dbgError() {}\n' + extractFn(src, 'hasTopLevelComma') + '\n' + extractFn(src, 'parseSyncHeader') + '\nreturn parseSyncHeader;'
+    'function dbg() {} function dbgWarn() {} function dbgError() {}\n' + extractFn(src, 'hasTopLevelComma') + '\n' + extractFn(src, 'findYamlFrontmatterRange') + '\n' + extractFn(src, 'parseSyncHeader') + '\nreturn parseSyncHeader;'
   )();
   const broken = parse('# ScriptConfig:{broken-json}\n*://a.com/*');
   const brokenSel = parse('# ScriptConfig: {"syncedAt":1}\n# Selectors:{bad\n*://a.com/*');
@@ -694,11 +694,11 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
 // 修复留档(主/Lite): 坏ScriptConfig头行(解析失败且非JSON形态)剔除出正文, 重复伪头保留正文的语义不变
 {
   const parse = new Function(
-    'function dbg() {} function dbgWarn() {} function dbgError() {}\n' + extractFn(src, 'hasTopLevelComma') + '\n' + extractFn(src, 'parseSyncHeader') + '\nreturn parseSyncHeader;'
+    'function dbg() {} function dbgWarn() {} function dbgError() {}\n' + extractFn(src, 'hasTopLevelComma') + '\n' + extractFn(src, 'findYamlFrontmatterRange') + '\n' + extractFn(src, 'parseSyncHeader') + '\nreturn parseSyncHeader;'
   )();
   const garbage = parse('# ScriptConfig:损坏数据\n*://a.com/*');
   const liteSrc = fs.readFileSync(['', 'other'].map((d) => path.join(scriptDir, d, 'Lite.user.js')).find((p) => fs.existsSync(p)), 'utf8');
-  const parseLite = new Function(extractFn(liteSrc, 'parseConfigHeader') + '\nreturn parseConfigHeader;')();
+  const parseLite = new Function(extractFn(liteSrc, 'parseRegexLiteral') + '\n' + extractFn(liteSrc, 'selectorPatchOk') + '\n' + extractFn(liteSrc, 'findYamlFrontmatterRange') + '\n' + extractFn(liteSrc, 'parseConfigHeader') + '\nreturn parseConfigHeader;')();
   const liteGarbage = parseLite(['# ScriptConfig:损坏数据', '*://a.com/*']);
   const liteGood = parseLite(['# ScriptConfig: {"syncedAt":1}', '*://a.com/*']);
   assert('同步-027: 主/Lite坏ScriptConfig行剔除出正文且好头不受影响', garbage.restLines.join('|') === '*://a.com/*' && garbage.config === null && liteGarbage.rest.join('|') === '*://a.com/*' && liteGarbage.settings === null && liteGood.settings.syncedAt === 1 && liteGood.rest.join('|') === '*://a.com/*');
@@ -750,10 +750,10 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
 // 修复留档(主/Lite): 导入两条ScriptConfig头时均取首个且第二条按注释保留正文
 {
   const parseMain = new Function(
-    'function dbg() {} function dbgWarn() {} function dbgError() {}\n' + extractFn(src, 'hasTopLevelComma') + '\n' + extractFn(src, 'parseSyncHeader') + '\nreturn parseSyncHeader;'
+    'function dbg() {} function dbgWarn() {} function dbgError() {}\n' + extractFn(src, 'hasTopLevelComma') + '\n' + extractFn(src, 'findYamlFrontmatterRange') + '\n' + extractFn(src, 'parseSyncHeader') + '\nreturn parseSyncHeader;'
   )();
   const liteSrc = fs.readFileSync(['', 'other'].map((d) => path.join(scriptDir, d, 'Lite.user.js')).find((p) => fs.existsSync(p)), 'utf8');
-  const parseLite = new Function(extractFn(liteSrc, 'parseConfigHeader') + '\nreturn parseConfigHeader;')();
+  const parseLite = new Function(extractFn(liteSrc, 'parseRegexLiteral') + '\n' + extractFn(liteSrc, 'selectorPatchOk') + '\n' + extractFn(liteSrc, 'findYamlFrontmatterRange') + '\n' + extractFn(liteSrc, 'parseConfigHeader') + '\nreturn parseConfigHeader;')();
   const content = '# ScriptConfig: {"a":1}\n# ScriptConfig: {"b":2}\n*://a.com/*';
   const main = parseMain(content), lite = parseLite(content.split('\n'));
   const rest = '# ScriptConfig: {"b":2}|*://a.com/*';
@@ -773,6 +773,18 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   const reset = store.get(KEYS.SUB_VERSION_KEY) === '8.9.3' && savedSubs.length === 1 && savedSubs[0][0].lastUpdate === 0 && savedSubs[0][0].lastAttempt === 0 && savedSubs[0][0].rules.length === 1 && savedEngine.length === 1 && savedEngine[0][0].lastUpdate === 0 && savedEngine[0][0].lastAttempt === 0 && savedEngine[0][1].lastUpdate === 0 && savedEngine[0][1].lastAttempt === 0 && savedEngine[0][0].builtin === true && savedEngine[0][0].selectors.google !== undefined;
   run();
   assert('同步-033: 版本变化重置规则与引擎订阅lastUpdate/lastAttempt且保留缓存字段, 同版本不重复重置', reset && savedSubs.length === 1 && savedEngine.length === 1);
+}
+// 修复留档(主/Lite): 配置头检测跳过YAML frontmatter并从其后首行开始计数, frontmatter元数据不落入正文
+{
+  const mainParse = new Function(
+    'function dbg() {} function dbgWarn() {} function dbgError() {}\n' + extractFn(src, 'hasTopLevelComma') + '\n' + extractFn(src, 'findYamlFrontmatterRange') + '\n' + extractFn(src, 'parseSyncHeader') + '\nreturn parseSyncHeader;'
+  )();
+  const liteSrc = fs.readFileSync(['', 'other'].map((d) => path.join(scriptDir, d, 'Lite.user.js')).find((p) => fs.existsSync(p)), 'utf8');
+  const liteParse = new Function(extractFn(liteSrc, 'parseRegexLiteral') + '\n' + extractFn(liteSrc, 'selectorPatchOk') + '\n' + extractFn(liteSrc, 'findYamlFrontmatterRange') + '\n' + extractFn(liteSrc, 'parseConfigHeader') + '\nreturn parseConfigHeader;')();
+  const content = '---\ntitle: 推荐规则\ndate: 2026-11-26\ndraft: false\nnote: 可能含大量误杀 仅供参考\n---\n# c\n# c\n# ScriptConfig:{"syncedAt":1}\n# Selectors:{"s":{"containers":".x"}}\n*://a.com/*';
+  const main = mainParse(content), lite = liteParse(content.split('\n'));
+  const rest = '# c|# c|*://a.com/*';
+  assert('同步-034: 主/Lite配置头检测从YAML frontmatter之后开始计数且元数据不落入正文', main.config && main.config.syncedAt === 1 && main.rawSelectors && main.restLines.join('|') === rest && lite.settings && lite.settings.syncedAt === 1 && lite.selectors && lite.selectors.s && lite.rest.join('|') === rest);
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

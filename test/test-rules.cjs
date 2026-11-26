@@ -394,7 +394,7 @@ assert('规则-034: so360 /jump明文u解链且url兜底, /link?m=原样保留(�
 
 // ---- 规则-035~040: ScriptConfig头 / 垃圾文本拒绝 / 空文件确认 ----
 await (async () => {
-const parseSyncHeaderFn = extractFn(src, 'hasTopLevelComma') + '\n' + extractFn(src, 'parseSyncHeader');
+const parseSyncHeaderFn = extractFn(src, 'hasTopLevelComma') + '\n' + extractFn(src, 'findYamlFrontmatterRange') + '\n' + extractFn(src, 'parseSyncHeader');
 const getSyncSettingsFn = extractFn(src, 'getSyncSettings');
 const importRulesFromFileFn = extractFn(src, 'importRulesFromFile');
 const pickTextFileFn = extractFn(src, 'pickTextFile');
@@ -582,6 +582,8 @@ function createEnv(initRules) {
 const mergeApi = new Function(SERH_FN_DEPS + '\n' + SERH_RAW_EXTRACT(src, 'stripRuleComment') + '\n' + SERH_RAW_EXTRACT(src, 'getRuleKey') + '\n' + SERH_RAW_EXTRACT(src, 'mergeRules3Way') + '\nreturn mergeRules3Way;')();
 const B_OLD = '*://b.com/* # old', B_NEW = '*://b.com/* # new';
 assert('规则-044: 一方移动+删规则他方仅改行尾注释修改保留且单方插入新规则锚定原位', JSON.stringify(mergeApi(['A', B_OLD, 'C'], ['C', 'A'], ['A', B_NEW, 'C'])) === JSON.stringify(['C', 'A', B_NEW]) && JSON.stringify(mergeApi(['A', 'B', 'C'], ['A', 'X', 'B', 'C'], ['A', 'B', 'C'])) === JSON.stringify(['A', 'X', 'B', 'C']));
+const FM = ['---', 'title: 推荐规则', 'date: 2026-11-26', 'draft: false', 'note: 仅供参考', '---'];
+assert('规则-057: 三方合并保留YAML frontmatter首尾---且只合并正文规则', JSON.stringify(mergeApi(['*://a.com/*'], FM.concat(['*://a.com/*']), ['*://a.com/*'])) === JSON.stringify(FM.concat(['*://a.com/*'])) && JSON.stringify(mergeApi(['*://a.com/*'], FM.concat(['*://a.com/*', '*://b.com/*']), ['*://a.com/*'])) === JSON.stringify(FM.concat(['*://a.com/*', '*://b.com/*'])));
 }
 
 // ---- 规则-045: 订阅规则类型守卫 / YAML探测回退 ----
@@ -637,6 +639,8 @@ const liteSrc = fs.readFileSync(['', 'other'].map((d) => path.join(scriptDir, d,
 const liteMerge = new Function(SERH_FN_DEPS + '\n' + SERH_RAW_EXTRACT(liteSrc, 'stripRuleComment') + '\n' + SERH_RAW_EXTRACT(liteSrc, 'getRuleKey') + '\n' + SERH_RAW_EXTRACT(liteSrc, 'mergeRules3Way') + '\nreturn mergeRules3Way;')();
 // 修复留档: Lite saveConfig原为追加式合并, 他侧删除的规则会随保存复活, 已对齐主版mergeRules3Way
 assert('规则-050: Lite三方合并他侧删除不复活且纯新增保留', JSON.stringify(liteMerge(['*://r.com/*'], ['*://r.com/*'], [], true)) === '[]' && JSON.stringify(liteMerge([], [], ['*://n.com/*'], true)) === JSON.stringify(['*://n.com/*']));
+const LITE_FM = ['---', 'title: 推荐规则', 'date: 2026-11-26', 'draft: false', 'note: 仅供参考', '---'];
+assert('规则-058: Lite三方合并保留YAML frontmatter首尾---且只合并正文规则', JSON.stringify(liteMerge(['*://a.com/*'], LITE_FM.concat(['*://a.com/*']), ['*://a.com/*'], true)) === JSON.stringify(LITE_FM.concat(['*://a.com/*'])));
 }
 
 // ---- 规则-051: Lite导入# Selectors头(修复留档) ----
@@ -649,6 +653,7 @@ assert('规则-050: Lite三方合并他侧删除不复活且纯新增保留', JS
     ${SERH_RAW_EXTRACT(liteSrc, 'hasPseudoElement')}
     ${SERH_RAW_EXTRACT(liteSrc, 'isValidCssSelector')}
     ${SERH_RAW_EXTRACT(liteSrc, 'selectorPatchOk')}
+    ${SERH_RAW_EXTRACT(liteSrc, 'findYamlFrontmatterRange')}
     ${SERH_RAW_EXTRACT(liteSrc, 'parseConfigHeader')}
     return parseConfigHeader;`)();
   // 修复留档: Lite导入须识别# Selectors头并从正文剔除, 与主版parseSyncHeader同口径
@@ -694,6 +699,14 @@ assert('规则-050: Lite三方合并他侧删除不复活且纯新增保留', JS
   const yHead = api.parseRulesetContent('---\ntitle: My List\n---\n*://*.b.com/*\n');
   const yNameFirst = api.parseRulesetContent('name: RealName\ntitle: Sample ruleset\nrules:\n  - c.com\n');
   assert('规则-055: title元数据读作订阅名且无前导---的title单词值按YAML解析不混入幽灵规则', yTitle.meta.name === 'AdBlock' && JSON.stringify(api.collectSubscriptionRules(yTitle.lines.map((l) => l.trim()))) === JSON.stringify(['*://*.a.com/*']) && yHead.meta.name === 'My List' && JSON.stringify(api.collectSubscriptionRules(yHead.lines.map((l) => l.trim()))) === JSON.stringify(['*://*.b.com/*']) && yNameFirst.meta.name === 'RealName');
+}
+
+{
+  const findFm = new Function(extractFn(src, 'findYamlFrontmatterRange') + '\nreturn findYamlFrontmatterRange;')();
+  const lines = ['---', 'title: 推荐规则', 'date: 2026-11-26', 'draft: false', 'note: 可能含大量误杀 仅供参考', '---', '*://a.com/*'];
+  const range = findFm(lines);
+  const kept = lines.filter((_, i) => !(range && i >= range.start && i <= range.end)).map((l) => l.trim()).filter((l) => l.length > 0);
+  assert('规则-056: 规则自检识别YAML frontmatter范围且仅跳过元数据行', !!range && range.start === 0 && range.end === 5 && JSON.stringify(kept) === JSON.stringify(['*://a.com/*']) && findFm(['*://a.com/*']) === null && !!findFm(['  ', '---', 'a: b', '...', 'x']) && findFm(['---', 'a: b']) === null);
 }
 
 // 易错: 优先级依赖规则拼接顺序, getRuleKey 以去注释正文为键会合并重复行
