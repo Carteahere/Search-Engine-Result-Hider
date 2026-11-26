@@ -1,9 +1,15 @@
-# 261118 可能含大量误杀 仅供参考
-# ==== 文件 ====
+---
+title: 推荐规则
+date: 2026-11-26
+draft: false
+note: 可能含大量误杀 仅供参考
+---
+# 正则
 /^https?:\/\/[^\s"<>]+\.doc(?:[?#].*)?$/i
 /^https?:\/\/[^\s"<>]+\.pdf(?:[?#].*)?$/i
 /^https?:\/\/[^\s"<>]+\.xlsx?(?:[?#].*)?$/i
-# ==== 标题-摘要 ====
+/^https:\/\/pcedu\.pconline\.com\.cn\/\d{1,5}\/\d{1,15}\.html$/i
+# 标题-摘要
 text/.*一句话总结.*/
 text/.*暂无购买权限.*/
 text/.*来到了没有知识存在的荒原.*/
@@ -27,13 +33,13 @@ title/^(?=.*github)(?=.*(?:教程网|中文站|中文网)).*/i
 title/^(?=.*pikpak)(?=.*优惠).*/i
 title/^(?=.*telegram)(?=.*(?:86|短信)).*/i
 title/^(?=.*YSM)(?=.*爱发电).*/i
-# ==== 域名-条件 ====
+# 域名-条件
 *://*.ali213.net/* @if(title *= "视频指南")
 *://*.gamersky.com/* @if(title =~ /视频|修改器/)
 *://*.github.com/* @if(title *= "pikpak")
 *://*.news.qq.com/* @if(title =~ /攻略|一图流/)
 text/.*总的来说.*/ @if(host $= ".zhihu.com")
-# ==== 社区 ====
+# 社区
 *://*.51cto.com/*
 *://*.ali213.net/*
 *://*.bbs.nasdiyer.com/*
@@ -59,7 +65,7 @@ text/.*总的来说.*/ @if(host $= ".zhihu.com")
 *://*.support.huaweicloud.com/*
 *://*.toutiao.com/*
 *://community.oneplus.com/*
-# ==== 搜索引流 ====
+# 搜索引流
 *://*.3g.ali213.net/down/*
 *://*.acfun.cn/error/*
 *://*.agents.baidu.com/*
@@ -174,8 +180,7 @@ text/.*总的来说.*/ @if(host $= ".zhihu.com")
 *://wuu.wikipedia.org/*
 *://zh-classical.wikipedia.org/*
 *://zh-yue.wikipedia.org/*
-/^https:\/\/pcedu\.pconline\.com\.cn\/\d{1,5}\/\d{1,15}\.html$/i
-# ==== 购物平台 ====
+# 购物平台
 *://*.1688.com/*
 *://*.aeoncity.com.hk/*
 *://*.amazon.*/*
@@ -250,7 +255,7 @@ text/.*总的来说.*/ @if(host $= ".zhihu.com")
 *://*.uniform.klovergroup.net/*
 *://*.uniqlo.com/*
 *://*.zh.accio.com/*
-# ==== 域名 ====
+# 域名
 *://*.063060.com/*
 *://*.0769soft.com/*
 *://*.0s52.com/*
@@ -274,6 +279,7 @@ text/.*总的来说.*/ @if(host $= ".zhihu.com")
 *://*.32r.com/*
 *://*.333ttt.com/*
 *://*.360game.360.cn/*
+*://*.3673.com/*
 *://*.37uu.cn/*
 *://*.3d66.com/*
 *://*.3h3.com/*
@@ -317,6 +323,7 @@ text/.*总的来说.*/ @if(host $= ".zhihu.com")
 *://*.aciyuan.com/*
 *://*.adatai.com/*
 *://*.aethovpn.com/*
+*://*.ai345.info/*
 *://*.aigamewang.com/*
 *://*.aigei.com/*
 *://*.aiqicha.baidu.com/*
@@ -394,8 +401,10 @@ text/.*总的来说.*/ @if(host $= ".zhihu.com")
 *://*.chooseai.net/*
 *://*.chunman4.com/*
 *://*.chuzhou.cn/*
+*://*.cilifei.mom/*
 *://*.cilifeilong.wiki/*
 *://*.ciligou.mom/*
+*://*.ciligui.trade/*
 *://*.cilimao.fit/*
 *://*.cilitt.cn/*
 *://*.cinema.be/*
@@ -545,6 +554,7 @@ text/.*总的来说.*/ @if(host $= ".zhihu.com")
 *://*.hj.cn/*
 *://*.hk.trip.com/*
 *://*.hktvmall.com/*
+*://*.hkvpnschool.com/*
 *://*.hlshebbs.com.cn/*
 *://*.hlshelink.com.cn/*
 *://*.hmxz.org/*
@@ -629,6 +639,7 @@ text/.*总的来说.*/ @if(host $= ".zhihu.com")
 *://*.liulan.net/*
 *://*.liushijiazu.com/*
 *://*.live.pinduoduo.com/*
+*://*.lmaoyx.com/*
 *://*.logitechclub.com/*
 *://*.lp.pinduoduo.com/*
 *://*.lunai.top/*
@@ -741,6 +752,7 @@ text/.*总的来说.*/ @if(host $= ".zhihu.com")
 *://*.peachring.com/*
 *://*.peterrabbit-shop.jp/*
 *://*.pexels.com/*
+*://*.phone.yandex.com.tr/*
 *://*.pikpak.me/*
 *://*.pincai.com/*
 *://*.pincong.rocks/*
@@ -886,6 +898,7 @@ text/.*总的来说.*/ @if(host $= ".zhihu.com")
 *://*.wilsoncomm.com.hk/*
 *://*.windowsreport.com/*
 *://*.writehelp.cn/*
+*://*.wwtyrd.com/*
 *://*.www4.fusionmovies.to/*
 *://*.xda.cn/*
 *://*.xfbzk.aihorizondemo.com/*
@@ -943,6 +956,7 @@ text/.*总的来说.*/ @if(host $= ".zhihu.com")
 *://*.youzan.com/*
 *://*.youzy.cn/*
 *://*.ysgcgw.com.cn/*
+*://*.yskaozheng.com/*
 *://*.yuhuatour.com/*
 *://*.yundiesc.com/*
 *://*.yunlogin.com/*
