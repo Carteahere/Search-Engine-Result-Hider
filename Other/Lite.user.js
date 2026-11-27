@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器 Lite
 // @name:en      Search Engine Result Hider Lite
 // @namespace    https://github.com/Carteahere
-// @version      8.9.3
+// @version      8.9.4
 // @description        支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。Lite版移除了WebDAV同步/规则订阅/引擎订阅等联网功能。
 // @description:en     A search result blocking tool that supports regular expressions. The Lite version removes networking features including WebDAV Sync / Rule Subscription / Engine Subscription.
@@ -6037,16 +6037,20 @@
   function importRulesFromFile() {
     pickTextFile('.txt,text/plain', (content) => {
       const rawLines = String(content || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n');
+      const fmRange = findYamlFrontmatterRange(rawLines);
+      const fmLines = fmRange ? rawLines.slice(fmRange.start, fmRange.end + 1) : null;
       const parsedHeader = parseConfigHeader(rawLines);
+      const importedLines = fmLines ? fmLines.concat(parsedHeader.rest) : parsedHeader.rest;
       const hasHeader = !!(parsedHeader.settings || parsedHeader.selectors);
       if (isNonRuleTextResponse(parsedHeader.rest, hasHeader, true)) { showToast(t('fileImportFailed'), 'error'); return; }
       if (parsedHeader.invalidSelectors) {
         showToast(t('selectorJsonError'), 'error');
         if (!hasHeader && !hasEffectiveRules(parsedHeader.rest)) return;
       }
-      const newRules = filterValidRuleLines(parsedHeader.rest);
+      const bodyRules = filterValidRuleLines(parsedHeader.rest);
+      const newRules = fmLines ? fmLines.concat(bodyRules) : bodyRules;
       const headerOnly = hasHeader && !parsedHeader.rest.some(l => l.trim());
-      const replaceRules = !headerOnly && (hasEffectiveRules(newRules) || !hasEffectiveRules(currentConfig.rules) || confirm(t('importClearConfirm')));
+      const replaceRules = !headerOnly && (hasEffectiveRules(bodyRules) || !hasEffectiveRules(currentConfig.rules) || confirm(t('importClearConfirm')));
       if (parsedHeader.settings) applyImportedSettings(parsedHeader.settings);
       const headerSelectors = parsedHeader.selectors; const selectorsApplied = !!headerSelectors && typeof headerSelectors === 'object' && !Array.isArray(headerSelectors);
       if (selectorsApplied) { GM_setValue(SELECTORS_KEY, headerSelectors); _selectorStoreSignature = getSelectorStoreSignature(); resetSelectorCache(); }
@@ -6054,7 +6058,7 @@
       if (replaceRules) {
         const textarea = document.getElementById('serhl-rules');
         if (textarea) {
-          textarea.value = parsedHeader.rest.join('\n'); updateLineNumbers();
+          textarea.value = importedLines.join('\n'); updateLineNumbers();
         }
         currentConfig.rules = newRules;
         const panel = document.getElementById('serhl-panel'); if (panel) panel._initialRules = [...currentConfig.rules];
