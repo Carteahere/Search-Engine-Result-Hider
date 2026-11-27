@@ -29,7 +29,7 @@ const SERH_RAW_EXTRACT = (text, fnName) => {
 };
 const SERH_FN_DEPS = ((text) => {
   const consts = text.match(/const (?:RULE_PREFIX_RE|RULE_PREFIX_REGEX_RE|RULE_LEADING_REGEX_RE|REGEX_CTX_A|REGEX_CTX_B|REGEX_CTX_C|REGEX_CTX_D|RULE_REGEX_LIT_RE) = [^\n]+;/g).join('\n').replace(/\bconst\b/g, 'var');
-  return consts + '\n' + ['findBalancedParenEnd', 'regexCloseAhead', 'regexStartAhead', 'isBadRegexTail', 'scanRuleString', 'encodeNonAscii'].map((n) => SERH_RAW_EXTRACT(text, n)).join('\n');
+  return consts + '\n' + ['findBalancedParenEnd', 'regexCloseAhead', 'regexStartAhead', 'isBadRegexTail', 'scanRuleString', 'encodeNonAscii', 'findYamlFrontmatterRange', 'splitYamlFrontmatter'].map((n) => SERH_RAW_EXTRACT(text, n)).join('\n');
 })(src);
 const SERH_FLAG_HELPERS = ['isUniqueFlagsStr', 'isFlagsCandidateError'].map((n) => SERH_RAW_EXTRACT(src, n)).join('\n');
 const SERH_EL_HELPERS = ['isCondExprCore', 'looksLikeCondExpr', 'isScriptRuleLine', 'isElementRuleLine'].map((n) => SERH_RAW_EXTRACT(src, n)).join('\n');
@@ -428,6 +428,7 @@ function createEnv(initRules) {
     ${extractFn(src, 'sanitizeRegexFlags')}
     ${extractFn(src, 'isRegexLiteralStr')}
     ${parseSyncHeaderFn}
+    ${extractFn(src, 'getYamlFrontmatterLines')}
     ${getSyncSettingsFn}
     ${extractFn(src, 'isNonRuleTextResponse')}
     ${extractFn(src, 'isCondExprCore')}

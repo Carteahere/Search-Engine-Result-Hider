@@ -65,7 +65,7 @@ const KEYS = {
 const baseSyncFns = [
   'scanRuleString', 'findBalancedParenEnd', 'getSyncSettings', 'getCloudModifiedTime',
   'subscriptionsSignature', 'buildDavPutHeaders', 'persistSyncSnapshots', 'putWebDAVRules',
-  'getRuleKey', 'filterValidRuleLines', 'hasEffectiveRules', 'findYamlFrontmatterRange', 'getSubscriptionSyncSnapshot', 'setSubscriptionSyncSnapshot',
+  'getRuleKey', 'filterValidRuleLines', 'hasEffectiveRules', 'findYamlFrontmatterRange', 'getYamlFrontmatterLines', 'splitYamlFrontmatter', 'getSubscriptionSyncSnapshot', 'setSubscriptionSyncSnapshot',
   'getRuleSyncSnapshot', 'setRuleSyncSnapshot', 'webdavTargetId', 'mergeRules3Way', 'makeSyncSnapshot',
   'stripRuleComment', 'hasTopLevelComma', 'isHttpsUrl', 'getWebDAVRequest', 'ensureWebDAVFolder', 'isHtmlResponse', 'isInvalidSyncResponse', 'parseRegexLiteral', 'sanitizeRegexFlags', 'isRegexLiteralStr', 'parseSyncHeader', 'isNonRuleTextResponse',
   'buildUploadContent', 'gmPutWebDAV', 'putWebDAVBackup',
@@ -383,6 +383,7 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
     const GM_setValue = (k, v) => { store.set(k, v); };
     function getUserSelectors() { return {}; }
     function getSelectorsModifiedTime() { return 0; }
+    ${extractFn(src, 'findYamlFrontmatterRange')}
     ${extractFn(src, 'buildUploadContent')}
     return { build: (content, at, preserved) => buildUploadContent(content, at, preserved) };
   `);
@@ -405,6 +406,7 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
     function getSettingsModifiedTime() { return 0; }
     function buildSyncPayload() { return {}; }
     function getSelectorSyncSnapshot() { const v = store.get(WEBDAV_LAST_SYNC_SELECTORS_KEY); return (v && typeof v === 'object' && !Array.isArray(v)) ? v : null; }
+    ${extractFn(src, 'findYamlFrontmatterRange')}
     ${extractFn(src, 'selectorsEqual')}
     ${extractFn(src, 'buildUploadContent')}
     return { build: (content, at, preserved) => buildUploadContent(content, at, preserved) };
@@ -428,7 +430,7 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
 // ---- 同步-016~018: mergeRules3Way 三方合并 ----
 {
   const merge3 = new Function(
-    extractFn(src, 'stripRuleComment') + '\n' + extractFn(src, 'getRuleKey') + '\n' + extractFn(src, 'mergeRules3Way') + '\nreturn mergeRules3Way;'
+    extractFn(src, 'stripRuleComment') + '\n' + extractFn(src, 'getRuleKey') + '\n' + extractFn(src, 'findYamlFrontmatterRange') + '\n' + extractFn(src, 'splitYamlFrontmatter') + '\n' + extractFn(src, 'mergeRules3Way') + '\nreturn mergeRules3Way;'
   )();
   const res1 = merge3(['*://r1.com/*', '*://r2.com/*'], ['*://r1.com/*'], ['*://r1.com/*', '*://r2.com/*', '*://r3.com/*']);
   const res6 = merge3(['*://a.com/* @if(title *= "x")', '*://b.com/*'], ['*://a.com/* @if(title *= "y")', '*://b.com/*'], ['*://a.com/* @if(title *= "z")', '*://b.com/*']);
@@ -496,7 +498,7 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
 
 // ---- 同步-022: 覆盖非空云端前备份为 .bak ----
 {
-  // 自动同步: 合并产生上传 -> 先备份云端旧内容再覆盖(每次上传均备份)
+  // 自动同步首次上传(无备份时间记录) -> 先备份云端旧内容再覆盖
   const cloudRules = ['*://cloud.example.com/*', '*://cloud2.example.com/*'];
   const cloudText = '# ScriptConfig:' + JSON.stringify({ syncedAt: 500 }) + '\n' + cloudRules.join('\n');
   const env = makeSyncEnv({ cloudText, localRules: [], localTime: 1000, storedConfig: { rules: [], enabled: true }, initialSnapshot: cloudRules });
@@ -507,6 +509,60 @@ const syncCfg = { url: 'https://dav.example.com/dav/', username: '', password: '
   const bakIdx = env.calls.indexOf(bakPut);
   assert('同步-022: 上传前先PUT备份云端旧内容为rules.txt.bak且置空上传不含旧规则', !!bakPut && !!finalPut && bakPut.url.endsWith('rules.txt.bak') && String(bakPut.data || '').includes('*://cloud.example.com/*') && finalPut.url.endsWith('rules.txt') && bakIdx !== -1 && bakIdx < env.calls.indexOf(finalPut) && !String(finalPut.data || '').includes('*://cloud.example.com/*'));
 }
+
+// ---- 同步-035: 自动同步备份按小时间隔且每日备份延迟到次日写入前一天内容 ----
+{
+  const cloudRules = ['*://cloud.example.com/*'];
+  const cloudText = '# ScriptConfig:' + JSON.stringify({ syncedAt: 500 }) + '\n' + cloudRules.join('\n');
+  const dayKey = (t) => { const d = new Date(t); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); };
+  const runBackups = async (hourTs, dayTs, pending) => {
+    const env = makeSyncEnv({ cloudText, localRules: [], localTime: 1000, storedConfig: { rules: [], enabled: true }, initialSnapshot: cloudRules });
+    env.store.set('searchfilter_webdav_bak_hour', hourTs);
+    env.store.set('searchfilter_webdav_bak_day', dayTs);
+    env.store.set('searchfilter_webdav_bak_pending', pending);
+    env.setCurrent({ rules: [], enabled: true });
+    await env.run(syncCfg);
+    const bakCalls = env.calls.filter((c) => c.method === 'PUT' && c.url.endsWith('.bak'));
+    return { urls: bakCalls.map((c) => c.url), daily: bakCalls.find((c) => c.url.endsWith('.daily.bak')), env };
+  };
+  const now = Date.now(); const today = dayKey(now);
+  const first = await runBackups(0, '', '');
+  const none = await runBackups(now, today, '*://pending.example.com/*');
+  const hourly = await runBackups(now - 2 * 60 * 60 * 1000, today, '*://pending.example.com/*');
+  const both = await runBackups(now - 2 * 60 * 60 * 1000, '2000-1-1', '*://pending.example.com/*');
+  assert('同步-035: 自动同步一小时内不重复备份、跨小时生成rules.txt.bak；每日备份次日才写入前一天内容，当天首次运行不写', first.urls.length === 1 && first.urls[0].endsWith('rules.txt.bak') && none.urls.length === 0 && hourly.urls.length === 1 && hourly.urls[0].endsWith('rules.txt.bak') && both.urls.some((u) => u.endsWith('rules.txt.bak')) && !!both.daily && String(both.daily.data || '') === '*://pending.example.com/*' && both.env.store.get('searchfilter_webdav_bak_pending') === cloudText && both.env.store.get('searchfilter_webdav_bak_day') === today);
+}
+
+// ---- 同步-036: WebDAV同步保留YAML frontmatter(自动合并与手动下载) ----
+{
+  const fm = ['---', 'name: 云端规则集', 'title: 测试', '---'];
+  const cloudBody = ['*://cloud.example.com/*'];
+  const cloudText = fm.concat(['# ScriptConfig:' + JSON.stringify({ syncedAt: 500 })], cloudBody).join('\n');
+  const localRules = ['*://cloud.example.com/*', '*://local.example.com/*'];
+
+  const env = makeSyncEnv({ cloudText, localRules, localTime: 1000, storedConfig: { rules: localRules, enabled: true }, initialSnapshot: cloudBody });
+  env.setCurrent({ rules: localRules, enabled: true });
+  await env.run(syncCfg);
+  const put = env.calls.find((c) => c.method === 'PUT' && c.url.endsWith('rules.txt'));
+  const uploaded = String((put && put.data) || '');
+  const synced = env.getCurrent().rules;
+  const ulines = uploaded.split('\n');
+  const fmClose = ulines.indexOf('---', 1);
+  const cfgIdx = ulines.findIndex((l) => l.startsWith('# ScriptConfig:'));
+  const reParsed = env.parse(uploaded);
+  const orderOk = ulines[0] === '---' && fmClose !== -1 && cfgIdx > fmClose;
+  const reparseOk = !!reParsed.rawScriptConfig && !reParsed.restLines.includes('---') && !reParsed.restLines.some((l) => l.startsWith('name:')) && reParsed.restLines.includes('*://local.example.com/*');
+  const autoOk = synced[0] === '---' && synced.includes('name: 云端规则集') && synced.includes('title: 测试') && synced.includes('*://cloud.example.com/*') && synced.includes('*://local.example.com/*') && uploaded.includes('name: 云端规则集') && uploaded.includes('title: 测试') && uploaded.includes('*://local.example.com/*') && orderOk && reparseOk;
+
+  const dlEnv = makeSyncEnv({ cloudText, localRules: ['*://local.example.com/*'], localTime: 1000, syncConfig: false });
+  dlEnv.setCurrent({ rules: ['*://local.example.com/*'], enabled: true });
+  await dlEnv.download(syncCfg);
+  const dl = dlEnv.getCurrent().rules;
+  const downloadOk = dl[0] === '---' && dl.includes('name: 云端规则集') && dl.includes('title: 测试') && dl.includes('*://cloud.example.com/*');
+
+  assert('同步-036: 自动同步合并上传与手动下载均保留规则文件开头的YAML frontmatter', autoOk && downloadOk, { synced, uploaded, dl });
+}
+
 
 // ---- 授时-001~006: 授时回退链与自动同步预检 ----
 {
