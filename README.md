@@ -37,7 +37,7 @@ Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、S
 
 ### 1.3 关于WebDAV：
 
-1. 自动同步后台运行，每1h三方快照合并同步一次，手动上传/下载为强制覆盖，云端文件在首次上传后每次上传都会生成 `rules.txt.bak` 备份文件
+1. 自动同步后台运行，每1h三方快照合并同步一次，手动上传/下载为强制覆盖，同步时自动生成 `rules.txt.bak` 备份和次日备份
 2. 地址只支持**https**和完整路径，如坚果云 `https://dav.jianguoyun.com/dav/your_folder/`，路径文件夹不存在时会自动创建，文件名如 `rules.txt` 修改后需手动上传覆盖一次
 3. 油猴无安全存储API，密码只能本地混淆处理，安全起见必须使用单独应用密码
 4. 同步时为确保时间戳准确，会自动访问一次 timeapi/cloudflare 联网授时点，访问失败或关闭 `时间校准` 开关则默认使用 webdav 的 `date` 时间戳
@@ -58,11 +58,11 @@ Bing、Google、Google Scholar、DuckDuckGo(&lite)、Yandex、Brave、Ecosia、S
 
 ## 文档
 
-具体规则语法见 [规则说明](Rule-Explanation.md)
+添加自定义引擎见 [自定义引擎](Custom-Engine.md)
 
-添加自定义引擎教程见 [自定义引擎](Custom-Engine.md)
+具体规则语法说明见 [规则说明](Rule-Explanation.md)
 
-调试模式、规则自检报错说明见 [测试说明](Debug.md)
+调试模式、规则自检报错说明见 [调试说明](Debug.md)
 
 规则简单示例：
 

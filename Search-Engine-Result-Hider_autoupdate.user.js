@@ -3,7 +3,7 @@
 // @name:zh-CN   搜索引擎结果屏蔽器
 // @name:en      Search Engine Result Hider
 // @namespace    https://github.com/Carteahere
-// @version      8.9.3
+// @version      8.9.4
 // @description        支持正则的搜索结果屏蔽工具。
 // @description:zh-CN  支持正则的搜索结果屏蔽工具。
 // @description:en     A search result blocking tool that supports regular expressions.
@@ -1881,6 +1881,18 @@
     if (first === -1 || String(arr[first] ?? '').trim() !== '---') return null;
     for (let i = first + 1; i < arr.length; i++) { const s = String(arr[i] ?? '').trim(); if (s === '---' || s === '...') return { start: first, end: i }; }
     return null;
+  }
+
+  function getYamlFrontmatterLines(content) {
+    const lines = String(content ?? '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n');
+    const range = findYamlFrontmatterRange(lines);
+    return range ? lines.slice(range.start, range.end + 1) : null;
+  }
+
+  function splitYamlFrontmatter(list) {
+    const arr = Array.isArray(list) ? list : [];
+    const range = findYamlFrontmatterRange(arr);
+    return range ? { head: arr.slice(0, range.end + 1), body: arr.slice(range.end + 1) } : { head: [], body: arr };
   }
 
   function hasEffectiveRules(lines) {
@@ -6448,13 +6460,7 @@
   function mergeRules3Way(baseRules, localRules, cloudRules, preferLocal = true) {
     baseRules = Array.isArray(baseRules) ? baseRules : []; localRules = Array.isArray(localRules) ? localRules : []; cloudRules = Array.isArray(cloudRules) ? cloudRules : [];
 
-    const splitFm = (list) => {
-      let first = -1;
-      for (let i = 0; i < list.length; i++) { if (String(list[i] ?? '').trim() !== '') { first = i; break; } }
-      if (first === -1 || String(list[first] ?? '').trim() !== '---') return { head: [], body: list };
-      for (let i = first + 1; i < list.length; i++) { const s = String(list[i] ?? '').trim(); if (s === '---' || s === '...') return { head: list.slice(0, i + 1), body: list.slice(i + 1) }; }
-      return { head: [], body: list };
-    };
+    const splitFm = (list) => splitYamlFrontmatter(list);
     const baseParts = splitFm(baseRules); const localParts = splitFm(localRules); const cloudParts = splitFm(cloudRules);
     baseRules = baseParts.body; localRules = localParts.body; cloudRules = cloudParts.body;
 
@@ -6818,8 +6824,22 @@
     }
   }
 
-  async function putWebDAVBackup(fullUrl, headers, rawContent) {
-    await gmRequest('PUT', fullUrl + '.bak', { headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' }, data: rawContent });
+  async function putWebDAVBackup(fullUrl, headers, rawContent, autoSync = false) {
+    const putBak = (suffix, data) => gmRequest('PUT', fullUrl + suffix, { headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' }, data });
+    if (!autoSync) { await putBak('.bak', rawContent); return; }
+    const now = Date.now(); const HOUR = 60 * 60 * 1000;
+    const lastHourBak = Number(GM_getValue('searchfilter_webdav_bak_hour', 0)) || 0;
+    if (!(lastHourBak > 0) || now - lastHourBak >= HOUR || now < lastHourBak) {
+      await putBak('.bak', rawContent); GM_setValue('searchfilter_webdav_bak_hour', now);
+    }
+    const d = new Date(now); const dayKey = d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+    const pendingDay = GM_getValue('searchfilter_webdav_bak_day', '');
+    const pendingContent = String(GM_getValue('searchfilter_webdav_bak_pending', '') || '');
+    if (pendingDay && pendingDay !== dayKey && pendingContent) {
+      await putBak('.daily.bak', pendingContent);
+    }
+    GM_setValue('searchfilter_webdav_bak_day', dayKey);
+    GM_setValue('searchfilter_webdav_bak_pending', rawContent);
   }
 
   function buildUploadContent(content, syncedAt, remotePreserved) {
@@ -6858,6 +6878,11 @@
       prefix += remotePreserved.rawSelectors + '\n';
     }
 
+    if (prefix) {
+      const lines = String(content).split('\n');
+      const fmRange = findYamlFrontmatterRange(lines);
+      if (fmRange) return lines.slice(0, fmRange.end + 1).join('\n') + '\n' + prefix + lines.slice(fmRange.end + 1).join('\n');
+    }
     return prefix + content;
   }
 
@@ -7539,8 +7564,8 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
   async function performWebDAVDownload(config) {
     adoptStoredConfigIfNewer(); const { fullUrl, headers } = getWebDAVRequest(config); const resp = await gmRequest('GET', fullUrl, { headers }); const content = resp.responseText;
     if (isInvalidSyncResponse(content, resp.responseHeaders)) throw new Error(t('subImportFailed')); const parsedHeader = parseSyncHeader(content);
-    if (isNonRuleTextResponse(parsedHeader.restLines, !!(parsedHeader.rawScriptConfig || parsedHeader.rawSelectors))) throw new Error(t('subImportFailed')); const newRules = filterValidRuleLines(parsedHeader.restLines);
-    if (!hasEffectiveRules(newRules) && hasEffectiveRules(currentConfig.rules) && !confirm(t('webdavClearConfirm'))) return 'cancelled';
+    if (isNonRuleTextResponse(parsedHeader.restLines, !!(parsedHeader.rawScriptConfig || parsedHeader.rawSelectors))) throw new Error(t('subImportFailed')); const fmLines = getYamlFrontmatterLines(content); const bodyRules = filterValidRuleLines(parsedHeader.restLines); const newRules = fmLines ? fmLines.concat(bodyRules) : bodyRules;
+    if (!hasEffectiveRules(bodyRules) && hasEffectiveRules(currentConfig.rules) && !confirm(t('webdavClearConfirm'))) return 'cancelled';
     if (parsedHeader.config) {
       const { subscriptions, selectors, engineSubscriptions } = parsedHeader.config; const settings = getSyncSettings(parsedHeader.config);
 
@@ -7629,7 +7654,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     adoptStoredConfigIfNewer(); const { folderUrl, fullUrl, headers } = getWebDAVRequest(config);
 
     const resp = await gmRequest('GET', fullUrl, { headers, allow404: true }); const trustedNow = await getTrustedNow(parseHttpDateHeader(resp.responseHeaders));
-    let cloudRules = [], cloudConfig = null; let cloudTime = 0; let cloudSettingsTime = 0; let cloudETag = ''; let cloudLastMod = ''; let parsedHeader = null;
+    let cloudRules = [], cloudBodyRules = [], cloudFmLines = null, cloudConfig = null; let cloudTime = 0; let cloudSettingsTime = 0; let cloudETag = ''; let cloudLastMod = ''; let parsedHeader = null;
     if (resp.status !== 404) {
       const content = resp.responseText;
       if (isInvalidSyncResponse(content, resp.responseHeaders)) {
@@ -7639,7 +7664,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       if (isNonRuleTextResponse(parsedHeader.restLines, !!(parsedHeader.rawScriptConfig || parsedHeader.rawSelectors))) {
         console.warn('[WebDAV] 云端返回非规则文本，已跳过'); markWebDAVSyncFailure(trustedNow); return;
       }
-      cloudRules = parsedHeader.restLines.map(r => r.trim()).filter(r => r); const validHeaderTimes = [getCloudModifiedTime(parsedHeader.config, 'rulesSyncedAt', trustedNow)].filter(v => v > 0); let lastModTime = 0;
+      cloudFmLines = getYamlFrontmatterLines(content); cloudBodyRules = parsedHeader.restLines.map(r => r.trim()).filter(r => r); cloudRules = cloudFmLines ? cloudFmLines.concat(cloudBodyRules) : cloudBodyRules; const validHeaderTimes = [getCloudModifiedTime(parsedHeader.config, 'rulesSyncedAt', trustedNow)].filter(v => v > 0); let lastModTime = 0;
       if (resp.responseHeaders && typeof resp.responseHeaders === 'string') {
         const lastModMatch = resp.responseHeaders.match(/last-modified:\s*(.+)$/im);
         if (lastModMatch) {
@@ -7661,12 +7686,13 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
     adoptStoredConfigIfNewer(); let localTime = GM_getValue(LOCAL_LAST_MODIFIED_KEY, 0); if (localTime > trustedNow + WEBDAV_TIME_TOLERANCE) localTime = trustedNow;
     let localSettingsTime = getSettingsModifiedTime(); if (localSettingsTime > trustedNow + WEBDAV_TIME_TOLERANCE) localSettingsTime = trustedNow;
     const localRules = currentConfig.rules || [];
-    const scriptedEmptyCloud = resp.status !== 404 && cloudRules.length === 0 && !!(parsedHeader && parsedHeader.config && typeof parsedHeader.config.rulesSyncedAt === 'number' && Number.isFinite(parsedHeader.config.rulesSyncedAt) && parsedHeader.config.rulesSyncedAt > 0);
-    if (resp.status !== 404 && cloudRules.length === 0 && !scriptedEmptyCloud) {
+    const scriptedEmptyCloud = resp.status !== 404 && cloudBodyRules.length === 0 && !!(parsedHeader && parsedHeader.config && typeof parsedHeader.config.rulesSyncedAt === 'number' && Number.isFinite(parsedHeader.config.rulesSyncedAt) && parsedHeader.config.rulesSyncedAt > 0);
+    if (resp.status !== 404 && cloudBodyRules.length === 0 && !scriptedEmptyCloud) {
       if (localRules.length > 0) {
         console.log('[WebDAV] 云端文件为空，上传本地规则...'); const uploadedTime = Math.max(cloudTime + 1000, localTime + 1, trustedNow);
+        const uploadRules = (!findYamlFrontmatterRange(localRules) && cloudFmLines) ? cloudFmLines.concat(localRules) : localRules;
         try {
-          await putWebDAVRules({ fullUrl, folderUrl, headers, rules: localRules, config }, localRules.join('\n'), uploadedTime, {
+          await putWebDAVRules({ fullUrl, folderUrl, headers, rules: uploadRules, config }, uploadRules.join('\n'), uploadedTime, {
             rawScriptConfig: parsedHeader ? parsedHeader.rawScriptConfig : null,
             rawSelectors: parsedHeader ? parsedHeader.rawSelectors : null
           }, buildDavPutHeaders(headers, uploadedTime, { etag: cloudETag, lastMod: cloudLastMod }));
@@ -7707,7 +7733,9 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
             seen.add(k); union.push(trimmed);
           }
         };
-        localRules.forEach(addRule); cloudRules.forEach(addRule); mergedRules = union;
+        const localParts = splitYamlFrontmatter(localRules); const cloudParts = splitYamlFrontmatter(cloudRules);
+        localParts.body.forEach(addRule); cloudParts.body.forEach(addRule);
+        const fmHead = localParts.head.length ? localParts.head : cloudParts.head; mergedRules = fmHead.concat(union);
       } else {
         mergedRules = mergeRules3Way(baseRules, localRules, cloudRules, localTime >= cloudTime);
       }
@@ -7751,7 +7779,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
       if (shouldUpload) {
         console.log('[WebDAV] 规则合并或配置更新完成，上传至云端...'); const uploadedTime = Math.max(cloudTime + 1000, localTime + 1, trustedNow);
-        if (cloudRules.length > 0 && resp.status !== 404 && String(resp.responseText || '').trim() !== '') { try { await putWebDAVBackup(fullUrl, headers, String(resp.responseText || '')); } catch (err) { console.warn('[WebDAV] 备份失败:', err && err.message); } }
+        if (cloudRules.length > 0 && resp.status !== 404 && String(resp.responseText || '').trim() !== '') { try { await putWebDAVBackup(fullUrl, headers, String(resp.responseText || ''), true); } catch (err) { console.warn('[WebDAV] 备份失败:', err && err.message); } }
         try {
           await putWebDAVRules({ fullUrl, folderUrl, headers, rules: mergedRules, subs: mergedSubs, engineSubs: mergedEngineSubs, selectors: mergedSelectors, config, rulesModifiedAt: (contentChanged || selectorsChanged) ? uploadedTime : (cloudTime || uploadedTime), settingsModifiedAt: (subscriptionsChanged || engineSubsChanged) ? Math.max(uploadedTime, localSettingsTime) : localSettingsTime }, mergedContent, uploadedTime, {
             rawScriptConfig: parsedHeader ? parsedHeader.rawScriptConfig : null,
@@ -7858,16 +7886,19 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
 
   function importRulesFromFile() {
     pickTextFile('.txt,text/plain', (content) => {
+      const fmLines = getYamlFrontmatterLines(content);
       const parsedHeader = parseSyncHeader(content);
+      const importedLines = fmLines ? fmLines.concat(parsedHeader.restLines) : parsedHeader.restLines;
       const hasHeader = !!(parsedHeader.rawScriptConfig || parsedHeader.rawSelectors);
       if (isNonRuleTextResponse(parsedHeader.restLines, hasHeader, true)) { showToast(t('fileImportFailed'), 'error'); return; }
       if (parsedHeader.invalidSelectors) {
         showToast(t('selectorJsonError'), 'error');
         if (!hasHeader && !hasEffectiveRules(parsedHeader.restLines)) return;
       }
-      const newRules = filterValidRuleLines(parsedHeader.restLines);
+      const bodyRules = filterValidRuleLines(parsedHeader.restLines);
+      const newRules = fmLines ? fmLines.concat(bodyRules) : bodyRules;
       const headerOnly = hasHeader && !parsedHeader.restLines.some(l => l.trim());
-      const replaceRules = !headerOnly && (hasEffectiveRules(newRules) || !hasEffectiveRules(currentConfig.rules) || confirm(t('importClearConfirm')));
+      const replaceRules = !headerOnly && (hasEffectiveRules(bodyRules) || !hasEffectiveRules(currentConfig.rules) || confirm(t('importClearConfirm')));
       const headerConfig = parsedHeader.config;
       if (headerConfig && typeof headerConfig === 'object' && !Array.isArray(headerConfig)) {
         const headerSelectors = parsedHeader.rawSelectors ? headerConfig.selectors : null;
@@ -7889,7 +7920,7 @@ async function performSubscriptionForUrl(url, showAlerts = true) {
       if (replaceRules) {
         const textarea = document.getElementById('serh-rules');
         if (textarea) {
-          textarea.value = parsedHeader.restLines.join('\n'); updateLineNumbers();
+          textarea.value = importedLines.join('\n'); updateLineNumbers();
         }
         currentConfig.rules = newRules;
         const panel = document.getElementById('serh-panel'); if (panel) panel._initialRules = [...currentConfig.rules];

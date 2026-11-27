@@ -37,7 +37,7 @@ Partial setting instructions:
 
 ### 1.3 About WebDAV:
 
-1. Auto-sync runs in the background, performing a 3-way snapshot merge sync once every 1h, manual upload/download is a forced overwrite, the cloud file generates a `rules.txt.bak` backup file on every upload after the first upload.
+1. Auto-sync runs in the background, performing a 3-way snapshot merge sync once every 1h, manual upload/download is a forced overwrite. During synchronization, a `rules.txt.bak` backup file is automatically generated, along with a separate backup for the following day.
 2. The address only supports **https** and full paths, such as Nutstore `https://dav.jianguoyun.com/dav/your_folder/`, the path folder is automatically created when it does not exist, after modifying the file name such as `rules.txt`, you need to manually upload and overwrite once.
 3. Tampermonkey has no secure storage API, passwords can only be obfuscated locally, for security you must use a separate application password.
 4. To ensure timestamp accuracy during sync, it will automatically access the timeapi/cloudflare networked time source once, if the access fails or the `Time Calibration` switch is turned off, the `date` timestamp of WebDAV is used by default.
@@ -58,9 +58,9 @@ Partial setting instructions:
 
 ## Docs
 
-For specific rule syntax, see [Rule-Explanation](Rule-Explanation.en.md)
-
 For the tutorial on adding custom engines, see [Custom-Engine](Custom-Engine.en.md)
+
+For specific rule syntax instructions, see [Rule-Explanation](Rule-Explanation.en.md)
 
 For debug mode and rule self-check error instructions, see [Debug](Debug.en.md)
 
